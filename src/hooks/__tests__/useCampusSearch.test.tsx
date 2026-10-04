@@ -1,14 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
-import { connectedCampusDestinations, useCampusSearch } from "../useCampusSearch";
+import { connectedCampusDestinations, searchFloorRooms, useCampusSearch } from "../useCampusSearch";
 
 const campus = {
   id: "campus",
   buildings: [
     { id: "connected", name: "Student Center", code: "STUDC", category: "academic", entrances: [{ id: "main" }], floors: [
       { id: "ground", number: 1, label: "Ground Floor", rooms: [
-        { id: "copy", name: "Copy Shop", type: "classroom", floorId: "ground", buildingId: "connected", accessDoorId: "copy-door" },
+      { id: "copy", name: "Copy Shop", type: "classroom", floorId: "ground", buildingId: "connected", accessDoorId: "copy-door" },
         { id: "unlinked", name: "Unlinked Room", type: "classroom", floorId: "ground", buildingId: "connected", accessDoorId: "unlinked-door" },
       ] },
     ] },
@@ -17,6 +17,9 @@ const campus = {
   navNodes: [
     { id: "entry", buildingId: "connected", entranceId: "main", x: 0, y: 0 },
     { id: "hall", buildingId: "connected", floorId: "ground", x: 1, y: 0 },
+    // The Admin's explicit Add to Navigation relationship. It remains a
+    // Student destination even before its room/door route edges are complete.
+    { id: "copy-room-node", buildingId: "connected", floorId: "ground", roomId: "copy", x: 2, y: 1 },
     { id: "copy-door-node", buildingId: "connected", floorId: "ground", doorId: "copy-door", x: 2, y: 0 },
     { id: "unlinked-door-node", buildingId: "connected", floorId: "ground", doorId: "unlinked-door", x: 3, y: 0 },
     { id: "isolated-entry-node", buildingId: "isolated", entranceId: "isolated-entry", x: 4, y: 0 },
@@ -24,12 +27,13 @@ const campus = {
   navEdges: [
     { startNodeId: "entry", endNodeId: "hall", bidirectional: true, distance: 1, accessible: true },
     { startNodeId: "hall", endNodeId: "copy-door-node", bidirectional: true, distance: 1, accessible: true },
-    { startNodeId: "hall", endNodeId: "unlinked-door-node", bidirectional: true, distance: 1, accessible: true, closed: true },
+    // A walkable door node alone must not make a visual-only room searchable.
+    { startNodeId: "hall", endNodeId: "unlinked-door-node", bidirectional: true, distance: 1, accessible: true },
   ],
 } as unknown as Campus;
 
 describe("published campus search connectivity", () => {
-  it("indexes every connected building and room, but not isolated or closed destinations", () => {
+  it("indexes explicitly authored room destinations, independent of edge completeness", () => {
     const connected = connectedCampusDestinations(campus);
     expect([...connected.buildingIds]).toEqual(["connected"]);
     expect([...connected.roomKeys]).toEqual(["connected:ground:copy"]);
@@ -51,6 +55,15 @@ describe("published campus search connectivity", () => {
       navEdges: [...(campus.navEdges ?? []), { startNodeId: "room-node", endNodeId: "copy-door-node", type: "room_door_transition", bidirectional: true, distance: 1, accessible: true }],
     } as Campus;
     expect(connectedCampusDestinations(linked).roomKeys.has("connected:ground:semantic")).toBe(true);
+  });
+
+  it("excludes visual-only rooms from both campus and floor search", () => {
+    const { result } = renderHook(() => useCampusSearch(campus));
+    expect(result.current.destinations.map((entry) => entry.id)).not.toContain("unlinked");
+
+    const floor = campus.buildings[0].floors[0];
+    expect(searchFloorRooms(floor, campus.buildings[0], "Unlinked")).toEqual([]);
+    expect(searchFloorRooms(floor, campus.buildings[0], "Copy", new Set(["copy"])).map((entry) => entry.id)).toEqual(["copy"]);
   });
 
   it("indexes campus gates as selectable campus places instead of buildings", () => {

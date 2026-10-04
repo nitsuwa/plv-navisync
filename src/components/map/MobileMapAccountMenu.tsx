@@ -5,7 +5,9 @@ import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { Bookmark, ChevronDown, Flag, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/utils";
+import { StudentAvatar } from "../ui/StudentAvatar";
 
 const menuItemClass = "flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50";
 
@@ -15,7 +17,7 @@ interface MobileMapAccountMenuProps {
 }
 
 export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: MobileMapAccountMenuProps) {
-  const { isStudent, loading, username, role, signOut } = useStudentAuth();
+  const { isStudent, loading, username, role, profile, signOut } = useStudentAuth();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const reducedMotion = useReducedMotion();
@@ -28,8 +30,8 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
   const outsideClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const { error: showError } = useToast();
   const displayName = isStudent ? username : "Campus visitor";
-  const initials = isStudent ? (username.trim().slice(0, 2).toUpperCase() || "ST") : "GU";
   const roleLabel = isStudent ? role.replaceAll("_", " ") : "Guest";
   const openRef = useRef(open);
   openRef.current = open;
@@ -130,9 +132,13 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
   }, [open]);
 
   const handleSignOut = async () => {
-    await signOut();
-    changeOpen(false);
-    navigate("/");
+    try {
+      await signOut();
+      changeOpen(false);
+      navigate("/");
+    } catch {
+      showError("Could not sign out. Please try again.");
+    }
   };
 
   return (
@@ -150,9 +156,9 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
           open && "border-primary/40",
         )}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[10px] font-extrabold text-primary-foreground" aria-hidden="true">
-          {loading ? <span className="h-3 w-3 animate-pulse rounded-full bg-white/80" /> : initials}
-        </span>
+        {loading
+          ? <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[10px] font-extrabold text-primary-foreground" aria-hidden="true"><span className="h-3 w-3 animate-pulse rounded-full bg-white/80" /></span>
+          : <StudentAvatar name={username} avatarPath={profile?.avatar_path} className="h-8 w-8 text-[10px]" aria-hidden />}
         <ChevronDown className={cn("absolute bottom-1 right-1 h-3 w-3 rounded-full bg-card text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden="true" />
       </button>
 
@@ -164,7 +170,7 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
             role={open ? "menu" : undefined}
             aria-label={open ? "Student account menu" : undefined}
             aria-hidden={!open}
-            inert={!open}
+            inert={!open ? ("" as never) : undefined}
             initial={false}
             animate={open ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: -5 }}
             transition={reducedMotion ? { duration: 0.01 } : { duration: 0.17, ease: "easeOut" }}
@@ -172,9 +178,7 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
             style={{ top: menuPosition.top, right: menuPosition.right, maxHeight: menuMaxHeight, pointerEvents: open ? "auto" : "none" }}
           >
             <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-extrabold text-primary-foreground" aria-hidden="true">
-                {initials}
-              </span>
+              <StudentAvatar name={username} avatarPath={profile?.avatar_path} className="h-11 w-11 rounded-xl text-sm" aria-hidden />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-extrabold">{displayName}</span>
                 <span className="block text-[11px] capitalize text-muted-foreground">{roleLabel}</span>

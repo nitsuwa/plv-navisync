@@ -4,6 +4,7 @@ import {
   STUDENT_MAP_MIN_ZOOM,
   clampStudentMapZoom,
   clampViewportPan,
+  dampCameraZoomLogarithm,
   getCameraSmoothingFactor,
   getBuildingFocusPan,
   getPanToKeepWorldPoint,
@@ -34,6 +35,18 @@ describe("student map viewport", () => {
     const two120HzFrames = 1 - (1 - getCameraSmoothingFactor(1000 / 120)) ** 2;
     expect(one60HzFrame).toBeCloseTo(two120HzFrames, 10);
     expect(getCameraSmoothingFactor(0)).toBe(0);
+  });
+
+  it("damps zoom in log space with refresh-rate-independent ratios", () => {
+    const one60HzFrame = dampCameraZoomLogarithm(0.6, 2.4, 1000 / 60, 34);
+    let two120HzFrames = 0.6;
+    two120HzFrames = dampCameraZoomLogarithm(two120HzFrames, 2.4, 1000 / 120, 34);
+    two120HzFrames = dampCameraZoomLogarithm(two120HzFrames, 2.4, 1000 / 120, 34);
+    expect(Math.log(one60HzFrame / 0.6)).toBeCloseTo(Math.log(two120HzFrames / 0.6), 10);
+
+    const lowerScale = dampCameraZoomLogarithm(0.5, 1, 17, 34) / 0.5;
+    const higherScale = dampCameraZoomLogarithm(1, 2, 17, 34) / 1;
+    expect(lowerScale).toBeCloseTo(higherScale, 10);
   });
 
   it("normalizes mouse wheel, trackpad, line, and page deltas into smooth zoom increments", () => {

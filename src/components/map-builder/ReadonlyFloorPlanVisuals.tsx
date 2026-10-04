@@ -7,7 +7,7 @@
  * simplified legacy room-only format.
  */
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type {
   FloorPlan,
   FloorRoom,
@@ -151,6 +151,7 @@ import { sortFloorItemsByLocalZ } from "../../lib/floorRenderLayers";
 
 interface RoomVisualProps {
   room: FloorRoom;
+  interactive?: boolean;
   hovered?: boolean;
   highlighted?: boolean;
   mapMode?: "standard" | "accessible" | "emergency";
@@ -160,7 +161,7 @@ interface RoomVisualProps {
   onMouseLeave?: () => void;
 }
 
-export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMouseEnter, onMouseLeave }: RoomVisualProps) {
+export const RoomVisual = memo(function RoomVisual({ room, onClick, onMouseEnter, onMouseLeave, interactive = Boolean(onClick || onMouseEnter), hovered, highlighted, mapMode }: RoomVisualProps) {
   const rotation = room.rotation ?? 0;
   const cx = room.x + room.w / 2;
   const cy = room.y + room.h / 2;
@@ -169,29 +170,30 @@ export function RoomVisual({ room, hovered, highlighted, mapMode, onClick, onMou
     <g
       data-testid="readonly-room"
       data-room-id={room.id}
+      data-room-interactive={interactive ? "true" : "false"}
       data-room-hovered={hovered ? "true" : "false"}
       data-room-highlighted={highlighted ? "true" : "false"}
-      role={onClick ? "button" : undefined}
-      aria-label={onClick ? room.name : undefined}
-      aria-pressed={onClick ? highlighted : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      style={{ cursor: onClick ? "pointer" : undefined }}
+      role={interactive && onClick ? "button" : undefined}
+      aria-label={interactive && onClick ? room.name : undefined}
+      aria-pressed={interactive && onClick ? highlighted : undefined}
+      tabIndex={interactive && onClick ? 0 : undefined}
+      style={{ cursor: interactive ? "pointer" : "default" }}
       transform={Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? undefined : `rotate(${rotation}, ${cx}, ${cy})`}
-      onClick={onClick ? (e) => { e.stopPropagation(); onClick(room.id); } : undefined}
-      onKeyDown={onClick ? (event) => {
+      onClick={interactive && onClick ? (e) => { e.stopPropagation(); onClick(room.id); } : undefined}
+      onKeyDown={interactive && onClick ? (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         event.stopPropagation();
         onClick(room.id);
       } : undefined}
-      onMouseEnter={onMouseEnter ? () => onMouseEnter(room.id) : undefined}
-      onMouseLeave={onMouseLeave}
+      onMouseEnter={interactive && onMouseEnter ? () => onMouseEnter(room.id) : undefined}
+      onMouseLeave={interactive ? onMouseLeave : undefined}
     >
       <FloorRoomArtwork room={room} fillOpacity={hovered && !highlighted ? 0.62 : 0.58}
         strokeColor={hovered && !highlighted ? "#60a5fa" : undefined} strokeWidth={hovered && !highlighted ? 1.5 : 1} />
     </g>
   );
-}
+});
 
 /** Student-only selection treatment follows the room polygon and sits above
  * neighboring fills while staying below furniture, walls, doors, and labels. */
@@ -211,24 +213,19 @@ function RoomSelectionOverlay({ room }: { room: FloorRoom }) {
       aria-hidden="true"
     >
       {points ? (
-        <path data-testid="readonly-room-selection-tint" d={roomShapePath(points)} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
+        <path data-testid="readonly-room-selection-halo" className="student-room-selection-halo" d={roomShapePath(points)} fill="none" stroke="#10b981" strokeOpacity={0.045} strokeWidth={4} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : (
-        <rect data-testid="readonly-room-selection-tint" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="#60a5fa" fillOpacity={0.2} stroke="none" />
+        <rect data-testid="readonly-room-selection-halo" className="student-room-selection-halo" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#10b981" strokeOpacity={0.045} strokeWidth={4} vectorEffect="non-scaling-stroke" />
       )}
       {points ? (
-        <path data-testid="readonly-room-selection-halo" className="student-room-selection-halo" d={roomShapePath(points)} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <path data-testid="readonly-room-selection-outline" className="student-room-selection-outline" d={roomShapePath(points)} fill="none" stroke="#059669" strokeWidth={2.5} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : (
-        <rect data-testid="readonly-room-selection-halo" className="student-room-selection-halo" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#3b82f6" strokeOpacity={0.28} strokeWidth={9} vectorEffect="non-scaling-stroke" />
+        <rect data-testid="readonly-room-selection-outline" className="student-room-selection-outline" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#059669" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
       )}
       {points ? (
-        <path data-testid="readonly-room-selection-outline" d={roomShapePath(points)} fill="none" stroke="#1d4ed8" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <path data-testid="readonly-room-selection-trace" className="student-room-selection-trace" d={roomShapePath(points)} pathLength={1} fill="none" stroke="#34d399" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : (
-        <rect data-testid="readonly-room-selection-outline" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="none" stroke="#1d4ed8" strokeWidth={3} vectorEffect="non-scaling-stroke" />
-      )}
-      {points ? (
-        <path data-testid="readonly-room-selection-trace" className="student-room-selection-trace" d={roomShapePath(points)} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      ) : (
-        <rect data-testid="readonly-room-selection-trace" className="student-room-selection-trace" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} pathLength={1} fill="none" stroke="#2563eb" strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <rect data-testid="readonly-room-selection-trace" className="student-room-selection-trace" x={room.x} y={room.y} width={room.w} height={room.h} rx={1} pathLength={1} fill="none" stroke="#34d399" strokeWidth={3.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       )}
     </g>
   );
@@ -236,7 +233,7 @@ function RoomSelectionOverlay({ room }: { room: FloorRoom }) {
 
 // ── Wall rendering ──────────────────────────────────────────────────────────
 
-function WallVisual({ wall }: { wall: FloorWall }) {
+const WallVisual = memo(function WallVisual({ wall }: { wall: FloorWall }) {
   if (wall.visible === false) return null;
   if (Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1) < 1) return null;
 
@@ -245,7 +242,7 @@ function WallVisual({ wall }: { wall: FloorWall }) {
       <FloorWallArtwork wall={wall} />
     </g>
   );
-}
+});
 
 // ── Door rendering ──────────────────────────────────────────────────────────
 
@@ -256,7 +253,7 @@ function openingTransform(opening: FloorDoor | FloorWindow, wall?: FloorWall) {
   return { geometry, transform: `translate(${geometry.x},${geometry.y}) rotate(${geometry.angle})${side}` };
 }
 
-function DoorVisual({ door, wall, entrances, onClick, background, interactiveExit }: { door: FloorDoor; wall?: FloorWall; entrances: ReadonlyMap<string, CampusEntrance>; onClick?: (doorId: string) => void; background: string; interactiveExit?: boolean }) {
+const DoorVisual = memo(function DoorVisual({ door, wall, entrances, onClick, background, interactiveExit }: { door: FloorDoor; wall?: FloorWall; entrances: ReadonlyMap<string, CampusEntrance>; onClick?: (doorId: string) => void; background: string; interactiveExit?: boolean }) {
   const [emphasized, setEmphasized] = useState(false);
   if (door.visible === false) return null;
   const { geometry, transform } = openingTransform(door, wall);
@@ -313,8 +310,8 @@ function DoorVisual({ door, wall, entrances, onClick, background, interactiveExi
       )}
     </g>
   );
-}
-function WindowVisual({ window: win, wall, background }: { window: FloorWindow; wall?: FloorWall; background: string }) {
+});
+const WindowVisual = memo(function WindowVisual({ window: win, wall, background }: { window: FloorWindow; wall?: FloorWall; background: string }) {
   if (win.visible === false) return null;
   const { geometry, transform } = openingTransform(win, wall);
   return (
@@ -323,10 +320,10 @@ function WindowVisual({ window: win, wall, background }: { window: FloorWindow; 
         wallThickness={geometry?.wall.thickness ?? 4} color={win.color} background={background} testIdPrefix="readonly-" />
     </g>
   );
-}
+});
 // ── Stairs rendering ────────────────────────────────────────────────────────
 
-function StairsVisual({ stairs, floorIndex, floorCount, canvasW, canvasH, exteriorEmergencyStairs }: {
+const StairsVisual = memo(function StairsVisual({ stairs, floorIndex, floorCount, canvasW, canvasH, exteriorEmergencyStairs }: {
   stairs: FloorStairs;
   floorIndex: number;
   floorCount: number;
@@ -348,8 +345,8 @@ function StairsVisual({ stairs, floorIndex, floorCount, canvasW, canvasH, exteri
         : <StairsSymbol item={stairs} floorIndex={floorIndex} floorCount={floorCount} />}
     </g>
   );
-}
-function RampVisual({ ramp }: { ramp: FloorRamp }) {
+});
+const RampVisual = memo(function RampVisual({ ramp }: { ramp: FloorRamp }) {
   const cx = ramp.x + ramp.width / 2;
   const cy = ramp.y + ramp.height / 2;
   return (
@@ -358,8 +355,8 @@ function RampVisual({ ramp }: { ramp: FloorRamp }) {
       <RampSymbol item={ramp} />
     </g>
   );
-}
-function ElevatorVisual({ elevator }: { elevator: FloorElevatorItem }) {
+});
+const ElevatorVisual = memo(function ElevatorVisual({ elevator }: { elevator: FloorElevatorItem }) {
   const cx = elevator.x + elevator.width / 2;
   const cy = elevator.y + elevator.height / 2;
   return (
@@ -368,30 +365,30 @@ function ElevatorVisual({ elevator }: { elevator: FloorElevatorItem }) {
       <ElevatorSymbol item={elevator} />
     </g>
   );
-}
-function LabelVisual({ label }: { label: FloorLabel }) {
+});
+const LabelVisual = memo(function LabelVisual({ label }: { label: FloorLabel }) {
   return (
     <g data-testid="readonly-label" data-label-id={label.id}
       transform={label.rotation ? `rotate(${label.rotation},${label.x},${label.y})` : undefined}>
       <FloorLabelArtwork label={label} />
     </g>
   );
-}
+});
 
 // ── Path rendering ──────────────────────────────────────────────────────────
 
-function PathVisual({ path }: { path: FloorPath }) {
+const PathVisual = memo(function PathVisual({ path }: { path: FloorPath }) {
   if (!path.points || path.points.length < 2) return null;
   return (
     <g data-testid="readonly-floor-path" data-path-id={path.id}>
       <FloorPathArtwork path={path} />
     </g>
   );
-}
+});
 
 // ── Semi-outdoor floor rendering ───────────────────────────────────────────
 
-function FurnitureVisual({ item }: { item: FloorFurniture }) {
+const FurnitureVisual = memo(function FurnitureVisual({ item }: { item: FloorFurniture }) {
   if (item.visible === false) return null;
   const rotation = item.rotation ?? 0;
   const centerX = item.x + item.width / 2;
@@ -403,11 +400,11 @@ function FurnitureVisual({ item }: { item: FloorFurniture }) {
         width={item.width} height={item.height} color={item.color} flipX={item.flipX} flipY={item.flipY} />
     </g>
   );
-}
+});
 
-function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
+const RoomLabelVisual = memo(function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
   return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} studentSelected={highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
-}
+});
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;
   exteriorEmergencyStairs?: readonly ExteriorEmergencyStair[];
@@ -419,7 +416,11 @@ export interface ReadonlyFloorPlanSceneProps {
   /** Door IDs that have a working indoor-to-campus transition in the published graph. */
   interactiveExitDoorIds?: ReadonlySet<string>;
   mapMode?: "standard" | "accessible" | "emergency";
+  showLabels?: boolean;
   highlightedRoomId?: string | null;
+  /** When provided, only these authored-navigation rooms expose Student room
+   * interaction. Omitted for legacy visual snapshots and renderer-only uses. */
+  interactiveRoomIds?: ReadonlySet<string>;
   hoveredRoomId?: string | null;
   onRoomClick?: (roomId: string) => void;
   onRoomHover?: (roomId: string) => void;
@@ -428,10 +429,11 @@ export interface ReadonlyFloorPlanSceneProps {
 }
 
 /**
- * Read-only scene that renders the full authored FloorPlan data.
- * This replaces the legacy room-only rendering on the student-facing CampusMapPage.
+ * Read-only scene that renders the full authored FloorPlan data. The Student
+ * camera transform lives on its parent SVG group, so camera frames never enter
+ * these props; memo keeps the authored scene static during pan/zoom commits.
  */
-export function ReadonlyFloorPlanScene({
+export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
   floor,
   exteriorEmergencyStairs = [],
   floorIndex = 0,
@@ -441,6 +443,7 @@ export function ReadonlyFloorPlanScene({
   mapMode = "standard",
   showLabels = true,
   highlightedRoomId,
+  interactiveRoomIds,
   hoveredRoomId,
   onRoomClick,
   onRoomHover,
@@ -449,34 +452,39 @@ export function ReadonlyFloorPlanScene({
 }: ReadonlyFloorPlanSceneProps) {
   const canvasW = floor.canvasW || 440;
   const canvasH = floor.canvasH || 290;
-  const floorShapeRegions = getFloorShapeRegions(floor);
-  const floorShapeBounds = getFloorShapeBounds(floorShapeRegions);
+  const floorShapeRegions = useMemo(() => getFloorShapeRegions(floor), [floor]);
+  const floorShapeBounds = useMemo(() => getFloorShapeBounds(floorShapeRegions), [floorShapeRegions]);
   const floorShapeClipId = `readonly-floor-shape-${floor.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
 
-  const sortedRooms = sortFloorItemsByLocalZ(floor.rooms || []);
+  const sortedRooms = useMemo(() => sortFloorItemsByLocalZ(floor.rooms || []), [floor.rooms]);
+  const selectableHighlightedRoomId = highlightedRoomId
+    && (!interactiveRoomIds || interactiveRoomIds.has(highlightedRoomId))
+    ? highlightedRoomId
+    : null;
 
-  // Filter visible elements
-  const visibleWalls = sortFloorItemsByLocalZ((floor.walls || []).filter((w) => w.visible !== false));
-  const visibleDoors = sortFloorItemsByLocalZ((floor.doors || []).filter((d) => d.visible !== false));
-  const visibleWindows = sortFloorItemsByLocalZ((floor.windows || []).filter((w) => w.visible !== false));
-  const visibleStairs = sortFloorItemsByLocalZ((floor.stairs || []).filter((s) => s.visible !== false));
-  const visibleRamps = sortFloorItemsByLocalZ((floor.ramps || []).filter((r) => r.visible !== false));
-  const visibleElevators = sortFloorItemsByLocalZ((floor.elevators || []).filter((e) => e.visible !== false));
-  const visibleLabels = sortFloorItemsByLocalZ(floor.labels || []);
-  const visibleFurniture = sortFloorItemsByLocalZ((floor.furniture || []).filter((f) => f.visible !== false));
+  // Keep geometry filtering/sorting tied to authored data, not camera commits
+  // or lightweight hover/selection changes.
+  const visibleWalls = useMemo(() => sortFloorItemsByLocalZ((floor.walls || []).filter((w) => w.visible !== false)), [floor.walls]);
+  const visibleDoors = useMemo(() => sortFloorItemsByLocalZ((floor.doors || []).filter((d) => d.visible !== false)), [floor.doors]);
+  const visibleWindows = useMemo(() => sortFloorItemsByLocalZ((floor.windows || []).filter((w) => w.visible !== false)), [floor.windows]);
+  const visibleStairs = useMemo(() => sortFloorItemsByLocalZ((floor.stairs || []).filter((s) => s.visible !== false)), [floor.stairs]);
+  const visibleRamps = useMemo(() => sortFloorItemsByLocalZ((floor.ramps || []).filter((r) => r.visible !== false)), [floor.ramps]);
+  const visibleElevators = useMemo(() => sortFloorItemsByLocalZ((floor.elevators || []).filter((e) => e.visible !== false)), [floor.elevators]);
+  const visibleLabels = useMemo(() => sortFloorItemsByLocalZ(floor.labels || []), [floor.labels]);
+  const visibleFurniture = useMemo(() => sortFloorItemsByLocalZ((floor.furniture || []).filter((f) => f.visible !== false)), [floor.furniture]);
   const visiblePaths = floor.paths || [];
-  const exteriorZones = [...(floor.exteriorZones || [])].sort(
+  const exteriorZones = useMemo(() => [...(floor.exteriorZones || [])].sort(
     (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
-  );
-  const entranceSteps = [...(floor.entranceSteps || [])].sort(
+  ), [floor.exteriorZones]);
+  const entranceSteps = useMemo(() => [...(floor.entranceSteps || [])].sort(
     (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
-  );
-  const entranceRamps = [...(floor.entranceRamps || [])].sort(
+  ), [floor.entranceSteps]);
+  const entranceRamps = useMemo(() => [...(floor.entranceRamps || [])].sort(
     (a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0),
-  );
-  const exteriorZoneById = new Map(exteriorZones.map((zone) => [zone.id, zone]));
-  const entranceById = new Map(entrances.map((entrance) => [entrance.id, entrance]));
-  const wallById = new Map((floor.walls || []).map((wall) => [wall.id, wall]));
+  ), [floor.entranceRamps]);
+  const exteriorZoneById = useMemo(() => new Map(exteriorZones.map((zone) => [zone.id, zone])), [exteriorZones]);
+  const entranceById = useMemo(() => new Map(entrances.map((entrance) => [entrance.id, entrance])), [entrances]);
+  const wallById = useMemo(() => new Map((floor.walls || []).map((wall) => [wall.id, wall])), [floor.walls]);
 
   return (
     <g data-testid="readonly-floor-plan-scene">
@@ -572,22 +580,28 @@ export function ReadonlyFloorPlanScene({
       {/* Room fills form the back physical band. */}
       <g data-semantic-layer="room-fills">
         {sortedRooms.map((room) => (
-          <RoomVisual
-            key={room.id}
-            room={room}
-            hovered={hoveredRoomId === room.id}
-            highlighted={highlightedRoomId === room.id}
-            mapMode={mapMode}
-            onClick={onRoomClick}
-            onMouseEnter={onRoomHover}
-            onMouseLeave={onRoomHoverEnd}
-          />
+          (() => {
+            const interactive = interactiveRoomIds
+              ? interactiveRoomIds.has(room.id)
+              : Boolean(onRoomClick || onRoomHover);
+            return <RoomVisual
+              key={room.id}
+              room={room}
+              interactive={interactive}
+              hovered={interactive && hoveredRoomId === room.id}
+              highlighted={selectableHighlightedRoomId === room.id}
+              mapMode={mapMode}
+              onClick={interactive ? onRoomClick : undefined}
+              onMouseEnter={interactive ? onRoomHover : undefined}
+              onMouseLeave={interactive ? onRoomHoverEnd : undefined}
+            />;
+          })()
         ))}
       </g>
 
       {/* Selection is a separate student-only overlay above every room fill,
           but below authored furniture and architecture. */}
-      {sortedRooms.filter((room) => room.id === highlightedRoomId).map((room) => (
+      {sortedRooms.filter((room) => room.id === selectableHighlightedRoomId).map((room) => (
         <RoomSelectionOverlay key={`readonly-room-selection-${room.id}`} room={room} />
       ))}
 
@@ -639,12 +653,12 @@ export function ReadonlyFloorPlanScene({
       ))}
 
       {/* Room names are an overlay, so physical content cannot obscure them. */}
-      {sortedRooms.filter((room) => showLabels || room.id === highlightedRoomId).map((room) => (
+      {sortedRooms.filter((room) => showLabels || room.id === selectableHighlightedRoomId).map((room) => (
         <RoomLabelVisual
           key={`readonly-room-label-${room.id}`}
           room={room}
-          hovered={hoveredRoomId === room.id}
-          highlighted={highlightedRoomId === room.id}
+          hovered={interactiveRoomIds ? interactiveRoomIds.has(room.id) && hoveredRoomId === room.id : hoveredRoomId === room.id}
+          highlighted={selectableHighlightedRoomId === room.id}
         />
       ))}
 
@@ -654,4 +668,4 @@ export function ReadonlyFloorPlanScene({
       ))}
     </g>
   );
-}
+});

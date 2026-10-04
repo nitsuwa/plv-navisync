@@ -1,22 +1,20 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Bookmark, Flag, Navigation, MapPin, Camera, Shield, ChevronRight,
-  LogOut, Settings, GraduationCap, Award, Activity,
+  Settings, GraduationCap, Award, Activity, LoaderCircle,
   ArrowUpRight, Map, Pencil, Mail,
 } from "lucide-react";
-import { Link, useNavigate } from "react-router";
-import { motion } from "motion/react";
+import { Link } from "react-router";
+import { AnimatePresence, motion } from "motion/react";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { PageTransition } from "../components/ui/PageTransition";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useToast } from "../hooks/useToast";
+import { useReducedMotion } from "../hooks/useReducedMotion";
+import { StudentAvatar } from "../components/ui/StudentAvatar";
 import { splitStudentName } from "../lib/studentAccount";
-import {
-  getStudentAvatarUrl,
-  updateStudentProfile,
-  uploadStudentAvatar,
-} from "../services/studentProfileService";
+import { updateStudentProfile, uploadStudentAvatar } from "../services/studentProfileService";
 
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -66,14 +64,16 @@ import { studentAccountService } from "../services/studentAccountService";
 import { reportService } from "../services/reportService";
 
 export function StudentProfilePage() {
-  const navigate = useNavigate();
-  const { loading: authLoading, isStudent, profile, username, role, signOut, refreshProfile } = useStudentAuth();
+  const { loading: authLoading, isStudent, profile, username, role, applyProfileUpdate } = useStudentAuth();
   const { success, error: showError } = useToast();
+  const reducedMotion = useReducedMotion();
   const [loading, setLoading] = useState(true);
 
   const [displayName, setDisplayName] = useState(username || "");
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -86,15 +86,16 @@ export function StudentProfilePage() {
     let mounted = true;
     Promise.all([
       studentAccountService.getSavedBuildingIdsAsync(),
+      studentAccountService.getSavedCampusPlaceIdsAsync(),
       reportService.getStudentReports(),
     ])
-      .then(([saved, rpts]) => {
+      .then(([saved, savedPlaces, rpts]) => {
         if (!mounted) return;
-        setSavedCount(saved.length);
+        setSavedCount(saved.length + savedPlaces.length);
         setReportsCount(rpts.length);
-        setRecentActivity(rpts.slice(0, 5).map((report) => ({
+        setRecentActivity([...rpts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6).map((report) => ({
           icon: Flag,
-          text: `Reported ${report.title}`,
+          text: `Reported ${report.title}${report.campusPlaceName || report.buildingName ? ` · ${report.campusPlaceName || report.buildingName}` : ""}`,
           time: new Date(report.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
           color: "text-amber-500",
         })));
@@ -110,33 +111,14 @@ export function StudentProfilePage() {
     };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    if (!profile?.avatar_path) {
-      setAvatarUrl(null);
-      return;
-    }
-    void getStudentAvatarUrl(profile.avatar_path).then((url) => {
-      if (mounted) setAvatarUrl(url);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [profile?.avatar_path]);
-
   // Once the real profile loads, use its display name as the default.
   useEffect(() => {
     if (username) setDisplayName(username);
   }, [username]);
 
   useEffect(() => {
-    if (editingName && nameInputRef.current) nameInputRef.current.focus();
+    if (editingName) nameInputRef.current?.focus();
   }, [editingName]);
-
-  const handleLogout = async () => {
-    await signOut();
-    navigate("/");
-  };
 
   // ── Loading state while the Supabase session/profile resolves ──
   if (authLoading) {
@@ -189,7 +171,7 @@ export function StudentProfilePage() {
     return (
       <PageTransition>
         <div className="min-h-screen">
-          <div className="max-w-2xl mx-auto px-5 pt-8 pb-10 space-y-6">
+          <div className="max-w-3xl mx-auto px-5 pt-8 pb-10 space-y-6">
             <Skeleton className="h-5 w-28 rounded-full" />
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
               <Skeleton variant="avatar" className="h-24 w-24 sm:h-28 sm:w-28 rounded-[28px]" />
@@ -213,29 +195,42 @@ export function StudentProfilePage() {
     );
   }
 
-  const initials = displayName.slice(0, 2).toUpperCase();
-
   const saveDisplayName = async () => {
+    if (nameSaving) return;
     const nextName = nameInput.trim();
     if (!nextName) {
-      setNameInput(displayName);
-      setEditingName(false);
+      setNameError("Enter your first and last name.");
       return;
     }
     const { firstName, lastName } = splitStudentName(nextName);
     if (!firstName || !lastName) {
-      showError("Enter your first and last name");
+      setNameError("Enter your first and last name.");
       return;
     }
+    if (firstName.length > 100 || lastName.length > 100) {
+      setNameError("Each part of your name must be 100 characters or fewer.");
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
     try {
-      await updateStudentProfile({ firstName, lastName });
-      await refreshProfile();
-      setDisplayName(`${firstName} ${lastName}`);
+      const updated = await updateStudentProfile({ firstName, lastName });
+      applyProfileUpdate?.(updated);
+      setDisplayName([updated.first_name, updated.last_name].filter(Boolean).join(" ") || `${firstName} ${lastName}`);
       setEditingName(false);
       success("Profile name updated");
     } catch {
-      showError("Profile name could not be updated");
+      setNameError("Your name could not be saved. Your draft is still here; try again.");
+    } finally {
+      setNameSaving(false);
     }
+  };
+
+  const cancelNameEdit = () => {
+    if (nameSaving) return;
+    setEditingName(false);
+    setNameInput(displayName);
+    setNameError(null);
   };
 
   const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -251,7 +246,7 @@ export function StudentProfilePage() {
         avatarPath: uploaded.path,
       });
       setAvatarUrl(uploaded.url);
-      await refreshProfile();
+      applyProfileUpdate?.({ avatar_path: uploaded.path });
       success("Profile photo updated");
     } catch {
       showError("Profile photo could not be uploaded");
@@ -296,8 +291,8 @@ export function StudentProfilePage() {
   ];
 
   const STATS = [
-    { label: "Saved", value: String(savedCount), icon: Bookmark, color: "text-primary" },
-    { label: "Reports", value: String(reportsCount), icon: Flag, color: "text-amber-500" },
+    { label: "Saved", value: String(savedCount), icon: Bookmark, color: "text-primary", to: "/student/favorites" },
+    { label: "Reports", value: String(reportsCount), icon: Flag, color: "text-amber-500", to: "/student/reports" },
   ];
 
   return (
@@ -314,7 +309,7 @@ export function StudentProfilePage() {
             <div className="absolute top-1/3 right-1/4 w-40 h-40 bg-primary/[0.06] rounded-full blur-[60px] animate-glow-soft" />
           </div>
 
-          <div className="relative max-w-2xl mx-auto px-5 pt-6 pb-8 sm:pt-8 sm:pb-10">
+          <div className="relative max-w-3xl mx-auto px-5 pt-6 pb-8 sm:pt-8 sm:pb-10">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -326,13 +321,11 @@ export function StudentProfilePage() {
                 <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.1, type: "spring", stiffness: 150, damping: 12 }}
+                  transition={reducedMotion ? { duration: 0.01 } : { delay: 0.1, duration: 0.2, ease: "easeOut" }}
                   className="w-24 h-24 sm:w-28 sm:h-28 rounded-[28px] flex items-center justify-center text-3xl font-extrabold text-primary-foreground shadow-xl ring-4 ring-background/80"
                   style={{ background: "linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 70%, var(--accent)) 100%)" }}
                 >
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt={`${displayName} profile`} className="w-full h-full rounded-[28px] object-cover" />
-                  ) : initials}
+                  <StudentAvatar name={displayName} avatarPath={profile?.avatar_path} imageUrl={avatarUrl} className="h-full w-full rounded-[28px] text-3xl" />
                 </motion.div>
                 <button
                   type="button"
@@ -341,7 +334,7 @@ export function StudentProfilePage() {
                   className="absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-xl flex items-center justify-center border bg-card text-muted-foreground shadow-sm hover:bg-muted active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   aria-label="Change profile photo"
                 >
-                  <Camera className="h-4 w-4" />
+                  {avatarUploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                 </button>
                 <input
                   ref={avatarInputRef}
@@ -356,47 +349,56 @@ export function StudentProfilePage() {
               {/* Identity info */}
               <div className="flex-1 min-w-0 space-y-3">
                 {/* Name with edit */}
+                <div className="min-h-[46px] flex items-center justify-center sm:justify-start">
+                <AnimatePresence mode="wait" initial={false}>
                 {editingName ? (
-                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <motion.div key="name-edit" className="w-full" initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0.01 : 0.2, ease: "easeOut" }}>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
                       ref={nameInputRef}
                       value={nameInput}
-                      onChange={e => setNameInput(e.target.value)}
+                      maxLength={202}
+                      onChange={e => { setNameInput(e.target.value); setNameError(null); }}
                       onKeyDown={e => {
-                        if (e.key === "Enter") saveDisplayName();
-                        if (e.key === "Escape") { setEditingName(false); setNameInput(displayName); }
+                        if (e.key === "Enter") void saveDisplayName();
+                        if (e.key === "Escape") cancelNameEdit();
                       }}
-                      className="w-full sm:flex-1 h-10 px-3 rounded-xl border text-xl font-extrabold focus:outline-none focus:ring-2 focus:ring-primary/30 bg-input-background text-foreground"
+                      disabled={nameSaving}
+                      className="w-full sm:flex-1 h-11 px-3 rounded-xl border text-lg sm:text-xl font-extrabold focus:outline-none focus:ring-2 focus:ring-primary/30 bg-input-background text-foreground"
                       aria-label="Edit display name"
                     />
                     <div className="flex gap-2 shrink-0">
-                      <button onClick={saveDisplayName} className="h-10 px-4 rounded-xl text-sm font-bold bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        Save
+                      <button onClick={() => void saveDisplayName()} disabled={nameSaving} className="h-10 px-4 rounded-xl text-sm font-bold bg-primary text-primary-foreground hover:brightness-110 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+                        {nameSaving ? "Saving…" : "Save"}
                       </button>
-                      <button onClick={() => { setEditingName(false); setNameInput(displayName); }}
-                        className="h-10 px-4 rounded-xl text-sm font-bold border text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <button onClick={cancelNameEdit} disabled={nameSaving}
+                        className="h-10 px-4 rounded-xl text-sm font-bold border text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
                         Cancel
                       </button>
                     </div>
                   </div>
+                  {nameError && <p role="alert" className="mt-1 text-xs font-semibold text-destructive">{nameError}</p>}
+                  </motion.div>
                 ) : (
-                  <div className="flex items-center gap-2.5 justify-center sm:justify-start">
+                  <motion.div key="name-display" className="flex items-center gap-2.5 justify-center sm:justify-start" initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0.01 : 0.2, ease: "easeOut" }}>
                     <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
                       {displayName}
                     </h1>
                     <button
-                      onClick={() => { setEditingName(true); setNameInput(displayName); }}
+                      onClick={() => { setEditingName(true); setNameInput(displayName); setNameError(null); }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted/70 hover:text-foreground active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label="Edit display name"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                  </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
+                </div>
 
                 {/* Email & role row */}
                 <div className="flex flex-wrap items-center gap-2.5 justify-center sm:justify-start">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  <span className="min-w-0 max-w-full break-all text-sm text-muted-foreground flex items-center gap-1.5">
                     <Mail className="h-3.5 w-3.5 shrink-0" />
                     {profile?.email ?? `${username.toLowerCase()}@plv.edu.ph`}
                   </span>
@@ -426,15 +428,6 @@ export function StudentProfilePage() {
                 </div>
               </div>
 
-              {/* Desktop sign out */}
-              <button
-                onClick={handleLogout}
-                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.97] transition-all shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Sign out of your account"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Sign out
-              </button>
             </motion.div>
 
             {/* Stats row */}
@@ -444,19 +437,20 @@ export function StudentProfilePage() {
               transition={{ delay: 0.2, duration: 0.4 }}
               className="grid grid-cols-2 gap-3 mt-6"
             >
-              {STATS.map(({ label, value, icon: StatIcon, color }, i) => (
+              {STATS.map(({ label, value, icon: StatIcon, color, to }, i) => (
                 <motion.div
                   key={label}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.25 + i * 0.05 }}
-                  className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm px-3 py-3.5 text-center hover:shadow-md hover:border-primary/15 transition-all duration-200"
                 >
+                  <Link to={to} aria-label={`Open ${label === "Saved" ? "favorites" : "reports"}`} className="block rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm px-3 py-3.5 text-center hover:shadow-md hover:border-primary/15 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <div className={`w-9 h-9 rounded-xl bg-primary/[0.07] flex items-center justify-center mx-auto mb-1.5 ${color}`}>
                     <StatIcon className="h-4 w-4" />
                   </div>
                   <p className="text-lg font-extrabold text-foreground leading-none">{value}</p>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">{label}</p>
+                  </Link>
                 </motion.div>
               ))}
             </motion.div>
@@ -464,7 +458,7 @@ export function StudentProfilePage() {
         </section>
 
         {/* ════════════════════════════════════ CONTENT SECTIONS ══ */}
-        <div className="max-w-2xl mx-auto px-5 py-6 space-y-8">
+        <div className="max-w-3xl mx-auto px-5 py-6 space-y-8">
 
           {/* ── Recent Activity ── */}
           <section aria-labelledby="activity-heading">
@@ -497,9 +491,10 @@ export function StudentProfilePage() {
                         </div>
                       </div>
                       <div className="flex-1 min-w-0 pt-1.5">
-                        <p className="text-sm font-semibold text-foreground">{item.text}</p>
+                        <p className="break-words text-sm font-semibold text-foreground">{item.text}</p>
+                        <span className="mt-1 block text-[11px] text-muted-foreground sm:hidden">{item.time}</span>
                       </div>
-                      <span className="text-[11px] text-muted-foreground shrink-0 pt-1.5">{item.time}</span>
+                      <span className="hidden shrink-0 pt-1.5 text-[11px] text-muted-foreground sm:block sm:text-right">{item.time}</span>
                     </motion.div>
                   ))}
                 </div>
@@ -571,19 +566,6 @@ export function StudentProfilePage() {
           </section>
 
           {/* ── Mobile Sign Out ── */}
-          <Reveal delay={200}>
-            <div className="sm:hidden">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Sign out of your account"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </button>
-            </div>
-          </Reveal>
-
         </div>
       </div>
     </PageTransition>

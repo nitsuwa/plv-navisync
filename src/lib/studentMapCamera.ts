@@ -207,3 +207,16 @@ export function getStudentFloorInspectionSlack(
     y: Math.max(0, viewportHeight) * ratio,
   };
 }
+
+/** Keep outdoor campus edges inspectable without letting the map become lost. */
+export function getStudentOutdoorInspectionSlack(
+  viewportWidth: number,
+  viewportHeight: number,
+  isMobile: boolean,
+): MapPoint {
+  const ratio = isMobile ? 0.42 : 0.3;
+  return {
+    x: Math.max(0, viewportWidth) * ratio,
+    y: Math.max(0, viewportHeight) * ratio,
+  };
+}

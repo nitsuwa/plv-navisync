@@ -13,6 +13,8 @@ import { useToast } from "../../hooks/useToast";
 import { reportService } from "../../services/reportService";
 import { notificationService } from "../../lib/notificationService";
 import { cn } from "../../lib/utils";
+import { StudentAvatar } from "../ui/StudentAvatar";
+import { loadStudentPreferences } from "../../services/studentPreferencesService";
 
 const ALL_NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
@@ -35,7 +37,10 @@ export function Navbar() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { loading: authLoading, isStudent, isStudentOrg, username, role, signOut } = useStudentAuth();
+  const dropdownTriggerRef = useRef<HTMLButtonElement>(null);
+  const suppressOutsideClickRef = useRef(false);
+  const suppressOutsideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { loading: authLoading, isStudent, isStudentOrg, username, role, profile, signOut } = useStudentAuth();
   const toast = useToast();
   const [reportNotifCount, setReportNotifCount] = useState(0);
   const notifiedRef = useRef(false);
@@ -46,9 +51,15 @@ export function Navbar() {
     let mounted = true;
     (async () => {
       try {
-        const reports = await reportService.getStudentReports();
+        const [reports, preferences] = await Promise.all([reportService.getStudentReports(), loadStudentPreferences()]);
         if (!mounted || reports.length === 0) return;
+        if (!preferences.reportStatus) {
+          notificationService.markReportStatusSeen(reports);
+          notifiedRef.current = true;
+          return;
+        }
         const changes = notificationService.detectReportStatusChanges(reports);
+        notificationService.markReportStatusSeen(reports);
         if (changes.length > 0) {
           const first = changes[0];
           setReportNotifCount(changes.length);
@@ -68,9 +79,13 @@ export function Navbar() {
   }, [authLoading, isStudent, toast]);
 
   const handleStudentLogout = async () => {
-    await signOut();
-    setDropdownOpen(false);
-    navigate("/");
+    try {
+      await signOut();
+      setDropdownOpen(false);
+      navigate("/");
+    } catch {
+      toast.error("Could not sign out. Please try again.");
+    }
   };
 
   const isHome = location.pathname === "/";
@@ -83,14 +98,39 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
+    const outsidePointer = (event: PointerEvent) => {
+      if (!dropdownOpen || dropdownRef.current?.contains(event.target as Node)) return;
+      suppressOutsideClickRef.current = true;
+      if (suppressOutsideTimerRef.current) clearTimeout(suppressOutsideTimerRef.current);
+      suppressOutsideTimerRef.current = setTimeout(() => { suppressOutsideClickRef.current = false; }, 700);
+      event.preventDefault();
+      event.stopPropagation();
+      setDropdownOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    const swallowDismissClick = (event: MouseEvent) => {
+      if (!suppressOutsideClickRef.current) return;
+      suppressOutsideClickRef.current = false;
+      if (suppressOutsideTimerRef.current) clearTimeout(suppressOutsideTimerRef.current);
+      suppressOutsideTimerRef.current = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !dropdownOpen) return;
+      event.preventDefault();
+      setDropdownOpen(false);
+      dropdownTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", outsidePointer, true);
+    document.addEventListener("click", swallowDismissClick, true);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outsidePointer, true);
+      document.removeEventListener("click", swallowDismissClick, true);
+      document.removeEventListener("keydown", escape);
+      if (suppressOutsideTimerRef.current) clearTimeout(suppressOutsideTimerRef.current);
+    };
+  }, [dropdownOpen]);
 
   useEffect(() => {
     setDropdownOpen(false);
@@ -103,10 +143,6 @@ export function Navbar() {
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
   const navLinks = isStudent ? getStudentNavLinks(isStudentOrg) : ALL_NAV_LINKS;
-
-  const initials = isStudent ? username.slice(0, 2).toUpperCase() : "";
-
-
 
   return (
     <nav
@@ -196,6 +232,7 @@ export function Navbar() {
               /* Student avatar dropdown */
               <div className="relative" ref={dropdownRef}>
                 <motion.button
+                  ref={dropdownTriggerRef}
                   onClick={() => setDropdownOpen(v => !v)}
                   whileTap={{ scale: 0.93 }}
                   aria-label={`${username} — user menu`}
@@ -209,11 +246,7 @@ export function Navbar() {
                   )}
                   style={{ color: showWhiteText ? "rgba(255,255,255,0.9)" : "var(--foreground)" }}
                 >
-                  <div              aria-hidden="true"
-              className="w-7 h-7 rounded-xl flex items-center justify-center text-[11px] font-extrabold text-primary-foreground shrink-0"
-                    style={{ background: "var(--primary)" }}>
-                    {initials}
-                  </div>
+                  <StudentAvatar name={username} avatarPath={profile?.avatar_path} className="h-7 w-7 rounded-xl text-[11px]" />
                   <span className="hidden sm:block text-xs font-bold capitalize">{username}</span>
                   <motion.div
                     animate={{ rotate: dropdownOpen ? 180 : 0 }}
@@ -229,15 +262,13 @@ export function Navbar() {
                       initial={{ opacity: 0, scale: 0.95, y: -5 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                      transition={{ duration: 0.18, ease: "easeOut" }}
                       className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-border bg-card shadow-xl overflow-hidden"
                       style={{ zIndex: 60, transformOrigin: "top right" }}
                     >
                       <div className="px-4 py-3.5 border-b border-border">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-extrabold text-primary-foreground shrink-0 bg-primary">
-                            {initials}
-                          </div>
+                          <StudentAvatar name={username} avatarPath={profile?.avatar_path} className="h-9 w-9 rounded-xl text-sm" />
                           <div className="min-w-0">
                             <p className="text-sm font-extrabold text-foreground truncate">{username}</p>
                             <p className="text-[11px] text-muted-foreground capitalize">{role}</p>
@@ -245,9 +276,6 @@ export function Navbar() {
                         </div>
                       </div>
                       <div className="py-1.5">
-                        <Link to="/home" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
-                          <Home className="h-4 w-4 text-muted-foreground shrink-0" /> Home
-                        </Link>
                         <Link to="/student" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <User className="h-4 w-4 text-muted-foreground shrink-0" /> My Profile
                         </Link>

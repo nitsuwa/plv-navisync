@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import {
   X, Eye, EyeOff, Lock, Unlock, Info, Palette, Settings2,
   Route, Accessibility, Star, CheckCircle2, XCircle, AlertTriangle,
@@ -48,6 +48,10 @@ import type {
   ExteriorEmergencyStairVisualSize,
 } from "./types";
 import type { DoorOption, EntranceIndoorLinkStatus, EntranceOutdoorLinkStatus } from "../../lib/entranceTransitions";
+import {
+  entranceIndoorLinkStatus as getEntranceIndoorLinkStatus,
+  entranceOutdoorLinkStatus as getEntranceOutdoorLinkStatus,
+} from "../../lib/entranceTransitions";
 import { pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation } from "../../lib/campusPathNavigation";
 import {
   isPathwayGeneratedEdge,
@@ -60,8 +64,7 @@ import { isCampusGate } from "../../lib/campusGates";
 import { CAMPUS_GROUND_MATERIALS, campusAreaGroundAppearance } from "../../lib/campusCanvas";
 import { buildingCoverPublicUrl, uploadBuildingCoverImage, uploadCampusPlaceCoverImage } from "../../services/buildingImageService";
 import { BuildingWeeklyHoursEditor } from "./BuildingWeeklyHoursEditor";
-import { BUILDING_TYPE_OPTIONS } from "../../types/buildingInformation";
-import { buildingTypeValue, deriveBuildingAccessibilityFacts, facilityIsOnAuthoredMap } from "../../lib/buildingInformation";
+import { deriveBuildingAccessibilityFacts, facilityIsOnAuthoredMap } from "../../lib/buildingInformation";
 import { buildingNavigationHealth, reviewTargetForRoomIssue } from "./buildingNavigationHealth";
 
 type TabId = "basic" | "style" | "advanced";
@@ -248,6 +251,116 @@ const INACCESSIBLE_REASONS: { value: string; label: string }[] = [
   { value: "uneven_surface", label: "Uneven Surface" },
   { value: "other", label: "Other" },
 ];
+
+/** Keep keystrokes local to the small description field. The building and
+ * campus objects are committed once the field is left, instead of causing the
+ * outdoor canvas and its derived geometry to refresh for every character. */
+const BuildingDescriptionField = memo(function BuildingDescriptionField({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string;
+  disabled: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+
+  return (
+    <div>
+      <label htmlFor="bldg-description" className={labelCls}>About this building</label>
+      <p className="mb-1.5 text-[10px] leading-snug text-muted-foreground">Shown to students when they select this building on the campus map.</p>
+      <textarea
+        id="bldg-description"
+        maxLength={360}
+        value={draft}
+        rows={3}
+        disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => { if (draft !== value) onCommit(draft); }}
+        placeholder="A short description for students (1–3 sentences)."
+        className="w-full resize-none rounded-xl border border-border bg-input-background px-3 py-2 text-xs leading-5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+      />
+      <p className="mt-1 text-[10px] text-muted-foreground">{draft.length}/360 characters</p>
+    </div>
+  );
+});
+
+/** Keep Building Name/Code keystrokes local to the inspector. A committed
+ * edit updates the authored Campus once on blur/Enter, and an unmount flush
+ * protects drafts when the selected Building or inspector changes. */
+const BuildingIdentityField = memo(function BuildingIdentityField({
+  id,
+  value,
+  onCommit,
+  multiline = false,
+  maxLength,
+  formatDraft,
+  className,
+  placeholder,
+}: {
+  id: string;
+  value: string;
+  onCommit: (value: string) => void;
+  multiline?: boolean;
+  maxLength?: number;
+  formatDraft?: (value: string) => string;
+  className: string;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  const draftRef = useRef(value);
+  const committedRef = useRef(value);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
+  useEffect(() => {
+    draftRef.current = value;
+    committedRef.current = value;
+    setDraft(value);
+  }, [id, value]);
+
+  const commit = useCallback(() => {
+    const next = formatDraft ? formatDraft(draftRef.current) : draftRef.current;
+    draftRef.current = next;
+    setDraft(next);
+    if (next === committedRef.current) return;
+    committedRef.current = next;
+    onCommitRef.current(next);
+  }, [formatDraft]);
+
+  const flushRef = useRef(commit);
+  flushRef.current = commit;
+  useEffect(() => () => flushRef.current(), []);
+
+  const updateDraft = (raw: string) => {
+    const next = formatDraft ? formatDraft(raw) : raw;
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (!multiline && event.key === "Enter") {
+      event.preventDefault();
+      commit();
+      event.currentTarget.blur();
+    }
+  };
+  const commonProps = {
+    id,
+    value: draft,
+    maxLength,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => updateDraft(event.target.value),
+    onBlur: commit,
+    onKeyDown: handleKeyDown,
+    placeholder,
+    className,
+  };
+
+  return multiline
+    ? <textarea {...commonProps} rows={2} className={`${className} resize-none`} />
+    : <input {...commonProps} />;
+});
 
 /** B5 Phase 1.7: shared reason options for Emergency Safe = No. */
 const EMERGENCY_REASONS: { value: string; label: string }[] = [
@@ -613,6 +726,22 @@ export function PropertiesPanel({
   const navigationHealth = useMemo(() => navigationCampus && selBldg
     ? buildingNavigationHealth(navigationCampus, selBldg)
     : null, [navigationCampus, selBldg]);
+  const buildingEntranceNavigationSummary = useMemo(() => {
+    if (!navigationCampus || !selBldg) return null;
+    const entrances = selBldg.entrances ?? [];
+    const outdoorStatuses = entrances.map((entrance) => getEntranceOutdoorLinkStatus(navigationCampus, selBldg.id, entrance.id));
+    const indoorStatuses = entrances.map((entrance) => getEntranceIndoorLinkStatus(navigationCampus, selBldg.id, entrance.id));
+    const outdoorConnected = outdoorStatuses.filter((status) => status.state === "connected").length;
+    const outdoorMissing = outdoorStatuses.filter((status) => status.state === "missing").length;
+    const indoorLinked = indoorStatuses.filter((status) => status.state === "linked").length;
+    const indoorMissing = indoorStatuses.filter((status) => status.state === "missing").length;
+    return {
+      outdoorConnected,
+      outdoorMissing,
+      indoorLinked,
+      indoorMissing,
+    };
+  }, [navigationCampus, selBldg]);
   const uploadCoverFile = useCallback(async (file: File) => {
     if (!selBldg) return;
     setBuildingCoverError(null);
@@ -838,9 +967,9 @@ export function PropertiesPanel({
   return (
     <>
     <div
-      className="absolute top-0 right-0 bottom-0 z-30 flex flex-col border-l border-border shadow-2xl overflow-hidden"
+      data-testid="properties-panel"
+      className="absolute top-0 right-0 bottom-0 z-30 flex min-h-0 w-[min(400px,34vw)] flex-col border-l border-border shadow-2xl overflow-hidden max-[1023px]:w-[min(380px,calc(100vw-24px))]"
       style={{
-        width: 248,
         background: "var(--card)",
         transform: visible ? "translateX(0)" : "translateX(100%)",
         transition: "transform 0.22s cubic-bezier(0.16,1,0.3,1)",
@@ -869,9 +998,9 @@ export function PropertiesPanel({
       {selBldg && !isMultiMode && <TabBar active={tab} onChange={setTab} />}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-show-on-hover scroll-smooth p-4 space-y-4 min-w-0">
+      <div data-testid="properties-panel-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-show-on-hover p-4 space-y-4">
         {/* ── B7 Phase 2: contextual issue guidance for the selected object ── */}
-        <ObjectIssueSection items={issueItems} />
+        <ObjectIssueSection items={issueItems} scrollable={false} />
 
         {/* ── NAVIGATION MULTI-SELECT (B5 Phase 1.6) ── */}
         {isNavMultiMode && (
@@ -1268,33 +1397,39 @@ export function PropertiesPanel({
                 </div>
                 <div>
                   <label htmlFor="bldg-name" className={labelCls}>Name</label>
-                  <textarea id="bldg-name" value={selBldg.name} rows={2} onChange={(e) => onUpdateBuilding(selBldg.id, { name: e.target.value })} className="w-full resize-none rounded-xl border border-border bg-input-background px-3 py-2 text-sm leading-5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" placeholder="e.g. Main Academic Building" />
+                  <BuildingIdentityField
+                    key={selBldg.id}
+                    id="bldg-name"
+                    value={selBldg.name}
+                    onCommit={(name) => onUpdateBuilding(selBldg.id, { name })}
+                    multiline
+                    className="w-full rounded-xl border border-border bg-input-background px-3 py-2 text-sm leading-5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200"
+                    placeholder="e.g. Main Academic Building"
+                  />
                 </div>
                 <div>
                   <label htmlFor="bldg-code" className={labelCls}>Code</label>
-                  <input id="bldg-code" maxLength={32} value={selBldg.code} onChange={(e) => onUpdateBuilding(selBldg.id, { code: e.target.value.toUpperCase() })} className={cn(inputCls, "font-mono tracking-wide")} placeholder="e.g. MAB" />
+                  <BuildingIdentityField
+                    key={selBldg.id}
+                    id="bldg-code"
+                    value={selBldg.code}
+                    onCommit={(code) => onUpdateBuilding(selBldg.id, { code })}
+                    formatDraft={(value) => value.toUpperCase()}
+                    maxLength={32}
+                    className={cn(inputCls, "font-mono tracking-wide")}
+                    placeholder="e.g. MAB"
+                  />
                 </div>
                 <div>
                   <div className="mb-2 mt-3 flex items-center gap-1.5 border-t border-border/70 pt-3">
                     <Info className="h-3 w-3 text-primary" />
                     <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Building Information</span>
                   </div>
-                  <label htmlFor="bldg-description" className={labelCls}>About this building</label>
-                  <p className="mb-1.5 text-[9px] leading-snug text-muted-foreground">Shown to students when they select this building on the campus map.</p>
-                  <textarea id="bldg-description" maxLength={360} value={selBldg.description ?? ""} rows={3} onChange={(e) => onUpdateBuilding(selBldg.id, { description: e.target.value })} placeholder="A short description for students (1–3 sentences)." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200" />
-                  <p className="mt-1 text-[9px] text-muted-foreground">{(selBldg.description ?? "").length}/360 characters</p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className={labelCls}>Building type</label>
-                  <CompactDropdown
-                    ariaLabel="Building type"
-                    value={buildingTypeValue(selBldg)}
-                    options={BUILDING_TYPE_OPTIONS}
-                    onChange={(buildingType) => onUpdateBuilding(selBldg.id, { buildingType: buildingType as CampusBuilding["buildingType"] })}
-                    className="h-8 rounded-lg text-xs"
-                    testId="building-details-category"
-                    disabled={selBldg.locked}
+                  <BuildingDescriptionField
+                    key={selBldg.id}
+                    value={selBldg.description ?? ""}
+                    disabled={!!selBldg.locked}
+                    onCommit={(description) => onUpdateBuilding(selBldg.id, { description })}
                   />
                 </div>
 
@@ -1351,7 +1486,7 @@ export function PropertiesPanel({
 
                 <div className="space-y-1.5">
                   <span className={labelCls}>Facilities</span>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+                  <div data-testid="building-facilities-grid" className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,150px),1fr))] gap-x-2 gap-y-1.5">
                     {[
                       ["Restroom", "Restroom"], ["Clinic", "Clinic"], ["Study Area", "Study Area"],
                       ["Student Lounge", "Student Lounge"], ["Service Counter", "Service Counter"], ["Wi-Fi", "Wi-Fi"], ["Library", "Library"], ["Elevator", "Elevator"],
@@ -1359,29 +1494,31 @@ export function PropertiesPanel({
                       const derived = facilityIsOnAuthoredMap(selBldg, value);
                       const checked = derived || (selBldg.facilities ?? []).includes(value);
                       return (
-                        <label key={value} className={cn("flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[9px] font-semibold transition-colors", checked ? "border-primary/25 bg-primary/5 text-foreground" : "border-border/70 bg-card/60 text-muted-foreground hover:border-primary/25", (selBldg.locked || derived) && "cursor-default")} title={derived ? "Detected from authored floor-map data" : undefined}>
+                        <label key={value} className={cn("flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] font-semibold leading-snug transition-colors", checked ? "border-primary/25 bg-primary/5 text-foreground" : "border-border/70 bg-card/60 text-muted-foreground hover:border-primary/25", (selBldg.locked || derived) && "cursor-default")} title={derived ? "Detected from authored floor-map data" : undefined}>
                           <input type="checkbox" checked={checked} disabled={selBldg.locked || derived} onChange={(event) => {
                             const next = new Set(selBldg.facilities ?? []);
                             if (event.target.checked) next.add(value); else next.delete(value);
                             onUpdateBuilding(selBldg.id, { facilities: [...next] });
                           }} className="sr-only" />
-                          <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", checked ? "text-primary" : "text-muted-foreground/45")} />
-                          <span className="min-w-0 flex-1 truncate">{label}</span>
-                          {derived && <span className="shrink-0 text-[8px] font-medium text-muted-foreground">Detected</span>}
+                          <CheckCircle2 className={cn("mt-0.5 h-4 w-4 shrink-0", checked ? "text-primary" : "text-muted-foreground/45")} />
+                          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}{derived && <span className="mt-0.5 block text-[9px] font-medium text-muted-foreground">Detected from floor maps</span>}</span>
                         </label>
                       );
                     })}
                   </div>
-                  <p className="text-[9px] leading-relaxed text-muted-foreground">Only checked amenities and facilities present in the authored floor map appear to students.</p>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">Only checked amenities and facilities present in the authored floor map appear to students.</p>
                 </div>
                 <div className="space-y-1.5" data-testid="building-accessibility-facts">
                   <span className={labelCls}>Accessibility</span>
                   {deriveBuildingAccessibilityFacts(selBldg).length > 0 ? (
                     <div className="space-y-1">
                       {deriveBuildingAccessibilityFacts(selBldg).map((fact) => (
-                        <div key={fact.label} className="flex items-center justify-between gap-2 rounded-lg border border-blue-200/70 bg-blue-50/50 px-2 py-1.5 dark:border-blue-900/50 dark:bg-blue-950/15">
-                          <span className="flex min-w-0 items-center gap-1.5 text-[9px] font-semibold text-foreground"><Accessibility className="h-3 w-3 shrink-0 text-blue-600" />{fact.label}</span>
-                          <span className="shrink-0 text-[8px] text-muted-foreground">{fact.source}</span>
+                        <div key={fact.label} className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-x-2 rounded-lg border border-blue-200/70 bg-blue-50/50 px-2.5 py-2 dark:border-blue-900/50 dark:bg-blue-950/15">
+                          <Accessibility className="mt-0.5 h-4 w-4 text-blue-600" />
+                          <div className="min-w-0">
+                            <p className="break-words text-[11px] font-semibold leading-snug text-foreground">{fact.label}</p>
+                            <p className="mt-0.5 break-words text-[10px] leading-snug text-muted-foreground">{fact.source}</p>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1403,7 +1540,7 @@ export function PropertiesPanel({
                     </button>
                   </div>
                   {(selBldg.entrances?.length ?? 0) > 0 ? (
-                    <div className="space-y-1 max-h-[132px] overflow-y-auto scrollbar-show-on-hover">
+                    <div className="space-y-1">
                       {(selBldg.entrances ?? []).map((entrance, idx) => {
                         const meta = entrancePurposeMeta(entrance);
                         const entranceType = normalizeEntranceType(entrance.type);
@@ -1415,9 +1552,9 @@ export function PropertiesPanel({
                             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/60 bg-muted/10 hover:bg-muted/30 text-left transition-colors"
                           >
                             <DoorOpen className="h-3.5 w-3.5 text-primary shrink-0" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-[10px] font-bold text-foreground truncate">{entranceDisplayName(entrance, idx)}</span>
-                              <span className="block text-[8px] text-muted-foreground truncate">{meta}</span>
+                            <span className="min-w-0 flex-1 whitespace-normal [overflow-wrap:anywhere]">
+                              <span className="block text-[11px] font-bold leading-snug text-foreground">{entranceDisplayName(entrance, idx)}</span>
+                              <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">{meta}</span>
                             </span>
                             {entrance.isPrimary && entranceType === "general" && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
                             {entrance.accessible && <Accessibility className="h-3 w-3 text-blue-500 shrink-0" />}
@@ -1466,7 +1603,7 @@ export function PropertiesPanel({
                       Add
                     </button>
                   </div>
-                  <div className="space-y-1 max-h-[160px] overflow-y-auto scrollbar-show-on-hover">
+                  <div className="space-y-1">
                     {selBldg.floors.map((floor, idx) => (
                       <div
                         key={floor.id}
@@ -1479,7 +1616,7 @@ export function PropertiesPanel({
                         >
                           {idx + 1}
                         </div>
-                        <span className="flex-1 text-[10px] font-medium text-foreground truncate">
+                        <span className="min-w-0 flex-1 whitespace-normal break-words text-[10px] font-medium text-foreground">
                           {floor.label}
                         </span>
                         <span className="text-[8px] text-muted-foreground">{floor.rooms.length} rooms</span>
@@ -1526,7 +1663,7 @@ export function PropertiesPanel({
                         <button type="button" onClick={() => onAddExteriorEmergencyStair(selBldg.id)} disabled={selBldg.locked} className="flex items-center gap-1 h-6 px-2 rounded-lg border border-red-300/60 text-[9px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-40"><Plus className="h-3 w-3" /> Add</button>
                       </div>
                       {exteriorStairsOpen && (stairs.length === 0 ? <p className="text-[9px] text-muted-foreground italic">No exterior emergency stair configured.</p> : (
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-show-on-hover">
+                        <div className="space-y-2">
                           {stairs.map((stair, index) => {
                             const readiness = exteriorEmergencyStairRouteReadiness(selBldg, stair, allNavNodes ?? [], allNavEdges ?? []);
                             const displayName = stair.label?.trim() || `Exterior Stair ${index + 1}`;
@@ -1535,7 +1672,7 @@ export function PropertiesPanel({
                             return <div key={stair.id} className="rounded-xl border border-red-200/60 dark:border-red-800/40 bg-red-50/35 dark:bg-red-950/10 p-2.5 space-y-2">
                               <div className="flex items-center gap-2">
                                 <div className="min-w-0 flex-1 px-1 py-0.5">
-                                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-foreground truncate">{displayName}</p>
+                                  <p className="break-words text-[10px] font-extrabold uppercase tracking-wide leading-snug text-foreground">{displayName}</p>
                                   <p className="text-[8px] text-muted-foreground">{BUILDING_ENTRANCE_EDGE_LABELS[stair.attachment.edge]} side · {servedCount} {servedCount === 1 ? "floor" : "floors"} · {stair.state === "open" ? "Open" : "Closed"}</p>
                                 </div>
                                 <button type="button" aria-expanded={detailOpen} onClick={() => {
@@ -1587,9 +1724,9 @@ export function PropertiesPanel({
                         {navigationHealth.issues.length > 0 && <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400"><AlertTriangle className="h-3 w-3" />{navigationHealth.issues.length} need attention</span>}
                       </div>
                       {navigationHealth.issues.length === 0 ? <p className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 px-2 py-1.5 text-[9px] font-medium text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/15 dark:text-emerald-300">All routable rooms are connected.</p> : (
-                        <div className="max-h-[180px] space-y-1 overflow-y-auto scrollbar-show-on-hover" aria-label="Navigation issues">
+                        <div className="space-y-1" aria-label="Navigation issues">
                           {navigationHealth.issues.map((issue) => <div key={`${issue.floorId}:${issue.roomId}`} className="rounded-lg border border-amber-200/60 bg-amber-50/45 px-2 py-1.5 dark:border-amber-900/40 dark:bg-amber-950/10">
-                            <div className="flex items-start justify-between gap-2"><span className="min-w-0 truncate text-[10px] font-semibold text-foreground">{issue.roomName}</span><span className="shrink-0 text-[8px] text-muted-foreground">{issue.floorLabel}</span></div>
+                            <div className="flex items-start justify-between gap-2"><span className="min-w-0 break-words text-[10px] font-semibold text-foreground">{issue.roomName}</span><span className="max-w-[40%] shrink-0 whitespace-normal text-right text-[9px] text-muted-foreground">{issue.floorLabel}</span></div>
                             <p className="mt-0.5 text-[9px] leading-snug text-muted-foreground">{issue.status === "no_usable_entrance" ? "No usable entrance" : "Needs attention"} · {issue.reason}</p>
                           </div>)}
                         </div>
@@ -1698,22 +1835,30 @@ export function PropertiesPanel({
                     <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Navigation</span>
                   </div>
                   <div className="px-2.5 py-2 rounded-xl border border-border bg-muted/20 text-[10px] text-muted-foreground space-y-1.5">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-2">
                       <span>Primary Entrance</span>
                       <span className="font-bold text-foreground truncate ml-2">
-                        {selBldg.entrances?.find(e => e.isPrimary)?.name ?? selBldg.entrances?.[0]?.name ?? 'Not set'}
+                        {selBldg.entrances?.find((entrance) => entrance.isPrimary)?.name?.trim() || 'Not set'}
                       </span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-2">
                       <span>Outdoor Network</span>
-                      <span className={cn("font-bold", selBldg.entranceNodeId ? "text-green-600" : "text-amber-600")}>
-                        {selBldg.entranceNodeId ? 'Connected' : 'Not connected'}
+                      <span className={cn("text-right font-bold", (buildingEntranceNavigationSummary?.outdoorConnected ?? 0) > 0 ? "text-green-600" : "text-amber-600")}>
+                        {(buildingEntranceNavigationSummary?.outdoorConnected ?? 0) > 0
+                          ? `Connected · ${buildingEntranceNavigationSummary!.outdoorConnected} entrance${buildingEntranceNavigationSummary!.outdoorConnected === 1 ? "" : "s"}${buildingEntranceNavigationSummary!.outdoorMissing > 0 ? ` · ${buildingEntranceNavigationSummary!.outdoorMissing} need review` : ""}`
+                          : (buildingEntranceNavigationSummary?.outdoorMissing ?? 0) > 0
+                            ? `Needs review · ${buildingEntranceNavigationSummary!.outdoorMissing}`
+                            : 'Not connected'}
                       </span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-2">
                       <span>Indoor Connection</span>
-                      <span className={cn("font-bold", (selBldg.entrances?.length ?? 0) > 0 ? "text-green-600" : "text-amber-600")}>
-                        {(selBldg.entrances?.length ?? 0) > 0 ? `${selBldg.entrances.length} entrance(s)` : 'None'}
+                      <span className={cn("text-right font-bold", (buildingEntranceNavigationSummary?.indoorLinked ?? 0) > 0 ? "text-green-600" : "text-amber-600")}>
+                        {(buildingEntranceNavigationSummary?.indoorLinked ?? 0) > 0
+                          ? `${buildingEntranceNavigationSummary!.indoorLinked} linked entrance${buildingEntranceNavigationSummary!.indoorLinked === 1 ? "" : "s"}${buildingEntranceNavigationSummary!.indoorMissing > 0 ? ` · ${buildingEntranceNavigationSummary!.indoorMissing} need review` : ""}`
+                          : (buildingEntranceNavigationSummary?.indoorMissing ?? 0) > 0
+                            ? `Needs review · ${buildingEntranceNavigationSummary!.indoorMissing}`
+                            : 'None'}
                       </span>
                     </div>
                   </div>

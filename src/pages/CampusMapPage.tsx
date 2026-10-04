@@ -29,6 +29,7 @@ import type { CampusPlaceDest, RoomDest } from "../lib/combinedPathfinding";
 import { snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
+import { clampStudentMapZoom, dampCameraZoomLogarithm, getCameraSmoothingFactor, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getSoftBoundedPan, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
 import { clampStudentMapZoom, getCameraSmoothingFactor, STUDENT_MAP_MIN_ZOOM, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getSoftBoundedPan, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
 import { routeEndpointFromSearchResult } from "../lib/routeEndpoints";
@@ -37,9 +38,10 @@ import { planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
 import { doorEntranceLinkStatus, entryFloorForBuilding } from "../lib/entranceTransitions";
 import { entranceWorldPosition, normalizeEntranceDirection } from "../lib/buildingEntrances";
 import { mapBackAction, publishMapSurface, type MapSurface } from "../lib/mapSurface";
-import { getStudentFloorInspectionSlack, getStudentOverviewCamera, getStudentRoomFocusCamera, getStudentRoomFocusProgress } from "../lib/studentMapCamera";
+import { getStudentFloorInspectionSlack, getStudentOutdoorInspectionSlack, getStudentOverviewCamera, getStudentRoomFocusCamera, getStudentRoomFocusProgress } from "../lib/studentMapCamera";
 import { getFloorShapeBounds, getFloorShapeRegions } from "../lib/floorShape";
 import { roomOutlinePoints, roomShapeBounds } from "../lib/roomShape";
+import { authoredNavigableRoomKeys, authoredRoomNavigationKey } from "../lib/roomNavigationMembership";
 import {
   RoutePlannerDialog, RouteStepsPanel, RouteMapOverlay,
   ReportModal, SignInPrompt, LocationQRScanner,
@@ -912,7 +914,11 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const zoomFrameRef    = useRef<number | null>(null);
   const pendingZoomRef  = useRef<{ x: number; y: number; zoom: number } | null>(null);
   const cameraScreenScaleRef = useRef(1);
+  const cameraViewportRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const cameraAnimationFrameRef = useRef<number | null>(null);
+  const cameraAnimationModeRef = useRef<"programmatic" | "manual-wheel">("programmatic");
+  const targetLogZoomRef = useRef(0);
+  const manualWheelAnchorRef = useRef<{ viewPoint: Pt; worldPoint: Pt } | null>(null);
   const timedCameraMotionRef = useRef<{ fromPan: Pt; fromZoom: number; startedAt: number; durationMs: number } | null>(null);
   const roomFocusAnimationRef = useRef(false);
   const lastRoomFocusKeyRef = useRef<string | null>(null);
@@ -922,8 +928,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const fittedCampusIdRef = useRef<string | null>(null);
   const fittedFloorIdRef = useRef<string | null>(null);
   const writeCameraTransformRef = useRef<(nextPan?: Pt, nextZoom?: number) => void>(() => {});
-  const animateCameraToRef = useRef<(nextPan: Pt, nextZoom: number, source?: "room-focus") => void>(() => {});
-  const animateZoomAtRef = useRef<(clientX: number, clientY: number, nextZoom: number) => void>(() => {});
+  const animateCameraToRef = useRef<(nextPan: Pt, nextZoom: number, source?: "room-focus" | "manual-wheel") => void>(() => {});
+  const animateZoomAtRef = useRef<(clientX: number, clientY: number, nextZoom: number, source?: "manual-wheel") => void>(() => {});
   const searchFocusRef = useRef<{ buildingId?: string; roomId?: string; floorNumber?: number; campusPlaceId?: string } | null>(null);
   const [searchFocusNonce, setSearchFocusNonce] = useState(0);
   const panRef         = useRef<Pt>({ x: 0, y: 0 });
@@ -1178,6 +1184,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     if (!building) return null;
     return building.floors.find(f => f.number === floorView.floor) ?? building.floors[0] ?? null;
   }, [floorView, activeCampus]);
+  const navigableRoomKeys = useMemo(() => authoredNavigableRoomKeys(activeCampus), [activeCampus]);
   const activeFloorOrdinal = useMemo(() => {
     if (!floorView || !activeCampus || !activeFloorPlan) return { index: 0, count: 1 };
     const building = activeCampus.buildings.find((candidate) => candidate.id === floorView.building.id);
@@ -1207,12 +1214,31 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       : undefined,
     [activeCampus, floorView],
   );
+  const interactiveFloorRoomIds = useMemo(() => new Set((activeFloorPlan?.rooms ?? [])
+    .filter((room) => navigableRoomKeys.has(authoredRoomNavigationKey(
+      activeFloorBuilding?.id ?? floorView?.building.id ?? "",
+      activeFloorPlan?.id ?? "",
+      room.id,
+    )))
+    .map((room) => room.id)), [activeFloorBuilding?.id, activeFloorPlan, floorView?.building.id, navigableRoomKeys]);
+  useEffect(() => {
+    if (!activeCampus || !selectedRoomContext) return;
+    const building = activeCampus.buildings.find((candidate) => candidate.id === selectedRoomContext.buildingId);
+    const floor = building?.floors.find((candidate) => candidate.number === selectedRoomContext.floorNumber);
+    if (building && floor && navigableRoomKeys.has(authoredRoomNavigationKey(building.id, floor.id, selectedRoomContext.roomId))) return;
+    setSelectedRoomContext(null);
+    if (highlightedRoom === selectedRoomContext.roomId) setHighlightedRoom(null);
+  }, [activeCampus, highlightedRoom, navigableRoomKeys, selectedRoomContext]);
+  const activeFloorEntrances = useMemo(() => activeFloorBuilding?.entrances ?? [], [activeFloorBuilding]);
+  const activeFloorExteriorStairs = useMemo(
+    () => activeFloorBuilding?.exteriorEmergencyStairs ?? [],
+    [activeFloorBuilding],
+  );
   const availableFloorOptions = useMemo(() => {
     const publishedFloors = activeFloorBuilding?.floors ?? [];
     if (publishedFloors.length > 0) return publishedFloors.map((floor) => ({ number: floor.number, label: floor.label }));
     return currentFloorData?.floors.map((floor) => ({ number: floor.number, label: floor.label })) ?? [];
   }, [activeFloorBuilding, currentFloorData]);
-  const activeFloorExteriorStairs = activeFloorBuilding?.exteriorEmergencyStairs ?? [];
   // The authored floor canvas can have semi-outdoor content (for example a
   // veranda) outside its 0..canvasW/H rectangle. Keep that content in the
   // student viewBox without changing any published object coordinates.
@@ -1308,14 +1334,25 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const writeCameraTransform = useCallback((nextPan = panRef.current, nextZoom = displayZoomRef.current) => {
     const group = cameraGroupRef.current;
     if (group) {
-      group.setAttribute("transform", `translate(${viewCX * (1 - nextZoom) + nextPan.x},${viewCY * (1 - nextZoom) + nextPan.y}) scale(${nextZoom})`);
+      const x = viewCX * (1 - nextZoom) + nextPan.x;
+      const y = viewCY * (1 - nextZoom) + nextPan.y;
+      if (isFloorMode) {
+        // A CSS transform lets the browser composite the dense, static floor
+        // scene as one camera layer instead of repainting every SVG node for
+        // each zoom frame. Keep the same SVG user-space matrix as Outdoor.
+        group.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${nextZoom})`;
+      } else {
+        group.setAttribute("transform", `translate(${x},${y}) scale(${nextZoom})`);
+      }
     }
-  }, [viewCX, viewCY]);
+  }, [isFloorMode, viewCX, viewCY]);
 
   const commitCameraState = useCallback(() => {
     const currentPan = panRef.current;
     const currentZoom = displayZoomRef.current;
     targetCameraRef.current = { pan: { ...currentPan }, zoom: currentZoom };
+    targetLogZoomRef.current = Math.log(currentZoom);
+    manualWheelAnchorRef.current = null;
     zoomStateRef.current = currentZoom;
     zoomRef.current = currentZoom;
     setPan(currentPan);
@@ -1331,7 +1368,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       cameraAnimationFrameRef.current = null;
     }
     timedCameraMotionRef.current = null;
+    manualWheelAnchorRef.current = null;
+    cameraAnimationModeRef.current = "programmatic";
     targetCameraRef.current = { pan: { ...panRef.current }, zoom: displayZoomRef.current };
+    targetLogZoomRef.current = Math.log(displayZoomRef.current);
     zoomStateRef.current = displayZoomRef.current;
     roomFocusAnimationRef.current = false;
     if (commitCurrent && wasAnimating) commitCameraState();
@@ -1346,7 +1386,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     return cameraScreenScaleRef.current || 1;
   }, [viewportCanvasW]);
   const getMapPanBounds = useCallback((zoomValue = zoomRef.current) => {
-    const rect = mapContainerRef.current?.getBoundingClientRect();
+    const rect = cameraViewportRectRef.current;
     const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 768;
     const focusingMobileBuildingDestination = isMobileViewport
       && directionsMode
@@ -1369,7 +1409,11 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
             rect?.height || viewportCanvasH,
             isMobileViewport,
           )
-        : undefined,
+        : getStudentOutdoorInspectionSlack(
+            rect?.width || viewportCanvasW,
+            rect?.height || viewportCanvasH,
+            isMobileViewport,
+          ),
     });
   }, [directionsMode, isFloorMode, roomDestination, toBuilding, viewportCanvasH, viewportCanvasW]);
   const clampMapPan = useCallback((candidate: Pt, zoomValue = zoomRef.current) =>
@@ -1378,16 +1422,19 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   writeCameraTransformRef.current = writeCameraTransform;
 
   /** One retargetable, time-based RAF loop for every animated camera move. */
-  const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current, source?: "room-focus") => {
+  const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current, source?: "room-focus" | "manual-wheel") => {
     const toZoom = clampStudentMapZoom(targetZoom);
     // Every camera move settles inside the active map pan bounds. Destination
     // bounds include inspection slack on mobile while a building route is open.
     const toPan = clampMapPan(targetPan, toZoom);
+    cameraAnimationModeRef.current = source === "manual-wheel" ? "manual-wheel" : "programmatic";
     roomFocusAnimationRef.current = source === "room-focus";
     timedCameraMotionRef.current = source === "room-focus"
       ? { fromPan: { ...panRef.current }, fromZoom: displayZoomRef.current, startedAt: performance.now(), durationMs: 330 }
       : null;
     targetCameraRef.current = { pan: toPan, zoom: toZoom };
+    targetLogZoomRef.current = Math.log(toZoom);
+    if (source !== "manual-wheel") manualWheelAnchorRef.current = null;
     zoomStateRef.current = toZoom;
 
     const finishAtTarget = () => {
@@ -1396,14 +1443,16 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       zoomRef.current = toZoom;
       zoomStateRef.current = toZoom;
       targetCameraRef.current = { pan: { ...toPan }, zoom: toZoom };
+      targetLogZoomRef.current = Math.log(toZoom);
       writeCameraTransformRef.current(toPan, toZoom);
       cameraAnimationFrameRef.current = null;
       timedCameraMotionRef.current = null;
       roomFocusAnimationRef.current = false;
+      manualWheelAnchorRef.current = null;
       commitCameraState();
     };
 
-    if (reducedMotion) {
+    if (reducedMotion && source !== "manual-wheel") {
       if (cameraAnimationFrameRef.current !== null) cancelAnimationFrame(cameraAnimationFrameRef.current);
       finishAtTarget();
       return;
@@ -1427,10 +1476,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
           zoomRef.current = target.zoom;
           zoomStateRef.current = target.zoom;
           targetCameraRef.current = { pan: { ...target.pan }, zoom: target.zoom };
+          targetLogZoomRef.current = Math.log(target.zoom);
           writeCameraTransformRef.current(target.pan, target.zoom);
           cameraAnimationFrameRef.current = null;
           timedCameraMotionRef.current = null;
           roomFocusAnimationRef.current = false;
+          manualWheelAnchorRef.current = null;
           commitCameraState();
           return;
         }
@@ -1441,18 +1492,36 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         cameraAnimationFrameRef.current = requestAnimationFrame(tick);
         return;
       }
-      const factor = getCameraSmoothingFactor(now - previousTime);
+      const isManualWheel = cameraAnimationModeRef.current === "manual-wheel";
+      const deltaMs = now - previousTime;
+      const factor = getCameraSmoothingFactor(deltaMs, 56);
       previousTime = now;
       const currentPan = panRef.current;
       const currentZoom = displayZoomRef.current;
-      const nextPan = {
-        x: currentPan.x + (target.pan.x - currentPan.x) * factor,
-        y: currentPan.y + (target.pan.y - currentPan.y) * factor,
-      };
-      const nextZoom = currentZoom + (target.zoom - currentZoom) * factor;
-      const settled = Math.abs(target.pan.x - nextPan.x) < 0.25
-        && Math.abs(target.pan.y - nextPan.y) < 0.25
-        && Math.abs(target.zoom - nextZoom) < 0.001;
+      const dampedZoom = isManualWheel
+        ? dampCameraZoomLogarithm(currentZoom, target.zoom, deltaMs, 34)
+        : currentZoom + (target.zoom - currentZoom) * factor;
+      const nextZoom = isManualWheel && Math.abs(Math.log(target.zoom) - Math.log(dampedZoom)) < 0.0005
+        ? target.zoom
+        : dampedZoom;
+      const anchor = isManualWheel ? manualWheelAnchorRef.current : null;
+      const proposedPan = anchor
+        ? {
+            x: anchor.viewPoint.x - viewCX * (1 - nextZoom) - anchor.worldPoint.x * nextZoom,
+            y: anchor.viewPoint.y - viewCY * (1 - nextZoom) - anchor.worldPoint.y * nextZoom,
+          }
+        : {
+            x: currentPan.x + (target.pan.x - currentPan.x) * factor,
+            y: currentPan.y + (target.pan.y - currentPan.y) * factor,
+          };
+      const nextPan = isManualWheel ? clampMapPan(proposedPan, nextZoom) : proposedPan;
+      const settled = isManualWheel
+        ? Math.abs(Math.log(target.zoom) - Math.log(nextZoom)) < 0.0005
+          && Math.abs(target.pan.x - nextPan.x) < 0.5
+          && Math.abs(target.pan.y - nextPan.y) < 0.5
+        : Math.abs(target.pan.x - nextPan.x) < 0.25
+          && Math.abs(target.pan.y - nextPan.y) < 0.25
+          && Math.abs(target.zoom - nextZoom) < 0.001;
 
       if (settled) {
         panRef.current = { ...target.pan };
@@ -1460,10 +1529,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         zoomRef.current = target.zoom;
         zoomStateRef.current = target.zoom;
         targetCameraRef.current = { pan: { ...target.pan }, zoom: target.zoom };
+        targetLogZoomRef.current = Math.log(target.zoom);
         writeCameraTransformRef.current(target.pan, target.zoom);
         cameraAnimationFrameRef.current = null;
         timedCameraMotionRef.current = null;
         roomFocusAnimationRef.current = false;
+        manualWheelAnchorRef.current = null;
         commitCameraState();
         return;
       }
@@ -1475,7 +1546,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       cameraAnimationFrameRef.current = requestAnimationFrame(tick);
     };
     cameraAnimationFrameRef.current = requestAnimationFrame(tick);
-  }, [clampMapPan, commitCameraState, reducedMotion]);
+  }, [clampMapPan, commitCameraState, reducedMotion, viewCX, viewCY]);
 
   useEffect(() => { animateCameraToRef.current = animateCameraTo; }, [animateCameraTo]);
   const applyOverviewCamera = useCallback((camera: { pan: Pt; zoom: number }) => {
@@ -1488,6 +1559,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     zoomRef.current = nextZoom;
     zoomStateRef.current = nextZoom;
     targetCameraRef.current = { pan: { ...nextPan }, zoom: nextZoom };
+    targetLogZoomRef.current = Math.log(nextZoom);
+    manualWheelAnchorRef.current = null;
     roomFocusAnimationRef.current = false;
     setPan(nextPan);
     setDisplayZoom(nextZoom);
@@ -1590,6 +1663,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     if (!element) return;
 
     const reconcileViewport = () => {
+      const rect = element.getBoundingClientRect();
+      cameraViewportRectRef.current = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
       const svgWidth = svgRef.current?.getBoundingClientRect().width;
       if (svgWidth && svgWidth > 0) cameraScreenScaleRef.current = viewportCanvasW / svgWidth;
       const current = panRef.current;
@@ -1602,13 +1677,24 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
 
     if (typeof ResizeObserver === "undefined") {
       reconcileViewport();
-      return;
+      window.addEventListener("resize", reconcileViewport);
+      window.addEventListener("scroll", reconcileViewport, true);
+      return () => {
+        window.removeEventListener("resize", reconcileViewport);
+        window.removeEventListener("scroll", reconcileViewport, true);
+      };
     }
     const observer = new ResizeObserver(reconcileViewport);
     observer.observe(element);
     reconcileViewport();
-    return () => observer.disconnect();
-  }, [clampMapPan, viewportCanvasW]);
+    window.addEventListener("resize", reconcileViewport);
+    window.addEventListener("scroll", reconcileViewport, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", reconcileViewport);
+      window.removeEventListener("scroll", reconcileViewport, true);
+    };
+  }, [clampMapPan, viewportCanvasW, viewportCanvasH]);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1620,15 +1706,28 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       e.preventDefault();
       const step = normalizeStudentMapWheelDelta(e.deltaY, e.deltaMode, el.clientHeight);
       if (step === 0) return;
-      // Wheel events only retarget the same camera animation. The one shared
-      // RAF loop updates the SVG group continuously until the target settles.
-      animateZoomAtRef.current(e.clientX, e.clientY, zoomStateRef.current * Math.exp(-step));
+      // Wheel/trackpad input retargets a single live RAF camera loop. Stop a
+      // programmatic move at its current rendered frame; successive wheel
+      // events update the target without queueing separate animations.
+      const interruptsProgrammaticMove = cameraAnimationFrameRef.current !== null && cameraAnimationModeRef.current !== "manual-wheel";
+      if (interruptsProgrammaticMove) {
+        cancelCameraAnimation(false);
+      }
+      cancelAnimationFrame(inertiaRef.current);
+      inertiaRef.current = 0;
+      const continuingWheel = !interruptsProgrammaticMove
+        && cameraAnimationFrameRef.current !== null
+        && cameraAnimationModeRef.current === "manual-wheel";
+      const baseLogZoom = continuingWheel ? targetLogZoomRef.current : Math.log(displayZoomRef.current);
+      const nextZoom = clampStudentMapZoom(Math.exp(baseLogZoom - step));
+      if (Math.abs(Math.log(nextZoom) - baseLogZoom) < 1e-9) return;
+      animateZoomAtRef.current(e.clientX, e.clientY, nextZoom, "manual-wheel");
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [activeCampus?.id, isCampusLoading]);
+  }, [activeCampus?.id, cancelCameraAnimation, isCampusLoading]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1785,8 +1884,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     return snapped ? snapped.point : pt;
   }, [activeCampus]);
 
-  /** Convert a client-space point to SVG content coordinates (inverse of pan/zoom). */
-  const svgPointFromClient = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+  /** Convert to both SVG view coordinates and live world coordinates from one matrix read. */
+  const svgCameraPointFromClient = useCallback((clientX: number, clientY: number): { viewPoint: Pt; worldPoint: Pt } | null => {
     const svg = svgRef.current;
     if (!svg?.createSVGPoint || !svg.getScreenCTM) return null;
     const pt = svg.createSVGPoint();
@@ -1794,26 +1893,42 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     pt.y = clientY;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
-    const p = pt.matrixTransform(ctm.inverse());
+    const viewPoint = pt.matrixTransform(ctm.inverse());
     const z = displayZoomRef.current;
     return {
-      x: (p.x - viewCX * (1 - z) - panRef.current.x) / z,
-      y: (p.y - viewCY * (1 - z) - panRef.current.y) / z,
+      viewPoint: { x: viewPoint.x, y: viewPoint.y },
+      worldPoint: {
+        x: (viewPoint.x - viewCX * (1 - z) - panRef.current.x) / z,
+        y: (viewPoint.y - viewCY * (1 - z) - panRef.current.y) / z,
+      },
     };
   }, [viewCX, viewCY]);
 
-  const animateZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number) => {
+  /** Convert a client-space point to SVG content coordinates (inverse of pan/zoom). */
+  const svgPointFromClient = useCallback((clientX: number, clientY: number): Pt | null =>
+    svgCameraPointFromClient(clientX, clientY)?.worldPoint ?? null,
+  [svgCameraPointFromClient]);
+
+  const animateZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number, source?: "manual-wheel") => {
     cancelAnimationFrame(inertiaRef.current);
     inertiaRef.current = 0;
-    // A deliberate wheel/keyboard zoom takes ownership away from scripted
-    // room focus. Repeated wheel input still retargets its own live camera.
-    if (roomFocusAnimationRef.current) cancelCameraAnimation();
+    // Manual wheel input owns the camera immediately and preserves the live
+    // transform as its origin. Other callers keep the existing programmatic
+    // behavior and duration.
+    if (source === "manual-wheel" && cameraAnimationFrameRef.current !== null && cameraAnimationModeRef.current !== "manual-wheel") {
+      cancelCameraAnimation(false);
+    } else if (roomFocusAnimationRef.current) {
+      cancelCameraAnimation();
+    }
     const clamped = clampStudentMapZoom(nextZoom);
-    const worldPoint = svgPointFromClient(clientX, clientY);
-    if (!worldPoint) {
-      animateCameraTo(panRef.current, clamped);
+    const cameraPoint = svgCameraPointFromClient(clientX, clientY);
+    if (!cameraPoint) {
+      manualWheelAnchorRef.current = null;
+      animateCameraTo(panRef.current, clamped, source);
       return;
     }
+    const worldPoint = cameraPoint.worldPoint;
+    if (source === "manual-wheel") manualWheelAnchorRef.current = cameraPoint;
     const nextPan = getPanToKeepWorldPoint({
       mapWidth: viewportCanvasW,
       mapHeight: viewportCanvasH,
@@ -1823,23 +1938,27 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       nextZoom: clamped,
       zoomOrigin: "center",
     });
-    animateCameraTo(clampMapPan(nextPan, clamped), clamped);
-  }, [animateCameraTo, cancelCameraAnimation, clampMapPan, svgPointFromClient, viewportCanvasH, viewportCanvasW]);
+    animateCameraTo(clampMapPan(nextPan, clamped), clamped, source);
+  }, [animateCameraTo, cancelCameraAnimation, clampMapPan, svgCameraPointFromClient, viewportCanvasH, viewportCanvasW]);
 
   useEffect(() => { animateZoomAtRef.current = animateZoomAt; }, [animateZoomAt]);
 
   /** Cursor-anchored zoom with the same center-origin transform as the map. */
   const applyZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number, commitState = true) => {
-    cancelCameraAnimation(true);
+    // User zoom takes over from scripted movement without an intermediate
+    // React-state commit. The final camera is committed once the gesture ends.
+    cancelCameraAnimation(false);
     const clamped = clampStudentMapZoom(nextZoom);
     cancelAnimationFrame(inertiaRef.current);
     inertiaRef.current = 0;
     zoomStateRef.current = clamped;
     zoomRef.current = clamped;
+    targetLogZoomRef.current = Math.log(clamped);
     const pt = svgPointFromClient(clientX, clientY);
     if (!pt) {
       displayZoomRef.current = clamped;
       targetCameraRef.current = { pan: { ...panRef.current }, zoom: clamped };
+      targetLogZoomRef.current = Math.log(clamped);
       writeCameraTransform(panRef.current, clamped);
       if (commitState) commitCameraState();
       return;
@@ -1861,6 +1980,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     // interpolation used to make the map jump away from the pointer.
     displayZoomRef.current = clamped;
     targetCameraRef.current = { pan: { ...nextPan }, zoom: clamped };
+    targetLogZoomRef.current = Math.log(clamped);
     writeCameraTransform(nextPan, clamped);
     if (commitState) commitCameraState();
   }, [cancelCameraAnimation, clampMapPan, commitCameraState, svgPointFromClient, viewportCanvasW, viewportCanvasH, writeCameraTransform]);
@@ -2469,6 +2589,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setIndoorWalkProgress(0);
   }, []);
 
+  const handleFloorRoomHover = useCallback((roomId: string) => setHoveredRoom(roomId), []);
+  const handleFloorRoomHoverEnd = useCallback(() => setHoveredRoom(null), []);
+  const handleFloorDoorClick = useCallback((_doorId: string) => closeFloorPlan(), [closeFloorPlan]);
+
   const navigateStair = useCallback((roomType: RoomType) => {
     const fv = floorViewRef.current;
     const fd = fv ? FLOOR_PLANS[fv.building.id] : null;
@@ -2673,6 +2797,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     const locationId = params.get("locationId");
     const locationPayload = locationId ? parseLocationQrPayload(window.location.href) : null;
     const placeId = params.get("placeId");
+    const destinationPlaceId = params.get("destinationPlaceId");
+    const destinationBuildingId = params.get("destinationBuildingId");
+    const campusHint = params.get("campusId");
+    const targetId = locationId || params.get("buildingId") || placeId || destinationPlaceId || destinationBuildingId || params.get("select");
     const campusHint = locationPayload?.campusId ?? params.get("campusId");
     const targetId = locationId || params.get("buildingId") || placeId || params.get("select");
     if (!targetId) {
@@ -2683,6 +2811,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       ? availableCampuses.filter((campus) => campus.id === campusHint)
       : availableCampuses;
     const matchesTarget = (campus: EditorCampus) => locationId
+      ? resolveCampusLocationQr(campus, targetId) !== null
+      : placeId || destinationPlaceId
+        ? campus.markers.some((marker) => marker.id === (placeId || destinationPlaceId))
       ? resolveCampusLocationQr(campus, targetId, locationPayload ?? undefined) !== null
       : placeId
         ? campus.markers.some((marker) => marker.id === placeId)
@@ -2710,18 +2841,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       window.history.replaceState(window.history.state, "", window.location.pathname);
       return;
     }
-    if (placeId) {
-      const place = targetCampus.markers.find((marker) => marker.id === placeId);
+    if (placeId || destinationPlaceId) {
+      const place = targetCampus.markers.find((marker) => marker.id === (placeId || destinationPlaceId));
       if (place) {
-        setSelected(null);
-        setSelectedCampusPlaceId(place.id);
-        setFloorView(null);
-        setSelectedRoomContext(null);
-        setHighlightedRoom(null);
-        setSearch(place.name);
-        setSearchFocused(false);
-        searchFocusRef.current = { campusPlaceId: place.id };
-        setSearchFocusNonce((nonce) => nonce + 1);
+        const routeDestination = destinationPlaceId ? campusPlaceDestination(place, targetCampus) : null;
+        if (routeDestination && campusPlaceCanRoute(place, targetCampus, "inbound")) {
+          setSelected(null);
+          setSelectedCampusPlaceId(null);
+          setToCampusPlace(routeDestination);
+          setToBuilding(null);
+          setFromCampusPlace(null);
+          setFromBuilding(null);
+          setRoomOrigin(null);
+          setRoomDestination(null);
+          setFloorView(null);
+          setDirectionsMode(true);
+          setUseMyLocation(Boolean(youAreHere));
+        } else {
+          setSelected(null);
+          setSelectedCampusPlaceId(place.id);
+          setFloorView(null);
+          setSelectedRoomContext(null);
+          setHighlightedRoom(null);
+          setSearch(place.name);
+          setSearchFocused(false);
+          searchFocusRef.current = { campusPlaceId: place.id };
+          setSearchFocusNonce((nonce) => nonce + 1);
+        }
       }
       initialSelectionRef.current = true;
       window.history.replaceState(window.history.state, "", window.location.pathname);
@@ -2731,10 +2877,23 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       candidate.id === targetId || candidate.code.toLowerCase() === targetId.toLowerCase(),
     );
     if (!building) return;
-    setSelected(building);
+    if (destinationBuildingId) {
+      setSelected(null);
+      setToBuilding(building);
+      setFromBuilding(null);
+      setToCampusPlace(null);
+      setFromCampusPlace(null);
+      setRoomOrigin(null);
+      setRoomDestination(null);
+      setFloorView(null);
+      setDirectionsMode(true);
+      setUseMyLocation(Boolean(youAreHere));
+    } else {
+      setSelected(building);
+    }
     initialSelectionRef.current = true;
     window.history.replaceState(window.history.state, "", window.location.pathname);
-  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError]);
+  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError, youAreHere]);
 
   useEffect(() => {
     if (!pendingLocationScan || isCampusLoading || !activeCampus || activeCampus.id !== pendingLocationScan.campusId) return;
@@ -3090,6 +3249,12 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     if (!roomId) return;
     const room = activeFloorPlan.rooms.find((candidate) => candidate.id === roomId);
     if (!room) return;
+    if (!interactiveFloorRoomIds.has(roomId)) {
+      if (searchMatchesFloor) searchFocusRef.current = null;
+      lastRoomFocusKeyRef.current = null;
+      return;
+    }
+    const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}`;
     // Opening the planner changes the room's safe viewport even if the same
     // room was focused moments earlier from its selection card.
     const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}:${directionsMode ? "planner" : "map"}`;
@@ -3196,6 +3361,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       cancelCameraAnimation();
     }
     if (searchMatchesFloor) searchFocusRef.current = null;
+  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, floorView, floorViewport, interactiveFloorRoomIds, isFloorMode, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
   }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
 
   const selectBuilding = useCallback((b: Building|null) => {
@@ -3270,6 +3436,22 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         setSearchFocusNonce((nonce) => nonce + 1);
       }
     } else {
+      const isRoomResult = item.kind === "room" || item.kind === "office" || item.kind === "laboratory" || item.kind === "facility";
+      if (isRoomResult) {
+        const campusBuilding = activeCampus?.buildings.find((candidate) => candidate.id === item.buildingId);
+        const publishedFloor = campusBuilding?.floors.find((floor) =>
+          (item.floorId ? floor.id === item.floorId : false)
+          || (item.floorNumber !== undefined && floor.number === item.floorNumber),
+        );
+        if (!campusBuilding || !publishedFloor
+          || !navigableRoomKeys.has(authoredRoomNavigationKey(campusBuilding.id, publishedFloor.id, item.id))) {
+          // Ignore stale/non-navigable room results without selecting or focusing
+          // the underlying visual-only room.
+          setSearch(item.name);
+          dismissSearch();
+          return;
+        }
+      }
       const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
       if (b) {
         searchFocusRef.current = { buildingId: b.id, roomId: item.id, floorNumber: item.floorNumber ?? 1 };
@@ -3291,7 +3473,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     }
     setSearch(item.name);
     dismissSearch();
-  }, [activeCampus, MOCK_BUILDINGS, dismissSearch, selectBuilding, selectCampusPlace]);
+  }, [activeCampus, MOCK_BUILDINGS, dismissSearch, navigableRoomKeys, selectBuilding, selectCampusPlace]);
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
@@ -3600,10 +3782,11 @@ const buildingFill = (id: string) =>
       activeFloorPlan?.rooms.find((candidate) => candidate.id === roomId) ??
       currentFloor?.rooms.find((candidate) => candidate.id === roomId);
     if (!room) return null;
-
     const publishedFloor = activeCampus?.buildings
       .find((building) => building.id === fv.building.id)
       ?.floors.find((floor) => floor.number === fv.floor);
+    const floorId = activeFloorPlan?.id ?? publishedFloor?.id;
+    if (!floorId || !navigableRoomKeys.has(authoredRoomNavigationKey(fv.building.id, floorId, roomId))) return null;
     const publishedRoom = publishedFloor?.rooms.find((candidate) => candidate.id === roomId);
     return {
       type: "room",
@@ -3618,12 +3801,11 @@ const buildingFill = (id: string) =>
       accessDoorId: publishedRoom?.accessDoorId,
       accessDoorIds: publishedRoom?.accessDoorIds,
     };
-  }, [activeCampus, activeFloorPlan, currentFloor]);
+  }, [activeCampus, activeFloorPlan, currentFloor, navigableRoomKeys]);
 
   // Both planner endpoints use the active published campus catalog rather
-  // than legacy floor-plan data. Structural spaces are intentionally omitted;
-  // the map builder's authored room/access nodes remain the source of truth
-  // for the route that is calculated after a room is selected.
+  // than legacy floor-plan data. Floor Editor's authored room/access-node
+  // membership is the source of truth for which physical rooms may be chosen.
   const roomDestinationCatalog = useMemo<RoomDest[]>(() => {
     if (!activeCampus) return [];
     const buildingsById = new Map(MOCK_BUILDINGS.map((building) => [building.id, building]));
@@ -3632,12 +3814,8 @@ const buildingFill = (id: string) =>
       if (!building) return [];
       return campusBuilding.floors.flatMap((floor) => floor.rooms
         .filter((room) => {
-          const roomType = String((room as { type?: unknown }).type ?? "").toLowerCase();
-          const isStructural = /(hallway|corridor|stairs?|staircase|elevator|lobby)/i.test(roomType);
-          const isCurrentOrigin = roomOrigin?.buildingId === campusBuilding.id
-            && roomOrigin.floorNumber === floor.number
-            && roomOrigin.roomId === room.id;
-          return !isStructural && !isCurrentOrigin;
+          const isAuthoredDestination = navigableRoomKeys.has(authoredRoomNavigationKey(campusBuilding.id, floor.id, room.id));
+          return room.visible !== false && isAuthoredDestination;
         })
         .map((room) => ({
           type: "room" as const,
@@ -3653,7 +3831,7 @@ const buildingFill = (id: string) =>
           accessDoorIds: room.accessDoorIds,
         })));
     });
-  }, [activeCampus, MOCK_BUILDINGS, roomOrigin]);
+  }, [activeCampus, MOCK_BUILDINGS, navigableRoomKeys]);
 
   const selectRoomDestination = useCallback((catalogKey: string) => {
     const target = roomDestinationCatalog.find((room) =>
@@ -4096,7 +4274,16 @@ const buildingFill = (id: string) =>
 
         </defs>
 
-        <g ref={cameraGroupRef} transform={`translate(${tx},${ty}) scale(${displayZoom})`}>
+        <g
+          ref={cameraGroupRef}
+          transform={isFloorMode ? undefined : `translate(${tx},${ty}) scale(${displayZoom})`}
+          style={isFloorMode ? {
+            willChange: "transform",
+            transform: `translate3d(${tx}px, ${ty}px, 0) scale(${displayZoom})`,
+            transformBox: "view-box",
+            transformOrigin: "0 0",
+          } : undefined}
+        >
 
           {/* ════════ FLOOR PLAN mode ════════ */}
           {isFloorMode ? (() => {
@@ -4112,17 +4299,18 @@ const buildingFill = (id: string) =>
                   floor={activeFloorPlan}
                   floorIndex={activeFloorOrdinal.index}
                   floorCount={activeFloorOrdinal.count}
-                  entrances={activeFloorBuilding?.entrances ?? []}
+                  entrances={activeFloorEntrances}
                   exteriorEmergencyStairs={activeFloorExteriorStairs}
                   interactiveExitDoorIds={interactiveExitDoorIds}
                   mapMode={mapMode}
                   showLabels={platformSettings.showMapLabels}
                   highlightedRoomId={highlightedRoom}
+                  interactiveRoomIds={interactiveFloorRoomIds}
                   hoveredRoomId={hoveredRoom}
                   onRoomClick={selectIndoorRoom}
-                  onRoomHover={(roomId) => setHoveredRoom(roomId)}
-                  onRoomHoverEnd={() => setHoveredRoom(null)}
-                  onDoorClick={() => closeFloorPlan()}
+                  onRoomHover={handleFloorRoomHover}
+                  onRoomHoverEnd={handleFloorRoomHoverEnd}
+                  onDoorClick={handleFloorDoorClick}
                 />
                 {showEventMaps && isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
                 {/* Indoor navigation path (entrance → active room) */}
@@ -4215,6 +4403,7 @@ const buildingFill = (id: string) =>
                 zoom={displayZoom}
                 showBuildings={true}
                 showLabels={platformSettings.showMapLabels}
+                showEntryPills={false}
                 selectedBuildingId={selected?.id ?? null}
                 selectedCampusPlaceId={selectedCampusPlaceId}
                 onSelectBuilding={(buildingId) => {

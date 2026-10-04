@@ -120,7 +120,7 @@ function groupByFloor(items: ObjectIssueItem[]): { label: string; items: ObjectI
   return groupOrder.map((label) => ({ label, items: groups.get(label)! }));
 }
 
-export function ObjectIssueSection({ items }: { items: ObjectIssueItem[] }) {
+export function ObjectIssueSection({ items, scrollable = true }: { items: ObjectIssueItem[]; scrollable?: boolean }) {
   if (items.length === 0) return null;
   const worst: "error" | "warning" | "info" = items.some((i) => i.severity === "error")
     ? "error"
@@ -154,7 +154,7 @@ export function ObjectIssueSection({ items }: { items: ObjectIssueItem[] }) {
         <span className="ml-auto text-[8px] font-bold text-muted-foreground tabular-nums">{items.length}</span>
       </div>
       {/* Scrollable issue list — constrained so it never takes over the sidebar. */}
-      <div className="max-h-[260px] overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-show-on-hover">
+      <div className={cn("space-y-1.5 pr-1", scrollable && "max-h-[260px] overflow-y-auto overflow-x-hidden scrollbar-show-on-hover")}>
         {groups.map((group) => (
           <div key={group.label}>
             {hasMultipleGroups && (

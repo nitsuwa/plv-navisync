@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { entranceDirectionLabel } from "../../lib/buildingEntrances";
-import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
+import { useCanvasControls, isSpacePressed, useSpacePressedState } from "./useCanvasControls";
 import { useFloorHistory } from "./useFloorHistory";
 import {
   ROOM_MAP,
@@ -4331,7 +4331,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       worldBounds: renderFloorShapeBounds,
       imperativeCamera: true,
       onCameraFrame: updateZoomReadouts,
-    });
+  });
+  const spacePanActive = useSpacePressedState();
+  useEffect(() => {
+    if (!spacePanActive && !panning.current) temporaryPanRef.current = false;
+  }, [panning, spacePanActive]);
+  useEffect(() => {
+    const cancelTemporaryPan = () => {
+      if (!temporaryPanRef.current && !panning.current) return;
+      temporaryPanRef.current = false;
+      endPan();
+    };
+    window.addEventListener("pointercancel", cancelTemporaryPan);
+    return () => window.removeEventListener("pointercancel", cancelTemporaryPan);
+  }, [endPan, panning]);
   // Keep physical alignment activation perceptually consistent as the floor
   // zoom changes. Grid and Edge Snap remain independent preferences; this is
   // only the small screen-space tolerance used by object guides.
@@ -4431,6 +4444,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
   // ── Data refs for drag operations ──
   const dragging = useRef<{ entries: { type: FloorSelection["type"]; id: string; origin: any }[]; sx: number; sy: number; fromBackground?: boolean } | null>(null);
+  const spacePanVisualActive = spacePanActive && !dragging.current;
   const roomAssemblyDraggingRef = useRef(false);
   const roomAssemblyPendingCommitRef = useRef<{
     rooms: FloorRoom[];
@@ -4458,6 +4472,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // pointer frame (the final footprint/host is resolved by the move below).
   const furnitureDragRef = useRef(false);
   const furnitureDragCommittedRef = useRef(false);
+  const furnitureDragPendingRef = useRef<Map<string, FloorFurniture>>(new Map());
+  const furnitureDragDomNodesRef = useRef<Map<string, { node: SVGGElement; originalTransform: string | null; originalOpacity: string | null; invalidOverlay: SVGGElement | null }[]>>(new Map());
+  const furnitureDragDomCapturePendingRef = useRef(false);
+  const furnitureDragAlignRefsRef = useRef<{ x: number; y: number; w: number; h: number; id: string }[]>([]);
+  const furnitureDragSpacingRefsRef = useRef<FloorFurniture[]>([]);
+  const furnitureDragGuideSignatureRef = useRef("");
+  const furnitureDragMoveFrameRef = useRef<number | null>(null);
+  const latestFurnitureDragPointerRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean } | null>(null);
   // A generated Exterior Emergency Stair is owned by the Building, not by a
   // Floor occurrence.  This transient gesture stores only the canonical owner
   // and starting offset; each move writes the owner and re-syncs every served
@@ -6863,6 +6885,129 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // serve as useful spatial alignment targets for rooms/furniture/circulation.
     return refs;
   }, [FP_H, FP_W, doors, elevators, entranceRamps, entranceSteps, exteriorZones, furniture, ramps, rooms, stairs, walls, windows]);
+
+  const beginFurnitureDragPreview = (entries: { type: string; id: string; origin: unknown }[]) => {
+    const furnitureEntries = entries.filter((entry): entry is { type: "furniture"; id: string; origin: FloorFurniture } => entry.type === "furniture");
+    furnitureDragRef.current = furnitureEntries.length > 0 && furnitureEntries.length === entries.length;
+    furnitureDragCommittedRef.current = false;
+    furnitureDragPendingRef.current = new Map();
+    furnitureDragDomNodesRef.current = new Map();
+    furnitureDragDomCapturePendingRef.current = furnitureEntries.length > 0 && furnitureEntries.length === entries.length;
+    furnitureDragGuideSignatureRef.current = "";
+    if (!furnitureDragRef.current) {
+      furnitureDragAlignRefsRef.current = [];
+      furnitureDragSpacingRefsRef.current = [];
+      return;
+    }
+    setAlignGuides([]);
+    const ids = new Set(furnitureEntries.map((entry) => entry.id));
+    furnitureDragAlignRefsRef.current = collectAlignRefs(ids);
+    furnitureDragSpacingRefsRef.current = furniture.filter((item) => !ids.has(item.id));
+    captureFurnitureDragDomNodes(furnitureEntries.map((entry) => entry.id));
+  };
+
+  const captureFurnitureDragDomNodes = (ids: string[]) => {
+    const svg = svgRef.current;
+    if (!svg || ids.length === 0) return;
+    const wanted = new Map<string, string>();
+    for (const id of ids) {
+      wanted.set(`furniture:${id}`, id);
+      wanted.set(`furniture-controls:${id}`, id);
+    }
+    for (const node of Array.from(svg.querySelectorAll<SVGGElement>("[data-layer-key]"))) {
+      const key = node.getAttribute("data-layer-key");
+      const id = key ? wanted.get(key) : undefined;
+      if (!id) continue;
+      const entries = furnitureDragDomNodesRef.current.get(id) ?? [];
+      if (entries.some((entry) => entry.node === node)) continue;
+      entries.push({ node, originalTransform: node.getAttribute("transform"), originalOpacity: node.getAttribute("opacity"), invalidOverlay: null });
+      furnitureDragDomNodesRef.current.set(id, entries);
+    }
+  };
+
+  const applyFurnitureDragDomTransform = (
+    entries: { id: string; origin: FloorFurniture }[],
+    items: Map<string, FloorFurniture>,
+    invalid = false,
+  ) => {
+    if (furnitureDragDomCapturePendingRef.current) {
+      captureFurnitureDragDomNodes(entries.map((entry) => entry.id));
+      furnitureDragDomCapturePendingRef.current = false;
+    }
+    for (const entry of entries) {
+      const item = items.get(entry.id);
+      if (!item) continue;
+      const dx = item.x - entry.origin.x;
+      const dy = item.y - entry.origin.y;
+      for (const nodeEntry of furnitureDragDomNodesRef.current.get(entry.id) ?? []) {
+        const translated = Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001 ? "" : `translate(${dx} ${dy})`;
+        const transform = [translated, nodeEntry.originalTransform].filter(Boolean).join(" ");
+        if (transform) nodeEntry.node.setAttribute("transform", transform);
+        else nodeEntry.node.removeAttribute("transform");
+        if (invalid && nodeEntry.node.getAttribute("data-layer-key") === `furniture:${entry.id}`) {
+          const centerX = entry.origin.x + entry.origin.width / 2;
+          const centerY = entry.origin.y + entry.origin.height / 2;
+          if (!nodeEntry.invalidOverlay) {
+            const overlay = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            overlay.setAttribute("data-testid", "furniture-drag-preview");
+            overlay.setAttribute("pointer-events", "none");
+            const outline = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            outline.setAttribute("fill", "#dc2626");
+            outline.setAttribute("fill-opacity", "0.12");
+            outline.setAttribute("stroke", "#dc2626");
+            outline.setAttribute("stroke-width", "1.7");
+            outline.setAttribute("stroke-dasharray", "5 3");
+            overlay.appendChild(outline);
+            nodeEntry.node.appendChild(overlay);
+            nodeEntry.invalidOverlay = overlay;
+          }
+          nodeEntry.invalidOverlay.setAttribute("transform", `rotate(${entry.origin.rotation ?? 0}, ${centerX}, ${centerY})`);
+          const outline = nodeEntry.invalidOverlay.firstElementChild;
+          outline?.setAttribute("x", String(entry.origin.x - 2));
+          outline?.setAttribute("y", String(entry.origin.y - 2));
+          outline?.setAttribute("width", String(entry.origin.width + 4));
+          outline?.setAttribute("height", String(entry.origin.height + 4));
+          nodeEntry.node.setAttribute("opacity", "0.72");
+        } else {
+          nodeEntry.invalidOverlay?.remove();
+          nodeEntry.invalidOverlay = null;
+          if (nodeEntry.originalOpacity !== null) nodeEntry.node.setAttribute("opacity", nodeEntry.originalOpacity);
+          else nodeEntry.node.removeAttribute("opacity");
+        }
+      }
+    }
+  };
+
+  const restoreFurnitureDragDom = () => {
+    for (const entries of furnitureDragDomNodesRef.current.values()) {
+      for (const entry of entries) {
+        entry.invalidOverlay?.remove();
+        if (entry.originalTransform === null) entry.node.removeAttribute("transform");
+        else entry.node.setAttribute("transform", entry.originalTransform);
+        if (entry.originalOpacity === null) entry.node.removeAttribute("opacity");
+        else entry.node.setAttribute("opacity", entry.originalOpacity);
+      }
+    }
+    furnitureDragDomNodesRef.current.clear();
+    furnitureDragDomCapturePendingRef.current = false;
+    furnitureDragPendingRef.current.clear();
+    furnitureDragAlignRefsRef.current = [];
+    furnitureDragSpacingRefsRef.current = [];
+    furnitureDragGuideSignatureRef.current = "";
+  };
+
+  const setFurnitureDragGuides = (guides: typeof alignGuides) => {
+    const signature = guides.map((guide) => `${guide.type}:${Math.round(guide.pos * 2) / 2}`).join("|");
+    if (signature === furnitureDragGuideSignatureRef.current) return;
+    furnitureDragGuideSignatureRef.current = signature;
+    setAlignGuides(guides);
+  };
+  useEffect(() => () => {
+    if (furnitureDragMoveFrameRef.current !== null) cancelAnimationFrame(furnitureDragMoveFrameRef.current);
+    furnitureDragMoveFrameRef.current = null;
+    latestFurnitureDragPointerRef.current = null;
+    restoreFurnitureDragDom();
+  }, []);
 
   const resolveRoomTemplatePlacement = useCallback((template: RoomTemplateDefinition, pointer: { x: number; y: number }) => {
     const templateBounds = roomTemplateBounds(template, { x: 0, y: 0 });
@@ -12510,8 +12655,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             suppressHistoryRef.current = true;
             gestureMoved.current = false;
             roomOverlapWarnedRef.current = false;
-            furnitureDragRef.current = entries.length > 0 && entries.every((entry) => entry.type === "furniture");
-            furnitureDragCommittedRef.current = false;
+            beginFurnitureDragPreview(entries);
             setFurnitureDragPreview(null);
             dragging.current = { entries, sx: pt.x, sy: pt.y, fromBackground: true };
             setSelected(null);
@@ -14796,7 +14940,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       dy = rawDy;
       if (!allDestinationsValid) furnitureDragValid = false;
     }
-    if (!furnitureDragValid) setAlignGuides([]);
+    if (!furnitureDragValid) setFurnitureDragGuides([]);
     // ── Nav-linked physical-object alignment (B5 Phase 2.12) ────────────────
     // A Door / Stair / Elevator / Ramp owns a DERIVED Navigation anchor that
     // its attached Walking Paths terminate at.  While that physical object is
@@ -14877,32 +15021,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // a smooth visual drag across the wall without committing a footprint
     // that straddles neither the indoor floor nor a valid exterior zone.
     if (furnitureDragRef.current && !furnitureDragValid) {
-      setFurnitureDragPreview(Object.fromEntries(
-        moved
-          .filter((entry) => entry.type === "furniture")
-          .map((entry) => [entry.id, entry.item as FloorFurniture]),
-      ));
-      setAlignGuides([]);
+      const invalidItems = new Map(moved
+        .filter((entry) => entry.type === "furniture")
+        .map((entry) => [entry.id, entry.item as FloorFurniture]));
+      applyFurnitureDragDomTransform(
+        drag.entries.filter((entry) => entry.type === "furniture").map((entry) => ({ id: entry.id, origin: entry.origin as FloorFurniture })),
+        invalidItems,
+        true,
+      );
+      setFurnitureDragGuides([]);
       return;
     }
-    if (furnitureDragRef.current) {
-      setFurnitureDragPreview(null);
-      if (dx !== 0 || dy !== 0) furnitureDragCommittedRef.current = true;
-    }
-    const byId = new Map(moved.map((entry) => [entry.id, entry.item]));
-    const movedRoomIds = new Set(moved.filter((entry) => entry.type === "room").map((entry) => entry.id));
-    const movedWallIds = new Set(moved.filter((entry) => entry.type === "wall").map((entry) => entry.id));
-    let nextRooms = rooms.map((r) => byId.get(r.id) ?? r);
-    let nextPaths = fpaths.map((path) => byId.get(path.id) ?? path);
-    let nextFurniture = furniture.map((f) => byId.get(f.id) ?? f);
-    let nextStairs = stairs.map((s) => byId.get(s.id) ?? s);
-    let nextRamps = ramps.map((r) => byId.get(r.id) ?? r);
-    let nextElevators = elevators.map((el) => byId.get(el.id) ?? el);
-    let nextLabels = labels.map((lb) => byId.get(lb.id) ?? lb);
     // ── Universal alignment: snap ALL supported moved objects ──
     let allMoveGuides: { type: "h" | "v"; pos: number; x1: number; y1: number; x2: number; y2: number }[] = [];
     const movedIds = new Set(moved.map((e) => e.id));
-    const refs = collectAlignRefs(movedIds);
+    const refs = furnitureDragRef.current ? furnitureDragAlignRefsRef.current : collectAlignRefs(movedIds);
     // Resolve alignment once per axis from the first eligible RAW object in
     // this gesture.  The lock keeps a nearly-equal edge/centre target stable;
     // applying one delta to the selected set also prevents multi-selection
@@ -15020,7 +15153,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (edgeSnapOn && furnitureDragRef.current && drag.entries.length === 1 && drag.entries[0].type === "furniture") {
         const moving = moved.find((entry) => entry.id === drag.entries[0].id)?.item as FloorFurniture | undefined;
         if (moving) {
-          const refsForSpacing = furniture.filter((item) => item.id !== moving.id && !movedIds.has(item.id));
+          const refsForSpacing = furnitureDragRef.current
+            ? furnitureDragSpacingRefsRef.current
+            : furniture.filter((item) => item.id !== moving.id && !movedIds.has(item.id));
           if (!axisXGuide) {
             const candidate = findEqualSpacingCandidate(moving, refsForSpacing, "horizontal", SNAP_THRESHOLD);
             if (candidate && edgeSnapOn) {
@@ -15040,6 +15175,68 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (axisXGuide) allMoveGuides.push(axisXGuide);
       if (axisYGuide) allMoveGuides.push(axisYGuide);
     }
+    if (edgeSnapOn && (axisDxSnap !== 0 || axisDySnap !== 0)) {
+      const constrainedSnap = constrainFloorItemsDelta(
+        moved.map((entry) => ({ type: entry.type, item: entry.item })),
+        axisDxSnap,
+        axisDySnap,
+        renderFloorShapeRegions,
+      );
+      if (Math.abs(constrainedSnap.dx - axisDxSnap) > 0.001 || Math.abs(constrainedSnap.dy - axisDySnap) > 0.001) {
+        axisDxSnap = 0;
+        axisDySnap = 0;
+        axisXGuide = undefined;
+        axisYGuide = undefined;
+        allMoveGuides = [];
+      }
+    }
+    if (furnitureDragRef.current) {
+      const snapDx = edgeSnapOn ? axisDxSnap : 0;
+      const snapDy = edgeSnapOn ? axisDySnap : 0;
+      const finalItems = new Map<string, FloorFurniture>();
+      let anyMoved = false;
+      for (const entry of moved) {
+        if (entry.type !== "furniture") continue;
+        const origin = entry.origin as FloorFurniture;
+        const rawCandidate = entry.item as FloorFurniture;
+        let candidate = rawCandidate;
+        if (snapDx !== 0 || snapDy !== 0) {
+          const snapped = { ...rawCandidate, x: rawCandidate.x + snapDx, y: rawCandidate.y + snapDy };
+          const hostZone = rawCandidate.exteriorZoneId
+            ? exteriorZones.find((zone) => zone.id === rawCandidate.exteriorZoneId)
+            : exteriorZones.find((zone) => furnitureFitsExteriorZone(rawCandidate, zone, FP_W, FP_H));
+          candidate = hostZone && !furnitureFitsExteriorZone(snapped, hostZone, FP_W, FP_H)
+            ? rawCandidate
+            : snapped;
+        }
+        finalItems.set(entry.id, candidate);
+        if (candidate.x !== origin.x || candidate.y !== origin.y) anyMoved = true;
+      }
+      furnitureDragPendingRef.current = finalItems;
+      if (anyMoved) {
+        furnitureDragCommittedRef.current = true;
+        gestureMoved.current = true;
+      }
+      applyFurnitureDragDomTransform(
+        drag.entries.filter((entry) => entry.type === "furniture").map((entry) => ({ id: entry.id, origin: entry.origin as FloorFurniture })),
+        finalItems,
+      );
+      setFurnitureDragPreview(null);
+      setFurnitureDragGuides(allMoveGuides);
+      setFurniturePlacementPreview(null);
+      return;
+    }
+
+    const byId = new Map(moved.map((entry) => [entry.id, entry.item]));
+    const movedRoomIds = new Set(moved.filter((entry) => entry.type === "room").map((entry) => entry.id));
+    const movedWallIds = new Set(moved.filter((entry) => entry.type === "wall").map((entry) => entry.id));
+    let nextRooms = rooms.map((r) => byId.get(r.id) ?? r);
+    let nextPaths = fpaths.map((path) => byId.get(path.id) ?? path);
+    let nextFurniture = furniture.map((f) => byId.get(f.id) ?? f);
+    let nextStairs = stairs.map((s) => byId.get(s.id) ?? s);
+    let nextRamps = ramps.map((r) => byId.get(r.id) ?? r);
+    let nextElevators = elevators.map((el) => byId.get(el.id) ?? el);
+    let nextLabels = labels.map((lb) => byId.get(lb.id) ?? lb);
     if (movedRoomIds.size > 0 && (axisDxSnap !== 0 || axisDySnap !== 0)) {
       const stationaryRooms = rooms.filter((room) => !movedRoomIds.has(room.id));
       const rawRoomCandidates = nextRooms.filter((room) => movedRoomIds.has(room.id));
@@ -15055,21 +15252,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         axisYGuide = undefined;
         allMoveGuides = [];
         alignmentSnapLocksRef.current = { x: null, y: null };
-      }
-    }
-    if (edgeSnapOn && (axisDxSnap !== 0 || axisDySnap !== 0)) {
-      const constrainedSnap = constrainFloorItemsDelta(
-        moved.map((entry) => ({ type: entry.type, item: entry.item })),
-        axisDxSnap,
-        axisDySnap,
-        renderFloorShapeRegions,
-      );
-      if (Math.abs(constrainedSnap.dx - axisDxSnap) > 0.001 || Math.abs(constrainedSnap.dy - axisDySnap) > 0.001) {
-        axisDxSnap = 0;
-        axisDySnap = 0;
-        axisXGuide = undefined;
-        axisYGuide = undefined;
-        allMoveGuides = [];
       }
     }
     // Labels ARE snapped (their anchor box participates like any other rect)
@@ -15192,6 +15374,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const processSvgMoveRef = useRef(processSvgMove);
   processSvgMoveRef.current = processSvgMove;
   const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (furnitureDragRef.current && dragging.current && !panning.current
+      && !furnitureResizing.current && !circulationResizing.current && !rotating.current) {
+      latestFurnitureDragPointerRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
+      if (furnitureDragMoveFrameRef.current === null) {
+        furnitureDragMoveFrameRef.current = requestAnimationFrame(() => {
+          furnitureDragMoveFrameRef.current = null;
+          const latest = latestFurnitureDragPointerRef.current;
+          latestFurnitureDragPointerRef.current = null;
+          if (latest && furnitureDragRef.current && dragging.current) processSvgMoveRef.current(latest as MouseEvent);
+        });
+      }
+      return;
+    }
     // Hover previews are display-only. Process them at most once per browser
     // frame, always using the newest pointer sample. Authoring clicks and all
     // active object drags still consume their own immediate pointer events.
@@ -15221,9 +15416,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setAlignGuides([]);
       return;
     }
+    if (furnitureDragRef.current && dragging.current
+      && !furnitureResizing.current && !circulationResizing.current && !rotating.current) {
+      if (furnitureDragMoveFrameRef.current !== null) {
+        cancelAnimationFrame(furnitureDragMoveFrameRef.current);
+        furnitureDragMoveFrameRef.current = null;
+      }
+      const latest = latestFurnitureDragPointerRef.current;
+      latestFurnitureDragPointerRef.current = null;
+      if (latest) processSvgMoveRef.current(latest as MouseEvent);
+    }
     const wasPanning = temporaryPanRef.current || panning.current !== null;
     const furnitureGestureActive = furnitureDragRef.current;
     const furnitureGestureCommitted = furnitureDragCommittedRef.current;
+    const pendingFurnitureItems = new Map(furnitureDragPendingRef.current);
     const roomAssemblyGestureActive = roomAssemblyDraggingRef.current;
     const pendingRoomAssemblyCommit = roomAssemblyPendingCommitRef.current;
     // A locked-object click is deliberately a no-op transform candidate.  If
@@ -15236,6 +15442,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     temporaryPanRef.current = false;
     furnitureDragRef.current = false;
     furnitureDragCommittedRef.current = false;
+    restoreFurnitureDragDom();
     roomAssemblyDraggingRef.current = false;
     roomAssemblyPendingCommitRef.current = null;
     setFurnitureDragPreview(null);
@@ -15448,6 +15655,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       );
     }
 
+    // Furniture positions are only transient SVG transforms while the pointer
+    // is down. Commit the final snapped group once on release so campus/floor
+    // synchronization and dirty-state work never runs per pointer frame.
+    const committedFurniture = furnitureGestureActive && furnitureGestureCommitted && pendingFurnitureItems.size > 0
+      ? furniture.map((item) => pendingFurnitureItems.get(item.id) ?? item)
+      : null;
+    if (committedFurniture) {
+      updFloor(rooms, fpaths, walls, doors, windows, committedFurniture, stairs, elevators, labels, ramps);
+    }
+
     // Commit exactly ONE history entry per completed gesture: the POST-gesture
     // state (per-frame pushes were suppressed during the drag). Undo therefore
     // restores the pre-gesture snapshot and redo re-applies the gesture.
@@ -15462,7 +15679,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             windows: pendingRoomAssemblyCommit.windows,
             furniture: pendingRoomAssemblyCommit.furniture,
           }
-        : floorSnapshot();
+        : committedFurniture
+          ? { ...floorSnapshot(), furniture: committedFurniture }
+          : floorSnapshot();
       pushHistory({ ...postGestureSnapshot, ...(roomAssemblyGestureActive ? { visualOnly: true } : {}) }); /* post-gesture commit */
     }
     suppressHistoryRef.current = false;
@@ -15966,8 +16185,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     roomOverlapWarnedRef.current = false;
     if (type === "room") setRoomInteractionPreview(null);
     alignmentSnapLocksRef.current = { x: null, y: null };
-    furnitureDragRef.current = entries.length > 0 && entries.every((entry) => entry.type === "furniture");
-    furnitureDragCommittedRef.current = false;
+    beginFurnitureDragPreview(entries);
     setFurnitureDragPreview(null);
     dragging.current = { entries, sx: pt.x, sy: pt.y };
   };
@@ -16669,12 +16887,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
   // ── Cursor ──
   const cursor = navMode
-    ? (isSpacePressed() || navTool === "pan")
+    ? ((isSpacePressed() && !dragging.current) || navTool === "pan")
       ? (panning.current ? "grabbing" : "grab")
       : navTool === "erase" ? "not-allowed"
       : navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link" ? "crosshair"
       : "default"
-    : isSpacePressed()
+    : (isSpacePressed() && !dragging.current)
     ? panning.current ? "grabbing" : "grab"
     : tool === "erase" ? "not-allowed"
     : tool === "pan" ? "grab"
@@ -17380,13 +17598,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               <div className="flex items-center gap-0.5 shrink-0">
                 {toolbarTools.map((t) => {
                     const Icon = t.icon;
-                    const isActive = tool === t.id;
+                    const isActive = tool === t.id || (t.id === "pan" && spacePanVisualActive);
                     return (
                       <ToolbarTooltip key={t.id} tool={t.id} isActive={isActive}
                       hint={t.id === "select" ? "Select, move, resize, and edit floor items." : t.id === "pan" ? "Move around the floor canvas without changing objects." : t.id === "path" ? "Draw a floor path through the interior plan." : undefined}>
                         <button type="button" onClick={() => switchTool(t.id)}
                           aria-label={`${t.label}${t.key ? ` (${t.key})` : ""}`}
+                          aria-pressed={isActive}
                           data-tutorial={t.id === "select" ? "floor-select-tool" : t.id === "pan" ? "floor-pan-tool" : undefined}
+                          data-temporary-pan-active={t.id === "pan" && spacePanVisualActive ? "true" : undefined}
                           className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all sm:h-[30px] sm:w-[30px]",
                             isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                           <Icon className="h-[15px] w-[15px]" />
@@ -17969,6 +18189,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           {testRoutePickKind && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 rounded-full border border-violet-300 bg-card/95 px-3 py-1.5 text-[10px] font-bold text-violet-700 shadow-lg pointer-events-none">
               {testRoutePickKind === "start" ? "Select a starting location · Esc to cancel" : "Select a destination · Esc to cancel"}
+            </div>
+          )}
+          {spacePanVisualActive && (
+            <div data-testid="floor-space-pan-indicator" role="status" className="absolute top-3 right-3 z-40 flex items-center gap-1.5 rounded-full border border-primary/25 bg-card/95 px-2.5 py-1.5 text-[10px] font-bold text-primary shadow-md pointer-events-none">
+              <Hand className="h-3.5 w-3.5" />
+              <span>Pan mode</span>
+              <span className="font-medium text-muted-foreground">· release Space to return</span>
             </div>
           )}
           <div className="contents"
