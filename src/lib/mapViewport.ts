@@ -18,6 +18,25 @@ export function getCameraSmoothingFactor(deltaMs: number, timeConstantMs = 56): 
 }
 
 /**
+ * Interpolate camera zoom in logarithmic space. Equal log-space movement is
+ * an equal perceived ratio at every zoom level, unlike damping raw scale.
+ */
+export function dampCameraZoomLogarithm(
+  currentZoom: number,
+  targetZoom: number,
+  deltaMs: number,
+  timeConstantMs = 34,
+): number {
+  if (!Number.isFinite(currentZoom) || currentZoom <= 0) return Math.max(Number.EPSILON, targetZoom);
+  if (!Number.isFinite(targetZoom) || targetZoom <= 0) return currentZoom;
+  const factor = getCameraSmoothingFactor(deltaMs, timeConstantMs);
+  if (factor === 0) return currentZoom;
+  const currentLogZoom = Math.log(currentZoom);
+  const targetLogZoom = Math.log(targetZoom);
+  return Math.exp(currentLogZoom + (targetLogZoom - currentLogZoom) * factor);
+}
+
+/**
  * Convert wheel deltas to a bounded logarithmic zoom input. Preserve fine
  * trackpad movement while normalizing line/page-mode wheels and capping spikes.
  */

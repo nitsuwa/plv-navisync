@@ -1159,8 +1159,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     toast.info("Select a Walking Point or Pathway", "Click an existing Walking Point or a physical Pathway segment to connect this Entrance.");
   }, [toast]);
 
-  const { zoom, pan, panning, svgRef, containerRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToFit, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
-    useCanvasControls(cw, ch);
+  const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToFit, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
+    useCanvasControls(cw, ch, { imperativeCamera: true });
 
   const SNAP_DIST = 12;
   // Physical-object alignment uses a small screen-space tolerance so guides
@@ -6440,9 +6440,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // hierarchy interaction or a visibility toggle is not a graph edit.
     const next = { ...campus, buildings: nextBuildings };
     campusRef.current = next;
-    const reconciled = reconcileExteriorApproachNavigation(next);
-    onUpdate(reconciled);
-    pushHistory(reconciled);
+    const textOnlyChange = Object.keys(changes).length > 0
+      && Object.keys(changes).every((key) => key === "name" || key === "code" || key === "description");
+    const committed = textOnlyChange ? next : reconcileExteriorApproachNavigation(next);
+    onUpdate(committed);
+    pushHistory(committed);
   };
 
   const onAddExteriorEmergencyStair = (buildingId: string) => {
@@ -10139,6 +10141,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           snapGrid={snapGrid}
           zoom={zoom}
           pan={pan}
+          cameraTransformRef={cameraTransformRef}
           svgRef={svgRef}
           containerRef={containerRef}
           cursor={cursor}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getStudentFloorInspectionSlack, getStudentOverviewCamera, getStudentRoomFocusCamera, getStudentRoomFocusProgress } from "../studentMapCamera";
+import { getStudentFloorInspectionSlack, getStudentOutdoorInspectionSlack, getStudentOverviewCamera, getStudentRoomFocusCamera, getStudentRoomFocusProgress } from "../studentMapCamera";
+import { getViewportFitZoom, getViewportPanBounds } from "../mapViewport";
 
 describe("student overview camera", () => {
   it("fits mapped campus content into the safe mobile viewport instead of the whole empty canvas", () => {
@@ -38,6 +39,28 @@ describe("student overview camera", () => {
   it("gives indoor panning a finite, proportional inspection range", () => {
     expect(getStudentFloorInspectionSlack(390, 760, true)).toEqual({ x: 156, y: 304 });
     expect(getStudentFloorInspectionSlack(1_280, 800, false)).toEqual({ x: 320, y: 200 });
+  });
+
+  it("gives outdoor panning a wider proportional inspection range", () => {
+    const mobileSlack = getStudentOutdoorInspectionSlack(390, 760, true);
+    expect(mobileSlack.x).toBeCloseTo(163.8);
+    expect(mobileSlack.y).toBeCloseTo(319.2);
+    expect(getStudentOutdoorInspectionSlack(1_280, 800, false)).toEqual({ x: 384, y: 240 });
+
+    const fitScale = getViewportFitZoom({ mapWidth: 1_800, mapHeight: 1_200, viewportWidth: 390, viewportHeight: 760 });
+    const bounds = getViewportPanBounds({
+      mapWidth: 1_800,
+      mapHeight: 1_200,
+      viewportWidth: 390,
+      viewportHeight: 760,
+      zoom: 1,
+      zoomOrigin: "center",
+      inspectionSlack: mobileSlack,
+    });
+    expect(bounds.minX).toBeLessThan(-mobileSlack.x / fitScale * 0.99);
+    expect(bounds.maxX).toBeGreaterThan(mobileSlack.x / fitScale * 0.99);
+    expect(bounds.minY).toBeLessThan(0);
+    expect(bounds.maxY).toBeGreaterThan(0);
   });
 
   it("keeps the camera still when a selected room is already comfortably visible", () => {

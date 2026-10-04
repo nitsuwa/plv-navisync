@@ -32,7 +32,7 @@ describe("MobileMapAccountMenu", () => {
 
     const menuButton = screen.getByRole("button", { name: /user menu/i });
     expect(menuButton).toHaveClass("h-12", "w-12", "min-w-12", "shrink-0");
-    expect(within(menuButton).getByText("DE")).toHaveClass("h-8", "w-8");
+    expect(within(menuButton).getByText("DE").parentElement).toHaveClass("h-8", "w-8");
   });
 
   it("portals the anchored menu to the transient foreground and restores focus on Escape", () => {

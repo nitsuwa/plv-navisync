@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Copy, RotateCcw } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { formatWeeklyOperatingHours, updateOperatingDay, weeklyHoursPreset } from "../../lib/buildingInformation";
@@ -26,8 +26,11 @@ export function BuildingWeeklyHoursEditor({ value, legacyValue, disabled = false
     return [value.tuesday, value.wednesday, value.thursday, value.friday].every((day) => sameHours(value.monday, day));
   });
   const [editing, setEditing] = useState(Boolean(value));
+  const [timeDrafts, setTimeDrafts] = useState<Record<string, string>>({});
   const hours = value ?? EMPTY_HOURS;
   const summary = useMemo(() => formatWeeklyOperatingHours(value), [value]);
+
+  useEffect(() => setTimeDrafts({}), [value]);
 
   const commit = (next: WeeklyOperatingHours) => onChange(next, formatWeeklyOperatingHours(next));
   const updateDay = (key: OperatingDayKey, changes: Partial<WeeklyOperatingHours[OperatingDayKey]>) => {
@@ -56,6 +59,21 @@ export function BuildingWeeklyHoursEditor({ value, legacyValue, disabled = false
     commit({ ...hours, tuesday: { ...monday }, wednesday: { ...monday }, thursday: { ...monday }, friday: { ...monday } });
   };
 
+  const setTimeDraft = (key: OperatingDayKey, field: "open" | "close", nextValue: string) => {
+    setTimeDrafts((current) => ({ ...current, [`${key}-${field}`]: nextValue }));
+  };
+
+  const commitTimeDraft = (key: OperatingDayKey, field: "open" | "close", rawValue: string) => {
+    setTimeDrafts((current) => {
+      const next = { ...current };
+      delete next[`${key}-${field}`];
+      return next;
+    });
+    if (/^\d{2}:\d{2}$/.test(rawValue) && rawValue !== hours[key][field]) {
+      updateDay(key, { [field]: rawValue });
+    }
+  };
+
   return (
     <section className="space-y-2" aria-label="Operating hours">
       <div className="flex items-center justify-between gap-2">
@@ -81,11 +99,11 @@ export function BuildingWeeklyHoursEditor({ value, legacyValue, disabled = false
 
       {value && (
         <>
-          <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-2 py-1.5">
-            <p className="min-w-0 truncate text-[10px] font-semibold text-foreground">{summary || "Add hours for each open day"}</p>
+          <div className="flex items-start justify-between gap-2 rounded-lg bg-muted/30 px-2 py-1.5">
+            <p className="min-w-0 whitespace-normal break-words text-[10px] font-semibold leading-snug text-foreground">{summary || "Add hours for each open day"}</p>
             <CalendarClock className="h-3.5 w-3.5 shrink-0 text-primary" />
           </div>
-          <label className="flex items-center gap-2 px-1 text-[9px] text-muted-foreground">
+          <label className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
             <input type="checkbox" checked={sameWeekdays} disabled={disabled} onChange={(event) => toggleSameWeekdays(event.target.checked)} className="accent-primary" />
             <Copy className="h-3 w-3" /> Use same hours Monday–Friday
           </label>
@@ -94,14 +112,14 @@ export function BuildingWeeklyHoursEditor({ value, legacyValue, disabled = false
               const day = hours[key];
               const mirrored = sameWeekdays && key !== "monday" && ["tuesday", "wednesday", "thursday", "friday"].includes(key);
               return (
-                <div key={key} className="grid grid-cols-[70px_48px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5 rounded-lg px-1 py-1">
-                  <span className="text-[9px] font-semibold text-foreground">{label}</span>
-                  <button type="button" disabled={disabled || mirrored} aria-pressed={!day.closed} onClick={() => updateDay(key, day.closed ? { closed: false, open: "08:00", close: "17:00" } : { closed: true })} className={cn("h-6 rounded-md border px-1 text-[8px] font-bold disabled:opacity-50", day.closed ? "border-border text-muted-foreground" : "border-emerald-300/70 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300")}>{day.closed ? "Closed" : "Open"}</button>
-                  {day.closed ? <span className="col-span-2 text-center text-[9px] text-muted-foreground">Closed</span> : <>
+                <div key={key} className="grid grid-cols-[60px_50px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 rounded-lg px-1 py-1">
+                  <span className="text-[10px] font-semibold text-foreground">{label}</span>
+                  <button type="button" disabled={disabled || mirrored} aria-pressed={!day.closed} onClick={() => updateDay(key, day.closed ? { closed: false, open: "08:00", close: "17:00" } : { closed: true })} className={cn("h-7 rounded-md border px-1 text-[9px] font-bold disabled:opacity-50", day.closed ? "border-border text-muted-foreground" : "border-emerald-300/70 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300")}>{day.closed ? "Closed" : "Open"}</button>
+                  {day.closed ? <span className="col-span-2 text-center text-[10px] text-muted-foreground">Closed</span> : <>
                     <label className="sr-only" htmlFor={`hours-${key}-open`}>{label} opening time</label>
-                    <input id={`hours-${key}-open`} type="time" value={day.open ?? "08:00"} disabled={disabled || mirrored} onChange={(event) => updateDay(key, { open: event.target.value })} className="h-7 min-w-0 rounded-md border border-border bg-card px-1 text-[9px] text-foreground disabled:opacity-50" />
+                    <input id={`hours-${key}-open`} type="time" value={timeDrafts[`${key}-open`] ?? day.open ?? "08:00"} disabled={disabled || mirrored} onChange={(event) => setTimeDraft(key, "open", event.target.value)} onBlur={(event) => commitTimeDraft(key, "open", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} className="h-8 min-w-0 rounded-md border border-border bg-card px-1 text-[11px] text-foreground disabled:opacity-50" />
                     <label className="sr-only" htmlFor={`hours-${key}-close`}>{label} closing time</label>
-                    <input id={`hours-${key}-close`} type="time" value={day.close ?? "17:00"} disabled={disabled || mirrored} onChange={(event) => updateDay(key, { close: event.target.value })} className="h-7 min-w-0 rounded-md border border-border bg-card px-1 text-[9px] text-foreground disabled:opacity-50" />
+                    <input id={`hours-${key}-close`} type="time" value={timeDrafts[`${key}-close`] ?? day.close ?? "17:00"} disabled={disabled || mirrored} onChange={(event) => setTimeDraft(key, "close", event.target.value)} onBlur={(event) => commitTimeDraft(key, "close", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} className="h-8 min-w-0 rounded-md border border-border bg-card px-1 text-[11px] text-foreground disabled:opacity-50" />
                   </>}
                 </div>
               );

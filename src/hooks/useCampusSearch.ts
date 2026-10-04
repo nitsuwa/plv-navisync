@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import type { Campus, CampusBuilding, CampusEventOverlay, FloorPlan } from "../components/map-builder/types";
 import { useDebounce } from "./useDebounce";
+import { authoredNavigableRoomKeys, authoredRoomNavigationKey } from "../lib/roomNavigationMembership";
 import { ROOM_DOOR_EDGE_TYPE } from "../lib/indoorNavigationGraph";
 
 export interface SearchResult {
@@ -33,9 +34,9 @@ export interface UseCampusSearchResult {
   clearSearch: () => void;
 }
 
-/** The public search index should advertise only destinations with a usable
- * published connection. A room center or its semantic Room→Door edge alone
- * is not a walkable route; the physical Door needs a path edge as well. */
+/** Buildings retain their published connectivity check. Room searchability is
+ * based on Floor Editor's explicit Add to Navigation ownership link, not on
+ * whether every graph edge has been completed. */
 export function connectedCampusDestinations(campus: Campus): {
   buildingIds: Set<string>;
   roomKeys: Set<string>;
@@ -46,7 +47,7 @@ export function connectedCampusDestinations(campus: Campus): {
     .filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE)
     .flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
   const buildingIds = new Set<string>();
-  const roomKeys = new Set<string>();
+  const roomKeys = authoredNavigableRoomKeys(campus);
 
   for (const building of campus.buildings ?? []) {
     const entranceIds = new Set((building.entrances ?? []).map((entrance) => entrance.id));
@@ -58,22 +59,6 @@ export function connectedCampusDestinations(campus: Campus): {
         || (entranceIds.size === 0 && (node.type === "entrance" || node.type === "emergency_exit"))));
     if (hasEntrance) buildingIds.add(building.id);
 
-    for (const floor of building.floors ?? []) {
-      for (const room of floor.rooms ?? []) {
-        const doorIds = new Set([room.accessDoorId, ...(room.accessDoorIds ?? [])].filter((id): id is string => !!id));
-        const roomNodeIds = new Set(nodes.filter((node) => node.buildingId === building.id
-          && node.floorId === floor.id && node.roomId === room.id).map((node) => node.id));
-        const semanticDoorNodeIds = new Set(edges.filter((edge) => edge.type === ROOM_DOOR_EDGE_TYPE)
-          .flatMap((edge) => roomNodeIds.has(edge.startNodeId) ? [edge.endNodeId]
-            : roomNodeIds.has(edge.endNodeId) ? [edge.startNodeId] : []));
-        const connectedDoor = nodes.some((node) => node.buildingId === building.id
-          && node.floorId === floor.id
-          && !!node.doorId
-          && walkableNodeIds.has(node.id)
-          && (node.id === room.accessNodeId || doorIds.has(node.doorId) || semanticDoorNodeIds.has(node.id)));
-        if (connectedDoor) roomKeys.add(`${building.id}:${floor.id}:${room.id}`);
-      }
-    }
   }
   return { buildingIds, roomKeys };
 }
@@ -92,12 +77,13 @@ export function searchFloorRooms(
   floor: FloorPlan | undefined,
   building: Pick<CampusBuilding, "id" | "name" | "code"> | undefined,
   query: string,
+  navigableRoomIds: ReadonlySet<string> = new Set(),
 ): SearchResult[] {
   const normalizedQuery = query.trim().toLowerCase();
   if (!floor || !building || !normalizedQuery) return [];
 
   return (floor.rooms ?? [])
-    .filter((room) => room.visible !== false)
+    .filter((room) => room.visible !== false && navigableRoomIds.has(room.id))
     .map((room) => {
       const roomRecord = room as typeof room & { code?: string };
       const name = room.name || roomRecord.code || "Room";
@@ -156,6 +142,7 @@ export function useCampusSearch(
     const entries: SearchResult[] = [];
     const hasPublishedGraph = Boolean((campus.navNodes?.length ?? 0) || (campus.navEdges?.length ?? 0));
     const connected = hasPublishedGraph ? connectedCampusDestinations(campus) : null;
+    const navigableRoomKeys = authoredNavigableRoomKeys(campus);
 
     // 1. Index Buildings
     (campus.buildings ?? []).forEach((b: CampusBuilding) => {
@@ -181,11 +168,11 @@ export function useCampusSearch(
         keywords,
       });
 
-      // 2. Index Rooms/Elements inside building floors
-      (b.floors ?? []).forEach((floor: FloorPlan) => {
-        (floor.rooms ?? []).forEach((room) => {
-          if (room.visible === false) return;
-          if (connected && !connected.roomKeys.has(`${b.id}:${floor.id}:${room.id}`)) return;
+        // 2. Index Rooms/Elements inside building floors
+        (b.floors ?? []).forEach((floor: FloorPlan) => {
+          (floor.rooms ?? []).forEach((room) => {
+            if (room.visible === false) return;
+          if (!navigableRoomKeys.has(authoredRoomNavigationKey(b.id, floor.id, room.id))) return;
 
           const roomCode = (room as typeof room & { code?: string }).code;
           const rName = room.name || roomCode || "Room";

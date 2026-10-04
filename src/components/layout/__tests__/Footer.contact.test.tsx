@@ -22,7 +22,8 @@ describe("Footer contact information", () => {
     );
     expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Campus Map" })).toHaveAttribute("href", "/map");
-    expect(screen.getByRole("link", { name: "Help / FAQ" })).toHaveAttribute("href", "/help#faq");
+    expect(screen.queryByRole("link", { name: /FAQ/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Help Center/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign In" })).toHaveAttribute("href", "/admin");
     expect(screen.getByText("Navigate buildings, rooms, facilities, and walking routes across PLV.")).toBeInTheDocument();
     expect(screen.getByText(/NaviSync v1\.0\.3/)).toBeInTheDocument();

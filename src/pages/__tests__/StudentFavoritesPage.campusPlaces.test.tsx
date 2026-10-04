@@ -35,7 +35,7 @@ describe("StudentFavoritesPage campus places", () => {
 
     const navigateLink = await screen.findByRole("link", { name: /Navigate/i });
     expect(screen.getByText("Campus Gate")).toBeInTheDocument();
-    expect(navigateLink).toHaveAttribute("href", "/map?campusId=campus-1&placeId=gate-main");
+    expect(navigateLink).toHaveAttribute("href", "/map?campusId=campus-1&destinationPlaceId=gate-main");
     expect(screen.getByRole("button", { name: "Remove Campus Gate from favorites" })).toBeInTheDocument();
   });
 });

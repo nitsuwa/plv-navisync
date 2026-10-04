@@ -7,6 +7,7 @@ type Profile = Tables<"profiles">;
 
 const AVATAR_BUCKET = "avatars";
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+const avatarUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
 function activeClient(client?: StudentClient): StudentClient {
   return client ?? getSupabase();
@@ -56,7 +57,7 @@ export async function uploadStudentAvatar(
 ): Promise<{ path: string; url: string }> {
   const supabaseClient = activeClient(client);
   const user = await currentUser(supabaseClient);
-  if (!file.type.startsWith("image/")) throw new Error("student_avatar_type");
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("student_avatar_type");
   if (file.size > MAX_AVATAR_BYTES) throw new Error("student_avatar_size");
 
   const id = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -71,15 +72,20 @@ export async function uploadStudentAvatar(
     .from(AVATAR_BUCKET)
     .createSignedUrl(path, 60 * 60);
   if (signedUrlError || !data?.signedUrl) throw signedUrlError ?? new Error("student_avatar_url");
+  avatarUrlCache.set(path, { url: data.signedUrl, expiresAt: Date.now() + 50 * 60 * 1000 });
   return { path, url: data.signedUrl };
 }
 
 export async function getStudentAvatarUrl(path: string | null | undefined, client?: StudentClient): Promise<string | null> {
   if (!path) return null;
+  const cached = avatarUrlCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
   try {
     const { data, error } = await activeClient(client).storage.from(AVATAR_BUCKET).createSignedUrl(path, 60 * 60);
     if (error) return null;
-    return data?.signedUrl ?? null;
+    const url = data?.signedUrl ?? null;
+    if (url) avatarUrlCache.set(path, { url, expiresAt: Date.now() + 50 * 60 * 1000 });
+    return url;
   } catch {
     return null;
   }

@@ -491,6 +491,7 @@ export function OutdoorEntranceVisual({
   entrance,
   onClick,
   showEntryLabelByDefault = true,
+  showEntryPill = true,
 }: {
   building: CampusBuilding;
   entrance: ReadonlyOutdoorEntrance;
@@ -498,6 +499,8 @@ export function OutdoorEntranceVisual({
   onClick?: (buildingId: string) => void;
   /** Keep default labels sparse; secondary doors reveal their label on focus or hover. */
   showEntryLabelByDefault?: boolean;
+  /** Hide the permanent world-space action pill while preserving the entrance glyph and hit target. */
+  showEntryPill?: boolean;
 }) {
   const [emphasized, setEmphasized] = useState(false);
   const position = outdoorEntrancePosition(building, entrance);
@@ -514,7 +517,7 @@ export function OutdoorEntranceVisual({
     entrance.legacyPosition ? 0 : building.rotation ?? 0,
   );
   const labelOrigin = outdoorEntryLabelOrigin(badgePoint);
-  const showEntryIndicator = canEnterBuilding && (showEntryLabelByDefault || emphasized);
+  const showEntryIndicator = showEntryPill && canEnterBuilding && (showEntryLabelByDefault || emphasized);
   return (
     <g data-testid="readonly-entrance" data-entrance-id={entrance.id}
       role={canEnterBuilding ? "button" : undefined}
@@ -701,10 +704,12 @@ export interface ReadonlyOutdoorCampusSceneProps {
   onSelectCampusPlace?: (placeId: string) => void;
   onDoubleClickBuilding?: (buildingId: string) => void;
   onClickEntrance?: (buildingId: string) => void;
+  /** Whether read-only outdoor entrances render a permanent Enter Building pill. */
+  showEntryPills?: boolean;
 }
 
 /** Read-only scene composition shared by Preview and the public campus map. */
-export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, selectedCampusPlaceId, onSelectBuilding, onSelectCampusPlace, onDoubleClickBuilding, onClickEntrance }: ReadonlyOutdoorCampusSceneProps) {
+export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, selectedCampusPlaceId, onSelectBuilding, onSelectCampusPlace, onDoubleClickBuilding, onClickEntrance, showEntryPills = true }: ReadonlyOutdoorCampusSceneProps) {
   const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
   const defaultEntryLabelIds = defaultOutdoorEntryLabelIds(campus);
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
@@ -759,7 +764,7 @@ export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = t
       {showBuildings && campus.entrances.map((entrance) => {
         const building = buildingById.get(entrance.buildingId);
         return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance}
-          onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} /> : null;
+          onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} showEntryPill={showEntryPills} /> : null;
       })}
       {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
         const building = buildingById.get(stair.buildingId);

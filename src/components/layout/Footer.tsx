@@ -10,7 +10,6 @@ export function Footer() {
   const quickLinks = [
     { label: "Home", to: "/" },
     { label: "Campus Map", to: "/map" },
-    { label: "Help / FAQ", to: "/help#faq" },
     { label: isStudent ? "Student Portal" : "Sign In", to: isStudent ? "/home" : "/admin" },
   ];
 

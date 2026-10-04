@@ -34,7 +34,10 @@ function attachCanvasRefs(result: { current: ReturnType<typeof useCanvasControls
 }
 
 describe("useCanvasControls imperative Floor camera", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("coalesces pan moves to one SVG transform per frame and publishes React state at release", () => {
     const raf = installAnimationFrameQueue();
@@ -68,7 +71,7 @@ describe("useCanvasControls imperative Floor camera", () => {
     expect(result.current.svgRef.current?.style.cursor).toBe("grab");
   });
 
-  it("keeps the same zoom-to-cursor result while rendering only the next camera frame", () => {
+  it("interpolates wheel zoom through one RAF target and commits only after it settles", () => {
     const raf = installAnimationFrameQueue();
     const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
     let renders = 0;
@@ -86,22 +89,112 @@ describe("useCanvasControls imperative Floor camera", () => {
     act(() => result.current.endPan());
     const rendersBeforeWheel = renders;
 
-    act(() => result.current.handleWheel({
+    const wheel = (deltaY: number) => result.current.handleWheel({
       ctrlKey: true,
       metaKey: false,
-      deltaY: 100,
+      deltaY,
       deltaMode: 0,
       clientX: 250,
       clientY: 250,
+      currentTarget: { clientHeight: 500 },
       preventDefault: vi.fn(),
-    } as unknown as React.WheelEvent<HTMLDivElement>));
+    } as unknown as React.WheelEvent<HTMLDivElement>);
+    act(() => wheel(100));
 
     expect(renders).toBe(rendersBeforeWheel);
     expect(raf.callbacks.size).toBe(1);
-    act(() => raf.flush(performance.now() + 250));
-    expect(result.current.zoom).toBeCloseTo(0.9);
-    expect(result.current.pan).toEqual({ x: -65, y: -65 });
-    expect(transform.getAttribute("transform")).toBe("translate(-65,-65) scale(0.9)");
+    const firstFrameTime = performance.now() + 17;
+    act(() => raf.flush(firstFrameTime));
+    expect(renders).toBe(rendersBeforeWheel);
+    expect(result.current.zoom).toBe(1);
+    expect(result.current.pan).toEqual({ x: -100, y: -100 });
+    const firstScale = Number(transform.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    expect(firstScale).toBeLessThan(1);
+    expect(firstScale).toBeGreaterThan(0.89);
+    expect(transform.getAttribute("transform")).not.toBe("translate(-61.5,-61.5) scale(0.89)");
+
+    act(() => wheel(-50));
+    expect(raf.callbacks.size).toBe(1);
+    let timestamp = firstFrameTime;
+    for (let frame = 0; frame < 40 && raf.callbacks.size > 0; frame += 1) {
+      timestamp += 17;
+      act(() => raf.flush(timestamp));
+    }
+    expect(result.current.zoom).toBeCloseTo(0.945);
+    expect(result.current.pan).not.toEqual({ x: -100, y: -100 });
+    expect(transform.getAttribute("transform")).toBe(`translate(${result.current.pan.x},${result.current.pan.y}) scale(${result.current.zoom})`);
+    expect(renders).toBeGreaterThan(rendersBeforeWheel);
+    expect(raf.callbacks.size).toBe(0);
+  });
+
+  it("keeps deliberate zoom actions animated and yields smoothly to wheel input", () => {
+    const raf = installAnimationFrameQueue();
+    const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const { result } = renderHook(() => useCanvasControls(500, 500, { imperativeCamera: true }));
+    attachCanvasRefs(result, transform);
+
+    act(() => result.current.zoomIn());
+    expect(result.current.zoom).toBe(1);
+    expect(transform.getAttribute("transform")).toBeNull();
+    act(() => raf.flush(performance.now() + 40));
+    const inFlightScale = Number(transform.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    expect(inFlightScale).toBeGreaterThan(1);
+    expect(inFlightScale).toBeLessThan(1.25);
+
+    const beforeWheel = transform.getAttribute("transform");
+    act(() => result.current.handleWheel({
+      ctrlKey: true, metaKey: false, deltaY: 100, deltaMode: 0,
+      clientX: 250, clientY: 250, currentTarget: { clientHeight: 500 }, preventDefault: vi.fn(),
+    } as unknown as React.WheelEvent<HTMLDivElement>));
+    expect(transform.getAttribute("transform")).toBe(beforeWheel);
+    let timestamp = performance.now() + 57;
+    for (let frame = 0; frame < 40 && raf.callbacks.size > 0; frame += 1) {
+      timestamp += 17;
+      act(() => raf.flush(timestamp));
+    }
+    expect(result.current.zoom).toBeLessThan(1.25);
+    expect(raf.callbacks.size).toBe(0);
+  });
+
+  it("keeps the world point under the cursor stable through interpolated zoom", () => {
+    const raf = installAnimationFrameQueue();
+    const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    Object.defineProperty(transform, "getScreenCTM", {
+      value: () => {
+        const value = transform.getAttribute("transform") ?? "translate(0,0) scale(1)";
+        const [x = "0", y = "0"] = value.match(/translate\(([^,]+),([^)]+)\)/)?.slice(1) ?? [];
+        const scale = Number(value.match(/scale\(([^)]+)\)/)?.[1] ?? 1);
+        return { a: scale, b: 0, c: 0, d: scale, e: Number(x), f: Number(y) };
+      },
+    });
+    const { result } = renderHook(() => useCanvasControls(500, 500, { mode: "viewer", imperativeCamera: true }));
+    attachCanvasRefs(result, transform);
+    result.current.containerRef.current = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 500, height: 500 }),
+    } as unknown as HTMLDivElement;
+
+    act(() => result.current.handleWheel({
+      ctrlKey: true, metaKey: false, deltaY: -100, deltaMode: 0,
+      clientX: 200, clientY: 200, currentTarget: { clientHeight: 500 }, preventDefault: vi.fn(),
+    } as unknown as React.WheelEvent<HTMLDivElement>));
+
+    const immediateScale = Number(transform.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1] ?? 1);
+    expect(immediateScale).toBe(1);
+    let timestamp = performance.now();
+    for (let frame = 0; frame < 40 && raf.callbacks.size > 0; frame += 1) {
+      timestamp += 17;
+      act(() => raf.flush(timestamp));
+      const liveMatrix = (transform as unknown as SVGGraphicsElement).getScreenCTM()!;
+      expect((200 - liveMatrix.e) / liveMatrix.a).toBeCloseTo(200, 3);
+      expect((200 - liveMatrix.f) / liveMatrix.d).toBeCloseTo(200, 3);
+    }
+
+    const finalMatrix = (transform as unknown as SVGGraphicsElement).getScreenCTM()!;
+    const finalWorldX = (200 - finalMatrix.e) / finalMatrix.a;
+    const finalWorldY = (200 - finalMatrix.f) / finalMatrix.d;
+    expect(finalWorldX).toBeCloseTo(200, 3);
+    expect(finalWorldY).toBeCloseTo(200, 3);
+    expect(raf.callbacks.size).toBe(0);
   });
 
   it("converts pointerdown through the live camera matrix, independent of SVG child target and layout shift", () => {

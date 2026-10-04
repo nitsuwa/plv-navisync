@@ -63,6 +63,8 @@ interface CanvasProps {
   snapGrid: boolean;
   zoom: number;
   pan: { x: number; y: number };
+  /** Optional persistent world-camera group for frame-synced editor zoom. */
+  cameraTransformRef?: React.RefObject<SVGGElement | null>;
   svgRef: React.RefObject<SVGSVGElement | null>;
   containerRef: React.RefObject<HTMLDivElement | null>;
   cursor: string;
@@ -325,7 +327,7 @@ function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number;
 
 export function Canvas({
   campus, tool, layer, selected, multiSelected, selectedPathPoint = null, pathVertexSnapTarget = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
-  zoom, pan, svgRef, containerRef, cursor,
+  zoom, pan, cameraTransformRef, svgRef, containerRef, cursor,
   buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
   onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, focusedExteriorEmergencyStairId, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
@@ -866,7 +868,7 @@ export function Canvas({
           </filter>
           <CampusGroundPatternDefs />
         </defs>
-        <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+        <g ref={cameraTransformRef} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas material is independent from the logical/editor snapping grid. */}
           <CampusGroundSurface
             material={groundAppearance.material}
