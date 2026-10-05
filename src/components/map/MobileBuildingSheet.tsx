@@ -234,7 +234,15 @@ export function MobileBuildingSheet({
       exit={reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 }}
       transition={reducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl">
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close building details"
+        className="absolute right-3 top-3 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full bg-card/90 text-muted-foreground shadow-sm transition hover:bg-muted hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <X className="h-4 w-4" />
+      </button>
+      <div className="flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl scrollbar-show-on-hover" style={{ WebkitOverflowScrolling: "touch" }}>
         <button
           type="button"
           aria-expanded={sheetState === "expanded"}
@@ -287,9 +295,6 @@ export function MobileBuildingSheet({
             </div>
             <h2 className="line-clamp-2 pr-1 text-[15px] font-extrabold leading-[1.1] tracking-tight text-foreground">{selected.name}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close building details" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/80 text-muted-foreground transition hover:bg-muted active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
-            <X className="h-4 w-4" />
-          </button>
         </header>
 
         <div className={`shrink-0 px-3 ${sheetState === "peek" ? "pb-3" : "pb-2"}`}>
@@ -317,7 +322,7 @@ export function MobileBuildingSheet({
         )}
 
         {sheetState === "expanded" && (
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] scrollbar-show-on-hover" style={{ WebkitOverflowScrolling: "touch" }}>
+          <div className="shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <BuildingDetailsSections
               building={selected}
               facilities={facilities}

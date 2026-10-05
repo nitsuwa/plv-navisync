@@ -110,7 +110,7 @@ export function SearchBar({
 
       {/* Keyboard shortcut hint */}
       {showShortcutHint && !controlledValue && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
+        <div className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 items-center gap-1 pointer-events-none select-none">
           <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-muted text-[10px] font-semibold text-muted-foreground border border-border">
             {isMac ? "⌘" : "Ctrl"}
             <span className="text-[9px]">/</span>

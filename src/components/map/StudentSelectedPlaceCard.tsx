@@ -97,6 +97,7 @@ export function StudentSelectedPlaceCard({ room, onDirections, onStartHere, onRe
               </div>
               <div className="rounded-xl bg-muted p-4">
                 <LocationQR
+                  displaySize="large"
                   buildingId={room.buildingId}
                   buildingName={room.buildingLabel}
                   campusId={campusId}

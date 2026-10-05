@@ -69,8 +69,8 @@ describe("StudentHomePage published building preview", () => {
       vi.advanceTimersByTime(400);
     });
 
-    expect(screen.getByRole("button", { name: /Library LIB/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Administration Building ADM/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Sports Complex SPC/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Library LIB/i })).toHaveAttribute("href", "/buildings/b1");
+    expect(screen.getByRole("link", { name: /Administration Building ADM/i })).toHaveAttribute("href", "/buildings/b4");
+    expect(screen.queryByRole("link", { name: /Sports Complex SPC/i })).not.toBeInTheDocument();
   });
 });

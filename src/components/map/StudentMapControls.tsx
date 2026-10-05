@@ -121,7 +121,7 @@ export function StudentMapControls({
           data-no-drag
           data-profile-open={profileOpen ? "true" : "false"}
           aria-hidden={profileOpen}
-          inert={profileOpen}
+          inert={profileOpen ? ("" as never) : undefined}
           className="student-map-utility-stack pointer-events-auto absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20"
         >
           {!navigationActive && (

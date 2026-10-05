@@ -1034,20 +1034,6 @@
   .map-layer-transient { z-index: var(--map-layer-transient); }
   .map-layer-modal { z-index: var(--map-layer-modal); }
 
-  .student-map-zoom-controls {
-    --map-controls-shift-x: 0px;
-    --map-controls-shift-y: 0px;
-    transform: translate3d(var(--map-controls-shift-x), var(--map-controls-shift-y), 0);
-    transition: transform 200ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease, box-shadow 180ms ease;
-  }
-  .student-map-zoom-controls[data-search-open="true"] {
-    opacity: 0;
-    pointer-events: none;
-  }
-  .student-map-zoom-controls[data-collision-hidden="true"] {
-    opacity: 0;
-    pointer-events: none;
-  }
   .student-map-utility-stack {
     transition: opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
   }
@@ -1125,7 +1111,6 @@
   }
 
   @media (max-width: 767px) {
-    .student-map-zoom-controls { right: 0.75rem; bottom: var(--student-map-utility-bottom, 1rem); }
     .student-map-utility-control,
     .student-map-event-control { bottom: var(--student-map-utility-bottom, 1rem); }
   }
@@ -1135,7 +1120,6 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .student-map-zoom-controls,
     .student-map-utility-stack { transition-duration: 0.01ms; }
     .student-room-selection-halo,
     .student-room-selection-outline,

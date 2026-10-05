@@ -271,6 +271,8 @@ describe("authored destination endpoint combinations", () => {
       { id: "room-1", name: "Room 1 center", type: "room_access", x: 30, y: 0, buildingId: "b1", floorId: "f1", roomId: "r1" },
       { id: "stair-1", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f1", stairId: "s1" },
       { id: "stair-2", name: "Stairs", type: "stair", x: 40, y: 0, buildingId: "b1", floorId: "f2", stairId: "s2" },
+      { id: "elevator-1", name: "Elevator", type: "elevator", x: 40, y: 0, buildingId: "b1", floorId: "f1", elevatorId: "e1" },
+      { id: "elevator-2", name: "Elevator", type: "elevator", x: 40, y: 0, buildingId: "b1", floorId: "f2", elevatorId: "e1" },
       { id: "room-2", name: "Room 2 center", type: "room_access", x: 70, y: 0, buildingId: "b1", floorId: "f2", roomId: "r2" },
       { id: "room-3", name: "Room 3 center", type: "room_access", x: 230, y: 0, buildingId: "b2", floorId: "f1", roomId: "r3" },
     ],
@@ -279,8 +281,11 @@ describe("authored destination endpoint combinations", () => {
       { id: "e-door-room-b1", startNodeId: "b1-room-door", endNodeId: "room-1", distance: 10, bidirectional: true, accessible: true, type: "room_door_transition" },
       { id: "e-room-door-lobby", startNodeId: "b1-room-door", endNodeId: "b1-door", distance: 10, bidirectional: true, accessible: true },
       { id: "e-door-stair", startNodeId: "b1-door", endNodeId: "stair-1", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-door-elevator", startNodeId: "b1-door", endNodeId: "elevator-1", distance: 10, bidirectional: true, accessible: true },
       { id: "e-stair-transition", startNodeId: "stair-1", endNodeId: "stair-2", distance: 5, bidirectional: true, accessible: false, type: "floor_transition", emergencySafe: true },
+      { id: "e-elevator-transition", startNodeId: "elevator-1", endNodeId: "elevator-2", distance: 100, bidirectional: true, accessible: true, type: "floor_transition", emergencySafe: true },
       { id: "e-stair-upper-door", startNodeId: "stair-2", endNodeId: "b1-door-upper", distance: 20, bidirectional: true, accessible: true },
+      { id: "e-elevator-upper-door", startNodeId: "elevator-2", endNodeId: "b1-door-upper", distance: 10, bidirectional: true, accessible: true },
       { id: "e-upper-door-room", startNodeId: "b1-door-upper", endNodeId: "room-2", distance: 10, bidirectional: true, accessible: true, type: "room_door_transition" },
       { id: "e-outdoor", startNodeId: "b1-entry", endNodeId: "b2-entry", distance: 200, bidirectional: true, accessible: true, emergencySafe: true },
       { id: "e-entry-door-b2", startNodeId: "b2-entry", endNodeId: "b2-door", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition" },
@@ -601,6 +606,22 @@ describe("authored destination endpoint combinations", () => {
     );
     expect(route).toBeNull();
     expect(hasNavigableRoute(null)).toBe(false);
+  });
+
+  it("prefers stairs or elevators in Standard mode and falls back when the preferred transition is absent", () => {
+    const targetRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 201" };
+    const stairsRoute = planDestinationRoute(building("b1", "B1"), targetRoom, "standard", graph, "stairs");
+    const elevatorRoute = planDestinationRoute(building("b1", "B1"), targetRoom, "standard", graph, "elevator");
+
+    expect(stairsRoute?.transitionDetails?.some((transition) => transition.kind === "stairs")).toBe(true);
+    expect(elevatorRoute?.transitionDetails?.some((transition) => transition.kind === "elevator")).toBe(true);
+    const stairsOnlyGraph: CampusNavGraph = {
+      ...graph,
+      navNodes: graph.navNodes?.filter((node) => !node.elevatorId && node.type !== "elevator"),
+      navEdges: graph.navEdges?.filter((edge) => !edge.id?.includes("elevator")),
+    };
+    const fallbackRoute = planDestinationRoute(building("b1", "B1"), targetRoom, "standard", stairsOnlyGraph, "elevator");
+    expect(fallbackRoute?.transitionDetails?.some((transition) => transition.kind === "stairs")).toBe(true);
   });
 });
 
