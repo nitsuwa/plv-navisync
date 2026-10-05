@@ -24,15 +24,14 @@ import {
   type IndoorRoute,
   type RoomLike,
 } from "../lib/indoorPathfinding";
-import { hasNavigableRoute, planBuildingRoute, planDestinationRoute, planPointToDestinationRoute, planRouteFromPoint, type PlannedRoute, type RouteIndoorSegment, type RouteStep } from "../lib/routePlanner";
+import { hasNavigableRoute, planBuildingRoute, planDestinationRoute, planPointToDestinationRoute, planRouteFromPoint, type PlannedRoute, type RouteIndoorSegment, type RouteStep, type StandardRoutePreference } from "../lib/routePlanner";
 import type { CampusPlaceDest, RoomDest } from "../lib/combinedPathfinding";
 import { snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
 import { clampStudentMapZoom, dampCameraZoomLogarithm, getCameraSmoothingFactor, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getSoftBoundedPan, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
-import { clampStudentMapZoom, getCameraSmoothingFactor, STUDENT_MAP_MIN_ZOOM, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getSoftBoundedPan, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
-import { routeEndpointFromSearchResult } from "../lib/routeEndpoints";
+import { routeEndpointFromSearchResult, routeEndpointKey, type RouteEndpoint } from "../lib/routeEndpoints";
 import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walkingAnimation";
 import { planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
 import { doorEntranceLinkStatus, entryFloorForBuilding } from "../lib/entranceTransitions";
@@ -778,6 +777,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const [highlightedRoom, setHighlightedRoom] = useState<string|null>(null);
   const [selectedRoomContext, setSelectedRoomContext] = useState<RoomDest | null>(null);
   const [routePlannerEndpoint, setRoutePlannerEndpoint] = useState<"start" | "destination" | null>(null);
+  const [routePlannerMapPick, setRoutePlannerMapPick] = useState<"start" | "destination" | null>(null);
+  const [routePlannerSelectionError, setRoutePlannerSelectionError] = useState<string | null>(null);
   const [stairLoading,    setStairLoading]    = useState<{ dir:"up"|"down"; label:string }|null>(null);
   const [stairChoice,     setStairChoice]     = useState<{
     roomType: RoomType; upFloor: number|null; dnFloor: number|null; upLabel: string; dnLabel: string;
@@ -817,6 +818,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const [directionsMode, setDirectionsMode] = useState(false);
   const directionsWasOpenRef = useRef(false);
   const routeModeTouchedRef = useRef(false);
+  const routeStartFocusPendingRef = useRef(false);
+  const [standardRoutePreference, setStandardRoutePreference] = useState<StandardRoutePreference>("best");
   const [fromBuilding,   setFromBuilding]   = useState<Building|null>(null);
   const [toBuilding,     setToBuilding]     = useState<Building|null>(null);
   const [fromCampusPlace, setFromCampusPlace] = useState<CampusPlaceDest | null>(null);
@@ -2067,7 +2070,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       setRoomOrigin(room ?? null);
       setRoomDestination(null);
       setFloorView({ building, floor: floor.number });
-      setZoom(getInitialFloorZoom());
+      setZoom(DEFAULT_OUTDOOR_ZOOM);
       setPan({ x: 0, y: 0 });
       setIndoorRoute(null);
       setDestinationIndoorSegments([]);
@@ -2615,6 +2618,17 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   // Computes the outdoor leg (point/building → destination building). When
   // the destination is a specific room/floor (roomDestination), the indoor
   // "enter → room" leg is appended so the steps cover the full journey.
+  const fromRouteEndpointKey = useMemo(() => {
+    if (useMyLocation && youAreHere) return `pin:${youAreHere.x}:${youAreHere.y}`;
+    if (roomOrigin) return `room:${roomOrigin.buildingId}:${roomOrigin.floorNumber}:${roomOrigin.roomId}`;
+    if (fromCampusPlace) return `campus-place:${fromCampusPlace.campusPlaceId}`;
+    return fromBuilding ? `building:${fromBuilding.id}` : null;
+  }, [fromBuilding, fromCampusPlace, roomOrigin, useMyLocation, youAreHere]);
+  const toRouteEndpointKey = useMemo(() => {
+    if (roomDestination) return `room:${roomDestination.buildingId}:${roomDestination.floorNumber}:${roomDestination.roomId}`;
+    if (toCampusPlace) return `campus-place:${toCampusPlace.campusPlaceId}`;
+    return toBuilding ? `building:${toBuilding.id}` : null;
+  }, [roomDestination, toBuilding, toCampusPlace]);
   const route = useMemo<PlannedRoute | null>(() => {
     if (mapMode === "emergency") {
       const origin = fromCampusPlace ?? roomOrigin ?? (useMyLocation && youAreHere
@@ -2636,9 +2650,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     } : null);
     if (fromCampusPlace || toCampusPlace) {
       if (useMyLocation && youAreHere && placeAwareTo) {
-        planned = planPointToDestinationRoute(youAreHere, placeAwareTo, mapMode, activeCampus, B_POS);
+        planned = planPointToDestinationRoute(youAreHere, placeAwareTo, mapMode, activeCampus, B_POS, standardRoutePreference);
       } else if (placeAwareFrom && placeAwareTo) {
-        planned = planDestinationRoute(placeAwareFrom, placeAwareTo, mapMode, activeCampus);
+        planned = planDestinationRoute(placeAwareFrom, placeAwareTo, mapMode, activeCampus, standardRoutePreference);
       }
     } else if (roomOrigin && toBuilding) {
       const destination = roomDestination ?? {
@@ -2648,7 +2662,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         code: toBuilding.code,
         entranceNodeId: activeCampus?.buildings.find((building) => building.id === toBuilding.id)?.entranceNodeId,
       };
-      planned = planDestinationRoute(roomOrigin, destination, mapMode, activeCampus);
+      planned = planDestinationRoute(roomOrigin, destination, mapMode, activeCampus, standardRoutePreference);
     } else if (useMyLocation && youAreHere && toBuilding) {
       // Kiosk-style: start from the "You are here" marker.
       if (roomDestination) {
@@ -2658,6 +2672,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
           mapMode,
           activeCampus,
           B_POS,
+          standardRoutePreference,
         );
       }
       if (!planned) {
@@ -2671,7 +2686,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
           },
           mapMode,
           activeCampus,
-          B_POS
+          B_POS,
+          standardRoutePreference,
         );
       }
     } else if (roomDestination && fromBuilding) {
@@ -2689,6 +2705,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         roomDestination,
         mapMode,
         activeCampus,
+        standardRoutePreference,
       );
     } else if (fromBuilding && toBuilding) {
       // Use the route planner: real graph stats in ALL modes, with an SVG
@@ -2708,7 +2725,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         },
         mapMode,
         B_POS,
-        activeCampus
+        activeCampus,
+        standardRoutePreference
       );
     }
 
@@ -2727,7 +2745,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       );
     }
     return planned;
-  }, [fromBuilding, toBuilding, fromCampusPlace, toCampusPlace, roomOrigin, useMyLocation, youAreHere, mapMode, B_POS, activeCampus, roomDestination]);
+  }, [fromBuilding, toBuilding, fromCampusPlace, toCampusPlace, roomOrigin, useMyLocation, youAreHere, mapMode, B_POS, activeCampus, roomDestination, standardRoutePreference]);
 
   // ── Auto-close planner when the route becomes ready ────────────────────
   // The compact RouteStepsPanel (bottom-left) takes over for ordinary
@@ -2799,10 +2817,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     const placeId = params.get("placeId");
     const destinationPlaceId = params.get("destinationPlaceId");
     const destinationBuildingId = params.get("destinationBuildingId");
-    const campusHint = params.get("campusId");
-    const targetId = locationId || params.get("buildingId") || placeId || destinationPlaceId || destinationBuildingId || params.get("select");
     const campusHint = locationPayload?.campusId ?? params.get("campusId");
-    const targetId = locationId || params.get("buildingId") || placeId || params.get("select");
+    const targetPlaceId = destinationPlaceId || placeId;
+    const targetId = locationId || params.get("buildingId") || targetPlaceId || destinationBuildingId || params.get("select");
     if (!targetId) {
       initialSelectionRef.current = true;
       return;
@@ -2811,12 +2828,9 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       ? availableCampuses.filter((campus) => campus.id === campusHint)
       : availableCampuses;
     const matchesTarget = (campus: EditorCampus) => locationId
-      ? resolveCampusLocationQr(campus, targetId) !== null
-      : placeId || destinationPlaceId
-        ? campus.markers.some((marker) => marker.id === (placeId || destinationPlaceId))
       ? resolveCampusLocationQr(campus, targetId, locationPayload ?? undefined) !== null
-      : placeId
-        ? campus.markers.some((marker) => marker.id === placeId)
+      : targetPlaceId
+        ? campus.markers.some((marker) => marker.id === targetPlaceId)
         : campus.buildings.some((building) =>
           building.id === targetId || building.code.toLowerCase() === targetId.toLowerCase(),
         );
@@ -2841,8 +2855,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       window.history.replaceState(window.history.state, "", window.location.pathname);
       return;
     }
-    if (placeId || destinationPlaceId) {
-      const place = targetCampus.markers.find((marker) => marker.id === (placeId || destinationPlaceId));
+    if (targetPlaceId) {
+      const place = targetCampus.markers.find((marker) => marker.id === targetPlaceId);
       if (place) {
         const routeDestination = destinationPlaceId ? campusPlaceDestination(place, targetCampus) : null;
         if (routeDestination && campusPlaceCanRoute(place, targetCampus, "inbound")) {
@@ -2889,6 +2903,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       setDirectionsMode(true);
       setUseMyLocation(Boolean(youAreHere));
     } else {
+      searchFocusRef.current = { buildingId: building.id };
+      setSearchFocusNonce((nonce) => nonce + 1);
       setSelected(building);
     }
     initialSelectionRef.current = true;
@@ -3077,6 +3093,19 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   // starting point and the end point are in focus — the viewport centers
   // on the route midpoint and the whole route stays on screen.
   useEffect(() => {
+    // Keep route preparation from pulling the camera away from the endpoint
+    // the student just selected. On Start Navigation, the origin focus is
+    // applied first and this flag prevents the generic full-route frame from
+    // immediately replacing it.
+    if (directionsMode) {
+      setShowArrival(false);
+      return;
+    }
+    if (routeStartFocusPendingRef.current) {
+      routeStartFocusPendingRef.current = false;
+      setShowArrival(false);
+      return;
+    }
     // Room routes are previewed in the planner. Their campus framing is
     // applied by the transition above only after Navigate is confirmed.
     if (platformSettingsReady && platformSettings.autoFocusRoute && route && route.points.length > 0 && !route.destinationRoom) {
@@ -3085,7 +3114,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     } else {
       setShowArrival(false);
     }
-  }, [route, frameRouteView, platformSettingsReady, platformSettings.autoFocusRoute]);
+  }, [directionsMode, route, routeStartFocusPendingRef, frameRouteView, platformSettingsReady, platformSettings.autoFocusRoute]);
 
   // ── Pan to selected building on click (smooth animated lerp) ──────
   useEffect(() => {
@@ -3117,6 +3146,56 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       searchFocusRef.current = null;
     }
   }, [animateCameraTo, clampMapPan, selected?.id, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce]);
+
+  useLayoutEffect(() => {
+    const target = searchFocusRef.current;
+    const isRouteEndpointFocus = Boolean(directionsMode
+      && !isFloorMode
+      && target?.buildingId
+      && !target.roomId
+      && (fromBuilding?.id === target.buildingId || toBuilding?.id === target.buildingId));
+    if (!isRouteEndpointFocus || !target?.buildingId) return;
+    const position = B_POS[target.buildingId];
+    const surface = mapContainerRef.current;
+    const svg = svgRef.current;
+    const surfaceRect = surface?.getBoundingClientRect();
+    const svgRect = svg?.getBoundingClientRect();
+    if (!position || !surface || !surfaceRect || !svgRect || svgRect.width <= 0 || svgRect.height <= 0) return;
+
+    const mapScale = Math.min(svgRect.width / outdoorCanvasW, svgRect.height / outdoorCanvasH);
+    if (!Number.isFinite(mapScale) || mapScale <= 0) return;
+    const viewportOffset = {
+      x: Math.max(0, (svgRect.width - outdoorCanvasW * mapScale) / (2 * mapScale)),
+      y: Math.max(0, (svgRect.height - outdoorCanvasH * mapScale) / (2 * mapScale)),
+    };
+    const safePx = { left: 12, right: 12, top: 12, bottom: 12 };
+    const plannerRect = surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect()
+      ?? document.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect();
+    if (plannerRect && plannerRect.width > 0 && plannerRect.height > 0) {
+      const mobileMap = surfaceRect.width < 768;
+      if (mobileMap && plannerRect.width >= surfaceRect.width * 0.72) {
+        safePx.bottom = Math.max(safePx.bottom, surfaceRect.bottom - plannerRect.top + 12);
+      } else if (!mobileMap && plannerRect.left <= surfaceRect.left + 24) {
+        safePx.left = Math.max(safePx.left, plannerRect.right - surfaceRect.left + 12);
+      }
+    }
+    const focus = getStudentRoomFocusCamera({
+      mapWidth: outdoorCanvasW,
+      mapHeight: outdoorCanvasH,
+      roomBounds: { x: position.x, y: position.y, width: position.w, height: position.h },
+      currentPan: panRef.current,
+      zoom: zoomRef.current,
+      insets: {
+        left: safePx.left / mapScale,
+        right: safePx.right / mapScale,
+        top: safePx.top / mapScale,
+        bottom: safePx.bottom / mapScale,
+      },
+      viewportOffset,
+    });
+    if (focus.shouldMove) animateCameraTo(focus.pan, focus.zoom, "room-focus");
+    searchFocusRef.current = null;
+  }, [activeCampus, animateCameraTo, B_POS, directionsMode, fromBuilding?.id, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce, toBuilding?.id]);
 
   // Keep mobile building destinations in the usable area above the route
   // planner, just as indoor room destinations are focused above the sheet.
@@ -3191,27 +3270,38 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
 
   useEffect(() => {
     const target = searchFocusRef.current;
-    if (!selectedCampusPlace || !target?.campusPlaceId || target.campusPlaceId !== selectedCampusPlace.id || isFloorMode) return;
+    if (!target?.campusPlaceId || isFloorMode) return;
+    const place = selectedCampusPlace?.id === target.campusPlaceId
+      ? selectedCampusPlace
+      : directionsMode && (fromCampusPlace?.campusPlaceId === target.campusPlaceId || toCampusPlace?.campusPlaceId === target.campusPlaceId)
+        ? activeCampus?.markers.find((candidate) => candidate.id === target.campusPlaceId)
+        : null;
+    if (!place) return;
     const mapRect = mapContainerRef.current?.getBoundingClientRect();
     if (!mapRect) return;
     const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-    const usableWidth = !isMobile ? mapRect.width - Math.min(390, Math.max(340, window.innerWidth * 0.32)) : mapRect.width;
+    const plannerRect = mapContainerRef.current?.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect();
+    const leftInset = !isMobile && plannerRect && plannerRect.left <= mapRect.left + 24
+      ? plannerRect.right - mapRect.left + 16
+      : 20;
+    const rightEdge = mapRect.width - 20;
+    const usableWidth = Math.max(120, rightEdge - leftInset);
     const currentZoom = zoomRef.current;
-    const screenX = viewCX * (1 - currentZoom) + panRef.current.x + selectedCampusPlace.x * currentZoom;
-    const screenY = viewCY * (1 - currentZoom) + panRef.current.y + selectedCampusPlace.y * currentZoom;
+    const screenX = viewCX * (1 - currentZoom) + panRef.current.x + place.x * currentZoom;
+    const screenY = viewCY * (1 - currentZoom) + panRef.current.y + place.y * currentZoom;
     const minY = isMobile ? 84 : 24;
-    const maxY = mapRect.height - (isMobile ? 230 : 24);
-    if (screenX >= 20 && screenX <= usableWidth - 20 && screenY >= minY && screenY <= maxY) {
+    const maxY = plannerRect && isMobile ? Math.max(minY + 40, plannerRect.top - mapRect.top - 16) : mapRect.height - 24;
+    if (screenX >= leftInset && screenX <= rightEdge && screenY >= minY && screenY <= maxY) {
       searchFocusRef.current = null;
       return;
     }
     const nextPan = clampMapPan({
-      x: usableWidth * 0.5 - viewCX * (1 - currentZoom) - selectedCampusPlace.x * currentZoom,
-      y: Math.max(minY + 20, maxY * 0.5) - viewCY * (1 - currentZoom) - selectedCampusPlace.y * currentZoom,
+      x: leftInset + usableWidth * 0.5 - viewCX * (1 - currentZoom) - place.x * currentZoom,
+      y: Math.max(minY + 20, maxY * 0.5) - viewCY * (1 - currentZoom) - place.y * currentZoom,
     }, currentZoom);
     animateCameraTo(nextPan, currentZoom);
     searchFocusRef.current = null;
-  }, [selectedCampusPlace, searchFocusNonce, isFloorMode, viewCX, viewCY, clampMapPan, animateCameraTo]);
+  }, [activeCampus, directionsMode, fromCampusPlace?.campusPlaceId, selectedCampusPlace, searchFocusNonce, isFloorMode, toCampusPlace?.campusPlaceId, viewCX, viewCY, clampMapPan, animateCameraTo]);
 
   // Room focus is shared by direct taps and search selection. Measure the
   // visible overlays after they commit, then pan only if the actual room shape
@@ -3254,7 +3344,6 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       lastRoomFocusKeyRef.current = null;
       return;
     }
-    const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}`;
     // Opening the planner changes the room's safe viewport even if the same
     // room was focused moments earlier from its selection card.
     const focusKey = `${floorView.building.id}:${floorView.floor}:${room.id}:${directionsMode ? "planner" : "map"}`;
@@ -3300,7 +3389,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       ?? document.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect()
       ?? null;
     const floorPickerRect = getRect("[data-testid='student-floor-picker']");
-    const utilityRect = getRect(".student-map-utility-stack, .student-map-zoom-controls");
+    const utilityRect = getRect(".student-map-utility-stack");
     const mobileMap = surfaceRect.width < 768;
 
     if (headerRect && overlapsMapX(headerRect)) {
@@ -3361,8 +3450,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       cancelCameraAnimation();
     }
     if (searchMatchesFloor) searchFocusRef.current = null;
-  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, floorView, floorViewport, interactiveFloorRoomIds, isFloorMode, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
-  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
+  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, interactiveFloorRoomIds, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
 
   const selectBuilding = useCallback((b: Building|null) => {
     cancelCameraAnimation();
@@ -3418,6 +3506,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setSearchFocused(false);
     setShowCampusSelector(false);
     setRoutePlannerEndpoint(null);
+    setRoutePlannerMapPick(null);
+    setRoutePlannerSelectionError(null);
     if (!directionsMode) setUseMyLocation(Boolean(youAreHere));
     setDirectionsMode(true);
   }, [directionsMode, prepareFreshRoutePlannerMode, youAreHere]);
@@ -3833,6 +3923,160 @@ const buildingFill = (id: string) =>
     });
   }, [activeCampus, MOCK_BUILDINGS, navigableRoomKeys]);
 
+  const setRoutePlannerMapSelection = useCallback((endpoint: "start" | "destination" | null) => {
+    setRoutePlannerSelectionError(null);
+    setRoutePlannerMapPick(endpoint);
+    setRoutePlannerEndpoint(null);
+  }, []);
+
+  const applyRoutePlannerEndpoint = useCallback((endpoint: RouteEndpoint, purpose: "start" | "destination") => {
+    if (endpoint.kind === "manual-pin") {
+      setRoutePlannerSelectionError("Choose a building, room, or campus place on the map.");
+      return false;
+    }
+    const endpointKey = routeEndpointKey(endpoint);
+    const oppositeKey = purpose === "start" ? toRouteEndpointKey : fromRouteEndpointKey;
+    if (oppositeKey && endpointKey === oppositeKey) {
+      setRoutePlannerSelectionError(`That place is already selected as ${purpose === "start" ? "the destination" : "the start"}. Choose a different place.`);
+      return false;
+    }
+    if (endpoint.kind === "campus-place") {
+      const marker = activeCampus?.markers.find((candidate) => candidate.id === endpoint.place.campusPlaceId);
+      if (!marker || !campusPlaceCanRoute(marker, activeCampus, purpose === "start" ? "outbound" : "inbound")) {
+        setRoutePlannerSelectionError("This campus place is not connected to a route in that direction.");
+        return false;
+      }
+    }
+
+    setRoutePlannerSelectionError(null);
+    setRoutePlannerMapPick(null);
+    setRoutePlannerEndpoint(null);
+    setSelected(null);
+    setSelectedCampusPlaceId(null);
+    setSelectedRoomContext(null);
+    setNavigationPhase("idle");
+    setNavigationTransitioning(false);
+
+    if (purpose === "start") {
+      setUseMyLocation(false);
+      if (endpoint.kind === "building") {
+        setRoomOrigin(null);
+        setFromCampusPlace(null);
+        setFromBuilding(endpoint.building);
+        setFloorView(null);
+        searchFocusRef.current = { buildingId: endpoint.building.id };
+      } else if (endpoint.kind === "room") {
+        setRoomOrigin(endpoint.room);
+        setFromCampusPlace(null);
+        setFromBuilding(endpoint.building);
+        setFloorView({ building: endpoint.building, floor: endpoint.room.floorNumber });
+        setHighlightedRoom(endpoint.room.roomId);
+        setActiveRouteRoom(endpoint.room.roomId);
+        lastRoomFocusKeyRef.current = null;
+        searchFocusRef.current = { buildingId: endpoint.building.id, roomId: endpoint.room.roomId, floorNumber: endpoint.room.floorNumber };
+      } else {
+        setRoomOrigin(null);
+        setFromBuilding(null);
+        setFromCampusPlace(endpoint.place);
+        setFloorView(null);
+        searchFocusRef.current = { campusPlaceId: endpoint.place.campusPlaceId };
+      }
+    } else if (endpoint.kind === "building") {
+      setRoomDestination(null);
+      setToCampusPlace(null);
+      setToBuilding(endpoint.building);
+      setFloorView(null);
+      searchFocusRef.current = { buildingId: endpoint.building.id };
+      lastDestinationBuildingFocusKeyRef.current = null;
+    } else if (endpoint.kind === "room") {
+      setRoomDestination(endpoint.room);
+      setToCampusPlace(null);
+      setToBuilding(endpoint.building);
+      setFloorView({ building: endpoint.building, floor: endpoint.room.floorNumber });
+      setHighlightedRoom(endpoint.room.roomId);
+      setActiveRouteRoom(endpoint.room.roomId);
+      lastRoomFocusKeyRef.current = null;
+      searchFocusRef.current = { buildingId: endpoint.building.id, roomId: endpoint.room.roomId, floorNumber: endpoint.room.floorNumber };
+    } else {
+      setRoomDestination(null);
+      setToBuilding(null);
+      setToCampusPlace(endpoint.place);
+      setFloorView(null);
+      searchFocusRef.current = { campusPlaceId: endpoint.place.campusPlaceId };
+    }
+
+    setSearchFocusNonce((nonce) => nonce + 1);
+    return true;
+  }, [activeCampus, fromRouteEndpointKey, toRouteEndpointKey]);
+
+  const focusRoutePlannerOrigin = () => {
+    if (roomOrigin || isFloorMode) return false;
+    const buildingBounds = fromBuilding ? B_POS[fromBuilding.id] : undefined;
+    const placeMarker = fromCampusPlace
+      ? activeCampus?.markers.find((marker) => marker.id === fromCampusPlace.campusPlaceId)
+      : undefined;
+    const originPoint = placeMarker
+      ? { x: placeMarker.x, y: placeMarker.y }
+      : useMyLocation && youAreHere
+        ? youAreHere
+        : null;
+    const roomBounds = buildingBounds
+      ? { x: buildingBounds.x, y: buildingBounds.y, width: buildingBounds.w, height: buildingBounds.h }
+      : originPoint ? {
+          x: originPoint.x - 20,
+          y: originPoint.y - 20,
+          width: 40,
+          height: 40,
+        } : undefined;
+    if (!roomBounds) return false;
+
+    const surface = mapContainerRef.current;
+    const svg = svgRef.current;
+    const surfaceRect = surface?.getBoundingClientRect();
+    const svgRect = svg?.getBoundingClientRect();
+    if (!surface || !surfaceRect || !svgRect || svgRect.width <= 0 || svgRect.height <= 0) return false;
+
+    const mapScale = Math.min(svgRect.width / outdoorCanvasW, svgRect.height / outdoorCanvasH);
+    if (!Number.isFinite(mapScale) || mapScale <= 0) return false;
+    const viewportOffset = {
+      x: Math.max(0, (svgRect.width - outdoorCanvasW * mapScale) / (2 * mapScale)),
+      y: Math.max(0, (svgRect.height - outdoorCanvasH * mapScale) / (2 * mapScale)),
+    };
+    const safePx = { left: 12, right: 12, top: 12, bottom: 12 };
+    const plannerRect = surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect()
+      ?? document.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")?.getBoundingClientRect();
+    const mobileMap = surfaceRect.width < 768;
+    if (plannerRect && plannerRect.width > 0 && plannerRect.height > 0) {
+      if (mobileMap && plannerRect.width >= surfaceRect.width * 0.72) {
+        safePx.bottom = Math.max(safePx.bottom, surfaceRect.bottom - plannerRect.top + 12);
+      } else if (plannerRect.left <= surfaceRect.left + 24) {
+        safePx.left = Math.max(safePx.left, plannerRect.right - surfaceRect.left + 12);
+      }
+    }
+    const headerRect = surface.querySelector<HTMLElement>("[data-map-search-header='true']")?.getBoundingClientRect();
+    if (headerRect && headerRect.bottom > surfaceRect.top) {
+      safePx.top = Math.max(safePx.top, headerRect.bottom - surfaceRect.top + 12);
+    }
+
+    const focus = getStudentRoomFocusCamera({
+      mapWidth: outdoorCanvasW,
+      mapHeight: outdoorCanvasH,
+      roomBounds,
+      currentPan: panRef.current,
+      zoom: zoomRef.current,
+      insets: {
+        left: safePx.left / mapScale,
+        right: safePx.right / mapScale,
+        top: safePx.top / mapScale,
+        bottom: safePx.bottom / mapScale,
+      },
+      viewportOffset,
+    });
+    routeStartFocusPendingRef.current = true;
+    if (focus.shouldMove) animateCameraTo(clampMapPan(focus.pan, focus.zoom), focus.zoom);
+    return true;
+  };
+
   const selectRoomDestination = useCallback((catalogKey: string) => {
     const target = roomDestinationCatalog.find((room) =>
       `${room.buildingId}:${room.floorNumber}:${room.roomId}` === catalogKey,
@@ -3908,11 +4152,16 @@ const buildingFill = (id: string) =>
   const selectIndoorRoom = useCallback((roomId: string) => {
     const room = roomEndpointFromFloor(roomId);
     if (!room) return;
+    if (routePlannerMapPick) {
+      const building = MOCK_BUILDINGS.find((candidate) => candidate.id === room.buildingId);
+      if (building) applyRoutePlannerEndpoint({ kind: "room", room, building }, routePlannerMapPick);
+      return;
+    }
     searchFocusRef.current = null;
     lastRoomFocusKeyRef.current = null;
     setHighlightedRoom(roomId);
     setSelectedRoomContext(room);
-  }, [roomEndpointFromFloor]);
+  }, [applyRoutePlannerEndpoint, MOCK_BUILDINGS, roomEndpointFromFloor, routePlannerMapPick]);
 
   // ── Walk arrival → enter the destination building's floor plan ────────
   // When the walking dot reaches the end of an outdoor route that targets a
@@ -4403,24 +4652,40 @@ const buildingFill = (id: string) =>
                 zoom={displayZoom}
                 showBuildings={true}
                 showLabels={platformSettings.showMapLabels}
-                showEntryPills={false}
                 selectedBuildingId={selected?.id ?? null}
                 selectedCampusPlaceId={selectedCampusPlaceId}
                 onSelectBuilding={(buildingId) => {
                   const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
-                  if (building) selectBuilding(selected?.id === buildingId ? null : building);
+                  if (!building) return;
+                  if (routePlannerMapPick) {
+                    applyRoutePlannerEndpoint({ kind: "building", building }, routePlannerMapPick);
+                    return;
+                  }
+                  selectBuilding(selected?.id === buildingId ? null : building);
                 }}
                 onSelectCampusPlace={(placeId) => {
                   const place = activeCampus?.markers.find((marker) => marker.id === placeId);
-                  if (place) selectCampusPlace(selectedCampusPlaceId === placeId ? null : place);
+                  if (!place) return;
+                  if (routePlannerMapPick) {
+                    const destination = campusPlaceDestination(place, activeCampus);
+                    if (destination) applyRoutePlannerEndpoint({ kind: "campus-place", place: destination }, routePlannerMapPick);
+                    else setRoutePlannerSelectionError("This campus place is not connected to a route.");
+                    return;
+                  }
+                  selectCampusPlace(selectedCampusPlaceId === placeId ? null : place);
                 }}
                 onDoubleClickBuilding={(buildingId) => {
                   const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
-                  if (building) openFloorPlan(building);
+                  if (building && !routePlannerMapPick) openFloorPlan(building);
                 }}
                 onClickEntrance={(buildingId) => {
                   const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
-                  if (building) openFloorPlan(building);
+                  if (!building) return;
+                  if (routePlannerMapPick) {
+                    openFloorPlan(building);
+                    return;
+                  }
+                  openFloorPlan(building);
                 }}
               />
             )}
@@ -4530,60 +4795,19 @@ const buildingFill = (id: string) =>
               destinationResults={campusSearch.destinations}
               activeEndpoint={routePlannerEndpoint}
               onActiveEndpointChange={setRoutePlannerEndpoint}
+              standardPreference={standardRoutePreference}
+              onStandardPreferenceChange={setStandardRoutePreference}
+              mapSelectionEndpoint={routePlannerMapPick}
+              onChooseOnMap={setRoutePlannerMapSelection}
+              selectionError={routePlannerSelectionError}
               suspendedForBuilding={Boolean(selected || selectedCampusPlace)}
-              selectedRoomForPlanner={selectedRoomContext}
-              onUseSelectedRoomAsStart={useRoomAsStart}
-              onUseSelectedRoomAsDestination={useRoomAsDestination}
-              onReportSelectedRoom={room => {
-                if (!floorView || !activeFloorPlan) return;
-                setReportRoomContext({ floorId: activeFloorPlan.id, roomId: room.roomId });
-                setReportCampusPlace(null);
-                setReportModal(floorView.building);
-              }}
               onSelectFromDestination={(result) => {
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog, activeCampus?.markers);
-                if (!endpoint) return;
-                setNavigationPhase("idle");
-                setSelectedRoomContext(null);
-                if (endpoint.kind === "building") {
-                  setRoomOrigin(null);
-                  setFromCampusPlace(null);
-                  setFromBuilding(endpoint.building);
-                  setUseMyLocation(false);
-                } else if (endpoint.kind === "room") {
-                  setFromCampusPlace(null);
-                  setRoomOrigin(endpoint.room);
-                  setFromBuilding(endpoint.building);
-                  setUseMyLocation(false);
-                  setHighlightedRoom(endpoint.room.roomId);
-                  setActiveRouteRoom(endpoint.room.roomId);
-                } else if (endpoint.kind === "campus-place") {
-                  setRoomOrigin(null);
-                  setFromBuilding(null);
-                  setFromCampusPlace(endpoint.place);
-                  setUseMyLocation(false);
-                }
+                if (endpoint) applyRoutePlannerEndpoint(endpoint, "start");
               }}
               onSelectToDestination={(result) => {
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog, activeCampus?.markers);
-                if (!endpoint) return;
-                setNavigationPhase("idle");
-                setSelectedRoomContext(null);
-                if (endpoint.kind === "building") {
-                  setRoomDestination(null);
-                  setToCampusPlace(null);
-                  setToBuilding(endpoint.building);
-                } else if (endpoint.kind === "room") {
-                  setToCampusPlace(null);
-                  setRoomDestination(endpoint.room);
-                  setToBuilding(endpoint.building);
-                  setHighlightedRoom(endpoint.room.roomId);
-                  setActiveRouteRoom(endpoint.room.roomId);
-                } else if (endpoint.kind === "campus-place") {
-                  setRoomDestination(null);
-                  setToBuilding(null);
-                  setToCampusPlace(endpoint.place);
-                }
+                if (endpoint) applyRoutePlannerEndpoint(endpoint, "destination");
               }}
               onToRoomChange={(room) => {
                 if (!room) {
@@ -4607,19 +4831,22 @@ const buildingFill = (id: string) =>
                 const previousToPlace = toCampusPlace;
                 setNavigationPhase("idle");
                 setNavigationTransitioning(false);
+                setRoutePlannerMapPick(null);
+                setRoutePlannerSelectionError(null);
+                setUseMyLocation(false);
                 setRoomOrigin(previousToRoom);
                 setRoomDestination(previousFromRoom);
                 setFromCampusPlace(previousToPlace);
                 setToCampusPlace(previousFromPlace);
                 setFromBuilding(previousToRoom
                   ? MOCK_BUILDINGS.find((building) => building.id === previousToRoom.buildingId) ?? null
-                  : previousToBuilding);
+                  : previousToPlace ? null : previousToBuilding);
                 setToBuilding(previousFromRoom
                   ? MOCK_BUILDINGS.find((building) => building.id === previousFromRoom.buildingId) ?? null
-                  : previousFromBuilding);
+                  : previousFromPlace ? null : previousFromBuilding);
               }}
-              onClose={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setDirectionsMode(false); setRoutePlannerEndpoint(null); setSelectedRoomContext(null); setFromBuilding(null); setToBuilding(null); setFromCampusPlace(null); setToCampusPlace(null); setRoomOrigin(null); setRoomDestination(null); }}
-              onClear={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setRoutePlannerEndpoint(null); setSelectedRoomContext(null); setFromBuilding(null); setToBuilding(null); setFromCampusPlace(null); setToCampusPlace(null); setRoomOrigin(null); setRoomDestination(null); }}
+              onClose={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setDirectionsMode(false); setRoutePlannerEndpoint(null); setRoutePlannerMapPick(null); setRoutePlannerSelectionError(null); setSelectedRoomContext(null); setSelectedCampusPlaceId(null); setUseMyLocation(false); setFromBuilding(null); setToBuilding(null); setFromCampusPlace(null); setToCampusPlace(null); setRoomOrigin(null); setRoomDestination(null); }}
+              onClear={() => { setNavigationPhase("idle"); setNavigationTransitioning(false); setRoutePlannerEndpoint(null); setRoutePlannerMapPick(null); setRoutePlannerSelectionError(null); setSelectedRoomContext(null); setSelectedCampusPlaceId(null); setUseMyLocation(false); setFromBuilding(null); setToBuilding(null); setFromCampusPlace(null); setToCampusPlace(null); setRoomOrigin(null); setRoomDestination(null); }}
               onFindRoute={() => {
               const endpointsSet = Boolean(
                 (mapMode === "emergency" && (roomOrigin || fromCampusPlace || fromBuilding || (useMyLocation && youAreHere)))
@@ -4634,6 +4861,19 @@ const buildingFill = (id: string) =>
               // are set but planning returns null. Keep it open; closing here
               // would hide the only actionable feedback from the student.
               if (!endpointsSet || !hasNavigableRoute(route)) return;
+
+              if (roomOrigin) {
+                routeStartFocusPendingRef.current = true;
+                searchFocusRef.current = {
+                  buildingId: roomOrigin.buildingId,
+                  roomId: roomOrigin.roomId,
+                  floorNumber: roomOrigin.floorNumber,
+                };
+                lastRoomFocusKeyRef.current = null;
+                setSearchFocusNonce((nonce) => nonce + 1);
+              } else {
+                focusRoutePlannerOrigin();
+              }
 
               const hasOutdoorLeg = route.points.length >= 2;
               const sameBuildingRoomExit = Boolean(
@@ -4762,7 +5002,7 @@ const buildingFill = (id: string) =>
                 if (isFloorMode) {
                   setNavigationTransitioning(true);
                 } else {
-                  if (platformSettingsReady && platformSettings.autoFocusRoute) frameRouteView();
+                  if (platformSettingsReady && platformSettings.autoFocusRoute && !routeStartFocusPendingRef.current) frameRouteView();
                   setNavigationTransitioning(false);
                 }
               }
@@ -4938,7 +5178,7 @@ const buildingFill = (id: string) =>
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
 
       {/* ══════════════ MAP ZOOM / RESET CONTROLS ══════════════ */}
-      {isFloorMode && availableFloorOptions.length > 1 && !directionsMode && !showEventMaps && !stairLoading && !navigationTransitioning && navigationPhase === "idle" && (
+      {isFloorMode && availableFloorOptions.length > 1 && (!directionsMode || Boolean(routePlannerMapPick)) && !showEventMaps && !stairLoading && !navigationTransitioning && navigationPhase === "idle" && (
         <StudentFloorPicker
           buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
           floors={availableFloorOptions}

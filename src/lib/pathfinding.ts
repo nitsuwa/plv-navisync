@@ -559,6 +559,7 @@ export type NavigationRouteNode = {
 };
 
 export type NavigationRouteEdge = {
+  id?: string;
   startNodeId: string;
   endNodeId: string;
   distance: number;
@@ -884,7 +885,7 @@ function runPreparedNavigationRoute(
     const to = nodeMap.get(neighbor.nodeId);
     const edgeType = neighbor.edge?.type?.toLowerCase() ?? "";
     const exteriorAccessTransition = transitionKind === "ramp"
-      || (transitionKind === "stair" && (edgeType.includes("entrance") || from?.floorId !== to?.floorId));
+      || (transitionKind === "stair" && (edgeType.includes("entrance") || Boolean(from?.floorId) !== Boolean(to?.floorId)));
     const appliesPreference = !(preferredTransitionKind === "elevator" && exteriorAccessTransition);
     if (!appliesPreference) return 0;
     return transitionKind === "ramp" && preferredTransitionKind === "stair" ? 100_000 : 1_000_000;

@@ -14,6 +14,7 @@ export function LocationQR({
   roomName,
   floorId,
   floorNumber,
+  displaySize = "compact",
 }: {
   buildingId: string;
   buildingName: string;
@@ -22,6 +23,7 @@ export function LocationQR({
   roomName?: string;
   floorId?: string;
   floorNumber?: number;
+  displaySize?: "compact" | "large";
 }) {
   const toast = useToast();
   const locationName = roomName ?? buildingName;
@@ -52,11 +54,12 @@ export function LocationQR({
   };
 
   return (
-    <div className="flex flex-col items-center gap-2.5">
-      <div className="rounded-xl bg-white p-2.5 shadow-sm">
+    <div className={displaySize === "large" ? "flex w-full flex-col items-center gap-1.5" : "flex flex-col items-center gap-2.5"}>
+      <div className={displaySize === "large" ? "w-full rounded-xl bg-white p-2 shadow-sm" : "rounded-xl bg-white p-2.5 shadow-sm"}>
         <QRCodeSVG
           value={url}
-          size={132}
+          size={displaySize === "large" ? 320 : 132}
+          className={displaySize === "large" ? "block h-auto w-full" : undefined}
           level="M"
           marginSize={1}
           fgColor="#0f172a"

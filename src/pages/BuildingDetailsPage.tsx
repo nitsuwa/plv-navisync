@@ -2,8 +2,8 @@ import { useParams, Link, useNavigate } from "react-router";
 import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
-  ChevronRight, Bookmark, Share2, Flag, Info, CheckCircle2, Map,
-  Accessibility,
+  ChevronRight, ChevronDown, Bookmark, Share2, Flag, Info, CheckCircle2,
+  Accessibility, DoorOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -23,13 +23,12 @@ import { studentAccountService } from "../services/studentAccountService";
 import { ReportModal } from "../components/map/ReportModal";
 import { useToast } from "../hooks/useToast";
 
-type Tab = "about" | "departments" | "facilities" | "accessibility";
+type Tab = "about" | "rooms" | "departments";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "about", label: "About", icon: Info },
+  { key: "rooms", label: "Rooms", icon: DoorOpen },
   { key: "departments", label: "Departments", icon: Users },
-  { key: "facilities", label: "Facilities", icon: Layers },
-  { key: "accessibility", label: "Accessibility", icon: Map },
 ];
 
 export function BuildingDetailsPage() {
@@ -37,6 +36,7 @@ export function BuildingDetailsPage() {
   const navigate = useNavigate();
   const { success, error: showError } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("about");
+  const [expandedRoomFloors, setExpandedRoomFloors] = useState<Set<string>>(() => new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -69,12 +69,28 @@ export function BuildingDetailsPage() {
 
   useEffect(() => {
     setIsLoading(true);
+    setExpandedRoomFloors(new Set());
     const timer = setTimeout(() => setIsLoading(false), 300);
     window.scrollTo({ top: 0, behavior: "instant" });
     return () => clearTimeout(timer);
   }, [id]);
 
   const building = buildings.find((b) => b.id === id);
+  const roomGroups = useMemo(() => {
+    const campusBuilding = activeCampus?.buildings.find((item) => item.id === id);
+    return (campusBuilding?.floors ?? [])
+      .map((floor) => ({
+        id: floor.id,
+        number: floor.number,
+        label: floor.label || `Floor ${floor.number}`,
+        rooms: (floor.rooms ?? [])
+          .filter((room) => room.visible !== false && room.name.trim().length > 0)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .filter((floor) => floor.rooms.length > 0)
+      .sort((a, b) => a.number - b.number);
+  }, [activeCampus, id]);
+  const roomCount = roomGroups.reduce((total, floor) => total + floor.rooms.length, 0);
   const related = buildings.filter(
     (b) => b.id !== id && b.category === building?.category
   ).slice(0, 3);
@@ -170,12 +186,23 @@ export function BuildingDetailsPage() {
     <PageTransition>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {/* ── Breadcrumb ── */}
-        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-5 flex-wrap">
-          <Link to="/" className="hover:text-primary transition-colors">Home</Link>
-          <ChevronRight className="h-3 w-3" />
-          <Link to="/buildings" className="hover:text-primary transition-colors">Buildings</Link>
-          <ChevronRight className="h-3 w-3" />
-          <span className="text-foreground font-bold">{building!.code}</span>
+        <nav
+          aria-label="Breadcrumb"
+          className="mb-5 w-full min-w-0 overflow-x-auto text-xs text-muted-foreground no-scrollbar"
+        >
+          <ol className="m-0 flex w-max min-w-full list-none flex-nowrap items-center gap-1.5 whitespace-nowrap p-0">
+            <li className="flex shrink-0 items-center gap-1.5">
+              <Link to="/" className="transition-colors hover:text-primary">Home</Link>
+              <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+            </li>
+            <li className="flex shrink-0 items-center gap-1.5">
+              <Link to="/buildings" className="transition-colors hover:text-primary">Buildings</Link>
+              <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+            </li>
+            <li aria-current="page" className="max-w-[40vw] truncate font-bold text-foreground sm:max-w-64">
+              {building!.code}
+            </li>
+          </ol>
         </nav>
 
         <Link
@@ -303,6 +330,7 @@ export function BuildingDetailsPage() {
                   type="button"
                   role="tab"
                   aria-selected={activeTab === key}
+                  aria-label={label}
                   tabIndex={activeTab === key ? 0 : -1}
                   onClick={() => setActiveTab(key)}
                   className={cn(
@@ -328,7 +356,7 @@ export function BuildingDetailsPage() {
                 transition={{ duration: 0.2 }}
               >
                 {activeTab === "about" && (
-                  <div className="surface-card p-6 space-y-4">
+                  <div className="surface-card p-5 sm:p-6 space-y-5">
                     <h2 className="font-extrabold text-foreground flex items-center gap-2">
                       <span className="w-1 h-5 rounded-full bg-primary inline-block" />
                       About This Building
@@ -341,6 +369,113 @@ export function BuildingDetailsPage() {
                         <Phone className="h-4 w-4 text-primary shrink-0" />
                         <span className="text-sm text-foreground font-semibold">{building!.contact}</span>
                       </div>
+                    )}
+                    <section className="border-t border-border pt-4" aria-labelledby="building-facilities-title">
+                      <h3 id="building-facilities-title" className="mb-3 flex items-center gap-2 text-sm font-extrabold text-foreground">
+                        <Layers className="h-4 w-4 text-primary" /> Facilities
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {(buildingFacilities[building!.id] ?? ["General Facilities", "Study Areas"]).map((facility) => (
+                          <span
+                            key={facility}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+                          >
+                            <CheckCircle2 className="h-3 w-3 text-primary/70" />
+                            {facility}
+                          </span>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="border-t border-border pt-4" aria-labelledby="building-accessibility-title">
+                      <h3 id="building-accessibility-title" className="mb-3 flex items-center gap-2 text-sm font-extrabold text-foreground">
+                        <Accessibility className="h-4 w-4 text-green-500" /> Accessibility
+                      </h3>
+                      <ul className="grid gap-2 sm:grid-cols-2">
+                        {(buildingAccessibility[building!.id] ?? ["Standard Access"]).map((feature) => (
+                          <li
+                            key={feature}
+                            className="flex items-center gap-2.5 rounded-xl border border-green-200/60 bg-green-50/60 px-3.5 py-3 text-sm text-foreground dark:border-green-800/20 dark:bg-green-900/10"
+                          >
+                            <Accessibility className="h-4 w-4 shrink-0 text-green-500" />
+                            {feature}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  </div>
+                )}
+
+                {activeTab === "rooms" && (
+                  <div className="surface-card p-4 sm:p-6">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+                      <h2 className="flex items-center gap-2 font-extrabold text-foreground">
+                        <DoorOpen className="h-4 w-4 text-primary" /> Rooms & Spaces
+                      </h2>
+                      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
+                        {roomCount} {roomCount === 1 ? "room" : "rooms"}
+                      </span>
+                    </div>
+                    {roomGroups.length > 0 ? (
+                      <div className="space-y-5">
+                        {roomGroups.map((floor) => (
+                          <section key={floor.id} aria-labelledby={`rooms-floor-${floor.id}`}>
+                            <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-2">
+                              <div className="min-w-0">
+                                <h3 id={`rooms-floor-${floor.id}`} className="text-sm font-bold text-foreground">
+                                  {floor.label}
+                                </h3>
+                                <span className="text-xs text-muted-foreground">
+                                  {floor.rooms.length} {floor.rooms.length === 1 ? "space" : "spaces"}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                aria-expanded={expandedRoomFloors.has(floor.id)}
+                                aria-controls={`floor-rooms-${floor.id}`}
+                                aria-label={`${expandedRoomFloors.has(floor.id) ? "Hide" : "Show"} rooms on ${floor.label}`}
+                                onClick={() => setExpandedRoomFloors((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(floor.id)) next.delete(floor.id);
+                                  else next.add(floor.id);
+                                  return next;
+                                })}
+                                className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                              >
+                                {expandedRoomFloors.has(floor.id) ? "Hide" : "Show"}
+                                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expandedRoomFloors.has(floor.id) && "rotate-180")} />
+                              </button>
+                            </div>
+                            <ul
+                              id={`floor-rooms-${floor.id}`}
+                              aria-labelledby={`rooms-floor-${floor.id}`}
+                              className={cn("gap-2 sm:grid-cols-2", expandedRoomFloors.has(floor.id) ? "grid" : "hidden")}
+                            >
+                              {floor.rooms.map((room) => (
+                                <li
+                                  key={room.id}
+                                  className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-background/50 px-3 py-2.5"
+                                >
+                                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                    <MapPin className="h-4 w-4" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-semibold text-foreground">
+                                      {room.name}
+                                    </span>
+                                    <span className="mt-0.5 block truncate text-xs capitalize text-muted-foreground">
+                                      {room.type.replace(/[_-]+/g, " ")}
+                                    </span>
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                        No rooms are listed for this building yet.
+                      </p>
                     )}
                   </div>
                 )}
@@ -373,43 +508,6 @@ export function BuildingDetailsPage() {
                   </div>
                 )}
 
-                {activeTab === "facilities" && (
-                  <div className="surface-card p-6">
-                    <h2 className="font-extrabold text-foreground mb-4 flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-primary" /> Facilities
-                    </h2>
-                    <div className="flex flex-wrap gap-2">
-                      {(buildingFacilities[building!.id] ?? ["General Facilities", "Study Areas"]).map((f) => (
-                        <span
-                          key={f}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-muted border border-border text-muted-foreground hover:border-primary/20 hover:text-foreground transition-colors"
-                        >
-                          <CheckCircle2 className="h-3 w-3 text-primary/60" />
-                          {f}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === "accessibility" && (
-                  <div className="surface-card p-6">
-                    <h2 className="font-extrabold text-foreground mb-4 flex items-center gap-2">
-                      <Map className="h-4 w-4 text-primary" /> Accessibility Features
-                    </h2>
-                    <div className="space-y-2">
-                      {(buildingAccessibility[building!.id] ?? ["Standard Access"]).map((a) => (
-                        <div
-                          key={a}
-                          className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-green-50/60 dark:bg-green-900/10 border border-green-200/60 dark:border-green-800/20 text-sm text-foreground"
-                        >
-                          <Accessibility className="h-4 w-4 text-green-500 shrink-0" />
-                          {a}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>

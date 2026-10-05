@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Building } from "../../../types";
 import type { StudentAuthState } from "../../../hooks/useStudentAuth";
@@ -41,24 +42,45 @@ describe("mobile building details sheet", () => {
     expect(sheetContent.getByRole("button", { name: "Directions" })).toBeVisible();
     expect(sheetContent.getByRole("button", { name: "Enter Building" })).toBeVisible();
     expect(sheetContent.getByRole("button", { name: /Save/ })).toBeVisible();
-    expect(sheetContent.getByRole("button", { name: /Share/ })).toBeVisible();
+    expect(sheetContent.getByRole("button", { name: "Show building QR code" })).toBeVisible();
     expect(sheetContent.getByRole("button", { name: "Report map issue" })).toBeVisible();
     expect(sheetContent.getByTestId("building-quick-facts-compact")).toHaveTextContent("Academic");
     expect(sheetContent.getByTestId("building-quick-facts-compact")).toHaveTextContent("6 floors");
     expect(sheetContent.queryByText(/floor plan/i)).not.toBeInTheDocument();
   });
 
-  it("keeps Report in the visible action row rather than duplicating it in More", () => {
+  it("keeps Report and QR visible while More contains Share and Copy Link", () => {
     render(<MobileBuildingSheet
       selected={building} onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}
       onSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
       hasFloorPlans floorPlanCount={6} facilities={[]} accessibility={[]} showQR={false} onToggleQR={vi.fn()}
     />);
     expect(screen.getByRole("button", { name: "Report map issue" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Show building QR code" })).toBeVisible();
     fireEvent.pointerDown(screen.getByRole("button", { name: "More building actions" }), { button: 0, ctrlKey: false });
-    expect(screen.getByRole("menuitem", { name: "Show QR Code" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Share" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Copy Link" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /qr code/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /report/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the building QR after the QR action is activated", async () => {
+    const props = {
+      selected: building, campusId: "campus-1", onClose: vi.fn(), onDirections: vi.fn(), onEnterBuilding: vi.fn(),
+      onSave: vi.fn(), onReport: vi.fn(), onSignInPrompt: vi.fn(), saved: new Set<string>(),
+      studentAuth: { isStudent: true } as StudentAuthState, hasFloorPlans: true, floorPlanCount: 6,
+      facilities: ["Elevator"], accessibility: ["Accessible entrance"],
+    };
+    function InteractiveBuildingSheet() {
+      const [showQR, setShowQR] = useState(false);
+      return <MobileBuildingSheet {...props} showQR={showQR} onToggleQR={() => setShowQR((visible) => !visible)} />;
+    }
+    render(<InteractiveBuildingSheet />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show building QR code" }));
+    expect(await screen.findByLabelText(`QR code for ${building.name}`)).toBeVisible();
+    expect(screen.getByTestId("building-qr")).toBeVisible();
+    expect(screen.getByText(`Scan to set ${building.name} as your current location`)).toBeVisible();
   });
 
   it("places an authored building cover in the default mobile state", () => {

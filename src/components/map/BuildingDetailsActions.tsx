@@ -72,8 +72,14 @@ export function BuildingDetailsActions({
           {isSaved && studentAuth.isStudent ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Bookmark className={cn("h-3.5 w-3.5 shrink-0", isSaved && "fill-current")} />}
           <span>{isSaved && studentAuth.isStudent ? "Saved" : "Save"}</span>
         </button>
-        <button type="button" onClick={() => void share()} className={cn(iconButton, "h-11 gap-1 px-1 text-[10px]")}>
-          <Share2 className="h-3.5 w-3.5 shrink-0" /> <span>Share</span>
+        <button
+          type="button"
+          aria-label={showQR ? "Hide building QR code" : "Show building QR code"}
+          aria-pressed={showQR}
+          onClick={onToggleQR}
+          className={cn(iconButton, "h-11 gap-1 px-1 text-[10px]", showQR && "border-primary/25 bg-primary/5 text-primary")}
+        >
+          <QrCode className="h-3.5 w-3.5 shrink-0" /> <span>QR Code</span>
         </button>
         <StudentReportAction
           testId="building-report"
@@ -90,8 +96,8 @@ export function BuildingDetailsActions({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content align="end" sideOffset={6} collisionPadding={10} className="z-[120] min-w-48 rounded-xl border border-border bg-card p-1.5 text-card-foreground shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:zoom-out-95 duration-150">
-              <DropdownMenu.Item onSelect={onToggleQR} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold outline-none transition-colors hover:bg-muted focus:bg-muted data-[highlighted]:bg-muted">
-                <QrCode className="h-3.5 w-3.5 text-primary" /> {showQR ? "Hide QR Code" : "Show QR Code"}
+              <DropdownMenu.Item onSelect={() => void share()} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold outline-none transition-colors hover:bg-muted focus:bg-muted data-[highlighted]:bg-muted">
+                <Share2 className="h-3.5 w-3.5 text-primary" /> Share
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => void copyLink()} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold outline-none transition-colors hover:bg-muted focus:bg-muted data-[highlighted]:bg-muted">
                 <ClipboardCopy className="h-3.5 w-3.5 text-primary" /> Copy Link
