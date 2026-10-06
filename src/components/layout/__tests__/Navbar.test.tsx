@@ -5,6 +5,7 @@ import { Navbar } from "../Navbar";
 
 const authState = vi.hoisted(() => ({
   isStudent: true,
+  isAdmin: false,
   isStudentOrg: true,
   loading: false,
   username: "Test Student",
@@ -130,5 +131,30 @@ describe("Navbar student navigation", () => {
 
     expect(screen.getByRole("status", { name: /checking account/i })).toBeInTheDocument();
     expect(screen.getByText("Checking account")).toBeInTheDocument();
+  });
+
+  it("keeps public Sign in as navigation only for a guest", async () => {
+    authState.isStudent = false;
+    authState.isStudentOrg = false;
+    authState.isAdmin = false;
+    authState.loading = false;
+    authState.signOut.mockClear();
+    render(<MemoryRouter initialEntries={["/"]}><RouteProbe /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole("link", { name: /Login/ }));
+
+    await waitFor(() => expect(screen.getByTestId("current-route")).toHaveTextContent("/admin"));
+    expect(authState.signOut).not.toHaveBeenCalled();
+  });
+
+  it("shows an Admin dashboard link instead of guest Sign in for an active Admin", () => {
+    authState.isStudent = false;
+    authState.isStudentOrg = false;
+    authState.isAdmin = true;
+    authState.loading = false;
+    renderNavbar();
+
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/admin-dashboard");
+    expect(screen.queryByRole("link", { name: /Login/ })).not.toBeInTheDocument();
   });
 });

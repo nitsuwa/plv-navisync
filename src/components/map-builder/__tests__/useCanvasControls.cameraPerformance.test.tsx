@@ -127,6 +127,20 @@ describe("useCanvasControls imperative Floor camera", () => {
     expect(raf.callbacks.size).toBe(0);
   });
 
+  it("moves the Floor camera on the first Pan or Space-pan pointer move", () => {
+    installAnimationFrameQueue();
+    const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const { result } = renderHook(() => useCanvasControls(500, 500, {
+      imperativeCamera: true, immediatePan: true, svgPanCoordinateSpace: true,
+    }));
+    attachCanvasRefs(result, transform);
+    act(() => result.current.startPan({ clientX: 100, clientY: 100 } as MouseEvent));
+    act(() => result.current.movePan({ clientX: 80, clientY: 90 } as MouseEvent));
+    expect(transform.getAttribute("transform")).toBe("translate(-20,-10) scale(1)");
+    act(() => result.current.endPan());
+    expect(result.current.pan).toEqual({ x: -20, y: -10 });
+  });
+
   it("keeps deliberate zoom actions animated and yields smoothly to wheel input", () => {
     const raf = installAnimationFrameQueue();
     const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -215,5 +229,36 @@ describe("useCanvasControls imperative Floor camera", () => {
     matrix = { ...matrix, e: 760 + 20 };
     const shiftedClick = { clientX: 760 + 20 + 100 * 2.5, clientY: screenPoint.clientY } as MouseEvent;
     expect(result.current.getPoint(shiftedClick, 500, 500)).toEqual({ x: 100, y: 80 });
+  });
+
+  it("lets outdoor authored edges pan into the center of the measured usable viewport", () => {
+    const transform = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const { result } = renderHook(() => useCanvasControls(3_000, 1_000, {
+      imperativeCamera: true,
+      immediatePan: true,
+      centerMapEdges: true,
+    }));
+    const usableRect = { left: 224, top: 0, width: 680, height: 700 };
+    result.current.containerRef.current = { getBoundingClientRect: () => usableRect } as unknown as HTMLDivElement;
+    result.current.svgRef.current = {
+      getBoundingClientRect: () => usableRect,
+      viewBox: { baseVal: { x: 0, y: 0, width: 3_000, height: 1_000 } },
+      style: { cursor: "grab" },
+    } as unknown as SVGSVGElement;
+    result.current.cameraTransformRef.current = transform as SVGGElement;
+
+    act(() => {
+      result.current.startPan({ clientX: 0, clientY: 0 } as MouseEvent);
+      result.current.movePan({ clientX: -1_600, clientY: 0 } as MouseEvent);
+    });
+    expect(Number(transform.getAttribute("transform")?.match(/translate\(([^,]+)/)?.[1])).toBeCloseTo(-1_600);
+    act(() => result.current.endPan());
+
+    act(() => {
+      result.current.startPan({ clientX: 0, clientY: 0 } as MouseEvent);
+      result.current.movePan({ clientX: 3_200, clientY: 0 } as MouseEvent);
+    });
+    expect(Number(transform.getAttribute("transform")?.match(/translate\(([^,]+)/)?.[1])).toBeCloseTo(1_600);
+    act(() => result.current.endPan());
   });
 });

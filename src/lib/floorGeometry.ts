@@ -1460,7 +1460,14 @@ export function rotateFloorItem(
   return item;
 }
 
-export function selectionIdsInRect(floor: FloorPlan, rect: Rect) {
+export interface SelectableFloorBounds {
+  type: FloorSelection["type"];
+  id: string;
+  bounds: Rect;
+}
+
+/** Capture selectable object bounds once at the start of a marquee gesture. */
+export function selectableFloorBounds(floor: FloorPlan): SelectableFloorBounds[] {
   const pairs: Array<[FloorSelection["type"], any[]]> = [
     ["room", floor.rooms],
     ["wall", floor.walls.filter((wall) => wall.managedKind !== "perimeter")],
@@ -1475,15 +1482,23 @@ export function selectionIdsInRect(floor: FloorPlan, rect: Rect) {
     ["entranceRamp", floor.entranceRamps ?? []],
     ["exteriorZone", floor.exteriorZones ?? []],
   ];
-  return pairs.flatMap(([type, items]) =>
-    items
-      .filter((item) => {
-        if (item?.locked) return false;
-        const bounds = itemBounds(type, item);
-        return bounds ? rectsIntersect(rect, bounds) : false;
-      })
-      .map((item) => item.id as string)
-  );
+  const selectable: SelectableFloorBounds[] = [];
+  for (const [type, items] of pairs) {
+    for (const item of items) {
+      if (item?.locked || (type === "wall" && item.managedKind === "perimeter")) continue;
+      const bounds = itemBounds(type, item);
+      if (bounds) selectable.push({ type, id: item.id as string, bounds });
+    }
+  }
+  return selectable;
+}
+
+export function selectionIdsInCachedBounds(selectable: readonly SelectableFloorBounds[], rect: Rect) {
+  return selectable.filter(({ bounds }) => rectsIntersect(rect, bounds)).map(({ id }) => id);
+}
+
+export function selectionIdsInRect(floor: FloorPlan, rect: Rect) {
+  return selectionIdsInCachedBounds(selectableFloorBounds(floor), rect);
 }
 
 export function validateFloorGeometry(floor: FloorPlan): FloorIssue[] {

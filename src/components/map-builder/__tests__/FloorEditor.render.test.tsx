@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { Profiler, useState } from "react";
 import { FloorEditor, exteriorEmergencyStairSafeOffsetRange } from "../FloorEditor";
 import { ReadonlyFloorPlanScene } from "../ReadonlyFloorPlanVisuals";
 import type { Campus, FloorStairs } from "../types";
@@ -171,12 +171,14 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
 
     fireEvent.mouseDown(eastHandle!, { clientX: 340, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 180, clientY: 140, bubbles: true });
+    await waitFor(() => expect(readLines().lines.length).toBeGreaterThan(initial.lines.length));
     const narrow = readLines();
     expect(narrow.label).toBeTruthy();
     expect(narrow.lines.join(" ")).toBe(name);
     expect(narrow.lines.length).toBeGreaterThan(initial.lines.length);
 
     fireEvent.mouseMove(svg!, { clientX: 400, clientY: 140, bubbles: true });
+    await waitFor(() => expect(readLines().lines.length).toBeLessThan(narrow.lines.length));
     const wide = readLines();
     expect(wide.lines.join(" ")).toBe(name);
     expect(wide.lines.length).toBeLessThan(narrow.lines.length);
@@ -220,13 +222,16 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.mouseDown(eastHandle!, { clientX: 340, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 190, clientY: 140, bubbles: true });
 
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="resized-custom-room"]')!;
+    expect(Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "").join(" ")).toBe(name);
+    // The live resize remains visible in the Floor-local preview while the
+    // canonical parent Campus is held until pointer-up.
+    expect(latestCampus.buildings[0].floors[0].rooms[0].w).toBe(260);
+    fireEvent.mouseUp(svg!, { bubbles: true });
     const resizedRoom = latestCampus.buildings[0].floors[0].rooms[0];
     expect(resizedRoom.name).toBe(name);
     expect(resizedRoom.shapePoints).toHaveLength(4);
     expect(Math.max(...resizedRoom.shapePoints!.map((point) => point.x)) - Math.min(...resizedRoom.shapePoints!.map((point) => point.x))).toBe(resizedRoom.w);
-    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="resized-custom-room"]')!;
-    expect(Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "").join(" ")).toBe(name);
-    fireEvent.mouseUp(svg!, { bubbles: true });
   });
 
   it("uses the shared full-name layout in the Readonly Floor view", () => {
@@ -554,6 +559,289 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(moved?.x).toBeGreaterThan(250);
   });
 
+  it("draws Select Marquee without React commits and applies selection only on release", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [
+      { id: "marquee-room", name: "Marquee Room", type: "classroom", x: 40, y: 40, w: 100, h: 80, floorId: "f1", buildingId: "b1" },
+    ];
+    const onRender = vi.fn();
+    const { container } = render(
+      <Profiler id="floor-editor-marquee" onRender={onRender}>
+        <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />
+      </Profiler>,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-marquee-selection"]')).toBeTruthy());
+
+    fireEvent.mouseDown(svg!, { button: 0, clientX: 10, clientY: 10, bubbles: true });
+    const gestureStartCommitCount = onRender.mock.calls.length;
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="marquee-room"]')).toBeNull();
+    fireEvent.mouseMove(window, { clientX: 150, clientY: 130, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-marquee-selection"]')?.getAttribute("visibility")).toBe("visible"));
+
+    expect(onRender).toHaveBeenCalledTimes(gestureStartCommitCount);
+    expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="marquee-room"]')).toBeNull();
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 150, clientY: 130, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="marquee-room"]')).toBeTruthy());
+    expect(onRender.mock.calls.length).toBeGreaterThan(gestureStartCommitCount);
+    expect(container.querySelector('[data-testid="floor-marquee-selection"]')?.getAttribute("visibility")).toBe("hidden");
+  });
+
+  it("draws a Room marquee in the interaction layer and commits only on release", () => {
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByTestId("room-library-tool"));
+    fireEvent.mouseDown(svg, { clientX: 200, clientY: 160 });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 210 });
+    expect(container.querySelector('[data-testid="room-placement-interaction-overlay"]')).toBeTruthy();
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { clientX: 260, clientY: 210 });
+    expect(updates).toHaveLength(1);
+  });
+
+  it("moves a Room in one commit and restores exact geometry through Undo and Redo", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [{ id: "room-history", name: "History Room", type: "classroom", x: 80, y: 80, w: 100, h: 70, floorId: "f1", buildingId: "b1" }];
+    const updates: Campus[] = [];
+    function Harness() {
+      const [current, setCurrent] = useState(campus);
+      return <FloorEditor campus={current} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { updates.push(next); setCurrent(next); }} />;
+    }
+    const { container } = render(<Harness />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.mouseDown(container.querySelector('[data-floor-title="History Room"]')!, { clientX: 90, clientY: 90 });
+    fireEvent.mouseMove(svg, { clientX: 190, clientY: 170 });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-interaction-items"]')?.children.length).toBeGreaterThan(0));
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { clientX: 190, clientY: 170 });
+    await waitFor(() => expect(updates).toHaveLength(1));
+    const moved = updates.at(-1)!.buildings[0].floors[0].rooms[0];
+    expect(moved).toMatchObject({ x: 180, y: 160 });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(updates.at(-1)?.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 80, y: 80 }));
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => expect(updates.at(-1)?.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 180, y: 160 }));
+  });
+
+  it("keeps the physical Room preview live while the Navigation overlay is visible", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [{ id: "room-nav-visible", name: "Nav Visible Room", type: "classroom", x: 80, y: 80, w: 100, h: 70, floorId: "f1", buildingId: "b1" }];
+    campus.navNodes = [
+      { id: "room-node", name: "Room", type: "room_access", x: 130, y: 115, buildingId: "b1", floorId: "f1", roomId: "room-nav-visible", accessible: true, color: "#16a34a" },
+      { id: "room-target", name: "Hall", type: "hallway", x: 450, y: 300, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [{ id: "room-edge", startNodeId: "room-node", endNodeId: "room-target", distance: 360, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hide Navigation" })).toBeTruthy());
+
+    fireEvent.mouseDown(container.querySelector('[data-floor-title="Nav Visible Room"]')!, { clientX: 90, clientY: 90 });
+    fireEvent.mouseMove(svg, { clientX: 190, clientY: 170 });
+    const previewSelector = '[data-testid="floor-interaction-items"] [data-layer-key="room:room-nav-visible"]';
+    await waitFor(() => expect(container.querySelector(previewSelector)?.getAttribute("transform")).toContain("translate(230 195)"));
+    expect(container.querySelector('[data-testid="floor-nav-gesture-preview"] [data-preview-edge-id="room-edge"]')?.getAttribute("points")).toContain("230,185");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { clientX: 190, clientY: 170 });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].rooms[0]).toMatchObject({ x: 180, y: 160 });
+  });
+
+  it("updates the Wall drawing preview without a live Floor commit", async () => {
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByTitle("Wall"));
+    fireEvent.mouseDown(svg, { clientX: 200, clientY: 160 });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 210 });
+    await waitFor(() => expect(container.querySelector('[data-testid="wall-draw-interaction-overlay"]')).toBeTruthy());
+    expect(updates).toHaveLength(0);
+  });
+
+  it("keeps the furniture placement ghost in the interaction layer without Floor commits", async () => {
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.change(screen.getByLabelText("Search objects"), { target: { value: "Chair" } });
+    fireEvent.click(screen.getByRole("button", { name: "Chair" }));
+    fireEvent.mouseMove(svg, { clientX: 250, clientY: 180 });
+    await waitFor(() => expect(container.querySelector('[data-testid="furniture-placement-interaction-overlay"]')).toBeTruthy());
+    expect(updates).toHaveLength(0);
+  });
+
+  it("cleans the stable interaction layer safely on Escape and tool switch", async () => {
+    const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByTitle("Wall"));
+    fireEvent.mouseDown(svg, { clientX: 200, clientY: 160 });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 210 });
+    await waitFor(() => expect(container.querySelector('[data-testid="wall-draw-interaction-overlay"]')).toBeTruthy());
+    fireEvent.click(screen.getByTitle("Stairs"));
+    expect(container.querySelector('[data-testid="wall-draw-interaction-overlay"]')).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector('[data-testid="floor-interaction-items"]')?.children).toHaveLength(0);
+  });
+
+  it("previews Door and Window attachment without committing pointer samples", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].walls = [{ id: "wall-attach", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByTitle("Door"));
+    fireEvent.mouseMove(svg, { clientX: 220, clientY: 100 });
+    await waitFor(() => expect(container.querySelector('[data-preview-kind="door"]')).toBeTruthy());
+    expect(updates).toHaveLength(0);
+    fireEvent.click(screen.getByTitle("Window"));
+    fireEvent.mouseMove(svg, { clientX: 280, clientY: 100 });
+    await waitFor(() => expect(container.querySelector('[data-preview-kind="window"]')).toBeTruthy());
+    expect(updates).toHaveLength(0);
+  });
+
+  it("keeps a dragged Door projected and reorients its live preview onto a vertical Wall", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [
+      { id: "wall-horizontal", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" },
+      { id: "wall-vertical", x1: 300, y1: 100, x2: 300, y2: 320, thickness: 8, color: "#334155" },
+    ];
+    floor.doors = [{ id: "door-live", x: 200, y: 100, width: 48, offset: 0.286, wallId: "wall-horizontal", direction: "left", doorType: "single", color: "#92400e" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    const door = container.querySelector('[data-layer-key="door:door-live"]') as SVGGElement;
+    const before = door.getAttribute("transform") ?? "";
+    fireEvent.mouseDown(door, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 300, clientY: 160, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door:door-live"]')).toBeTruthy());
+    const preview = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door:door-live"]') as SVGGElement;
+    expect(door.getAttribute("visibility")).toBe("hidden");
+    expect(preview.getAttribute("transform")).toContain("rotate(90)");
+    expect(preview.getAttribute("transform")).not.toBe(before);
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].doors?.[0]).toMatchObject({ wallId: "wall-vertical", x: 300, y: 160 });
+  });
+
+  it("moves the read-only navigation anchor and connected edge with a dragged Door", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [
+      { id: "door-wall", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" },
+      { id: "target-wall", x1: 300, y1: 100, x2: 300, y2: 320, thickness: 8, color: "#334155" },
+    ];
+    floor.doors = [{ id: "door-linked", x: 200, y: 100, width: 48, offset: 0.286, wallId: "door-wall", direction: "left", doorType: "single", color: "#92400e" }];
+    campus.navNodes = [
+      { id: "door-node", name: "Door", type: "hallway", x: 200, y: 100, buildingId: "b1", floorId: "f1", doorId: "door-linked", accessible: true, color: "#16a34a" },
+      { id: "other-node", name: "Other", type: "hallway", x: 450, y: 240, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [{ id: "door-edge", startNodeId: "door-node", endNodeId: "other-node", distance: 260, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hide Navigation" })).toBeTruthy());
+    const door = container.querySelector('[data-layer-key="door:door-linked"]')!;
+    fireEvent.mouseDown(door, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 300, clientY: 160, bubbles: true });
+    await waitFor(() => {
+      const edge = container.querySelector('[data-testid="floor-nav-gesture-preview"] [data-preview-edge-id="door-edge"]');
+      expect(edge?.getAttribute("points")).toContain("300,160");
+      expect(container.querySelector('[data-testid="floor-nav-layer"] [data-nav-edge-id="door-edge"]')?.getAttribute("visibility")).toBe("hidden");
+      expect(container.querySelector('[data-testid="floor-nav-gesture-preview"] [data-nav-node-id="door-node"]')?.getAttribute("transform")).toBe("translate(100 60)");
+      expect(container.querySelector('[data-testid="floor-nav-gesture-preview"] [data-issue-object="navEdge:door-edge"]')?.getAttribute("transform")).toBe("translate(50 30)");
+    });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].navEdges?.map((edge) => edge.id)).toEqual(["door-edge"]);
+    expect(updates[0].navNodes?.find((node) => node.id === "other-node")).toMatchObject({ x: 450, y: 240 });
+  });
+
+  it("moves the Door direction badge with the same transient owner transform", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    campus.buildings[0].entrances = [{
+      id: "door-entrance",
+      buildingId: "b1",
+      edge: "top",
+      offset: 0.5,
+      type: "general",
+      direction: "exit_only",
+    }];
+    floor.walls = [
+      { id: "door-wall", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" },
+      { id: "target-wall", x1: 300, y1: 100, x2: 300, y2: 320, thickness: 8, color: "#334155" },
+    ];
+    floor.doors = [{ id: "door-arrow", x: 200, y: 100, width: 48, offset: 0.286, wallId: "door-wall", direction: "left", doorType: "single", color: "#92400e", buildingEntranceId: "door-entrance" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    const door = container.querySelector('[data-layer-key="door:door-arrow"]')!;
+    const authoredDoorTransform = door.getAttribute("transform") ?? "";
+    fireEvent.mouseDown(door, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 100, bubbles: true });
+
+    await waitFor(() => {
+      const originalBadge = container.querySelector('[data-layer-key="door-direction:door-arrow"]');
+      const previewBadge = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door-direction:door-arrow"]');
+      const previewDoor = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door:door-arrow"]');
+      expect(originalBadge?.getAttribute("visibility")).toBe("hidden");
+      expect(previewBadge).toBeTruthy();
+      const doorPreviewTransform = previewDoor?.getAttribute("transform") ?? "";
+      const sharedTransientTransform = authoredDoorTransform
+        ? doorPreviewTransform.slice(0, -authoredDoorTransform.length).trim()
+        : doorPreviewTransform;
+      expect(sharedTransientTransform).not.toBe("");
+      expect(previewBadge?.getAttribute("transform")).toBe(sharedTransientTransform);
+      expect(previewBadge?.querySelector('[data-testid="entrance-direction-badge"]')).toBeTruthy();
+    });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].doors?.[0]?.buildingEntranceId).toBe("door-entrance");
+  });
+
+  it("moves Stairs and Elevators with a single release commit", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.stairs = [{ id: "stairs-move", x: 110, y: 100, width: 40, height: 60, direction: "both", label: "Stairs" }];
+    floor.elevators = [{ id: "elevator-move", x: 220, y: 100, width: 40, height: 40, doorWidth: 6, label: "Elevator" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    for (const [type, id, startX] of [["stairs", "stairs-move", 120], ["elevator", "elevator-move", 230]] as const) {
+      const object = container.querySelector(`[data-layer-key="${type}:${id}"]`)!;
+      fireEvent.mouseDown(object, { clientX: startX, clientY: 110 });
+      fireEvent.mouseMove(svg, { clientX: startX + 35, clientY: 135 });
+      await waitFor(() => expect(container.querySelector('[data-testid="floor-interaction-items"]')?.children.length).toBeGreaterThan(0));
+      expect(updates).toHaveLength(type === "stairs" ? 0 : 1);
+      fireEvent.mouseUp(svg, { clientX: startX + 35, clientY: 135 });
+      expect(updates).toHaveLength(type === "stairs" ? 1 : 2);
+    }
+    expect(updates[0].buildings[0].floors[0].stairs?.[0].x).toBeGreaterThan(110);
+    expect(updates[1].buildings[0].floors[0].elevators?.[0].x).toBeGreaterThan(220);
+  });
+
   it("moves grouped furniture as one transient drag and preserves child geometry", () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
@@ -594,7 +882,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     document.body.appendChild(input);
     input.focus();
     fireEvent.keyDown(input, { code: "Space", key: " " });
-    expect(screen.queryByTestId("floor-space-pan-indicator")).toBeNull();
+    expect(screen.getByTestId("floor-space-pan-indicator")).not.toBeVisible();
     input.blur();
     input.remove();
 
@@ -604,7 +892,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect((svg as SVGSVGElement).style.cursor).toBe("grab");
 
     fireEvent.blur(window);
-    expect(screen.queryByTestId("floor-space-pan-indicator")).toBeNull();
+    expect(screen.getByTestId("floor-space-pan-indicator")).not.toBeVisible();
     expect(container.querySelector('[data-temporary-pan-active="true"]')).toBeNull();
   });
 
@@ -650,7 +938,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("shows a red Room ghost for an invalid move while preserving the last valid Room", () => {
+  it("shows a red Room ghost for an invalid move while preserving the last valid Room", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.rooms = [
@@ -668,7 +956,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(room).toBeTruthy();
     fireEvent.mouseDown(room!, { clientX: 90, clientY: 90, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 310, clientY: 90, bubbles: true });
-    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy();
+    await waitFor(() => expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy());
     expect(container.querySelector('[data-testid="placement-warning-badge"]')?.textContent).toMatch(/Overlaps.*Room/);
     const previewRect = container.querySelector('[data-testid="room-invalid-preview"] rect');
     const badge = container.querySelector('[data-testid="placement-warning-badge"]');
@@ -678,7 +966,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates).toHaveLength(0);
     expect(room?.querySelector("rect")?.getAttribute("x")).toBe("80");
     fireEvent.mouseMove(svg!, { clientX: 100, clientY: 200, bubbles: true });
-    expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
+    await waitFor(() => expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull());
     fireEvent.mouseUp(svg!, { bubbles: true });
   });
 
@@ -846,7 +1134,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("shows a red Room ghost for an invalid resize and commits no blocked geometry", () => {
+  it("shows a red Room ghost for an invalid resize and commits no blocked geometry", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.rooms = [
@@ -862,11 +1150,87 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(eastHandle).toBeTruthy();
     fireEvent.mouseDown(eastHandle!, { clientX: 180, clientY: 115, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 320, clientY: 115, bubbles: true });
-    expect(container.querySelector('[data-testid="room-invalid-preview"]')?.getAttribute("data-preview-kind")).toBe("resize");
+    await waitFor(() => expect(container.querySelector('[data-testid="room-invalid-preview"]')?.getAttribute("data-preview-kind")).toBe("resize"));
     expect(container.querySelector('[data-testid="placement-warning-badge"]')?.textContent).toMatch(/Overlaps.*Room/);
     expect(updates).toHaveLength(0);
     fireEvent.mouseUp(svg!, { bubbles: true });
     expect(updates).toHaveLength(0);
+  });
+
+  it("shows cached Room alignment guides during drag without a live Campus update", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [
+      { id: "room-a", name: "Room A", type: "classroom", x: 80, y: 80, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+      { id: "room-b", name: "Room B", type: "classroom", x: 300, y: 220, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+    ];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'));
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const room = container.querySelector('[data-floor-title="Room A"]');
+    fireEvent.mouseDown(room!, { clientX: 90, clientY: 90, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 310, clientY: 110, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-alignment-guides-layer"] [data-testid="room-align-guide"]')).toBeTruthy());
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+  });
+
+  it("previews Wall endpoint geometry directly and commits once on release", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].entrances = [{ id: "wall-door-entrance", buildingId: "b1", edge: "top", offset: 0.5, type: "general", direction: "exit_only" }];
+    campus.buildings[0].floors[0].walls = [
+      { id: "wall-edit", x1: 80, y1: 80, x2: 180, y2: 80, thickness: 4, color: "#64748b", material: "concrete" },
+    ];
+    campus.buildings[0].floors[0].doors = [{ id: "wall-door-arrow", x: 130, y: 80, width: 24, wallId: "wall-edit", offset: 0.5, direction: "both", color: "#92400e", buildingEntranceId: "wall-door-entrance" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "wall", id: "wall-edit" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'));
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const handles = container.querySelectorAll('[data-testid="wall-endpoint-handle"]');
+    expect(handles).toHaveLength(2);
+    fireEvent.mouseDown(handles[1], { clientX: 180, clientY: 80, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 220, clientY: 120, bubbles: true });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="wall-endpoint-interaction-overlay"] [data-wall-core]')?.getAttribute("x2")).toBe("220");
+      const sourceBadge = container.querySelector('[data-layer-key="door-direction:wall-door-arrow"]');
+      const previewBadge = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door-direction:wall-door-arrow"]');
+      const previewDoor = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door:wall-door-arrow"]');
+      expect(sourceBadge?.getAttribute("visibility")).toBe("hidden");
+      const doorRotation = previewDoor?.getAttribute("transform")?.match(/rotate\([^)]*\)/)?.[0];
+      expect(doorRotation).toBeTruthy();
+      expect(previewBadge?.getAttribute("transform")).toContain(doorRotation!);
+    });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].walls[0]).toMatchObject({ x1: 80, y1: 80, x2: 220, y2: 120 });
+  });
+
+  it("moves a shared Wall junction cap with its transient endpoint", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].walls = [
+      { id: "wall-moving", x1: 80, y1: 80, x2: 180, y2: 80, thickness: 4, color: "#64748b", material: "concrete" },
+      { id: "wall-neighbor", x1: 180, y1: 80, x2: 260, y2: 80, thickness: 4, color: "#64748b", material: "concrete" },
+    ];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "wall", id: "wall-moving" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.querySelector('[data-testid="floor-canvas-boundary"]'))!;
+    mockFloorSvgViewport(svg);
+    const sharedCap = container.querySelector('[data-testid="wall-joint-cap"][data-wall-joint-key="180,80"]') as SVGGElement;
+    expect(sharedCap).toBeTruthy();
+    const handles = container.querySelectorAll('[data-testid="wall-endpoint-handle"]');
+    fireEvent.mouseDown(handles[1], { clientX: 180, clientY: 80, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 220, clientY: 120, bubbles: true });
+    await waitFor(() => {
+      const capPreview = container.querySelector('[data-testid="floor-interaction-items"] [data-wall-joint-key="180,80"]');
+      expect(capPreview?.getAttribute("transform")).toContain("translate(40 40)");
+      expect(sharedCap.getAttribute("visibility")).toBe("hidden");
+    });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
   });
 
   it("cancels every physical placement tool with Escape without creating history", () => {

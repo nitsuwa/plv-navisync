@@ -28,7 +28,7 @@ import {
 import { campusAreaGroundAppearance, campusGroundAppearance, campusObjectSafeBounds } from "../../lib/campusCanvas";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
-import { EntranceDirectionBadge } from "./EntranceDirectionBadge";
+import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -50,6 +50,8 @@ const pathPointRenderKey = (point: { x: number; y: number }) => `${Number(point.
 
 interface CanvasProps {
   campus: Campus;
+  /** Imperative live transforms keep a selected physical object from repainting the whole campus SVG. */
+  transientCampusPreviewRef?: React.MutableRefObject<CanvasGesturePreviewController | null>;
   tool: SimpleTool;
   layer: EditorLayer;
   selected: CampusSelection | null;
@@ -217,6 +219,20 @@ interface CanvasProps {
   animatingPathId?: string | null;
 }
 
+export interface CanvasGesturePreviewController {
+  preview: (next: Campus, hint?: CanvasTransformPreviewHint) => boolean;
+  setGuides: (guides: { type: "h" | "v"; pos: number }[]) => void;
+  clear: () => void;
+}
+
+export interface CanvasTransformPreviewHint {
+  type: "building" | "decorAsset" | "marker";
+  id: string;
+  kind?: "move" | "rotation" | "resize";
+  /** Latest transient authored object; lets the Canvas update only its SVG group. */
+  after?: CampusBuilding | CampusDecorAsset | CampusMarker;
+}
+
 // ── Drag-over indicator component — shows a real SVG preview of the dragged asset at the cursor ──
 function DragOverlay({
   x, y, valid, label,
@@ -343,11 +359,381 @@ export function Canvas({
   decorRotatingId, decorResizingId, markerResizingId = null, onDecorRotateStart, onDecorResizeStart,
   navNodes, navEdges, showNavigationOverlay = false, routePreview = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navPathTargetHover, navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
   issueMarkers = [],
-  testRoutePickKind = null, testRoutePickHover = null, onTestRoutePickHover, onRouteTransitionClick,
+  testRoutePickKind = null, testRoutePickHover = null, onTestRoutePickHover, onRouteTransitionClick, transientCampusPreviewRef,
 }: CanvasProps) {
-  const buildings = campus.buildings;
-  const markers = campus.markers;
-  const paths = campus.paths;
+  const [transientCampusPreview, setTransientCampusPreview] = useState<Campus | null>(null);
+  const svgRootRef = useRef<SVGGElement | null>(null);
+  const interactionWorldRef = useRef<SVGGElement | null>(null);
+  const interactionItemsRef = useRef<SVGGElement | null>(null);
+  const alignmentGuidesRef = useRef<SVGGElement | null>(null);
+  // `style` is reconciled by React on a parent rerender, which can reveal the
+  // authored source while its transient clone is still moving. `visibility`
+  // is deliberately an imperative-only attribute for the gesture lifetime.
+  const hiddenPhysicalSourcesRef = useRef(new Map<SVGElement, string | null>());
+  const physicalPreviewElementsRef = useRef(new Map<string, SVGElement>());
+  const imperativePreviewActiveRef = useRef(false);
+  const physicalPreviewBeforeRef = useMemo(() => ({
+    buildings: new Map(campus.buildings.map((item) => [item.id, item])),
+    decorAssets: new Map((campus.decorAssets ?? []).map((item) => [item.id, item])),
+    markers: new Map(campus.markers.map((item) => [item.id, item])),
+  }), [campus.buildings, campus.decorAssets, campus.markers]);
+
+  const getPhysicalPreviewElement = useCallback((key: string, selector: string) => {
+    const cached = physicalPreviewElementsRef.current.get(key);
+    if (cached) return cached;
+    const source = svgRootRef.current?.querySelector<SVGElement>(selector);
+    const layer = interactionItemsRef.current;
+    if (!source || !layer) return null;
+    const clone = source.cloneNode(true) as SVGElement;
+    clone.removeAttribute("id");
+    clone.style.pointerEvents = "none";
+    clone.style.transition = "none";
+    clone.querySelectorAll<SVGElement>("*").forEach((child) => {
+      child.removeAttribute("id");
+      child.style.pointerEvents = "none";
+      child.style.transition = "none";
+    });
+    layer.appendChild(clone);
+    hiddenPhysicalSourcesRef.current.set(source, source.getAttribute("visibility"));
+    source.setAttribute("visibility", "hidden");
+    physicalPreviewElementsRef.current.set(key, clone);
+    return clone;
+  }, []);
+
+  const rememberAndSetTransform = useCallback((element: Element | null, transform: string) => {
+    if (!element) return;
+    element.setAttribute("transform", transform);
+  }, []);
+
+  const renderGuidesImperatively = useCallback((nextGuides: { type: "h" | "v"; pos: number }[]) => {
+    const group = alignmentGuidesRef.current;
+    if (!group) return;
+    const svg = group.ownerSVGElement;
+    if (!svg) return;
+    const ns = "http://www.w3.org/2000/svg";
+    const fragment = document.createDocumentFragment();
+    const { width, height } = svg.viewBox.baseVal;
+    for (const guide of nextGuides) {
+      const wrapper = document.createElementNS(ns, "g");
+      wrapper.setAttribute("class", "pointer-events-none");
+      const line = (thickness: string, dash?: string) => {
+        const node = document.createElementNS(ns, "line");
+        const vertical = guide.type === "v";
+        node.setAttribute("x1", vertical ? String(guide.pos) : "0");
+        node.setAttribute("y1", vertical ? "0" : String(guide.pos));
+        node.setAttribute("x2", vertical ? String(guide.pos) : String(width));
+        node.setAttribute("y2", vertical ? String(height) : String(guide.pos));
+        node.setAttribute("stroke", "var(--accent)");
+        node.setAttribute("stroke-width", thickness);
+        if (dash) node.setAttribute("stroke-dasharray", dash);
+        return node;
+      };
+      const halo = line("4");
+      halo.setAttribute("opacity", "0.12");
+      halo.setAttribute("data-testid", "alignment-guide");
+      wrapper.append(halo);
+      const stroke = line("1.25", "5 3");
+      stroke.setAttribute("opacity", "0.78");
+      wrapper.append(stroke);
+      const vertical = guide.type === "v";
+      const badge = document.createElementNS(ns, "rect");
+      badge.setAttribute("x", vertical ? String(guide.pos - 15) : String(width - 34));
+      badge.setAttribute("y", vertical ? "6" : String(guide.pos - 6));
+      badge.setAttribute("width", "30");
+      badge.setAttribute("height", "12");
+      badge.setAttribute("rx", "3");
+      badge.setAttribute("fill", "var(--accent)");
+      badge.setAttribute("fill-opacity", "0.7");
+      wrapper.append(badge);
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("x", vertical ? String(guide.pos) : String(width - 19));
+      label.setAttribute("y", vertical ? "14.5" : String(guide.pos + 3.5));
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("fill", "white");
+      label.setAttribute("font-size", "7");
+      label.setAttribute("font-weight", "700");
+      label.setAttribute("class", "pointer-events-none select-none");
+      label.textContent = String(guide.pos);
+      wrapper.append(label);
+      fragment.append(wrapper);
+    }
+    group.replaceChildren(fragment);
+  }, []);
+
+  const clearImperativePreview = useCallback(() => {
+    for (const [source, visibility] of hiddenPhysicalSourcesRef.current) {
+      if (visibility === null) source.removeAttribute("visibility");
+      else source.setAttribute("visibility", visibility);
+    }
+    hiddenPhysicalSourcesRef.current.clear();
+    interactionItemsRef.current?.replaceChildren();
+    physicalPreviewElementsRef.current.clear();
+    imperativePreviewActiveRef.current = false;
+    setTransientCampusPreview(null);
+  }, []);
+
+  const tryImperativeNavigationPreview = useCallback((next: Campus): boolean => {
+    if (tool !== "select" || layer !== "navigation" || !showNavigationOverlay || routePreview) return false;
+    const sourceNodes = navNodes ?? campus.navNodes ?? [];
+    const nextNodes = next.navNodes ?? [];
+    const sourceEdges = navEdges ?? campus.navEdges ?? [];
+    const nextEdges = next.navEdges ?? [];
+    const sourceNodeById = new Map(sourceNodes.map((node) => [node.id, node] as const));
+    const nextNodeById = new Map(nextNodes.map((node) => [node.id, node] as const));
+    const movedNodeIds = new Set<string>();
+
+    const previewNodePosition = (nodeId: string, oldPosition: { x: number; y: number }, newPosition: { x: number; y: number }) => {
+      const dx = newPosition.x - oldPosition.x;
+      const dy = newPosition.y - oldPosition.y;
+      if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) return;
+      movedNodeIds.add(nodeId);
+      const escapedId = CSS.escape(nodeId);
+      const node = getPhysicalPreviewElement(`nav-node:${nodeId}`, `[data-campus-nav-node-id="${escapedId}"]`);
+      rememberAndSetTransform(node, `translate(${dx} ${dy})`);
+      const issue = getPhysicalPreviewElement(`nav-node-issue:${nodeId}`, `[data-issue-object="${CSS.escape(`navNode:${nodeId}`)}"]`);
+      rememberAndSetTransform(issue, `translate(${dx} ${dy})`);
+    };
+
+    // Physical Building transforms also own their Entrance-linked graph nodes.
+    // Keep the physical preview isolated while translating the complete node
+    // presentation (including a warning badge) in the same stable overlay.
+    if (selected.type === "building") {
+      const before = physicalPreviewBeforeRef.buildings.get(selected.id);
+      const after = next.buildings.find((building) => building.id === selected.id);
+      if (before && after) {
+        for (const entrance of after.entrances ?? []) {
+          const node = sourceNodes.find((candidate) => candidate.buildingId === after.id && candidate.entranceId === entrance.id);
+          if (!node) continue;
+          const position = entranceWorldPosition(after, entrance);
+          previewNodePosition(node.id, node, position);
+        }
+      }
+    }
+
+    for (const [id, before] of sourceNodeById) {
+      const after = nextNodeById.get(id);
+      if (after && (before.x !== after.x || before.y !== after.y)) previewNodePosition(id, before, after);
+    }
+
+    const sourceEdgeById = new Map(sourceEdges.map((edge) => [edge.id, edge] as const));
+    const nextEdgeById = new Map(nextEdges.map((edge) => [edge.id, edge] as const));
+    const movedEdges = new Set<string>();
+    for (const [id, after] of nextEdgeById) {
+      const before = sourceEdgeById.get(id);
+      if (!before) continue;
+      const bendsChanged = before.bendPoints !== after.bendPoints
+        && ((before.bendPoints?.length ?? 0) !== (after.bendPoints?.length ?? 0)
+          || (before.bendPoints ?? []).some((point, index) => point.x !== after.bendPoints?.[index]?.x || point.y !== after.bendPoints?.[index]?.y));
+      if (movedNodeIds.has(before.startNodeId) || movedNodeIds.has(before.endNodeId) || bendsChanged) movedEdges.add(id);
+    }
+    if (movedEdges.size === 0 && movedNodeIds.size === 0) return false;
+
+    const pointsFor = (edge: NavigationEdge, nodesById: Map<string, NavigationNode>) => {
+      const start = nodesById.get(edge.startNodeId);
+      const end = nodesById.get(edge.endNodeId);
+      if (!start || !end) return [] as { x: number; y: number }[];
+      return [
+        { x: start.x, y: start.y },
+        ...(isPathwayGeneratedEdge(edge) ? [] : edge.bendPoints ?? []),
+        { x: end.x, y: end.y },
+      ];
+    };
+    const polylineMidpoint = (points: { x: number; y: number }[]) => {
+      const total = points.slice(1).reduce((sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y), 0);
+      if (total <= 0) return points[0] ?? { x: 0, y: 0 };
+      let remaining = total / 2;
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const length = Math.hypot(end.x - start.x, end.y - start.y);
+        if (remaining <= length || index === points.length - 1) {
+          const ratio = length > 0 ? remaining / length : 0;
+          return { x: start.x + (end.x - start.x) * ratio, y: start.y + (end.y - start.y) * ratio };
+        }
+        remaining -= length;
+      }
+      return points[points.length - 1];
+    };
+    const pointsToAttribute = (points: { x: number; y: number }[]) => points.map((point) => `${point.x},${point.y}`).join(" ");
+
+    for (const id of movedEdges) {
+      const before = sourceEdgeById.get(id);
+      const after = nextEdgeById.get(id);
+      if (!before || !after) continue;
+      const clone = getPhysicalPreviewElement(`nav-edge:${id}`, `[data-edge-id="${CSS.escape(id)}"]`);
+      if (!clone) continue;
+      const oldPoints = pointsFor(before, sourceNodeById);
+      const nextPoints = pointsFor(after, nextNodeById);
+      if (nextPoints.length < 2) continue;
+      const pointString = pointsToAttribute(nextPoints);
+      clone.querySelectorAll<SVGPolylineElement>("polyline").forEach((line) => line.setAttribute("points", pointString));
+      const middleSegmentIndex = Math.max(0, Math.floor((nextPoints.length - 1) / 2));
+      const middleStart = nextPoints[middleSegmentIndex];
+      const middleEnd = nextPoints[middleSegmentIndex + 1] ?? middleStart;
+      const midX = (middleStart.x + middleEnd.x) / 2;
+      const midY = (middleStart.y + middleEnd.y) / 2;
+      const angle = Math.atan2(middleEnd.y - middleStart.y, middleEnd.x - middleStart.x) * 180 / Math.PI;
+      const midpoint = clone.querySelector<SVGCircleElement>("[data-nav-edge-midpoint]");
+      midpoint?.setAttribute("cx", String(midX)); midpoint?.setAttribute("cy", String(midY));
+      clone.querySelector<SVGGElement>("[data-testid='nav-edge-blocked-marker']")?.setAttribute("transform", `translate(${midX + 10} ${midY - 10})`);
+      clone.querySelector<SVGGElement>("[data-testid='nav-edge-closed-marker']")?.setAttribute("transform", `translate(${midX} ${midY})`);
+      const direction = clone.querySelector<SVGPolygonElement>("[data-testid='nav-edge-direction']");
+      if (direction) {
+        const radians = angle * Math.PI / 180;
+        direction.setAttribute("points", `${midX + 6 * Math.cos(radians)},${midY + 6 * Math.sin(radians)} ${midX - 5 * Math.cos(radians) + 4 * Math.cos(radians + Math.PI / 2)},${midY - 5 * Math.sin(radians) + 4 * Math.sin(radians + Math.PI / 2)} ${midX - 5 * Math.cos(radians) - 4 * Math.cos(radians + Math.PI / 2)},${midY - 5 * Math.sin(radians) - 4 * Math.sin(radians + Math.PI / 2)}`);
+      }
+      const addBends = Array.from(clone.querySelectorAll<SVGCircleElement>("[data-nav-edge-add-bend]"));
+      addBends.forEach((handle, index) => {
+        const start = nextPoints[index]; const end = nextPoints[index + 1];
+        if (!start || !end) return;
+        handle.setAttribute("cx", String(Math.round((start.x + end.x) / 2)));
+        handle.setAttribute("cy", String(Math.round((start.y + end.y) / 2)));
+      });
+      const bendHandles = Array.from(clone.querySelectorAll<SVGCircleElement>("[data-nav-edge-bend-handle]"));
+      (after.bendPoints ?? []).forEach((bend, index) => {
+        bendHandles[index]?.setAttribute("cx", String(bend.x));
+        bendHandles[index]?.setAttribute("cy", String(bend.y));
+      });
+      const oldMidpoint = polylineMidpoint(oldPoints);
+      const newMidpoint = polylineMidpoint(nextPoints);
+      const issue = getPhysicalPreviewElement(`nav-edge-issue:${id}`, `[data-issue-object="${CSS.escape(`navEdge:${id}`)}"]`);
+      rememberAndSetTransform(issue, `translate(${newMidpoint.x - oldMidpoint.x} ${newMidpoint.y - oldMidpoint.y})`);
+    }
+    const root = svgRootRef.current;
+    const cameraTransform = root?.getAttribute("transform");
+    if (cameraTransform && interactionWorldRef.current?.getAttribute("transform") !== cameraTransform) interactionWorldRef.current?.setAttribute("transform", cameraTransform);
+    imperativePreviewActiveRef.current = true;
+    return true;
+  }, [campus, getPhysicalPreviewElement, layer, multiSelected.length, navEdges, navNodes, physicalPreviewBeforeRef, rememberAndSetTransform, routePreview, selected, showNavigationOverlay, tool]);
+
+  const tryImperativePreview = useCallback((next: Campus, hint?: CanvasTransformPreviewHint): boolean => {
+    const reject = () => false;
+    if (!hint) return tryImperativeNavigationPreview(next);
+    if (tool !== "select" || (layer !== "campus" && layer !== "navigation") || routePreview || multiSelected.length > 0) return reject();
+    // On the first drag after changing editor layers, pointer-down can arm the
+    // gesture before React has committed the corresponding selection. The
+    // gesture hint is already scoped to the directly-manipulated entity, so
+    // allow the isolated preview in that brief selection handoff window.
+    if (selected && selected.id !== hint.id) return reject();
+    const root = svgRootRef.current;
+    if (!root) return false;
+    const cameraTransform = root.getAttribute("transform");
+    if (cameraTransform && interactionWorldRef.current?.getAttribute("transform") !== cameraTransform) {
+      interactionWorldRef.current?.setAttribute("transform", cameraTransform);
+    }
+
+    if (hint.type === "building" && selected.type === "building") {
+      const before = physicalPreviewBeforeRef.buildings.get(hint.id);
+      const after = hint.after as CampusBuilding | undefined ?? next.buildings.find((item) => item.id === hint.id);
+      if (!before || !after) return reject();
+      const oldCenterX = before.x + before.width / 2;
+      const oldCenterY = before.y + before.height / 2;
+      const newCenterX = after.x + after.width / 2;
+      const newCenterY = after.y + after.height / 2;
+      const scaleX = after.width / before.width;
+      const scaleY = after.height / before.height;
+      rememberAndSetTransform(
+        getPhysicalPreviewElement(`building:${hint.id}`, `[data-campus-building-transform="${CSS.escape(hint.id)}"]`),
+        `translate(${newCenterX} ${newCenterY}) rotate(${after.rotation ?? 0}) scale(${scaleX} ${scaleY}) translate(${-oldCenterX} ${-oldCenterY})`,
+      );
+      for (const entrance of after.entrances ?? []) {
+        const position = entranceWorldPosition(after, entrance);
+        rememberAndSetTransform(
+          getPhysicalPreviewElement(`entrance:${hint.id}:${entrance.id}`, `[data-campus-entrance-transform="${CSS.escape(hint.id)}:${CSS.escape(entrance.id)}"]`),
+          `translate(${position.x},${position.y}) rotate(${position.angle})`,
+        );
+        // The blue direction badge lives in a separate top-level SVG layer.
+        // Preview it with the entrance so its old static copy cannot ghost.
+        const badge = getPhysicalPreviewElement(
+          `entrance-badge:${hint.id}:${entrance.id}`,
+          `[data-campus-entrance-badge="${CSS.escape(hint.id)}:${CSS.escape(entrance.id)}"]`,
+        );
+        if (badge) {
+          const placement = entranceDirectionBadgePlacement(position.x, position.y, entrance.edge, after.rotation ?? 0);
+          rememberAndSetTransform(badge.querySelector('[data-testid="entrance-direction-badge"]'), `translate(${placement.x},${placement.y}) rotate(${placement.angle})`);
+        }
+      }
+      for (const stair of canonicalExteriorEmergencyStairsForBuilding(after)) {
+        const position = exteriorEmergencyStairWorldPosition(after, stair);
+        rememberAndSetTransform(getPhysicalPreviewElement(`stair:${stair.id}`, `[data-campus-stair-id="${CSS.escape(stair.id)}"]`), `translate(${position.x},${position.y}) rotate(${position.angle})`);
+      }
+      const originalNavNodes = navNodes ?? campus.navNodes ?? [];
+      const movedEntranceNodes = originalNavNodes.map((node) => {
+        const entrance = node.buildingId === after.id && node.entranceId
+          ? (after.entrances ?? []).find((candidate) => candidate.id === node.entranceId)
+          : undefined;
+        if (!entrance) return node;
+        const position = entranceWorldPosition(after, entrance);
+        return { ...node, x: position.x, y: position.y };
+      });
+      tryImperativeNavigationPreview({ ...next, navNodes: movedEntranceNodes });
+      imperativePreviewActiveRef.current = true;
+      return true;
+    }
+
+    if (hint.type === "decorAsset" && selected.type === "decorAsset") {
+      const before = physicalPreviewBeforeRef.decorAssets.get(hint.id);
+      const after = hint.after as CampusDecorAsset | undefined ?? (next.decorAssets ?? []).find((item) => item.id === hint.id);
+      if (!before || !after || before.type !== after.type) return reject();
+      const template = DECOR_ASSET_MAP[before.type];
+      if (!template) return reject();
+      const beforeSize = isDecorAreaType(before.type)
+        ? { width: before.width ?? template.defaultWidth, height: before.height ?? template.defaultHeight }
+        : decorWorldSize(template, before.scale);
+      const afterSize = isDecorAreaType(after.type)
+        ? { width: after.width ?? template.defaultWidth, height: after.height ?? template.defaultHeight }
+        : decorWorldSize(template, after.scale);
+      rememberAndSetTransform(
+        getPhysicalPreviewElement(`decor:${hint.id}`, `[data-campus-decor-id="${CSS.escape(hint.id)}"]`),
+        `translate(${after.x} ${after.y}) rotate(${after.rotation ?? 0}) scale(${afterSize.width / beforeSize.width} ${afterSize.height / beforeSize.height}) rotate(${- (before.rotation ?? 0)}) translate(${-before.x} ${-before.y})`,
+      );
+      const angleLabel = physicalPreviewElementsRef.current.get(`decor:${hint.id}`)?.querySelector(`[data-testid="decor-rotation-angle"] text`);
+      if (angleLabel && hint.kind === "rotation") angleLabel.textContent = `${Math.round(after.rotation ?? 0)}°`;
+      const scaleLabel = physicalPreviewElementsRef.current.get(`decor:${hint.id}`)?.querySelector(`[data-testid="decor-scale-value"]`);
+      if (scaleLabel && hint.kind === "resize") scaleLabel.textContent = `${Math.round((after.scale ?? 1) * 10) / 10}×`;
+      imperativePreviewActiveRef.current = true;
+      return true;
+    }
+
+    if (hint.type === "marker" && (selected.type === "marker" || selected.type === "gate")) {
+      const before = physicalPreviewBeforeRef.markers.get(hint.id);
+      const after = hint.after as CampusMarker | undefined ?? next.markers.find((item) => item.id === hint.id);
+      if (!before || !after || before.type !== after.type) return reject();
+      const beforeWidth = before.width ?? (isCampusGate(before) ? campusGateSize(before).width : 22);
+      const beforeHeight = before.height ?? (isCampusGate(before) ? campusGateSize(before).height : 22);
+      const afterWidth = after.width ?? (isCampusGate(after) ? campusGateSize(after).width : 22);
+      const afterHeight = after.height ?? (isCampusGate(after) ? campusGateSize(after).height : 22);
+      rememberAndSetTransform(
+        getPhysicalPreviewElement(`marker:${hint.id}`, `[data-campus-marker-id="${CSS.escape(hint.id)}"]`),
+        `translate(${after.x} ${after.y}) scale(${afterWidth / beforeWidth} ${afterHeight / beforeHeight}) translate(${-before.x} ${-before.y})`,
+      );
+      imperativePreviewActiveRef.current = true;
+      return true;
+    }
+    return reject();
+  }, [campus, getPhysicalPreviewElement, layer, multiSelected.length, physicalPreviewBeforeRef, rememberAndSetTransform, routePreview, selected, showNavigationOverlay, tool, tryImperativeNavigationPreview]);
+
+  useEffect(() => {
+    if (!transientCampusPreviewRef) return;
+    transientCampusPreviewRef.current = {
+      preview: (next, hint) => {
+        if (tryImperativePreview(next, hint)) return true;
+        imperativePreviewActiveRef.current = false;
+        setTransientCampusPreview(next);
+        return false;
+      },
+      setGuides: renderGuidesImperatively,
+      clear: clearImperativePreview,
+    };
+    return () => {
+      if (transientCampusPreviewRef.current) transientCampusPreviewRef.current = null;
+      clearImperativePreview();
+    };
+  }, [transientCampusPreviewRef, tryImperativePreview, renderGuidesImperatively, clearImperativePreview]);
+  const renderCampus = transientCampusPreview ?? campus;
+  const buildings = renderCampus.buildings;
+  const markers = renderCampus.markers;
+  const paths = renderCampus.paths;
   const highlightedRouteMarkerPoints = [
     ...(highlightedRoute?.transitionMarkers ?? []),
     ...(highlightedRoute?.continuationMarkers ?? []),
@@ -371,7 +757,7 @@ export function Canvas({
       pathJunctionVisualOwner.set(key, `${path.id}:${index}`);
     }
   }));
-  const decorAssets = campus.decorAssets ?? [];
+  const decorAssets = renderCampus.decorAssets ?? [];
   // Ground/area assets remain in the dedicated background layer (below paths
   // and foreground objects), but they still honour the same optional z-order
   // field as every other outdoor asset.  Previously this list was rendered in
@@ -406,8 +792,13 @@ export function Canvas({
   // derives (outdoor-only entities) — indoor floor nodes/edges never render
   // here, even when their building sits on this canvas. The campus fallback is
   // only a safety net for legacy direct usage.
-  const renderNavNodes = navNodes ?? campus.navNodes ?? [];
-  const renderNavEdges = navEdges ?? campus.navEdges ?? [];
+  const renderNavNodes = useMemo(() => {
+    const sourceNodes = navNodes ?? campus.navNodes ?? [];
+    if (!transientCampusPreview) return sourceNodes;
+    const previewNodes = new Map((renderCampus.navNodes ?? []).map((node) => [node.id, node] as const));
+    return sourceNodes.map((node) => previewNodes.get(node.id) ?? node);
+  }, [navNodes, campus.navNodes, transientCampusPreview, renderCampus.navNodes]);
+  const renderNavEdges = navEdges ?? renderCampus.navEdges ?? [];
   const navGraphInteractive = layer === "navigation" && !routePreview;
   // `path` was the historical runtime id for Navigation Connect.  Keep that
   // alias guarded here so a stale editor/session state cannot fall through to
@@ -868,7 +1259,7 @@ export function Canvas({
           </filter>
           <CampusGroundPatternDefs />
         </defs>
-        <g ref={cameraTransformRef} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+        <g ref={(element) => { svgRootRef.current = element; if (cameraTransformRef) cameraTransformRef.current = element; }} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Canvas material is independent from the logical/editor snapping grid. */}
           <CampusGroundSurface
             material={groundAppearance.material}
@@ -1481,23 +1872,6 @@ export function Canvas({
             </>
           )}
 
-          {/* Alignment guides */}
-          {guides && guides.map((g, i) => (
-            <g key={`g${i}`} className="pointer-events-none">
-              {g.type === "v" ? (
-                <line data-testid="alignment-guide" x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={4} opacity={0.12} />
-              ) : (
-                <line data-testid="alignment-guide" x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={4} opacity={0.12} />
-              )}
-              {g.type === "v" ? (
-                <line x1={g.pos} y1={0} x2={g.pos} y2={ch} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
-              ) : (
-                <line x1={0} y1={g.pos} x2={cw} y2={g.pos} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
-              )}
-              <rect x={g.type === "v" ? g.pos - 15 : cw - 34} y={g.type === "v" ? 6 : g.pos - 6} width={30} height={12} rx={3} fill="var(--accent)" fillOpacity={0.7} />
-              <text x={g.type === "v" ? g.pos : cw - 19} y={g.type === "v" ? 14.5 : g.pos + 3.5} textAnchor="middle" fill="white" fontSize={7} fontWeight="700" className="pointer-events-none select-none">{g.pos}</text>
-            </g>
-          ))}
 
           {/* Rubber-band selection */}
           {rubberBand && (() => {
@@ -1714,9 +2088,9 @@ export function Canvas({
             const selectionPad = Math.max(2, controls.handleSize * 0.55);
             const editorOpacity = isVisible ? opacity : Math.min(opacity, isSel || isMultiSel ? 0.35 : 0.28);
             return (
-              <g key={b.id} data-hidden={isVisible ? undefined : "true"} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onMouseEnter={() => { if (testRoutePickKind) onTestRoutePickHover?.({ type: "building", id: b.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
+              <g key={b.id} data-hidden={isVisible ? undefined : "true"} data-campus-building-id={b.id} onMouseDown={(e) => { if (isLocked) return; onItemDown(e, "building", b.id, b.x, b.y); }} onMouseEnter={() => { if (testRoutePickKind) onTestRoutePickHover?.({ type: "building", id: b.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "building" && testRoutePickHover.id === b.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (isLocked) return; onItemContextMenu?.(e, "building", b.id); }} onDoubleClick={(e) => { if (isLocked) return; e.stopPropagation(); onBuildingDoubleClick?.(b.id); }} style={{ cursor: isLocked ? "default" : tool === "select" ? "move" : cursor, opacity: editorOpacity }}>
                 {/* ── Rotated group: shadow, outline, handles, overlap borders, and body all rotate together ── */}
-                <g transform={rot !== 0 ? `rotate(${rot}, ${cx}, ${cy})` : ''}>
+                <g data-campus-building-transform={b.id} transform={rot !== 0 ? `rotate(${rot}, ${cx}, ${cy})` : ''}>
                   {/* The editor wrapper owns hit testing; the shared visual
                       remains pointer-transparent in Admin mode. */}
                   <rect
@@ -1916,6 +2290,7 @@ export function Canvas({
 
             return (
               <g key={da.id}
+                data-campus-decor-id={da.id}
                 data-decor-type={da.type}
                 data-hidden={isVisible ? undefined : "true"}
                 opacity={editorOpacity}
@@ -2006,7 +2381,7 @@ export function Canvas({
                     {decorResizingId === da.id && (
                       <g className="pointer-events-none select-none">
                         <rect x={visCx - 26} y={aabb.y + aabb.height + 6} width={52} height={18} rx={5} fill="var(--accent)" opacity={0.95} filter="url(#dropShadow)" />
-                        <text x={visCx} y={aabb.y + aabb.height + 18} textAnchor="middle" fill="white" fontSize={9} fontWeight="900">{Math.round((da.scale ?? 1) * 10) / 10}×</text>
+                        <text data-testid="decor-scale-value" x={visCx} y={aabb.y + aabb.height + 18} textAnchor="middle" fill="white" fontSize={9} fontWeight="900">{Math.round((da.scale ?? 1) * 10) / 10}×</text>
                       </g>
                     )}
                   </>
@@ -2040,7 +2415,7 @@ export function Canvas({
               && (focusedExteriorEmergencyStairId === undefined || focusedExteriorEmergencyStairId === stair.id);
             const { width: visualWidth, height: visualHeight } = exteriorEmergencyStairVisualDimensions(displayStair);
             return (
-              <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? (preview ? ((preview.edge === "top" || preview.edge === "bottom") ? "ew-resize" : "ns-resize") : "grab") : cursor }}>
+              <g key={`exterior-emergency-stair-${stair.id}`} data-testid="exterior-emergency-stair" data-campus-stair-id={stair.id} transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`} onMouseDown={(e) => { e.stopPropagation(); onExteriorEmergencyStairDown?.(e, building.id, stair.id); }} style={{ cursor: tool === "select" ? (preview ? ((preview.edge === "top" || preview.edge === "bottom") ? "ew-resize" : "ns-resize") : "grab") : cursor }}>
                 {/* Keep the wrapper as the authoritative Admin hit surface; the
                     shared visual is presentation-only and pointer-transparent. */}
                 <rect x={-visualWidth / 2 - 13} y={-visualHeight / 2 - 5} width={visualWidth + 26} height={visualHeight + 10} rx={6} fill="transparent" pointerEvents="all" />
@@ -2099,7 +2474,7 @@ export function Canvas({
                   onMouseDown={(e) => onEntranceDown?.(e, b.id, entrance.id, pos.x, pos.y)}
                 >
                   <title>{entranceQuickInfo}</title>
-                  <g transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}>
+                  <g data-campus-entrance-transform={`${b.id}:${entrance.id}`} transform={`translate(${pos.x},${pos.y}) rotate(${pos.angle})`}>
                   <circle cx={0} cy={0} r={12} fill="transparent" />
                   {/* Navigation routing-target highlight (Add Waypoint / Connect Path) —
                       B5 Phase 1.9: this is the SINGLE Connect Target indicator; the
@@ -2131,7 +2506,7 @@ export function Canvas({
             const gateSize = isGate ? campusGateSize(m) : null;
             const gateControls = gateSize ? transformControlMetrics(gateSize.width, gateSize.height, zoom) : null;
             return (
-              <g key={m.id} data-testid={isGate ? "campus-gate" : undefined} pointerEvents={isGate ? "all" : undefined} onMouseDown={(e) => onItemDown(e, isGate ? "gate" : "marker", m.id, m.x, m.y)} onMouseEnter={() => { if (isPickTarget) onTestRoutePickHover?.({ type: "gate", id: m.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "marker", m.id); }} style={{ cursor: testRoutePickKind ? "pointer" : tool === "select" ? "move" : cursor }}>
+              <g key={m.id} data-campus-marker-id={m.id} data-testid={isGate ? "campus-gate" : undefined} pointerEvents={isGate ? "all" : undefined} onMouseDown={(e) => onItemDown(e, isGate ? "gate" : "marker", m.id, m.x, m.y)} onMouseEnter={() => { if (isPickTarget) onTestRoutePickHover?.({ type: "gate", id: m.id }); }} onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === m.id) onTestRoutePickHover?.(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onItemContextMenu?.(e, "marker", m.id); }} style={{ cursor: testRoutePickKind ? "pointer" : tool === "select" ? "move" : cursor }}>
                 {(isSel || isPickTarget || isPickHover) && <rect x={m.x - (gateSize?.width ?? 22) / 2 - (isPickHover ? 8 : 5)} y={m.y - (gateSize?.height ?? 22) / 2 - (isPickHover ? 8 : 5)} width={(gateSize?.width ?? 22) + (isPickHover ? 16 : 10)} height={(gateSize?.height ?? 22) + (isPickHover ? 16 : 10)} rx={5} fill={isPickTarget && !isSel ? "rgba(22,163,74,0.08)" : "none"} stroke={isPickTarget && !isSel ? "#16a34a" : "var(--accent)"} strokeWidth={isPickHover ? 2.6 : 2} strokeDasharray={isPickTarget && !isSel ? "5 3" : undefined} opacity={isPickTarget && !isSel ? (isPickHover ? 1 : 0.75) : 0.6} pointerEvents="none" />}
                 {isGate ? (
                   <g transform={`translate(${m.x} ${m.y})`} className="pointer-events-auto">
@@ -2273,7 +2648,7 @@ export function Canvas({
                       data-invalid={isInvalid ? "true" : undefined}
                       className="pointer-events-none"
                     />
-                    {(isSel || isMultiSel) && <circle cx={midX} cy={midY} r={4} fill="var(--accent)" className="pointer-events-none" />}
+                    {(isSel || isMultiSel) && <circle data-nav-edge-midpoint="true" cx={midX} cy={midY} r={4} fill="var(--accent)" className="pointer-events-none" />}
                     {/* B5 Phase 6.10: blocked-edge warning marker on selected edges */}
                     {isSel && isBlocked && (
                       <g transform={`translate(${midX + 10} ${midY - 10})`} data-testid="nav-edge-blocked-marker" className="pointer-events-none">
@@ -2301,6 +2676,7 @@ export function Canvas({
                       return (
                         <circle
                           key={`${e.id}-add-${index}`}
+                          data-nav-edge-add-bend="true"
                           cx={addPoint.x}
                           cy={addPoint.y}
                           r={4}
@@ -2315,6 +2691,7 @@ export function Canvas({
                     {navGraphInteractive && !pathwayGenerated && !derivedApproach && isSel && tool === "select" && (e.bendPoints ?? []).map((point, index) => (
                       <circle
                         key={`${e.id}-bend-${index}`}
+                        data-nav-edge-bend-handle="true"
                         cx={point.x}
                         cy={point.y}
                         r={6}
@@ -2422,7 +2799,7 @@ export function Canvas({
                       || (routeContinuation.kind === "steps" && marker.kind === "stair")));
                 const showRouteContinuation = !!routeContinuation && !routeTransitionAtNode;
                 return (
-                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-path-junction={isPathJunction ? "true" : undefined} data-entrance-linked={isEntranceLinked ? "true" : undefined} data-derived-approach={derivedApproach ? "true" : undefined} className="group/nav-node"
+                  <g key={n.id} data-testid="nav-node" data-node-id={n.id} data-campus-nav-node-id={n.id} data-path-junction={isPathJunction ? "true" : undefined} data-entrance-linked={isEntranceLinked ? "true" : undefined} data-derived-approach={derivedApproach ? "true" : undefined} className="group/nav-node"
                     onMouseDown={(e) => { if (navGraphInteractive) onItemDown(e, "navNode", n.id, n.x, n.y); }}
                     onMouseEnter={() => { if (isGatePickTarget && n.gateId) onTestRoutePickHover?.({ type: "gate", id: n.gateId }); }}
                     onMouseLeave={() => { if (testRoutePickHover?.type === "gate" && testRoutePickHover.id === n.gateId) onTestRoutePickHover?.(null); }}
@@ -2563,7 +2940,7 @@ export function Canvas({
               {(highlightedRoute?.continuationMarkers ?? []).map((marker) => {
                 if (marker.kind !== "entrance" && marker.kind !== "waypoint") return null;
                 if (renderNavNodes.some((node) => node.id === marker.nodeId)) return null;
-                const node = (campus.navNodes ?? []).find((candidate) => candidate.id === marker.nodeId);
+                const node = (renderCampus.navNodes ?? []).find((candidate) => candidate.id === marker.nodeId);
                 if (!node) return null;
                 const entranceEdge = node.entranceId
                   ? buildings.find((building) => building.id === node.buildingId)?.entrances?.find((entrance) => entrance.id === node.entranceId)?.edge
@@ -2791,17 +3168,38 @@ export function Canvas({
             {buildings.flatMap((building) => (building.entrances ?? []).map((entrance) => {
               const position = entranceWorldPosition(building, entrance);
               return (
-                <EntranceDirectionBadge
-                  key={`entrance-direction-badge-${building.id}-${entrance.id}`}
-                  x={position.x}
-                  y={position.y}
-                  edge={entrance.edge}
-                  direction={entrance.direction}
-                  type={entrance.type}
-                  rotation={building.rotation ?? 0}
-                />
+                <g key={`entrance-direction-badge-${building.id}-${entrance.id}`} data-campus-entrance-badge={`${building.id}:${entrance.id}`}>
+                  <EntranceDirectionBadge
+                    x={position.x}
+                    y={position.y}
+                    edge={entrance.edge}
+                    direction={entrance.direction}
+                    type={entrance.type}
+                    rotation={building.rotation ?? 0}
+                  />
+                </g>
               );
             }))}
+          </g>
+        </g>
+      </svg>
+
+      {/* A small independent SVG keeps direct manipulation out of the large campus paint tree. */}
+      <svg
+        aria-hidden="true"
+        data-testid="campus-interaction-overlay"
+        viewBox={`0 0 ${cw} ${ch}`}
+        className="pointer-events-none absolute inset-0 z-[5] h-full w-full"
+        style={{ overflow: "hidden", isolation: "isolate" }}
+      >
+        <g ref={interactionWorldRef} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+          <g ref={interactionItemsRef} data-testid="campus-interaction-items" />
+          <g ref={alignmentGuidesRef} data-testid="alignment-guides-layer">
+            {guides?.map((guide, index) => (
+              <g key={index} className="pointer-events-none">
+                <line data-testid="alignment-guide" x1={guide.type === "v" ? guide.pos : 0} y1={guide.type === "h" ? guide.pos : 0} x2={guide.type === "v" ? guide.pos : cw} y2={guide.type === "h" ? guide.pos : ch} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
+              </g>
+            ))}
           </g>
         </g>
       </svg>

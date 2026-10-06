@@ -146,6 +146,15 @@ describe("student-facing building information persistence", () => {
     expect(row.metadata).toMatchObject({ ui: { facilities: ["Study Area", "Wi-Fi"], buildingType: "academic", operatingHoursSchedule: { monday: { closed: false, open: "08:00", close: "17:00" }, sunday: { closed: true } } } });
     expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("coverImagePath");
     expect((row.metadata as { ui: Record<string, unknown> }).ui).not.toHaveProperty("operatingHours");
+
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: [row as never],
+      floors: [],
+      mapElements: [],
+      navigationNodes: [],
+      navigationEdges: [],
+    } as Parameters<typeof hydrateCampusStructure>[1]);
+    expect(hydrated.buildings[0].coverImagePath).toBe("buildings/eng/cover.webp");
   });
 });
 
@@ -652,10 +661,38 @@ describe("B6 Phase 1 — event overlay persistence", () => {
   /** Serialize → hydrate a campus through the existing structure payload shape. */
   const hydrateFromPayload = (campus: Campus) => {
     const rows = serializeCampusStructure(campus);
+    // Event reads are a separate persistence concern. Supply mock rows here to
+    // exercise deserialization without putting Event-owned rows in the
+    // generic Map Builder write payload.
+    const eventRows = (campus.eventOverlays ?? []).map((overlay) => ({
+      id: overlay.id,
+      campus_id: campus.id,
+      building_id: overlay.locationRef?.buildingId ?? null,
+      floor_id: null,
+      element_type: "event_overlay",
+      name: overlay.title,
+      code: null,
+      description: overlay.description,
+      search_keywords: [],
+      x: 0,
+      y: 0,
+      width: null,
+      height: null,
+      rotation: 0,
+      z_index: 0,
+      geometry: null,
+      style: {},
+      metadata: { kind: "event_overlay", ui: overlay },
+      is_accessible: false,
+      is_emergency_asset: false,
+      is_searchable: false,
+      is_visible: true,
+      archived_at: null,
+    }));
     return hydrateCampusStructure(campus, {
       buildings: rows.buildings as never,
       floors: rows.floors.map((row) => ({ ...row, display_order: Number(row.display_order ?? 0), floor_number: Number(row.floor_number ?? 1) })) as never,
-      mapElements: rows.map_elements as never,
+      mapElements: [...rows.map_elements, ...eventRows] as never,
       navigationNodes: rows.navigation_nodes as never,
       navigationEdges: rows.navigation_edges as never,
     });
@@ -668,12 +705,11 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     expect(hydrateFromPayload(campus).eventOverlays).toEqual([]);
   });
 
-  it("round-trips a single event overlay with all authored fields", () => {
+  it("keeps event reads/hydration separate from generic structure writes", () => {
     const campus = makeCampus([{ id: IDs.floorA, number: 1 }]);
     campus.eventOverlays = [makeEventOverlay()];
     const rows = serializeCampusStructure(campus);
-    const overlayRows = rows.map_elements.filter((el) => (el.metadata as { kind?: string })?.kind === "event_overlay");
-    expect(overlayRows).toHaveLength(1);
+    expect(rows.map_elements.some((el) => (el.metadata as { kind?: string })?.kind === "event_overlay")).toBe(false);
     const hydrated = hydrateFromPayload(campus);
     expect(hydrated.eventOverlays).toEqual([makeEventOverlay()]);
   });
@@ -723,6 +759,7 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     const campus = makeEntranceCampus(); // building + floor + two doors + two door nav nodes
     campus.eventOverlays = [makeEventOverlay(), makeEventOverlay({ id: "eo-2", title: "Orientation" })];
     const rows = serializeCampusStructure(campus);
+    expect(rows.map_elements.some((el) => (el.metadata as { kind?: string })?.kind === "event_overlay")).toBe(false);
     expect(rows.buildings).toHaveLength(1);
     expect(rows.floors).toHaveLength(1);
     expect(rows.navigation_nodes).toHaveLength(2);
@@ -744,28 +781,55 @@ describe("B6 Phase 1 — event overlay persistence", () => {
 
     const candidate = repairInvalidFloorMapElementIds(campus).campus;
     const payload = serializeCampusStructure(candidate);
-    const eventRow = payload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")!;
-
-    expect(eventRow.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(() => validateCampusStructurePayload(payload)).not.toThrow();
-    expect((eventRow.metadata as { ui: { title: string; locationRef: { roomId: string } } }).ui)
-      .toMatchObject({ title: "TEST: College Week 2026", locationRef: { roomId: "room-101" } });
+    expect(payload.map_elements.some((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")).toBe(false);
 
     const secondCandidate = repairInvalidFloorMapElementIds(candidate);
     expect(secondCandidate.repairs).toEqual([]);
-    expect(serializeCampusStructure(secondCandidate.campus).map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")?.id)
-      .toBe(eventRow.id);
+    expect(secondCandidate.repairs).toEqual([]);
   });
 
-  it("saves an unrelated Floor with a legacy Student Org event and retains the event", async () => {
+  it("does not send or misclassify preserved Event rows during a generic structure save", async () => {
+    const eventOverlays = [
+      makeEventOverlay({ id: "10000000-0000-4000-8000-000000000098" }),
+      makeEventOverlay({ id: "10000000-0000-4000-8000-000000000097", title: "Orientation", status: "pending" }),
+    ];
+    const persistedEventRows = eventOverlays.map((overlay, index) => ({
+      id: index === 0 ? "10000000-0000-4000-8000-000000000098" : "10000000-0000-4000-8000-000000000097",
+      campus_id: IDs.campus,
+      building_id: null,
+      floor_id: null,
+      element_type: index === 0 ? "event_overlay" : "custom",
+      name: overlay.title,
+      code: null,
+      description: overlay.description,
+      search_keywords: [],
+      x: 0,
+      y: 0,
+      width: null,
+      height: null,
+      rotation: 0,
+      z_index: 0,
+      geometry: null,
+      style: {},
+      metadata: { kind: "event_overlay", ui: overlay },
+      is_accessible: false,
+      is_emergency_asset: false,
+      is_searchable: false,
+      is_visible: true,
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-02T00:00:00.000Z",
+    }));
     const stored: Record<string, unknown[]> = {
-      buildings: [], floors: [], map_elements: [], navigation_nodes: [], navigation_edges: [],
+      buildings: [], floors: [], map_elements: structuredClone(persistedEventRows), navigation_nodes: [], navigation_edges: [],
     };
     const rpc = vi.fn(async (_name: string, args: { p_payload: CampusStructurePayload }) => {
       const payload = args.p_payload;
+      const preservedEvents = (stored.map_elements as typeof persistedEventRows).filter((row) => row.element_type === "event_overlay" || row.metadata.kind === "event_overlay");
       stored.buildings = payload.buildings.map((row) => ({ ...row, campus_id: IDs.campus, archived_at: null }));
       stored.floors = payload.floors.map((row) => ({ ...row, archived_at: null }));
-      stored.map_elements = payload.map_elements.map((row) => ({ ...row, archived_at: null, created_at: "2026-01-01T00:00:00.000Z" }));
+      stored.map_elements = [...preservedEvents, ...payload.map_elements.map((row) => ({ ...row, archived_at: null, created_at: "2026-01-01T00:00:00.000Z" }))];
       stored.navigation_nodes = payload.navigation_nodes.map((row) => ({ ...row, campus_id: IDs.campus }));
       stored.navigation_edges = payload.navigation_edges.map((row) => ({ ...row, campus_id: IDs.campus }));
       return { error: null };
@@ -787,17 +851,14 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     });
     vi.mocked(getSupabase).mockReturnValue({ from, rpc } as never);
     const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
-    const legacyId = "eo-1790650205083-pe84vm";
-    campus.eventOverlays = [makeEventOverlay({ id: legacyId, title: "TEST: College Week 2026" })];
+    campus.eventOverlays = eventOverlays;
 
     const saved = await campusStructureService.save(campus);
     const savePayload = rpc.mock.calls[0][1].p_payload;
-    const eventRow = savePayload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")!;
-
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(eventRow.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-    expect(saved.eventOverlays?.[0]).toMatchObject({ id: eventRow.id, title: "TEST: College Week 2026" });
-    expect(campus.eventOverlays?.[0].id).toBe(legacyId);
+    expect(savePayload.map_elements.some((row) => (row.metadata as { kind?: string })?.kind === "event_overlay")).toBe(false);
+    expect(saved.eventOverlays).toEqual(eventOverlays);
+    expect(stored.map_elements.filter((row) => (row as typeof persistedEventRows[number]).metadata.kind === "event_overlay")).toEqual(persistedEventRows);
   });
 
   it("hydrates a legacy metadata event ID using its stable canonical map element row ID", () => {
@@ -810,11 +871,13 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     })];
     const serialized = serializeCampusStructure(campus);
     const canonicalRowId = "10000000-0000-4000-8000-000000000099";
-    const mapElements = serialized.map_elements.map((row) => {
-      if ((row.metadata as { kind?: string })?.kind !== "event_overlay") return row;
-      const metadata = row.metadata as { ui: Record<string, unknown> };
-      return { ...row, id: canonicalRowId, metadata: { ...metadata, ui: { ...metadata.ui, id: legacyId } } };
-    });
+    const mapElements = [{
+      id: canonicalRowId, campus_id: IDs.campus, building_id: null, floor_id: null,
+      element_type: "event_overlay", name: "TEST: College Week 2026", code: null, description: "",
+      search_keywords: [], x: 0, y: 0, width: null, height: null, rotation: 0, z_index: 0,
+      geometry: null, style: {}, metadata: { kind: "event_overlay", ui: { ...campus.eventOverlays![0], id: legacyId } },
+      is_accessible: false, is_emergency_asset: false, is_searchable: false, is_visible: true, archived_at: null,
+    }];
     const hydrated = hydrateCampusStructure(campus, {
       buildings: serialized.buildings as never,
       floors: serialized.floors.map((row) => ({ ...row, display_order: Number(row.display_order ?? 0), floor_number: Number(row.floor_number ?? 1) })) as never,
@@ -831,12 +894,10 @@ describe("B6 Phase 1 — event overlay persistence", () => {
     });
   });
 
-  it("reports legacy event identity failures with the event name and UUID requirement", () => {
+  it("does not validate Event-owned identities during a generic structure save", () => {
     const campus = makeCampus([]);
     campus.eventOverlays = [makeEventOverlay({ id: "eo-1790650205083-pe84vm", title: "TEST: College Week 2026" })];
-    expect(() => validateCampusStructurePayload(serializeCampusStructure(campus))).toThrow(
-      /Student event 'TEST: College Week 2026' on the Campus has invalid map element ID 'eo-1790650205083-pe84vm' \(expected UUID format\)/,
-    );
+    expect(() => validateCampusStructurePayload(serializeCampusStructure(campus))).not.toThrow();
   });
 });
 

@@ -193,6 +193,20 @@ describe("bounded map viewport", () => {
     expect(inspectorOpen.maxX).toBe(normal.maxX);
   });
 
+  it("lets authored edge objects reach the usable center with either sidebar covered", () => {
+    const viewport = { mapWidth: 3_000, mapHeight: 1_000, viewportWidth: 1_000, viewportHeight: 700, zoom: 1, padding: 80, baseScale: 1 };
+    const slack = { x: viewport.viewportWidth / 2 + 96, y: viewport.viewportHeight / 2 + 64 };
+    const rightInspector = getViewportPanBounds({ ...viewport, insets: { right: 320 }, inspectionSlack: slack });
+    const leftSidebar = getViewportPanBounds({ ...viewport, insets: { left: 224 }, inspectionSlack: slack });
+    const rightUsableCenter = (viewport.viewportWidth - 320) / 2;
+    const leftUsableCenter = (224 + viewport.viewportWidth) / 2;
+
+    expect(clampViewportPan({ x: rightUsableCenter - 2_980, y: 0 }, rightInspector).x).toBeCloseTo(rightUsableCenter - 2_980);
+    expect(clampViewportPan({ x: leftUsableCenter - 20, y: 0 }, leftSidebar).x).toBeCloseTo(leftUsableCenter - 20);
+    expect(rightInspector.minX).toBeLessThan(getViewportPanBounds({ ...viewport, insets: { right: 320 } }).minX);
+    expect(leftSidebar.maxX).toBeGreaterThan(getViewportPanBounds({ ...viewport, insets: { left: 224 } }).maxX);
+  });
+
   it("bases pan limits on the complete Floor bounds, including negative extension origins", () => {
     const base = getViewportPanBounds({
       mapWidth: 600,

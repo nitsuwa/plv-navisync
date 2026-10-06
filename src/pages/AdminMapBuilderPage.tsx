@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -7,7 +7,7 @@ import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, CampusDeletionError, CampusServiceError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import { nextDefaultBuildingIdentity } from "../lib/buildingDefaults";
-import { canPersistCampusStructure, campusHasUnpublishedChanges, campusHasUnsavedChanges, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
+import { canPersistCampusStructure, campusHasUnpublishedChanges, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
 import {
   CampusHome,
   CampusWizard,
@@ -141,6 +141,10 @@ export function AdminMapBuilderPage() {
   // this map, so rapid clicks cannot race two full-campus persistence writes.
   const savePromisesRef = useRef<Map<string, Promise<Campus>>>(new Map());
   const saveRevisionRef = useRef<Map<string, number>>(new Map());
+  // O(1) committed-edit tracking for the hot canvas path. Structural snapshots
+  // remain the save/draft-recovery boundary, never the per-frame dirty check.
+  const campusEditRevisionRef = useRef<Map<string, number>>(new Map());
+  const campusSavedRevisionRef = useRef<Map<string, number>>(new Map());
   // Campus cards are lightweight until the structure load completes. Never
   // allow a structure write against that pre-hydration state.
   const hydratedCampusIdsRef = useRef<Set<string>>(new Set());
@@ -186,25 +190,26 @@ export function AdminMapBuilderPage() {
     draftWriteTimersRef.current.delete(campusId);
     pendingDraftsRef.current.delete(campusId);
     const baselineRaw = savedSnapshotsRef.current[campusId];
-    if (!shouldPersistCampusDraft(draft, baselineRaw)) {
-      clearCampusDraft(campusId);
-      return;
-    }
     let baseline: Campus | undefined;
     try { baseline = JSON.parse(baselineRaw) as Campus; } catch { /* best-effort recovery */ }
+    // queueDraft is reached only after a committed editor mutation. Persist that
+    // latest snapshot directly; re-comparing two complete campus structures here
+    // duplicated the serialization immediately before serializing the draft itself.
+    // Hydration performs the baseline comparison once and removes a redundant draft.
     writeCampusDraft(draft, baseline);
   }, []);
   const queueDraft = useCallback((draft: Campus) => {
     const baselineRaw = savedSnapshotsRef.current[draft.id];
-    // A campus card can be present before its structure has hydrated. Never
-    // queue/save that temporary empty state as a draft; only a changed campus
-    // with a known persisted baseline is eligible for draft recovery.
-    if (!shouldPersistCampusDraft(draft, baselineRaw)) {
+    // Pointer frames only replace this reference and restart one trailing
+    // timer. Full comparison/stringification occurs once after input settles.
+    if (!baselineRaw || !hydratedCampusIdsRef.current.has(draft.id)) {
       clearDraft(draft.id);
       return;
     }
     pendingDraftsRef.current.set(draft.id, draft);
-    if (typeof window === "undefined" || draftWriteTimersRef.current.has(draft.id)) return;
+    if (typeof window === "undefined") return;
+    const previousTimer = draftWriteTimersRef.current.get(draft.id);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
     const timer = window.setTimeout(() => flushDraft(draft.id), 250);
     draftWriteTimersRef.current.set(draft.id, timer);
   }, [clearDraft, flushDraft]);
@@ -254,7 +259,7 @@ export function AdminMapBuilderPage() {
 
   // ── Campus CRUD ──────────────────────────────────────────────────────────
 
-  const updateCampus = useCallback((updated: Campus) => {
+  const updateCampus = useCallback((updated: Campus, options?: { persistAsBaseline?: boolean }) => {
     // Editor callbacks normally carry the complete hydrated structure. Keep a
     // defensive boundary here for startup/remount races where a lightweight
     // campus card or partial reconciliation could briefly emit empty arrays.
@@ -278,7 +283,14 @@ export function AdminMapBuilderPage() {
     // an empty/partial intermediate value must never become a writable draft.
     const hydrationInProgress = campusHydrationRef.current.campusId === safeUpdated.id
       && campusHydrationRef.current.status !== "ready";
-    if (!hydrationInProgress) queueDraft(safeUpdated);
+    if (!hydrationInProgress) {
+      const nextRevision = (campusEditRevisionRef.current.get(safeUpdated.id) ?? 0) + 1;
+      campusEditRevisionRef.current.set(safeUpdated.id, nextRevision);
+      if (options?.persistAsBaseline) campusSavedRevisionRef.current.set(safeUpdated.id, nextRevision);
+      if (!options?.persistAsBaseline) {
+        queueDraft(safeUpdated);
+      }
+    }
   }, [queueDraft]);
 
   const updateCampusMetadata = useCallback((updated: Campus) => {
@@ -291,6 +303,7 @@ export function AdminMapBuilderPage() {
     if (previous) {
       const stored = preserveStructureIfMissing(updated, previous);
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [stored.id]: JSON.stringify(stored) };
+      campusSavedRevisionRef.current.set(stored.id, campusEditRevisionRef.current.get(stored.id) ?? 0);
       if (hydratedCampusIdsRef.current.has(stored.id)) {
         setCanonicalCampuses((p) => ({ ...p, [stored.id]: stored }));
       }
@@ -606,6 +619,10 @@ export function AdminMapBuilderPage() {
         setCampusHydrationState({ campusId, status: "baseline" });
         savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [campusId]: JSON.stringify(hydratedWithPreview) };
         hydratedCampusIdsRef.current.add(campusId);
+        const restoredHasChanges = shouldPersistCampusDraft(restored, savedSnapshotsRef.current[campusId]);
+        if (!restoredHasChanges) clearCampusDraft(campusId);
+        campusEditRevisionRef.current.set(campusId, restoredHasChanges ? 1 : 0);
+        campusSavedRevisionRef.current.set(campusId, 0);
         updateCampus(restored);
       } catch (error) {
         if (campusHydrationRequestRef.current !== requestId) return;
@@ -688,7 +705,7 @@ export function AdminMapBuilderPage() {
     // A successful save is the canonical baseline for the outer dirty check.
     if (saveRevisionRef.current.get(campus.id) === revision) {
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
-      updateCampus(savedWithPreviewCount);
+      updateCampus(savedWithPreviewCount, { persistAsBaseline: true });
       clearDraft(saved.id);
     }
     return savedWithPreviewCount;
@@ -761,7 +778,7 @@ export function AdminMapBuilderPage() {
       [refreshed.id]: JSON.stringify(refreshed),
     };
     savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [refreshed.id]: JSON.stringify(refreshed) };
-    updateCampus(refreshed);
+    updateCampus(refreshed, { persistAsBaseline: true });
     clearDraft(refreshed.id);
     setStudentPreviewCampus(refreshed);
     toast.success("Campus Published", { description: `${refreshed.name} is now available to students.` });
@@ -782,20 +799,23 @@ export function AdminMapBuilderPage() {
     activeCampus !== null
       && campusEditorReady
       && typeof savedSnapshotsRef.current[activeCampus.id] === "string"
-      && campusHasUnsavedChanges(activeCampus, savedSnapshotsRef.current[activeCampus.id]);
-  const activeCampusIsUnpublished = (() => {
+      && (campusEditRevisionRef.current.get(activeCampus.id) ?? 0)
+        !== (campusSavedRevisionRef.current.get(activeCampus.id) ?? 0);
+  const activeSavedSnapshot = activeCampus ? savedSnapshotsRef.current[activeCampus.id] : undefined;
+  const activePublishedSnapshot = activeCampus ? publishedSnapshotsRef.current[activeCampus.id] : undefined;
+  const activeCampusIsUnpublished = useMemo(() => {
     if (!activeCampus || !campusEditorReady) return false;
-    const savedSnapshot = savedSnapshotsRef.current[activeCampus.id];
+    const savedSnapshot = activeSavedSnapshot;
     if (!savedSnapshot) return false;
     try {
       return campusHasUnpublishedChanges(
         JSON.parse(savedSnapshot) as Campus,
-        publishedSnapshotsRef.current[activeCampus.id],
+        activePublishedSnapshot,
       );
     } catch {
       return false;
     }
-  })();
+  }, [activeCampus?.id, activeSavedSnapshot, activePublishedSnapshot, campusEditorReady]);
   useEffect(() => {
     if (!activeCampus || !campusEditorReady || !savedSnapshotsRef.current[activeCampus.id]) {
       registerHandler(null);
@@ -804,8 +824,8 @@ export function AdminMapBuilderPage() {
     const campusId = activeCampus.id;
     registerHandler({
       isDirty: () => {
-        const current = activeCampusRef.current;
-        return Boolean(current && campusHasUnsavedChanges(current, savedSnapshotsRef.current[campusId]));
+        return (campusEditRevisionRef.current.get(campusId) ?? 0)
+          !== (campusSavedRevisionRef.current.get(campusId) ?? 0);
       },
       hasUnpublishedChanges: () => {
         const snapshot = savedSnapshotsRef.current[campusId];
@@ -831,11 +851,13 @@ export function AdminMapBuilderPage() {
       },
       onDiscard: () => {
         const current = activeCampusRef.current;
-        if (!current || !campusHasUnsavedChanges(current, savedSnapshotsRef.current[campusId])) return;
+        if (!current || (campusEditRevisionRef.current.get(campusId) ?? 0)
+          === (campusSavedRevisionRef.current.get(campusId) ?? 0)) return;
         const snapshot = savedSnapshotsRef.current[campusId];
         if (snapshot) {
           try {
-            updateCampus(JSON.parse(snapshot) as Campus);
+            updateCampus(JSON.parse(snapshot) as Campus, { persistAsBaseline: true });
+            clearDraft(campusId);
           } catch {
             // Baseline unavailable — keep the current draft untouched.
           }
@@ -843,7 +865,7 @@ export function AdminMapBuilderPage() {
       },
     });
     return () => registerHandler(null);
-  }, [activeCampus, activeCampusIsDirty, activeCampusIsUnpublished, campusEditorReady, registerHandler, saveCampusStructure, updateCampus]);
+  }, [activeCampus, activeCampusIsDirty, activeCampusIsUnpublished, campusEditorReady, clearDraft, registerHandler, saveCampusStructure, updateCampus]);
 
   const goToCampusFromFloor = useCallback((campusId: string) => {
     directionRef.current = -1;
@@ -986,6 +1008,8 @@ export function AdminMapBuilderPage() {
       // loading gate because it did not enter through goToCampus().
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [complete.id]: JSON.stringify(complete) };
       hydratedCampusIdsRef.current.add(complete.id);
+      campusEditRevisionRef.current.set(complete.id, 0);
+      campusSavedRevisionRef.current.set(complete.id, 0);
       updateCampusMetadata(complete);
       setCampusHydrationState({ campusId: complete.id, status: "ready" });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
@@ -1083,21 +1107,23 @@ export function AdminMapBuilderPage() {
                   </div>
                 </div>
               ) : <>
-                <CampusEditor
-                  campus={activeCampus}
-                  onBack={goHome}
-                  onUpdate={updateCampus}
-                  onSave={saveCampusStructure}
-                  onPublish={() => undefined}
-                  onPreviewStudent={openStudentPreview}
-                  publishingEnabled
-                  onOpenFloor={handleOpenFloor}
-                  onAddBuilding={() => setShowBuildingWizard(true)}
-                  onOpenCanvasSettings={() => setShowCanvasSettings(true)}
-                  lastSavedAt={activeCampus.updatedAt}
-                  savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
-                  publishedSnapshot={publishedSnapshotsRef.current[activeCampus.id]}
-                />
+                  <CampusEditor
+                    campus={activeCampus}
+                    onBack={goHome}
+                    onUpdate={updateCampus}
+                    onSave={saveCampusStructure}
+                    onPublish={() => undefined}
+                    onPreviewStudent={openStudentPreview}
+                    publishingEnabled
+                    onOpenFloor={handleOpenFloor}
+                    onAddBuilding={() => setShowBuildingWizard(true)}
+                    onOpenCanvasSettings={() => setShowCanvasSettings(true)}
+                    lastSavedAt={activeCampus.updatedAt}
+                    savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
+                    publishedSnapshot={publishedSnapshotsRef.current[activeCampus.id]}
+                    isDirty={(campusEditRevisionRef.current.get(activeCampus.id) ?? 0)
+                      !== (campusSavedRevisionRef.current.get(activeCampus.id) ?? 0)}
+                  />
                 {showBuildingWizard && (
                   <BuildingWizardModal
                     onClose={() => setShowBuildingWizard(false)}

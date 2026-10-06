@@ -82,8 +82,8 @@ export function StudentMapControls({
           data-testid="student-map-search-panel"
           data-no-drag
           className={cn(
-            "absolute left-2 top-2 w-auto pointer-events-auto md:left-3 md:right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
-            "right-16",
+            "absolute left-2 top-2 w-auto pointer-events-auto transition-[right] duration-200 ease-out motion-reduce:duration-0 md:left-3 md:right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
+            searchFocused ? "right-2" : "right-16",
           )}
           style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
         >

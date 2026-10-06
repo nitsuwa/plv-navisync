@@ -322,6 +322,30 @@ describe("CampusMapPage event overlays", () => {
     });
   });
 
+  it("expands mobile search and temporarily hides the account trigger while focused", async () => {
+    renderCampusMap({ previewCampus });
+    const search = await screen.findByRole("searchbox", { name: "Search campus map" });
+    const searchPanel = screen.getByTestId("student-map-search-panel");
+    const accountPositioner = screen.getByTestId("student-map-profile-trigger").parentElement!;
+
+    expect(searchPanel).toHaveClass("right-16");
+    expect(accountPositioner).not.toHaveAttribute("aria-hidden", "true");
+    fireEvent.focus(search);
+
+    await waitFor(() => {
+      expect(searchPanel).toHaveClass("right-2");
+      expect(accountPositioner).toHaveAttribute("aria-hidden", "true");
+      expect(accountPositioner).toHaveAttribute("inert");
+      expect(accountPositioner).toHaveClass("pointer-events-none", "opacity-0");
+    });
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => {
+      expect(searchPanel).toHaveClass("right-16");
+      expect(accountPositioner).not.toHaveAttribute("aria-hidden", "true");
+    });
+  });
+
   it("starts a fresh room-directions planner in the configured mode, not a previous SOS mode", async () => {
     const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{ ...previewCampus.buildings[0], floors: [{
       id: "route-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
@@ -555,6 +579,7 @@ describe("CampusMapPage event overlays", () => {
 
     expect(await screen.findByTestId("student-selected-place-card")).toBeInTheDocument();
     expect(screen.getByTestId("student-floor-picker")).toHaveAttribute("data-dock", "floor-control-bottom-left");
+    expect(screen.queryByTestId("student-campus-selector")).not.toBeInTheDocument();
     expect(screen.getByTestId("student-map-recenter-button")).toHaveAttribute("data-dock", "map-control-top-right");
     expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
@@ -740,8 +765,9 @@ describe("CampusMapPage event overlays", () => {
 
     const surface = await screen.findByTestId("student-map-surface");
     await screen.findByTestId("readonly-floor-plan-scene");
-    const camera = surface.querySelector("svg > g[transform]");
-    const readScale = () => Number(camera?.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+    const camera = surface.querySelector("svg > g");
+    const readTransform = () => camera?.style.transform || camera?.getAttribute("transform") || "";
+    const readScale = () => Number(readTransform().match(/scale\(([^)]+)\)/)?.[1]);
     const initialScale = readScale();
 
     fireEvent.wheel(surface, { deltaY: -100, clientX: 300, clientY: 220 });

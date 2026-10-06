@@ -345,8 +345,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (supabase) {
-      const { error: signOutError } = await supabase.auth.signOut();
+      // End this browser's session before clearing the in-memory profile. A
+      // failed revoke must not look like a successful logout and send the user
+      // back through a login route that can restore the still-active session.
+      const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
       if (signOutError) throw signOutError;
+      const { data, error: verifyError } = await supabase.auth.getSession();
+      if (verifyError) throw verifyError;
+      if (data.session) throw new Error("Sign out did not clear the current session.");
     }
     clearSession();
   }, [clearSession]);
@@ -398,8 +404,8 @@ export function useAuth(): AuthState {
 }
 
 /** Drop-in compatibility hook for existing student UI. */
-export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signOut">;
+export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isAdmin" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signOut">;
 export function useStudentAuth(): StudentAuthState {
-  const { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut } = useAuth();
-  return { profile, loading, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut };
+  const { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut } = useAuth();
+  return { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut };
 }

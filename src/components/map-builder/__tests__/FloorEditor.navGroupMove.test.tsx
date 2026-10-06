@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
@@ -98,7 +98,7 @@ function canvasSvg(container: HTMLElement, w = 220, h = 160): SVGSVGElement {
 }
 
 function enterNavigationMode() {
-  fireEvent.click(screen.getByRole("tab", { name: "Navigation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
 }
 
 function navNodeAt(container: HTMLElement, x: number): SVGGElement {
@@ -122,6 +122,61 @@ afterEach(() => {
 });
 
 describe("FloorEditor nav graph group move (B5 correction)", () => {
+  it("moves an isolated waypoint and its issue badge together before one release commit", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [{ id: "solo", name: "Isolated", type: "hallway", x: 60, y: 90, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" }];
+    const updates: Campus[] = [];
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = canvasSvg(container);
+    enterNavigationMode();
+    expect(container.querySelector('[data-issue-object="navNode:solo"]')).toBeTruthy();
+    fireEvent.mouseDown(navNodeAt(container, 60), { clientX: 60, clientY: 90, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 80, clientY: 100, bubbles: true });
+    await waitFor(() => {
+      const preview = container.querySelector('[data-testid="floor-nav-gesture-preview"]');
+      const node = preview?.querySelector('[data-nav-node-id="solo"]');
+      const warning = preview?.querySelector('[data-issue-object="navNode:solo"]');
+      expect(node?.getAttribute("transform")).toBe("translate(20 10)");
+      expect(warning?.getAttribute("transform")).toBe(node?.getAttribute("transform"));
+    });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].navNodes?.find((node) => node.id === "solo")).toMatchObject({ x: 80, y: 100 });
+    expect(container.querySelector('[data-testid="floor-nav-gesture-preview"]')).toBeNull();
+  });
+
+  it("previews a bend and connected edge without graph commits until release", async () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness initialCampus={bentGraphCampus()} onCampusChange={(next) => updates.push(next)} />);
+    const svg = canvasSvg(container);
+    enterNavigationMode();
+    const edgeHit = container.querySelector('[data-testid="nav-edge-hit"]');
+    expect(edgeHit).toBeTruthy();
+    fireEvent.mouseDown(edgeHit!, { clientX: 85, clientY: 90, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const bend = container.querySelector('[data-testid="nav-bend-handle"]');
+    expect(bend).toBeTruthy();
+    fireEvent.mouseDown(bend!, { clientX: 110, clientY: 80, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 120, clientY: 90, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-preview-edge-id="ne1"]')?.getAttribute("points")).toContain("120,90"));
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].navEdges?.find((edge) => edge.id === "ne1")?.bendPoints).toEqual([{ x: 120, y: 90 }]);
+  });
+
+  it("draws the Connect cursor preview without editing the graph on pointer movement", async () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness initialCampus={bentGraphCampus()} onCampusChange={(next) => updates.push(next)} />);
+    const svg = canvasSvg(container);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.mouseDown(navNodeAt(container, 60), { clientX: 60, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 90, clientY: 70, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"] [data-connect-target]')?.getAttribute("cx")).toBe("90"));
+    expect(updates).toHaveLength(0);
+  });
+
   it("arrow nudge translates selected nodes AND the bends of edges whose both endpoints are selected", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={bentGraphCampus()} onCampusChange={(c) => { latest = c; }} />);

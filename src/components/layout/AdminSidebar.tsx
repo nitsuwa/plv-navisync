@@ -15,7 +15,8 @@ import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
 import { reportService } from "../../services/reportService";
 import { PLVLogo } from "../ui/PLVLogo";
-import { supabase } from "../../lib/supabase";
+import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { useToast } from "../../hooks/useToast";
 import { motion, useReducedMotion } from "motion/react";
 import { sidebarSpring } from "../../config/animation";
 
@@ -131,6 +132,8 @@ export function AdminSidebar({
   const location = useLocation();
   const navigate = useNavigate();
   const { requestGuarded } = useUnsavedChangesContext();
+  const { signOut } = useStudentAuth();
+  const toast = useToast();
   const shouldReduce = useReducedMotion();
 
   const [signingOut, setSigningOut] = useState(false);
@@ -190,9 +193,11 @@ export function AdminSidebar({
       setSigningOut(true);
 
       try {
-        await supabase?.auth.signOut();
+        await signOut();
         onNavigate?.();
         navigate("/admin", { replace: true });
+      } catch {
+        toast.error("Could not sign out. Please try again.");
       } finally {
         setSigningOut(false);
       }

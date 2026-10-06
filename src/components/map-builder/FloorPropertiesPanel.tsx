@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { memo, useMemo, useRef, useState, useEffect } from "react";
 import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Copy, Eye, EyeOff, Lock, Unlock, Layers, FlipHorizontal, FlipVertical } from "lucide-react";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
@@ -353,7 +353,7 @@ function WallOffsetInput({ value, wall, className, onCommit }: {
   );
 }
 
-export function FloorPropertiesPanel({
+function FloorPropertiesPanelView({
   selected,
   mode,
   issueItems = [],
@@ -2637,4 +2637,26 @@ export function FloorPropertiesPanel({
       </div>
     </div>
   );
+}
+
+const MemoFloorPropertiesPanel = memo(FloorPropertiesPanelView);
+
+/**
+ * Keep the sizeable inspector subtree stable during transient canvas previews.
+ * Action trampolines always invoke the latest parent callbacks, while the
+ * memoized view only refreshes when its displayed data or selection changes.
+ */
+export function FloorPropertiesPanel(props: FloorPropertiesPanelProps) {
+  const latestPropsRef = useRef(props);
+  latestPropsRef.current = props;
+  const stableActionsRef = useRef<Record<string, (...args: unknown[]) => unknown> | null>(null);
+  if (!stableActionsRef.current) {
+    const actions: Record<string, (...args: unknown[]) => unknown> = {};
+    for (const key of Object.keys(props)) {
+      if (!key.startsWith("on") || typeof (props as any)[key] !== "function") continue;
+      actions[key] = (...args) => (latestPropsRef.current as any)[key]?.(...args);
+    }
+    stableActionsRef.current = actions;
+  }
+  return <MemoFloorPropertiesPanel {...props} {...stableActionsRef.current} />;
 }
