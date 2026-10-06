@@ -51,8 +51,10 @@ describe("student building and room reporting", () => {
   });
   it("prefills a room report opened from an indoor room interaction", () => {
     render(<ReportModal building={building} campusId="c1" floors={floors} initialFloorId="f2" initialRoomId="room2" onClose={vi.fn()} />);
-    expect(screen.getByLabelText("Floor (optional)")).toHaveValue("f2");
-    expect(screen.getByLabelText("Room (optional)")).toHaveValue("room2");
+    expect(screen.getByLabelText("Floor")).toHaveValue("Second Floor");
+    expect(screen.getByLabelText("Floor")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Room")).toHaveValue("Admin Office");
+    expect(screen.getByLabelText("Room")).toHaveAttribute("readonly");
     expect(screen.getByRole("dialog", { name: "Report issue" })).toHaveAttribute("data-map-layer", "modal");
     expect(screen.getByRole("dialog", { name: "Report issue" })).toHaveClass("map-layer-modal");
   });

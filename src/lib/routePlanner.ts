@@ -52,6 +52,13 @@ export type { Destination, RouteSegment };
 // ── Shared types ───────────────────────────────────────────────────────────
 
 export type RouteMode = "standard" | "accessible" | "emergency";
+export type StandardRoutePreference = "best" | "stairs" | "elevator";
+
+function routePreferenceOptions(mode: RouteMode, preference: StandardRoutePreference) {
+  return mode === "standard" && preference !== "best"
+    ? { transitionPreference: preference }
+    : {};
+}
 
 export interface Pt {
   x: number;
@@ -653,6 +660,7 @@ export function planAuthoredDestinationRoute(
   to: Destination,
   mode: RouteMode,
   graph?: CampusNavGraph | null,
+  preference: StandardRoutePreference = "best",
 ): PlannedRoute | null {
   const campusGraph = resolveCampusGraph(graph, mode);
   if (!campusGraph || (from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
@@ -676,7 +684,7 @@ export function planAuthoredDestinationRoute(
         toNode.id,
         accessibleOnly,
         mode === "emergency",
-        { useDerivedTransitions: false },
+        { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) },
       );
       if (!candidatePath) continue;
       if (!selected || candidatePath.distanceM < selected.path.distanceM) {
@@ -1205,7 +1213,8 @@ export function planBuildingRoute(
   to: BuildingLike,
   mode: RouteMode,
   positions?: Record<string, RoutePosition>,
-  graph?: CampusNavGraph | null
+  graph?: CampusNavGraph | null,
+  preference: StandardRoutePreference = "best",
 ): PlannedRoute | null {
   if (!from?.id || !to?.id || from.id === to.id) return null;
 
@@ -1219,7 +1228,7 @@ export function planBuildingRoute(
     for (const fromNode of fromNodes) {
       for (const toNode of toNodes) {
         const path = findNavigationRoute(campusGraph.nodes, campusGraph.edges, fromNode.id, toNode.id,
-          accessibleOnly, mode === "emergency", { useDerivedTransitions: false });
+          accessibleOnly, mode === "emergency", { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) });
         if (path && (!bestPath || path.distanceM < bestPath.distanceM)) bestPath = path;
       }
     }
@@ -1279,7 +1288,8 @@ export function planRouteFromPoint(
   to: BuildingLike,
   mode: RouteMode,
   graph?: CampusNavGraph | null,
-  positions?: Record<string, RoutePosition>
+  positions?: Record<string, RoutePosition>,
+  preference: StandardRoutePreference = "best",
 ): PlannedRoute | null {
   if (!fromPt || !to?.id) return null;
 
@@ -1326,7 +1336,7 @@ export function planRouteFromPoint(
   let path: GraphPath | null = null;
   for (const toNodeId of destinationNodeIds) {
     const candidate = findNavigationRoute(nodes, edges, fromNodeId, toNodeId,
-      mode === "accessible", mode === "emergency", { useDerivedTransitions: !campusGraph });
+      mode === "accessible", mode === "emergency", { useDerivedTransitions: !campusGraph, ...routePreferenceOptions(mode, preference) });
     if (candidate && (!path || candidate.distanceM < path.distanceM)) path = candidate;
   }
   if (!path || path.waypoints.length < 2) {
@@ -1367,6 +1377,7 @@ export function planPointToDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
   positions?: Record<string, RoutePosition>,
+  preference: StandardRoutePreference = "best",
 ): PlannedRoute | null {
   if (to.type === "building") {
     return planRouteFromPoint(
@@ -1375,6 +1386,7 @@ export function planPointToDestinationRoute(
       mode,
       graph,
       positions,
+      preference,
     );
   }
   if (!fromPt) return null;
@@ -1401,7 +1413,7 @@ export function planPointToDestinationRoute(
       toNode.id,
       mode === "accessible",
       mode === "emergency",
-      { useDerivedTransitions: false },
+      { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) },
     );
     if (candidatePath && (!path || candidatePath.distanceM < path.distanceM)) path = candidatePath;
   }
@@ -1483,11 +1495,12 @@ export function planDestinationRoute(
   to: Destination,
   mode: RouteMode,
   graph?: CampusNavGraph | null,
+  preference: StandardRoutePreference = "best",
 ): PlannedRoute | null {
   if ((from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
 
   if (resolveCampusGraph(graph, mode)) {
-    return planAuthoredDestinationRoute(from, to, mode, graph);
+    return planAuthoredDestinationRoute(from, to, mode, graph, preference);
   }
   if (from.type === "campus_place" || to.type === "campus_place") return null;
   if (mode === "accessible") return null;

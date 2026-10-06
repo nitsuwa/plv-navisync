@@ -29,18 +29,20 @@ describe("building details actions", () => {
     expect(screen.queryByText(/view floor plan|floor plan/i)).not.toBeInTheDocument();
   });
 
-  it("keeps Report visible and reserves More for QR and link utilities", () => {
+  it("keeps QR visible and puts Share and Copy Link in More", () => {
     const { props } = renderActions();
     const report = screen.getByRole("button", { name: "Report map issue" });
     expect(report).toHaveClass("text-destructive", "border-destructive/30");
     fireEvent.click(report);
     expect(props.onReport).toHaveBeenCalledWith(building);
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "More building actions" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Show QR Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show building QR code" }));
     expect(props.onToggleQR).toHaveBeenCalledTimes(1);
+
     fireEvent.pointerDown(screen.getByRole("button", { name: "More building actions" }), { button: 0, ctrlKey: false });
+    expect(screen.getByRole("menuitem", { name: "Share" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Copy Link" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /qr code/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /report/i })).not.toBeInTheDocument();
   });
 

@@ -92,4 +92,19 @@ describe("CampusDestinationSearch", () => {
     fireEvent.touchMove(list, { touches: [{ clientY: 100 }] });
     expect(onMapWheel).not.toHaveBeenCalled();
   });
+
+  it("marks duplicate endpoints unavailable and skips them on Enter", () => {
+    const onSelect = vi.fn();
+    render(<CampusDestinationSearch {...props({
+      query: "Room 205",
+      onSelect,
+      getDisabledReason: (candidate) => candidate.id === "r205" ? "Already selected as start" : undefined,
+    })} />);
+
+    const duplicate = screen.getByRole("option", { name: /Room 205, Room, Science Hall · Floor 2, Already selected as start/ });
+    expect(duplicate).toBeDisabled();
+    expect(duplicate).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search campus destinations" }), { key: "Enter" });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

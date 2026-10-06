@@ -37,6 +37,12 @@ export interface CampusDestinationSearchProps {
   browseContent?: ReactNode;
   autoFocus?: boolean;
   compact?: boolean;
+  /** Reduce fixed search chrome when results need to fill a compact route sheet. */
+  dense?: boolean;
+  /** Render inside a parent surface without introducing another nested card. */
+  embedded?: boolean;
+  /** Return a reason when a result duplicates the other route endpoint. */
+  getDisabledReason?: (result: SearchResult) => string | undefined;
   /** Let a containing sheet allocate the remaining height to the result list. */
   fillResults?: boolean;
   listId?: string;
@@ -71,6 +77,9 @@ export function CampusDestinationSearch({
   browseContent,
   autoFocus = false,
   compact = false,
+  dense = false,
+  embedded = false,
+  getDisabledReason,
   fillResults = false,
   listId = "campus-destination-results",
   groupByBuilding = false,
@@ -108,8 +117,9 @@ export function CampusDestinationSearch({
       <div className={cn(
         "rounded-[18px] border border-white/50 bg-card/95 backdrop-blur-xl dark:border-white/10",
         compact ? "shadow-[0_6px_18px_rgba(15,23,42,0.14)]" : "rounded-[20px] shadow-[0_10px_30px_rgba(15,23,42,0.14)]",
-        compact ? "p-1" : "p-1.5",
+        dense ? "p-2" : compact ? "p-1" : "p-1.5",
         fillResults && "flex min-h-0 flex-1 flex-col",
+        embedded && "rounded-none border-0 bg-transparent p-0 shadow-none backdrop-blur-none",
       )}>
         <div className="flex items-center gap-1.5" data-map-search-header={mapHeaderSafeZone ? "true" : undefined}>
           {leading}
@@ -117,7 +127,7 @@ export function CampusDestinationSearch({
             "flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 transition-colors",
             focused && "ring-2 ring-primary/15",
           )}>
-            <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <Search className={cn("shrink-0 text-muted-foreground", dense ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden="true" />
             <input
               type="text"
               role="searchbox"
@@ -137,7 +147,10 @@ export function CampusDestinationSearch({
                   const exact = filteredResults.find((result) =>
                     result.name.trim().toLowerCase() === query.trim().toLowerCase()
                     || result.code?.trim().toLowerCase() === query.trim().toLowerCase());
-                  const result = exact ?? filteredResults[0];
+                  const selectableResults = filteredResults.filter((result) => !getDisabledReason?.(result));
+                  const result = exact
+                    ? (getDisabledReason?.(exact) ? undefined : exact)
+                    : selectableResults[0];
                   if (result) {
                     event.preventDefault();
                     onSelect(result);
@@ -153,6 +166,7 @@ export function CampusDestinationSearch({
                 "min-w-0 min-h-11 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground",
                 compact && "min-h-10",
                 compact && "text-xs sm:text-[13px]",
+                dense && "min-h-9 text-[11px]",
               )}
             />
             {query && (
@@ -189,7 +203,8 @@ export function CampusDestinationSearch({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => onFilterChange(item.value)}
                   className={cn(
-                    "min-h-9 shrink-0 rounded-full border px-3 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    "shrink-0 rounded-full border text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    "min-h-9 px-3",
                     filter === item.value
                       ? "border-primary/30 bg-primary text-primary-foreground"
                       : "border-border/70 bg-muted/55 text-muted-foreground hover:border-primary/30 hover:text-primary",
@@ -206,7 +221,8 @@ export function CampusDestinationSearch({
               data-map-layer={mapHeaderSafeZone ? "transient" : undefined}
               aria-label="Campus destination results"
               className={cn(
-                "mt-1.5 max-h-[min(22rem,55dvh)] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl",
+                "max-h-[min(22rem,55dvh)] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl no-scrollbar",
+                dense ? "mt-2" : "mt-1.5",
                 fillResults && "min-h-0 max-h-none flex-1",
               )}
               style={compact && !fillResults ? { maxHeight: "min(22rem, calc(100dvh - var(--student-map-search-safe-top, 4rem) - 6.5rem - env(safe-area-inset-bottom, 0px)))" } : undefined}
@@ -219,37 +235,46 @@ export function CampusDestinationSearch({
                 resultGroups.map((group) => (
                   <div key={group.id} role={groupByBuilding ? "group" : undefined} aria-label={groupByBuilding ? group.label : undefined}>
                     {groupByBuilding && (
-                      <p className="sticky top-0 z-10 border-b border-border/60 bg-muted px-3.5 py-2 text-xs font-extrabold text-foreground">
-                        {group.label} <span className="font-normal text-muted-foreground">· {group.entries.length} places</span>
+                      <p className={cn("sticky top-0 z-10 flex min-w-0 items-center gap-1 border-b border-border/60 bg-muted font-extrabold text-foreground", dense ? "px-4 py-2 text-[11px]" : "px-3.5 py-2 text-xs")}>
+                        <span className="min-w-0 truncate">{group.label}</span>
+                        <span className="shrink-0 font-normal text-muted-foreground">· {group.entries.length} places</span>
                       </p>
                     )}
                     {group.entries.map((result) => (
-                  <button
-                    key={destinationResultKey(result)}
-                    type="button"
-                    role="option"
-                    aria-selected="false"
-                    aria-label={`${result.name}, ${destinationKindLabel(result)}${destinationContextLabel(result) ? `, ${destinationContextLabel(result)}` : ""}`}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => onSelect(result)}
-                    className="flex min-h-16 w-full items-center gap-3 border-b border-border/40 px-3.5 py-2.5 text-left transition-colors last:border-b-0 hover:bg-muted/70 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      {destinationIcon(result)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="min-w-0 truncate text-sm font-bold text-foreground">{result.name}</span>
-                        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-muted-foreground">
-                          {destinationKindLabel(result)}
-                        </span>
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">{destinationContextLabel(result)}</span>
-                    </span>
-                    {result.accessible && (
-                      <span className="shrink-0 rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-extrabold text-green-700 dark:text-green-300">Accessible</span>
-                    )}
-                  </button>
+                      (() => {
+                        const disabledReason = getDisabledReason?.(result);
+                        return (
+                          <button
+                            key={destinationResultKey(result)}
+                            type="button"
+                            role="option"
+                            aria-selected="false"
+                            aria-disabled={disabledReason ? "true" : undefined}
+                            aria-label={`${result.name}, ${destinationKindLabel(result)}${destinationContextLabel(result) ? `, ${destinationContextLabel(result)}` : ""}${disabledReason ? `, ${disabledReason}` : ""}`}
+                            disabled={Boolean(disabledReason)}
+                            title={disabledReason}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onSelect(result)}
+                            className={cn("flex w-full items-center border-b border-border/40 text-left transition-colors last:border-b-0 hover:bg-muted/70 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent", dense ? "min-h-[60px] gap-2.5 px-3.5 py-2.5" : "min-h-16 gap-3 px-3.5 py-2.5")}
+                          >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                              {destinationIcon(result)}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2">
+                                <span className={cn("min-w-0 truncate font-bold text-foreground", dense ? "text-[13px]" : "text-sm")}>{result.name}</span>
+                                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-muted-foreground">
+                                  {destinationKindLabel(result)}
+                                </span>
+                              </span>
+                              <span className={cn("mt-0.5 block truncate text-muted-foreground", dense ? "text-[11px]" : "text-xs")}>{disabledReason ?? destinationContextLabel(result)}</span>
+                            </span>
+                            {result.accessible && (
+                              <span className="shrink-0 rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-extrabold text-green-700 dark:text-green-300">Accessible</span>
+                            )}
+                          </button>
+                        );
+                      })()
                     ))}
                   </div>
                 ))

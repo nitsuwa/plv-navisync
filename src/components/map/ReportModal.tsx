@@ -42,6 +42,11 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
   const [warning, setWarning] = useState<string | null>(null);
   const selectedFloor = floors.find(floor => floor.id === floorId);
   const selectedRoom = selectedFloor?.rooms.find(room => room.id === roomId);
+  const isRoomLocationFixed = Boolean(
+    initialFloorId &&
+      initialRoomId &&
+      floors.find(floor => floor.id === initialFloorId)?.rooms.some(room => room.id === initialRoomId),
+  );
   const placeName = building?.name ?? campusPlace?.name ?? "Campus place";
   const locationLabel = [campusPlace ? `${campusPlace.type === "gate" ? "Campus Gate" : "Campus place"} · ${placeName}` : placeName, selectedFloor?.label, selectedRoom?.name].filter(Boolean).join(" · ");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -146,10 +151,10 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up max-h-[90vh] overflow-y-auto"
+        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up max-h-[calc(100dvh-1rem)] overflow-hidden sm:max-h-[90vh] sm:overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
+        <div className="flex items-center justify-between border-b border-border px-4 pb-2 pt-3 sm:px-5 sm:pb-4 sm:pt-5">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-destructive/10 flex items-center justify-center shrink-0">
               <Flag className="h-4 w-4 text-destructive" />
@@ -169,32 +174,58 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="space-y-2.5 p-3 sm:space-y-4 sm:p-5">
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          {floors.length > 0 && <div className="space-y-2">
-            <label htmlFor="report-floor" className="block text-xs font-bold">Floor (optional)</label>
-            <select id="report-floor" value={floorId} onChange={e => { setFloorId(e.target.value); setRoomId(""); }} className="w-full rounded-xl border border-border bg-background p-2 text-sm">
-              <option value="">Whole building</option>
-              {floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
-            </select>
-            {selectedFloor && <>
-              <label htmlFor="report-room" className="block text-xs font-bold">Room (optional)</label>
-              <select id="report-room" value={roomId} onChange={e => setRoomId(e.target.value)} className="w-full rounded-xl border border-border bg-background p-2 text-sm">
-                <option value="">Whole floor / common area</option>
-                {selectedFloor.rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
-              </select>
-            </>}
+          {floors.length > 0 && <div className={cn("grid gap-2", selectedFloor ? "grid-cols-2" : "grid-cols-1")}>
+            <div className="min-w-0 space-y-1">
+              <label htmlFor="report-floor" className="block text-[11px] font-bold sm:text-xs">Floor{isRoomLocationFixed ? "" : " (optional)"}</label>
+              {isRoomLocationFixed ? (
+                <input
+                  id="report-floor"
+                  type="text"
+                  value={selectedFloor?.label ?? ""}
+                  readOnly
+                  aria-readonly="true"
+                  title="The selected room's floor is fixed for this report."
+                  className="h-9 w-full cursor-default rounded-xl border border-border bg-background px-2 text-xs sm:text-sm"
+                />
+              ) : (
+                <select id="report-floor" value={floorId} onChange={e => { setFloorId(e.target.value); setRoomId(""); }} className="h-9 w-full rounded-xl border border-border bg-background px-2 text-xs sm:text-sm">
+                  <option value="">Whole building</option>
+                  {floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
+                </select>
+              )}
+            </div>
+            {selectedFloor && <div className="min-w-0 space-y-1">
+              <label htmlFor="report-room" className="block text-[11px] font-bold sm:text-xs">Room{isRoomLocationFixed ? "" : " (optional)"}</label>
+              {isRoomLocationFixed ? (
+                <input
+                  id="report-room"
+                  type="text"
+                  value={selectedRoom?.name ?? ""}
+                  readOnly
+                  aria-readonly="true"
+                  title="This report is fixed to the selected room."
+                  className="h-9 w-full cursor-default rounded-xl border border-border bg-background px-2 text-xs sm:text-sm"
+                />
+              ) : (
+                <select id="report-room" value={roomId} onChange={e => setRoomId(e.target.value)} className="h-9 w-full rounded-xl border border-border bg-background px-2 text-xs sm:text-sm">
+                  <option value="">Whole floor / common area</option>
+                  {selectedFloor.rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
+                </select>
+              )}
+            </div>}
           </div>}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/60 border border-border">
+          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-muted/60 px-3 py-1.5 sm:py-2">
             <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span className="text-xs text-foreground font-semibold flex-1">{placeName}</span>
-            <span className="text-[10px] font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground sm:text-xs">{placeName}</span>
+            <span className="shrink-0 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[9px] font-bold text-green-600 dark:text-green-400 sm:text-[10px]">
               Auto-set
             </span>
           </div>
           <div role="radiogroup" aria-label="Issue type">
-            <label className="block text-xs font-bold text-foreground uppercase tracking-wide mb-2">Issue Type *</label>
-            <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Issue type">
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-foreground sm:mb-2 sm:text-xs">Issue Type *</label>
+            <div className="grid grid-cols-2 gap-1.5 min-[480px]:grid-cols-3 sm:grid-cols-2" role="radiogroup" aria-label="Issue type">
               {ISSUE_TYPES.map((t) => (
                 <button
                   key={t}
@@ -203,7 +234,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
                   aria-checked={issueType === t}
                   onClick={() => setIssueType(t)}
                   className={cn(
-                    "text-xs font-semibold py-2.5 px-2.5 rounded-xl border text-left transition-all duration-150 cursor-pointer",
+                    "rounded-xl border px-2 py-2 text-left text-[11px] font-semibold transition-all duration-150 cursor-pointer sm:px-2.5 sm:py-2.5 sm:text-xs",
                     issueType === t
                       ? "border-destructive bg-destructive/8 text-destructive shadow-sm"
                       : "border-border text-muted-foreground hover:border-destructive/30 hover:bg-destructive/5",
@@ -215,7 +246,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
             </div>
           </div>
           <div>
-            <label htmlFor="report-description" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">
+            <label htmlFor="report-description" className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-foreground sm:mb-1.5 sm:text-xs">
               Description
             </label>
             <textarea
@@ -224,10 +255,10 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Describe the issue in detail…"
-              className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground placeholder:text-muted-foreground text-sm resize-y min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200"
+              className="h-20 w-full resize-none rounded-xl border border-border bg-input-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-200 sm:h-24 sm:px-4 sm:py-2.5"
             />
           </div>
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 pt-0 sm:pt-1">
             <input
               type="file"
               ref={fileInputRef}
@@ -240,7 +271,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "flex items-center gap-1.5 h-10 px-3 rounded-xl border text-xs font-semibold transition-all duration-200 cursor-pointer",
+                "flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-all duration-200 cursor-pointer sm:h-10",
                 imageFile
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:bg-muted"
@@ -252,7 +283,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
             <button
               onClick={handleSubmit}
               disabled={!issueType || isSubmitting}
-              className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-sm font-extrabold hover:bg-destructive/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97] flex items-center justify-center gap-2 cursor-pointer"
+              className="flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-destructive text-sm font-extrabold text-destructive-foreground transition-all hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.97] cursor-pointer sm:h-10"
             >
               {isSubmitting ? (
                 <>
