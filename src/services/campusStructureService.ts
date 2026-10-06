@@ -176,10 +176,15 @@ function mapElementHumanType(row: JsonObject, collection: string): string {
 }
 
 async function verifyPayloadMapElementsPersisted(campusId: string, payload: CampusStructurePayload, rows: CampusStructureRows): Promise<void> {
-  const persisted = new Map(rows.mapElements.map((row) => [row.id, row]));
+  // Event overlays are hydrated through this shared read, but they belong to
+  // the Event subsystem and are deliberately absent from the generic campus
+  // structure write payload. Do not treat preserved Event rows as unexpected
+  // physical rows during the post-save integrity check.
+  const physicalRows = rows.mapElements.filter((row) => !isEventOverlayPersistenceRow(row));
+  const persisted = new Map(physicalRows.map((row) => [row.id, row]));
   const expectedIds = new Set(payload.map_elements.map((row) => String(row.id)));
   const missing: ReturnType<typeof payloadElementDiagnostic>[] = [];
-  const unexpected = rows.mapElements
+  const unexpected = physicalRows
     .filter((row) => !expectedIds.has(row.id))
     .map((row) => ({ id: row.id, kind: structureKindForRow(row), element_type: row.element_type, name: row.name, building_id: row.building_id, floor_id: row.floor_id }));
   const wrongOwnership: Array<ReturnType<typeof payloadElementDiagnostic> & { actualBuildingId?: string | null; actualFloorId?: string | null }> = [];
@@ -227,7 +232,7 @@ async function verifyPayloadMapElementsPersisted(campusId: string, payload: Camp
   for (const floor of payload.floors) {
     const floorId = String(floor.id);
     const expectedIds = payload.map_elements.filter((row) => row.floor_id === floorId).map((row) => String(row.id)).sort();
-    const actualIds = rows.mapElements.filter((row) => row.floor_id === floorId).map((row) => String(row.id)).sort();
+    const actualIds = physicalRows.filter((row) => row.floor_id === floorId).map((row) => String(row.id)).sort();
     const expectedSet = new Set(expectedIds);
     const actualSet = new Set(actualIds);
     const missing = expectedIds.filter((id) => !actualSet.has(id));
@@ -754,6 +759,14 @@ export function canonicalizeCampusStructureForPersistence(campus: Campus): Campu
   );
 }
 
+function isEventOverlayPersistenceRow(row: Pick<MapElementRow, "element_type" | "metadata">): boolean {
+  if (row.element_type === "event_overlay") return true;
+  const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, Json | undefined>
+    : {};
+  return metadata.kind === "event_overlay";
+}
+
 export function serializeCampusStructure(campus: Campus): CampusStructurePayload {
   const canonicalCampus = canonicalizeCampusStructureForPersistence(campus);
   // Validate the canonicalized editor snapshot before row generation or any
@@ -876,7 +889,9 @@ export function serializeCampusStructure(campus: Campus): CampusStructurePayload
   (campus.accessibilityFeatures ?? []).forEach((v) => map_elements.push(element("accessibility_feature", campus.id, v as unknown as Record<string, unknown>, v.buildingId)));
   (campus.assemblyPoints ?? []).forEach((v) => map_elements.push(element("assembly_point", campus.id, v as unknown as Record<string, unknown>)));
   (campus.decorAssets ?? []).forEach((v) => map_elements.push(element("decor", campus.id, v as unknown as Record<string, unknown>)));
-  (campus.eventOverlays ?? []).forEach((v) => map_elements.push(element("event_overlay", campus.id, v as unknown as Record<string, unknown>, v.locationRef?.buildingId)));
+  // Event overlays are hydrated from the shared map_elements table, but their
+  // writes belong to the Event workflow. The generic Map Builder replacement
+  // payload must not claim ownership of those rows.
   // Campus appearance lives in the existing map_elements JSON channel. This
   // deterministic, non-rendered record is paired with the strict
   // `canvas_appearance` CHECK-constraint migration so ground material/tint
@@ -1130,7 +1145,10 @@ export const entranceService = { ...mapElementService, list: async (campusId: st
 export const campusStructureService = {
   async load(campus: Campus): Promise<Campus> { return hydrateCampusStructure(campus, await selectStructure(campus.id)); },
   async save(campus: Campus): Promise<Campus> {
-    const identityRepair = repairInvalidFloorMapElementIds(campus);
+    // Event rows have their own identity/revision lifecycle. Keep them out of
+    // every generic-write normalization step as well as the final payload.
+    const mapWriteCandidate = { ...campus, eventOverlays: [] };
+    const identityRepair = repairInvalidFloorMapElementIds(mapWriteCandidate);
     if (identityRepair.repairs.length > 0 && import.meta.env.DEV) {
       console.warn("[CampusStructure] Repaired malformed map element IDs before saving", identityRepair.repairs);
     }

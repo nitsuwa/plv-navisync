@@ -14,6 +14,8 @@ import {
   resizeFurnitureWithinFloor,
   scaleFloorItemFromBounds,
   resizeRoomWithinFloor,
+  selectableFloorBounds,
+  selectionIdsInCachedBounds,
   roomAnchorAtPoint,
   selectionIdsInRect,
   summarizeFloorResizeIssues,
@@ -93,6 +95,24 @@ describe("floorGeometry", () => {
 
     expect(selectionIdsInRect(floor, { x: 0, y: 0, w: 80, h: 80 })).toEqual(["r1"]);
     expect(selectionIdsInRect(floor, { x: 0, y: 0, w: 140, h: 140 })).toEqual(["r1", "fur1"]);
+  });
+
+  it("resolves a marquee from bounds captured once at gesture start", () => {
+    const floor = normalizeFloor({
+      id: "f1",
+      buildingId: "b1",
+      number: 1,
+      rooms: [
+        { id: "r1", name: "Room", type: "classroom", x: 20, y: 20, w: 50, h: 40, floorId: "f1", buildingId: "b1" },
+        { id: "r-locked", name: "Locked", type: "classroom", x: 90, y: 20, w: 50, h: 40, floorId: "f1", buildingId: "b1", locked: true },
+      ],
+      furniture: [{ id: "fur1", type: "desk", name: "Desk", category: "tables", x: 100, y: 100, width: 20, height: 10, rotation: 0, color: "#333" }],
+    });
+    const cachedBounds = selectableFloorBounds(floor);
+
+    expect(selectionIdsInCachedBounds(cachedBounds, { x: 0, y: 0, w: 80, h: 80 })).toEqual(["r1"]);
+    expect(selectionIdsInCachedBounds(cachedBounds, { x: 0, y: 0, w: 140, h: 140 })).toEqual(["r1", "fur1"]);
+    expect(cachedBounds.map(({ id }) => id)).not.toContain("r-locked");
   });
 
   it("reports blocking issues when existing objects fall outside a smaller canvas", () => {

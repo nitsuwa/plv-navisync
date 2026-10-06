@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { screenToWorld, screenPointToLocalCoordinates, screenPixelsToWorldDistance, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
+import { getSvgContentBox, screenToWorld, screenPointToLocalCoordinates, screenPixelsToWorldDistance, panToKeepWorldPoint, type ScreenRect } from "../../lib/editorPlacement";
 import { clampViewportPan, dampCameraZoomLogarithm, getViewportFitZoom, getViewportPanBounds, normalizeStudentMapWheelDelta, type MapViewportInsets, type MapViewportPanBounds } from "../../lib/mapViewport";
 
 // ── Animation constants ─────────────────────────────────────────────────────
@@ -45,13 +45,18 @@ export function isSpacePressed() {
   return spacePressedRef.current;
 }
 
+/** Subscribe without tying transient Space-pan feedback to a canvas render. */
+export function subscribeSpacePressedState(subscriber: (pressed: boolean) => void) {
+  spacePanSubscribers.add(subscriber);
+  subscriber(spacePressedRef.current);
+  return () => { spacePanSubscribers.delete(subscriber); };
+}
+
 /** Subscribe UI that needs to reflect the temporary pan state immediately. */
 export function useSpacePressedState() {
   const [pressed, setPressed] = useState(spacePressedRef.current);
   useEffect(() => {
-    spacePanSubscribers.add(setPressed);
-    setPressed(spacePressedRef.current);
-    return () => { spacePanSubscribers.delete(setPressed); };
+    return subscribeSpacePressedState(setPressed);
   }, []);
   return pressed;
 }
@@ -75,12 +80,20 @@ export interface CanvasViewportOptions {
   editorPadding?: number;
   /** Screen-space areas reserved by fixed editor UI over the canvas. */
   insets?: MapViewportInsets;
+  /** Let authored map edges reach the center of the currently usable editor canvas. */
+  centerMapEdges?: boolean;
+  /** Additional screen-space inspection range when edge-centering is disabled. */
+  inspectionSlack?: { x?: number; y?: number };
   /** Optional world-space area rendered by the SVG viewBox, including content
    * that extends beyond the base canvas. */
   worldBounds?: { x: number; y: number; width: number; height: number };
   /** Update one SVG camera group directly during gestures, then publish React
    * state when the gesture/animation settles. Used by large map-editor scenes. */
   imperativeCamera?: boolean;
+  /** Keep the Floor pan under the pointer on the first move. */
+  immediatePan?: boolean;
+  /** Floor SVG camera pans are measured in viewBox units, not CSS pixels. */
+  svgPanCoordinateSpace?: boolean;
   /** Receives transient camera frames for small DOM-only viewport readouts. */
   onCameraFrame?: (zoom: number, pan: { x: number; y: number }) => void;
 }
@@ -94,6 +107,8 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const insetRight = Math.max(0, options.insets?.right ?? 0);
   const insetBottom = Math.max(0, options.insets?.bottom ?? 0);
   const insetLeft = Math.max(0, options.insets?.left ?? 0);
+  const centerMapEdges = options.centerMapEdges ?? false;
+  const configuredInspectionSlack = options.inspectionSlack;
   const worldBounds = options.worldBounds;
   const imperativeCamera = options.imperativeCamera ?? false;
   const cameraFrameCallbackRef = useRef(options.onCameraFrame);
@@ -105,6 +120,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
   const currentZoom = useRef(1);
   const currentPan = useRef({ x: 0, y: 0 });
   const endPanForSpaceRef = useRef<() => void>(() => {});
+  const spacePanCursorBeforeRef = useRef<string | null>(null);
   const targetZoom = useRef(1);
   const targetLogZoom = useRef(0);
   const targetPan = useRef({ x: 0, y: 0 });
@@ -169,18 +185,29 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
 
   const getPanBounds = useCallback((zoomValue: number): MapViewportPanBounds => {
     const rect = viewportRectsRef.current?.container ?? containerRef.current?.getBoundingClientRect();
+    const viewBox = svgRef.current?.viewBox.baseVal;
+    const svgRect = viewportRectsRef.current?.svg ?? rect;
+    const useSvgUnits = options.svgPanCoordinateSpace && viewBox && viewBox.width > 0 && viewBox.height > 0 && svgRect;
+    const contentScale = useSvgUnits ? getSvgContentBox(svgRect, viewBox.width, viewBox.height).scale : 1;
+    const unitScale = useSvgUnits ? 1 / Math.max(contentScale, Number.EPSILON) : 1;
+    const usableWidth = rect?.width || canvasW;
+    const usableHeight = rect?.height || canvasH;
+    const inspectionSlack = centerMapEdges
+      ? { x: usableWidth / 2 + 96, y: usableHeight / 2 + 64 }
+      : { x: configuredInspectionSlack?.x ?? 0, y: configuredInspectionSlack?.y ?? 0 };
     return getViewportPanBounds({
       mapWidth: Math.max(1, worldBounds?.width ?? canvasW),
       mapHeight: Math.max(1, worldBounds?.height ?? canvasH),
-      viewportWidth: rect?.width || canvasW,
-      viewportHeight: rect?.height || canvasH,
+      viewportWidth: useSvgUnits ? viewBox.width : rect?.width || canvasW,
+      viewportHeight: useSvgUnits ? viewBox.height : rect?.height || canvasH,
       zoom: zoomValue,
-      padding: workspacePadding,
-      insets: { top: insetTop, right: insetRight, bottom: insetBottom, left: insetLeft },
+      padding: workspacePadding * unitScale,
+      insets: { top: insetTop * unitScale, right: insetRight * unitScale, bottom: insetBottom * unitScale, left: insetLeft * unitScale },
+      inspectionSlack,
       zoomOrigin: "top-left",
       worldOrigin: worldBounds ? { x: worldBounds.x, y: worldBounds.y } : undefined,
     });
-  }, [canvasH, canvasW, insetBottom, insetLeft, insetRight, insetTop, worldBounds?.height, worldBounds?.width, worldBounds?.x, worldBounds?.y, workspacePadding]);
+  }, [canvasH, canvasW, centerMapEdges, configuredInspectionSlack?.x, configuredInspectionSlack?.y, insetBottom, insetLeft, insetRight, insetTop, options.svgPanCoordinateSpace, worldBounds?.height, worldBounds?.width, worldBounds?.x, worldBounds?.y, workspacePadding]);
 
   const clampPan = useCallback((point: { x: number; y: number }, zoomValue = targetZoom.current) =>
     clampViewportPan(point, getPanBounds(zoomValue)), [getPanBounds]);
@@ -434,7 +461,9 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
         let nextPan = { ...currentPan.current };
         const world = clientX !== undefined && clientY !== undefined ? screenToWorldPt(clientX, clientY) : null;
         const svg = svgRef.current;
-        const rect = viewportRectsRef.current?.svg ?? getSvgRect();
+        // A sidebar or header can move the SVG without changing its size.
+        // Always anchor a new wheel gesture against the current viewport rect.
+        const rect = getSvgRect();
         if (world && svg && rect && clientX !== undefined && clientY !== undefined) {
           const viewBox = svg.viewBox.baseVal;
           const mapWidth = viewBox.width > 0 ? viewBox.width : canvasW;
@@ -514,17 +543,29 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
         if (isSpacePanBlockedTarget(e.target)) return;
         e.preventDefault();
         updateSpacePressed(true);
+        if (imperativeCamera && svgRef.current) {
+          if (spacePanCursorBeforeRef.current === null) spacePanCursorBeforeRef.current = svgRef.current.style.cursor;
+          svgRef.current.style.cursor = "grab";
+        }
       }
+    };
+    const restoreSpaceCursor = () => {
+      if (svgRef.current && spacePanCursorBeforeRef.current !== null) {
+        svgRef.current.style.cursor = spacePanCursorBeforeRef.current;
+      }
+      spacePanCursorBeforeRef.current = null;
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         updateSpacePressed(false);
         endPanForSpaceRef.current();
+        restoreSpaceCursor();
       }
     };
     const blur = () => {
       updateSpacePressed(false);
       endPanForSpaceRef.current();
+      restoreSpaceCursor();
     };
     const visibilityChange = () => {
       if (document.visibilityState === "hidden") blur();
@@ -539,8 +580,9 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
       window.removeEventListener("blur", blur);
       document.removeEventListener("visibilitychange", visibilityChange);
       updateSpacePressed(false);
+      restoreSpaceCursor();
     };
-  }, []);
+  }, [imperativeCamera]);
 
   // ── Panning ─────────────────────────────────────────────────────────────
   const startPan = useCallback((e: Pick<MouseEvent, "clientX" | "clientY">) => {
@@ -579,6 +621,10 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     if (!panning.current) return;
     if (imperativeCamera) {
       latestPanPointerRef.current = { x: e.clientX, y: e.clientY };
+      if (options.immediatePan) {
+        flushPendingPan();
+        return;
+      }
       if (panFrameRef.current === null) {
         panFrameRef.current = requestAnimationFrame(() => {
           panFrameRef.current = null;
@@ -594,7 +640,7 @@ export function useCanvasControls(canvasW: number, canvasH: number, options: Can
     currentPan.current = nextPan;
     targetPan.current = { ...nextPan };
     setPan(nextPan);
-  }, [clampPan, flushPendingPan, imperativeCamera]);
+  }, [clampPan, flushPendingPan, imperativeCamera, options.immediatePan]);
 
   const endPan = useCallback(() => {
     if (imperativeCamera && panning.current) {

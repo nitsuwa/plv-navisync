@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, fireEvent, cleanup, waitFor, screen, act } from "@testing-library/react";
 import { useState } from "react";
 import { CampusEditor } from "../CampusEditor";
 import type { Campus } from "../types";
@@ -245,6 +245,115 @@ describe("CampusEditor multi-object movement", () => {
     expect(buildingPos(latestCampus!, "b2")).toEqual({ x: 280, y: 120 });
   });
 
+  it("publishes one canonical Campus update for a multi-sample Building drag", () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness onCampusChange={(campus) => updates.push(campus)} />);
+    const svg = stubSvgRect(container);
+    const building = buildingG(container, "#1e40af");
+    fireEvent.mouseDown(building, { clientX: 100, clientY: 100 });
+    for (let sample = 1; sample <= 50; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: 100 + sample, clientY: 100 + sample, bubbles: true });
+    }
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(buildingPos(updates[0], "b1").x).toBeGreaterThan(100);
+    expect(buildingPos(updates[0], "b1").y).toBeGreaterThan(100);
+  });
+
+  it("keeps a Building visibly under the pointer with Navigation Mode enabled, then commits once", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].entrances = [{ id: "entrance-1", edge: "left", offset: 0.5, type: "main" } as never];
+    campus.navNodes = [{ id: "entrance-node", type: "entrance", x: 100, y: 140, buildingId: "b1", entranceId: "entrance-1" } as never];
+    const updates: Campus[] = [];
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Show and edit the walking network" }));
+    // Navigation visibility/layer synchronization may reconcile existing
+    // fixture state; measure only the subsequent user drag transaction.
+    updates.length = 0;
+
+    const building = buildingG(container, "#1e40af");
+    fireEvent.mouseDown(building, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(svg, { clientX: 130, clientY: 125, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    const originalBuilding = container.querySelector('[data-campus-building-transform="b1"]') as SVGGElement;
+    const previewBuilding = container.querySelector('[data-testid="campus-interaction-items"] [data-campus-building-transform="b1"]');
+    expect(originalBuilding.getAttribute("visibility")).toBe("hidden");
+    expect(previewBuilding?.getAttribute("transform")).toContain("translate(200 160)");
+    const originalEntranceBadge = container.querySelector('[data-campus-entrance-badge="b1:entrance-1"]');
+    const previewEntranceBadge = container.querySelector('[data-testid="campus-interaction-items"] [data-campus-entrance-badge="b1:entrance-1"]');
+    expect(originalEntranceBadge?.getAttribute("visibility")).toBe("hidden");
+    expect(previewEntranceBadge?.querySelector('[data-testid="entrance-direction-badge"]')?.getAttribute("transform"))
+      .not.toBe(originalEntranceBadge?.querySelector('[data-testid="entrance-direction-badge"]')?.getAttribute("transform"));
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(buildingPos(updates[0], "b1")).toEqual({ x: 140, y: 120 });
+  });
+
+  it("moves Navigation waypoint and issue visuals together before one release commit", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [{ id: "free-waypoint", type: "outdoor", name: "Free Point", x: 450, y: 120 } as never];
+    const updates: Campus[] = [];
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Show and edit the walking network" }));
+    const node = container.querySelector('[data-campus-nav-node-id="free-waypoint"]') as SVGGElement;
+    expect(node).toBeTruthy();
+    fireEvent.mouseDown(node, { clientX: 450, clientY: 120 });
+    fireEvent.mouseMove(svg, { clientX: 470, clientY: 140, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+    const previewNode = container.querySelector('[data-testid="campus-interaction-items"] [data-campus-nav-node-id="free-waypoint"]');
+    expect(node.getAttribute("visibility")).toBe("hidden");
+    expect(previewNode?.getAttribute("transform")).toBe("translate(20 20)");
+    const originalIssue = container.querySelector('[data-issue-object="navNode:free-waypoint"]');
+    const previewIssue = container.querySelector('[data-testid="campus-interaction-items"] [data-issue-object="navNode:free-waypoint"]');
+    if (originalIssue) {
+      expect(originalIssue.getAttribute("visibility")).toBe("hidden");
+      expect(previewIssue?.getAttribute("transform")).toBe("translate(20 20)");
+    }
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].navNodes?.[0]).toMatchObject({ x: 470, y: 140 });
+  });
+
+  it("keeps a decorative asset drag transient until release and commits it once", () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness onCampusChange={(campus) => updates.push(campus)} />);
+    const svg = stubSvgRect(container);
+    const tree = decorG(container);
+    fireEvent.mouseDown(tree, { clientX: 450, clientY: 120 });
+    for (let sample = 1; sample <= 50; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: 450 + sample, clientY: 120 + sample, bubbles: true });
+    }
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(decorPos(updates[0], "da1")).not.toEqual({ x: 450, y: 120 });
+  });
+
+  it("commits a decorative rotation once after transient pointer samples", () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness onCampusChange={(campus) => updates.push(campus)} />);
+    const svg = stubSvgRect(container);
+    fireEvent.mouseDown(decorG(container), { clientX: 450, clientY: 120 });
+    fireEvent.mouseUp(svg);
+    const handle = container.querySelector('[data-testid="decor-rotation-handle-hit"]') as SVGCircleElement;
+    const startX = Number(handle.getAttribute("cx"));
+    const startY = Number(handle.getAttribute("cy"));
+    fireEvent.mouseDown(handle, { clientX: startX, clientY: startY });
+    for (let sample = 1; sample <= 20; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: startX + sample, clientY: startY - sample, bubbles: true });
+    }
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].decorAssets?.[0].rotation).not.toBe(0);
+  });
+
   it("moves a mixed selection of a building and a decorative asset together", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);
@@ -352,6 +461,13 @@ describe("CampusEditor multi-object movement", () => {
     expect(latestCampus!.buildings.some((b) => b.id === "b1")).toBe(false);
     expect((latestCampus!.decorAssets ?? []).some((d) => d.id === "da1")).toBe(false);
     await waitFor(() => expect(toolbarCount(container, 2)).toBeNull());
+  });
+
+  it("opens the compact Properties inspector for an ordinary decorative asset", () => {
+    const { container } = render(<Harness />);
+    stubSvgRect(container);
+    fireEvent.mouseDown(decorG(container), { clientX: 450, clientY: 120 });
+    expect(container.querySelector('[data-compact-decor-inspector="true"]')).toBeTruthy();
   });
 
   it("rubber-band selection captures buildings AND decor assets and drags them together", () => {

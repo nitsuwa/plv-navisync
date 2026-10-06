@@ -1,11 +1,13 @@
 import * as Popover from "@radix-ui/react-popover";
 import { addDays, addMonths, format, isSameDay, isSameMonth, startOfMonth, startOfWeek } from "date-fns";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/utils";
+import { isValidThemedTime, ThemedTimeField } from "./ThemedTimeField";
+
+export { isValidThemedTime } from "./ThemedTimeField";
 
 const dayKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
-const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 function parseDateKey(value: string): Date | null {
   if (!dayKeyPattern.test(value)) return null;
@@ -36,13 +38,9 @@ export function manilaDateTimeParts(value?: string): { date: string; time: strin
 }
 
 export function manilaDateTimeToIso(date: string, time: string): string | undefined {
-  if (!parseDateKey(date) || !timePattern.test(time)) return undefined;
+  if (!parseDateKey(date) || !isValidThemedTime(time)) return undefined;
   const instant = new Date(`${date}T${time}:00+08:00`);
   return Number.isFinite(instant.getTime()) ? instant.toISOString() : undefined;
-}
-
-export function isValidThemedTime(value: string): boolean {
-  return timePattern.test(value);
 }
 
 export function ThemedDateTimeField({ label, date, time, onDateChange, onTimeChange, disabled = false, error }: {
@@ -62,11 +60,6 @@ export function ThemedDateTimeField({ label, date, time, onDateChange, onTimeCha
   const days = Array.from({ length: 42 }, (_, index) => addDays(calendarStart, index));
   const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const timeIsInvalid = Boolean(time) && !isValidThemedTime(time);
-  const hours = isValidThemedTime(time) ? Number(time.slice(0, 2)) : 9;
-  const minutes = isValidThemedTime(time) ? time.slice(3) : "00";
-  const period = hours >= 12 ? "PM" : "AM";
-  const displayTime = `${hours % 12 || 12}:${minutes} ${period}`;
-  const setTime = (hour: number, minute: string, meridiem: string) => onTimeChange(`${String(hour % 12 + (meridiem === "PM" ? 12 : 0)).padStart(2, "0")}:${minute}`);
 
   return (
     <fieldset className="min-w-0">
@@ -128,16 +121,7 @@ export function ThemedDateTimeField({ label, date, time, onDateChange, onTimeCha
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <Popover.Root>
-          <Popover.Trigger asChild><button type="button" disabled={disabled} aria-label={`${label} time: ${displayTime}`} className="flex h-10 min-w-0 items-center gap-2 rounded-xl border border-border bg-input-background px-3 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Clock3 aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />{displayTime}</button></Popover.Trigger>
-          <Popover.Portal><Popover.Content align="end" sideOffset={8} aria-label={`${label} time picker`} className="z-[120] w-[min(19rem,calc(100vw-2rem))] rounded-2xl border border-border bg-card p-4 text-foreground shadow-xl">
-            <p className="mb-3 text-sm font-bold">Choose time · {displayTime}</p>
-            <div className="mb-3 flex gap-2">{["AM", "PM"].map(value => <button type="button" key={value} aria-pressed={period === value} onClick={() => setTime(hours, minutes, value)} className={cn("min-h-10 flex-1 rounded-xl border border-border text-sm font-bold", period === value ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>{value}</button>)}</div>
-            <div className="grid grid-cols-2 gap-3"><div><p className="mb-2 text-xs font-semibold text-muted-foreground">Hour</p><div className="grid max-h-44 grid-cols-2 gap-1 overflow-y-auto overscroll-contain">{Array.from({ length: 12 }, (_, index) => index + 1).map(hour => <button type="button" key={hour} aria-label={`Hour ${hour}`} aria-pressed={(hours % 12 || 12) === hour} onClick={() => setTime(hour, minutes, period)} className="min-h-9 rounded-lg text-sm hover:bg-muted aria-pressed:bg-primary/10 aria-pressed:text-primary">{hour}</button>)}</div>
-            </div><div><p className="mb-2 text-xs font-semibold text-muted-foreground">Minute</p><div className="grid max-h-44 grid-cols-2 gap-1 overflow-y-auto overscroll-contain">{Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map(minute => <button type="button" key={minute} aria-label={`Minute ${minute}`} aria-pressed={minutes === minute} onClick={() => setTime(hours, minute, period)} className="min-h-9 rounded-lg text-xs hover:bg-muted aria-pressed:bg-primary/10 aria-pressed:text-primary">{minute}</button>)}</div>
-            </div></div><Popover.Close className="mt-3 min-h-10 w-full rounded-xl bg-primary text-sm font-bold text-primary-foreground">Done</Popover.Close>
-          </Popover.Content></Popover.Portal>
-        </Popover.Root>
+        <ThemedTimeField label={`${label} time`} value={time} onChange={onTimeChange} disabled={disabled} />
       </div>
       {(error || timeIsInvalid) && <p role="alert" className="mt-1.5 text-xs text-destructive">{error || "Choose a valid time using AM or PM."}</p>}
     </fieldset>

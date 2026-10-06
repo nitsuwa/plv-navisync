@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useCanvasControls, isSpacePressed } from "./useCanvasControls";
-import { Canvas } from "./Canvas";
+import { Canvas, type CanvasGesturePreviewController, type CanvasTransformPreviewHint } from "./Canvas";
 import { HierarchyPanel } from "./HierarchyPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { exteriorEmergencyStairSafeOffsetRange, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
@@ -207,6 +207,67 @@ const constrainBuildingToCanvas = (building: CampusBuilding, canvasW: number, ca
   );
   return { ...sized, x: Math.round(sized.x + delta.dx), y: Math.round(sized.y + delta.dy) };
 };
+
+/**
+ * Keep only entrance-linked nodes for moving Buildings in sync during the
+ * visual drag preview. The full authoritative entrance/stair graph sync is
+ * deferred until pointer-up; this pass avoids repeatedly searching every
+ * Building for every entrance node on each pointer frame.
+ */
+function previewEntranceNodePositionsForBuildings(
+  buildings: CampusBuilding[],
+  nodes: NavigationNode[],
+  movedBuildingIds: ReadonlySet<string>,
+): NavigationNode[] {
+  if (movedBuildingIds.size === 0) return nodes;
+  const buildingsById = new globalThis.Map(
+    buildings.filter((building) => movedBuildingIds.has(building.id)).map((building) => [building.id, building] as const),
+  );
+  if (buildingsById.size === 0) return nodes;
+  const entrancesByOwner = new globalThis.Map<string, globalThis.Map<string, NonNullable<CampusBuilding["entrances"]>[number]>>();
+  for (const [buildingId, building] of buildingsById) {
+    entrancesByOwner.set(buildingId, new globalThis.Map((building.entrances ?? []).map((entrance) => [entrance.id, entrance])));
+  }
+  return nodes.map((node) => {
+    if (!node.buildingId || !node.entranceId) return node;
+    const parent = buildingsById.get(node.buildingId);
+    const entrance = entrancesByOwner.get(node.buildingId)?.get(node.entranceId);
+    if (!parent || !entrance) return node;
+    const position = entranceWorldPosition(parent, entrance);
+    const x = Math.round(position.x);
+    const y = Math.round(position.y);
+    return x === node.x && y === node.y ? node : { ...node, x, y };
+  });
+}
+
+/** Update only node coordinates in the active Pathway preview. Authored graph
+ * ownership, edges, costs, and topology remain canonical until pointer-up. */
+function previewGeneratedPathNodePositions(
+  campus: Campus,
+  paths: CampusPath[],
+  movedPathIds: ReadonlySet<string>,
+): Campus {
+  if (movedPathIds.size === 0) return { ...campus, paths };
+  const positionsByVertex = new globalThis.Map<string, { x: number; y: number }>();
+  for (const path of paths) {
+    if (!movedPathIds.has(path.id) || path.navigationVertexIds?.length !== path.points.length) continue;
+    path.navigationVertexIds.forEach((vertexId, index) => {
+      positionsByVertex.set(`${path.id}:${vertexId}`, path.points[index]);
+    });
+  }
+  let nodesChanged = false;
+  const navNodes = (campus.navNodes ?? []).map((node) => {
+    for (const ref of node.generatedFromPathVertices ?? []) {
+      const position = positionsByVertex.get(`${ref.pathId}:${ref.vertexId}`);
+      if (!position) continue;
+      if (node.x === position.x && node.y === position.y) return node;
+      nodesChanged = true;
+      return { ...node, x: position.x, y: position.y };
+    }
+    return node;
+  });
+  return { ...campus, paths, ...(nodesChanged ? { navNodes } : {}) };
+}
 
 const fitBuildingRectToCanvas = (rect: { x: number; y: number; width: number; height: number; rotation?: number }, canvasW: number, canvasH: number) => {
   const centerX = rect.x + rect.width / 2;
@@ -602,7 +663,7 @@ const visualAttachmentTargetForSnap = (target: PathSnapTarget): VisualPathAttach
 interface CampusEditorProps {
   campus: Campus;
   onBack: () => void;
-  onUpdate: (c: Campus) => void;
+  onUpdate: (c: Campus, options?: { persistAsBaseline?: boolean }) => void;
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish: (c: Campus) => void;
   /** Open the read-only Student Preview; the page handles Save & Preview. */
@@ -611,6 +672,8 @@ interface CampusEditorProps {
   onOpenFloor: (buildingId: string, floorId: string, initialSelection?: FloorSelection) => void;
   onAddBuilding: () => void;
   onOpenCanvasSettings?: () => void;
+  /** Cheap page-level dirty revision; supplied to keep full-campus comparisons out of render. */
+  isDirty?: boolean;
   /** Timestamp of the last save (used to sync savedSnapshotRef with external saves) */
   lastSavedAt?: string;
   /**
@@ -624,9 +687,74 @@ interface CampusEditorProps {
   publishedSnapshot?: string;
 }
 
-export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot, publishedSnapshot }: CampusEditorProps) {
+export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot, publishedSnapshot, isDirty: isDirtyProp }: CampusEditorProps) {
   const campusRef = useRef(campus);
   useEffect(() => { campusRef.current = campus; }, [campus]);
+  // Active canvas manipulation is held in this editor-local preview. The page
+  // receives one canonical Campus update on pointer-up, so every pointer frame
+  // does not fan out through the page, dirty tracking, and draft recovery.
+  const transientGestureCampusRef = useRef<Campus | null>(null);
+  const transientCanvasPreviewRef = useRef<CanvasGesturePreviewController | null>(null);
+  const imperativeGesturePreviewRef = useRef(false);
+  const pendingPhysicalGestureObjectRef = useRef<CanvasTransformPreviewHint | null>(null);
+  const activePhysicalAlignmentRefsRef = useRef<{
+    excludedIds: ReadonlySet<string>;
+    refs: { x: number; y: number; width: number; height: number }[];
+    cellSize: number;
+    cells: Map<string, { x: number; y: number; width: number; height: number }[]>;
+  } | null>(null);
+  const cachedGateAlignmentTargetsRef = useRef<{ markerId: string; targets: { x: number; y: number }[] } | null>(null);
+  const previewGestureCampus = useCallback((next: Campus, transformHint?: CanvasTransformPreviewHint) => {
+    pendingPhysicalGestureObjectRef.current = null;
+    campusRef.current = next;
+    transientGestureCampusRef.current = next;
+    imperativeGesturePreviewRef.current = transientCanvasPreviewRef.current?.preview(next, transformHint) ?? false;
+  }, []);
+  const previewGestureObject = useCallback((hint: CanvasTransformPreviewHint) => {
+    pendingPhysicalGestureObjectRef.current = hint;
+    // Keep only the original canonical snapshot until release. The live item
+    // is held in this small ref and painted directly by the selected SVG group.
+    transientGestureCampusRef.current = campusRef.current;
+    imperativeGesturePreviewRef.current = transientCanvasPreviewRef.current?.preview(campusRef.current, hint) ?? false;
+  }, []);
+  const flushPendingPhysicalGestureObject = useCallback(() => {
+    const pending = pendingPhysicalGestureObjectRef.current;
+    if (!pending?.after) return;
+    pendingPhysicalGestureObjectRef.current = null;
+    const current = campusRef.current;
+    const roundTo = (value: number, places: number) => {
+      const factor = 10 ** places;
+      return Math.round((value + Number.EPSILON) * factor) / factor;
+    };
+    const after = pending.after as CampusBuilding | CampusDecorAsset | CampusMarker;
+    const committedAfter = {
+      ...after,
+      x: roundTo(after.x, 2),
+      y: roundTo(after.y, 2),
+      ...(typeof after.rotation === "number" ? { rotation: roundTo(after.rotation, 1) } : {}),
+      ...(typeof (after as CampusDecorAsset).scale === "number"
+        ? { scale: roundTo((after as CampusDecorAsset).scale!, 4) }
+        : {}),
+    };
+    const next: Campus = pending.type === "building"
+      ? { ...current, buildings: current.buildings.map((item) => item.id === pending.id ? committedAfter as CampusBuilding : item) }
+      : pending.type === "decorAsset"
+        ? { ...current, decorAssets: (current.decorAssets ?? []).map((item) => item.id === pending.id ? committedAfter as CampusDecorAsset : item) }
+        : { ...current, markers: current.markers.map((item) => item.id === pending.id ? committedAfter as CampusMarker : item) };
+    campusRef.current = next;
+    transientGestureCampusRef.current = next;
+  }, []);
+  const commitGestureCampus = useCallback(() => {
+    flushPendingPhysicalGestureObject();
+    const next = transientGestureCampusRef.current;
+    activePhysicalAlignmentRefsRef.current = null;
+    if (!next) return;
+    transientGestureCampusRef.current = null;
+    transientCanvasPreviewRef.current?.clear();
+    imperativeGesturePreviewRef.current = false;
+    onUpdate(next);
+  }, [flushPendingPhysicalGestureObject, onUpdate]);
+  const pendingCampusDragReconcileRef = useRef<{ buildings: boolean; gates: boolean; pathways: boolean; entranceConnections?: boolean } | null>(null);
   // `save_campus_structure` retires removed Buildings as archived rows. Their
   // campus/code uniqueness key remains occupied, so keep every generated
   // default identity reserved until this campus editor session ends.
@@ -765,11 +893,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const effectiveSavedSnapshot = savedSnapshot && savedSnapshot !== previousSavedSnapshotRef.current
     ? savedSnapshot
     : savedSnapshotRef.current;
-  const isDirty = campusHasUnsavedChanges(campus, effectiveSavedSnapshot);
+  const isDirty = isDirtyProp ?? campusHasUnsavedChanges(campus, effectiveSavedSnapshot);
   // ── Has draft changes that need publishing (saved but not yet published) ──
-  let savedCampusForLifecycle = campus;
-  try { savedCampusForLifecycle = JSON.parse(effectiveSavedSnapshot) as Campus; } catch { /* fallback below */ }
-  const hasDraftChanges = campusHasUnpublishedChanges(savedCampusForLifecycle, publishedSnapshot);
+  const savedCampusForLifecycle = useMemo(() => {
+    try { return JSON.parse(effectiveSavedSnapshot) as Campus; } catch { return campus; }
+  }, [campus.id, effectiveSavedSnapshot]);
+  const hasDraftChanges = useMemo(
+    () => campusHasUnpublishedChanges(savedCampusForLifecycle, publishedSnapshot),
+    [publishedSnapshot, savedCampusForLifecycle],
+  );
   // ── Publish confirmation dialog ──
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const outdoorTutorial = useEditorTutorial("outdoor", OUTDOOR_TUTORIAL_STEPS.length);
@@ -805,6 +937,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   }, [canvasSettingsPopoverOpen]);
   // ── Drag-to-create building ──
   const [buildingDrag, setBuildingDrag] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  const campusMoveFrameRef = useRef<number | null>(null);
+  const latestCampusMoveEventRef = useRef<MouseEvent | null>(null);
   // ── Building type placement mode ──
   const [selectedBuildingType, setSelectedBuildingType] = useState<BuildingTypeDescriptor | null>(null);
   // ── Route state ──
@@ -817,6 +951,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   }, [selected?.type, selected?.id, multiSelected.join("|")]);
   const inspectorVisible = !propertiesDismissed && (propertiesOpen || Boolean(selected || multiSelected.length > 0));
   const [rubberBand, setRubberBand] = useState<RubberBand | null>(null);
+  const rubberBandRef = useRef<RubberBand | null>(null);
+  const updateRubberBand = useCallback((next: RubberBand | null) => {
+    rubberBandRef.current = next;
+    setRubberBand(next);
+  }, []);
+  useEffect(() => { rubberBandRef.current = rubberBand; }, [rubberBand]);
   const lockedPhysicalSelectionRef = useRef<{ sx: number; sy: number; screenX: number; screenY: number } | null>(null);
   const physicalMarqueeRef = useRef(false);
   const [showAlignTools, setShowAlignTools] = useState(false);
@@ -829,7 +969,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // ── Overlap validation — track which buildings overlap others ──
   const [overlappingBuildings, setOverlappingBuildings] = useState<Set<string>>(new Set());
   // ── Alignment guides ──
-  const [guides, setGuides] = useState<{ type: "h" | "v"; pos: number }[]>([]);
+  const [guides, setGuidesState] = useState<{ type: "h" | "v"; pos: number }[]>([]);
+  const guidesRef = useRef(guides);
+  const setGuides = useCallback((next: { type: "h" | "v"; pos: number }[]) => {
+    const current = guidesRef.current;
+    if (current.length === next.length && current.every((guide, index) => guide.type === next[index]?.type && guide.pos === next[index]?.pos)) return;
+    guidesRef.current = next;
+    if (imperativeGesturePreviewRef.current) {
+      transientCanvasPreviewRef.current?.setGuides(next);
+      return;
+    }
+    setGuidesState(next);
+  }, []);
   const [exteriorStairPreview, setExteriorStairPreview] = useState<{
     buildingId: string;
     stairId: string;
@@ -900,17 +1051,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // ── Rotation state ──
   // Stores the previous mouse angle + accumulated rotation so spinning across the
   // ±180° atan2 wrap boundary stays smooth (never jumps to ±360° stored values).
-  const rotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number } | null>(null);
+  const rotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number; origin: CampusBuilding } | null>(null);
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [rotatingAngle, setRotatingAngle] = useState(0);
   // B5 Phase 5.13 — Frozen bounds during path-group rotation so the outline
   // doesn't awkwardly resize/reshape during the rotate drag.
   const [pathGroupRotationBounds, setPathGroupRotationBounds] = useState<{ x: number; y: number; width: number; height: number; cx: number; cy: number; angle: number } | null>(null);
   // ── Decor asset rotation state ──
-  const decorRotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number } | null>(null);
+  const decorRotating = useRef<{ id: string; cx: number; cy: number; prevAngle: number; rotation: number; origin: CampusDecorAsset } | null>(null);
   const [decorRotatingId, setDecorRotatingId] = useState<string | null>(null);
   // ── Decor asset resize state (uniform scale via corners, rotation-aware) ──
-  const decorResizing = useRef<{ id: string; corner: string; sx: number; sy: number; ox: number; oy: number; scale: number; hw: number; hh: number; rot: number; width?: number; height?: number; kind?: "ground" | "decor" } | null>(null);
+  const decorResizing = useRef<{ id: string; corner: string; sx: number; sy: number; ox: number; oy: number; scale: number; hw: number; hh: number; rot: number; width?: number; height?: number; kind?: "ground" | "decor"; origin: CampusDecorAsset } | null>(null);
   const [decorResizingId, setDecorResizingId] = useState<string | null>(null);
   // ── Hierarchy panel toggle ──
   const [hierarchyOpen, setHierarchyOpen] = useState(true);
@@ -1013,7 +1164,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // persistence shape.
   const lastDecorScalesRef = useRef<Record<string, number>>({});
   const lastMarkerSizesRef = useRef<Record<string, { width: number; height: number }>>({});
-  const markerResizing = useRef<{ id: string; corner: string; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number } | null>(null);
+  const markerResizing = useRef<{ id: string; corner: string; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; origin: CampusMarker } | null>(null);
   const [markerResizingId, setMarkerResizingId] = useState<string | null>(null);
   const [canvasResizeMode, setCanvasResizeMode] = useState(false);
   const [canvasResizePreview, setCanvasResizePreview] = useState<{ width: number; height: number } | null>(null);
@@ -1160,7 +1311,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   }, [toast]);
 
   const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, startPan, movePan, endPan, resetView, zoomIn, zoomOut, zoomToFit, zoomToBuilding, handleMiddleMouseDown, handleWheel } =
-    useCanvasControls(cw, ch, { imperativeCamera: true });
+    useCanvasControls(cw, ch, { imperativeCamera: true, centerMapEdges: true });
 
   const SNAP_DIST = 12;
   // Physical-object alignment uses a small screen-space tolerance so guides
@@ -1182,6 +1333,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     sy: number;
     ox: number;
     oy: number;
+    physicalOrigin?: CampusBuilding | CampusDecorAsset | CampusMarker;
     points?: { x: number; y: number }[];
     /** Explicit physical vertices controlled by a generated-point proxy drag. */
     generatedVertexRefs?: { pathId: string; pointIndex: number }[];
@@ -1240,12 +1392,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     currentOffset: number;
   } | null>(null);
 
-  const buildings = campus.buildings;
-  const markers = campus.markers;
-  const paths = campus.paths;
-  const decorAssets = campus.decorAssets ?? [];
-  const navNodes = campus.navNodes ?? [];
-  const navEdges = campus.navEdges ?? [];
+  const canvasCampus = campus;
+  const buildings = canvasCampus.buildings;
+  const markers = canvasCampus.markers;
+  const paths = canvasCampus.paths;
+  const decorAssets = canvasCampus.decorAssets ?? [];
+  const navNodes = canvasCampus.navNodes ?? [];
+  const navEdges = canvasCampus.navEdges ?? [];
 
   // Runtime hydration can leave a Building-owned stair visible while its
   // generated landing/discharge graph has not yet been reconciled. Repair
@@ -1529,6 +1682,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
    * Connect/path hit-test helper so merely loading or hovering coincident
    * geometry can never claim a second vertex by proximity.
    */
+  const pathVertexJoinCandidates = useMemo(() => (campus.paths ?? []).flatMap((candidatePath) => {
+    if (candidatePath.visible === false || candidatePath.locked) return [];
+    const candidateIds = candidatePath.navigationVertexIds;
+    // A vertex without an owned ID cannot become a generated canonical
+    // junction through this operation. Connect's conversion path remains
+    // responsible for legacy/segment targets.
+    if (!candidateIds || candidateIds.length !== candidatePath.points.length) return [];
+    return candidatePath.points.flatMap((point, pointIndex) => (candidatePath.disconnectedJunctionKeys ?? []).includes(`${Number(point.x.toFixed(3))}:${Number(point.y.toFixed(3))}`)
+      ? []
+      : [{ pathId: candidatePath.id, pointIndex, point }]);
+  }), [campus.paths]);
   const pathVertexJoinTargetForPoint = useCallback((
     point: { x: number; y: number },
     excludePathId: string,
@@ -1536,27 +1700,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   ): { pathId: string; pointIndex: number; point: { x: number; y: number }; distance: number } | null => {
     const screenTolerance = 9;
     const worldTolerance = Math.max(5, Math.min(12, screenTolerance / Math.max(zoom, 0.1)));
-    const candidates: { pathId: string; pointIndex: number; point: { x: number; y: number }; distance: number }[] = [];
-    for (const candidatePath of paths) {
-      if (candidatePath.id === excludePathId || candidatePath.visible === false || candidatePath.locked) continue;
-      const candidateIds = candidatePath.navigationVertexIds;
-      // A vertex without an owned ID cannot become a generated canonical
-      // junction through this operation. Connect's existing conversion path
-      // remains responsible for legacy/segment targets.
-      if (!candidateIds || candidateIds.length !== candidatePath.points.length) continue;
-      for (let candidateIndex = 0; candidateIndex < candidatePath.points.length; candidateIndex += 1) {
-        const candidatePoint = candidatePath.points[candidateIndex];
-        if (pathPointIsDisconnected(candidatePath, pathPointKey(candidatePoint))) continue;
-        const distance = Math.hypot(point.x - candidatePoint.x, point.y - candidatePoint.y);
-        if (distance > worldTolerance) continue;
-        candidates.push({
-          pathId: candidatePath.id,
-          pointIndex: candidateIndex,
-          point: { x: candidatePoint.x, y: candidatePoint.y },
-          distance,
-        });
-      }
-    }
+    const candidates = pathVertexJoinCandidates.flatMap((candidate) => {
+      if (candidate.pathId === excludePathId) return [];
+      const distance = Math.hypot(point.x - candidate.point.x, point.y - candidate.point.y);
+      return distance <= worldTolerance ? [{ ...candidate, point: { ...candidate.point }, distance }] : [];
+    });
     candidates.sort((a, b) => a.distance - b.distance || a.pathId.localeCompare(b.pathId) || a.pointIndex - b.pointIndex);
     const best = candidates[0];
     if (!best) return null;
@@ -1565,7 +1713,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const ambiguityEpsilon = Math.max(0.5, 1 / Math.max(zoom, 0.1));
     if (candidates[1] && candidates[1].distance - best.distance <= ambiguityEpsilon) return null;
     return best;
-  }, [paths, zoom]);
+  }, [pathVertexJoinCandidates, zoom]);
 
   // Resolve explicit generated-node provenance once for Pathway whole-move
   // gestures.  Unlike the legacy coordinate junction fallback, these groups
@@ -1573,18 +1721,18 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // one owning Pathway is translated.
   const explicitSharedPathwayGroups = useMemo(() => {
     const groups: { pathId: string; pointIndex: number }[][] = [];
-    for (const node of outdoorNodes) {
+    for (const node of campus.navNodes ?? []) {
       const refs = node.generatedFromPathVertices ?? [];
       if (refs.length < 2) continue;
       const resolved = refs.map((ref) => {
-        const owner = paths.find((path) => path.id === ref.pathId);
+        const owner = campus.paths?.find((path) => path.id === ref.pathId);
         const pointIndex = owner?.navigationVertexIds?.indexOf(ref.vertexId) ?? -1;
         return owner && pointIndex >= 0 ? { pathId: owner.id, pointIndex } : null;
       }).filter(Boolean) as { pathId: string; pointIndex: number }[];
       if (resolved.length > 1) groups.push(resolved);
     }
     return groups;
-  }, [outdoorNodes, paths]);
+  }, [campus.navNodes, campus.paths]);
 
   const pathVertexJoinTargetForSnapshot = useCallback((
     point: { x: number; y: number },
@@ -1969,23 +2117,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   // Recompute overlaps whenever buildings change
   useEffect(() => {
+    // A live Building/group transform only changes one bounded candidate.
+    // Skip the O(n²) all-pairs pass until the gesture's committed campus lands.
+    if (pendingCampusDragReconcileRef.current?.buildings) return;
     setOverlappingBuildings(computeOverlaps(buildings));
   }, [buildings, computeOverlaps]);
 
   /** Visible physical-object references used by campus alignment. Navigation
    * Pathways and generated graph nodes are intentionally excluded. */
-  const physicalAlignmentRefs = useCallback((excludedIds: ReadonlySet<string> = new Set()) => {
-    const refs: { x: number; y: number; width: number; height: number }[] = [];
+  const physicalAlignmentCandidates = useMemo(() => {
+    const refs: { id: string; x: number; y: number; width: number; height: number }[] = [];
     const add = (member: GroupMoveMember) => {
-      if (excludedIds.has(member.id)) return;
       const bounds = memberVisibleBounds(member);
-      refs.push({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+      refs.push({ id: member.id, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
     };
-    for (const building of buildings) {
+    for (const building of campus.buildings) {
       if (building.visible === false) continue;
       add({ kind: "building", id: building.id, x: building.x, y: building.y, width: building.width, height: building.height, rotation: building.rotation ?? 0 });
     }
-    for (const asset of decorAssets) {
+    for (const asset of campus.decorAssets ?? []) {
       if (asset.visible === false) continue;
       const descriptor = DECOR_ASSET_MAP[asset.type];
       if (!descriptor) continue;
@@ -1994,13 +2144,86 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         : decorWorldSize(descriptor, asset.scale);
       add({ kind: "decorAsset", id: asset.id, x: asset.x, y: asset.y, width: size.width, height: size.height, rotation: asset.rotation ?? 0 });
     }
-    for (const marker of markers) {
+    for (const marker of campus.markers) {
       if (!isCampusGate(marker) || (marker as CampusMarker & { visible?: boolean }).visible === false) continue;
       const size = campusGateSize(marker);
       add({ kind: "marker", id: marker.id, x: marker.x, y: marker.y, width: size.width, height: size.height });
     }
     return refs;
-  }, [buildings, decorAssets, markers]);
+  }, [campus.buildings, campus.decorAssets, campus.markers]);
+  const physicalAlignmentRefs = useCallback((excludedIds: ReadonlySet<string> = new Set(), queryBounds?: { x: number; y: number; width: number; height: number }) =>
+    (() => {
+      const cached = activePhysicalAlignmentRefsRef.current;
+      if (cached && cached.excludedIds.size === excludedIds.size && [...cached.excludedIds].every((id) => excludedIds.has(id))) {
+        if (!queryBounds) return cached.refs;
+        const padding = physicalSnapDistance + 1;
+        const x1 = Math.floor((queryBounds.x - padding) / cached.cellSize);
+        const y1 = Math.floor((queryBounds.y - padding) / cached.cellSize);
+        const x2 = Math.floor((queryBounds.x + queryBounds.width + padding) / cached.cellSize);
+        const y2 = Math.floor((queryBounds.y + queryBounds.height + padding) / cached.cellSize);
+        const nearby = new Set<{ x: number; y: number; width: number; height: number }>();
+        for (let x = x1; x <= x2; x += 1) for (let y = y1; y <= y2; y += 1) {
+          for (const candidate of cached.cells.get(`${x}:${y}`) ?? []) nearby.add(candidate);
+        }
+        return [...nearby];
+      }
+      return physicalAlignmentCandidates
+        .filter((reference) => !excludedIds.has(reference.id))
+        .map(({ x, y, width, height }) => ({ x, y, width, height }));
+    })(),
+  [physicalAlignmentCandidates, physicalSnapDistance]);
+  const cachePhysicalAlignmentRefs = useCallback((excludedIds: ReadonlySet<string>) => {
+    const cellSize = Math.max(48, Math.ceil(physicalSnapDistance * 4));
+    const refs = physicalAlignmentCandidates
+      .filter((reference) => !excludedIds.has(reference.id))
+      .map(({ x, y, width, height }) => ({ x, y, width, height }));
+    const cells = new Map<string, { x: number; y: number; width: number; height: number }[]>();
+    for (const ref of refs) {
+      const x1 = Math.floor(ref.x / cellSize);
+      const y1 = Math.floor(ref.y / cellSize);
+      const x2 = Math.floor((ref.x + ref.width) / cellSize);
+      const y2 = Math.floor((ref.y + ref.height) / cellSize);
+      for (let x = x1; x <= x2; x += 1) for (let y = y1; y <= y2; y += 1) {
+        const key = `${x}:${y}`;
+        const bucket = cells.get(key) ?? [];
+        bucket.push(ref);
+        cells.set(key, bucket);
+      }
+    }
+    activePhysicalAlignmentRefsRef.current = {
+      excludedIds: new Set(excludedIds),
+      refs,
+      cellSize,
+      cells,
+    };
+  }, [physicalAlignmentCandidates, physicalSnapDistance]);
+  const cacheGateAlignmentTargets = (markerId: string) => {
+    const marker = campusRef.current.markers.find((candidate) => candidate.id === markerId);
+    if (!marker || !isCampusGate(marker)) {
+      cachedGateAlignmentTargetsRef.current = null;
+      return;
+    }
+    const nodes = campusRef.current.navNodes ?? [];
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const gateNodeId = marker.navNodeId ?? nodes.find((node) => node.gateId === marker.id)?.id;
+    if (!gateNodeId) {
+      cachedGateAlignmentTargetsRef.current = { markerId, targets: [] };
+      return;
+    }
+    const connectedIds = new Set<string>();
+    for (const edge of campusRef.current.navEdges ?? []) {
+      if (edge.type === "floor_transition" || edge.type === "entrance_transition") continue;
+      if (edge.startNodeId === gateNodeId) connectedIds.add(edge.endNodeId);
+      else if (edge.endNodeId === gateNodeId) connectedIds.add(edge.startNodeId);
+    }
+    const targets: { x: number; y: number }[] = [];
+    for (const id of connectedIds) {
+      const node = nodeById.get(id);
+      if (node && !node.floorId && node.id !== gateNodeId) targets.push({ x: node.x, y: node.y });
+    }
+    cachedGateAlignmentTargetsRef.current = { markerId, targets };
+  };
+
 
   // ── Build the rigid group-drag member list ──
   // When the grabbed object is part of the current multi-selection, the whole
@@ -2149,7 +2372,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // In Navigation mode Select touches only graph elements, but empty-space
       // drags still start a marquee that captures waypoints + connections.
       const pt = getPoint(e, cw, ch);
-      setRubberBand({ sx: pt.x, sy: pt.y, cx: pt.x, cy: pt.y });
+      updateRubberBand({ sx: pt.x, sy: pt.y, cx: pt.x, cy: pt.y });
       if (!e.shiftKey) { setMultiSelected([]); setSelected(null); setGuides([]); }
       return;
     }
@@ -3234,7 +3457,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (committed) setTool("select");
   }, [cancelConnectPreviewFrame, commitNavEdge, navConnectStart, navPreviewPins, outdoorNodes, showConnectGuidance]);
 
-  const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const handleSvgMove = (e: React.MouseEvent | MouseEvent) => {
     if (tool === "pan") {
       movePan(e);
       return;
@@ -3242,9 +3465,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
     const pt = getPoint(e, cw, ch);
     // Cursor coordinates are useful in ordinary authoring, but they are not
-    // part of Connect's transient preview. Avoid a component-wide state write
-    // for every pointer event while the lightweight Connect loop is active.
-    if (!(tool === "connect" && layer === "navigation")) {
+    // part of an active transform. Avoid a component-wide state write on every
+    // drag/resize frame; the canvas already has the live object preview.
+    const transformingObject = Boolean(
+      dragging.current || buildingDrag || rubberBand || resizing || markerResizing.current
+      || groupResizing.current || groupRotating.current || rotating.current || decorResizing.current
+      || decorRotating.current || pathGroupRotating.current || pathGroupScale || exteriorStairDragging.current,
+    );
+    if (!transformingObject && !(tool === "connect" && layer === "navigation")) {
       setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
     }
 
@@ -3261,7 +3489,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setSelected(null);
       setMultiSelected([]);
       setShowAlignTools(false);
-      setRubberBand({ sx: candidate.sx, sy: candidate.sy, cx: pt.x, cy: pt.y });
+      updateRubberBand({ sx: candidate.sx, sy: candidate.sy, cx: pt.x, cy: pt.y });
       return;
     }
 
@@ -3297,8 +3525,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
 
     // Rubber-band update
-    if (rubberBand) {
-      setRubberBand({ ...rubberBand, cx: pt.x, cy: pt.y });
+    if (rubberBandRef.current) {
+      updateRubberBand({ ...rubberBandRef.current, cx: pt.x, cy: pt.y });
       return;
     }
 
@@ -3674,12 +3902,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         return;
       }
       gestureHistoryPushed.current = false;
-      onUpdate(reconcileExteriorApproachNavigation({
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      previewGestureCampus({
         ...campus,
         navEdges: navEdges.map((ed) => ed.id === segDrag.edgeId
           ? { ...ed, bendPoints: nextBends.length > 0 ? nextBends : undefined, distance: outdoorEdgeDistance(ed.startNodeId, ed.endNodeId, nextBends) }
           : ed),
-      }));
+      });
       return;
     }
 
@@ -3724,13 +3953,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           : b
       );
       gestureChangedRef.current = true;
-      onUpdate(reconcileExteriorApproachNavigation({
+      pendingCampusDragReconcileRef.current = { buildings: true, gates: false, pathways: false };
+      const movedBuildingIds = new Set([parent.id]);
+      previewGestureCampus({
         ...campus,
         buildings: nextBuildings,
-        // B5 Phase 1.8: repositioning an entrance moves its linked nav node
-        // in the SAME gesture — the node follows the resolved entrance position.
-        navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-      }));
+        // Keep the linked marker visually attached with a focused O(nodes)
+        // preview. Full entrance/stair synchronization is performed once on
+        // pointer-up.
+        navNodes: previewEntranceNodePositionsForBuildings(nextBuildings, navNodes, movedBuildingIds),
+      });
       return;
     }
 
@@ -3798,14 +4030,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (dx === 0 && dy === 0) return;
       gestureChangedRef.current = true;
       const startById = new globalThis.Map(group.map((m) => [m.id, m]));
-      const nextBuildings = buildings.map((b) => {
+      const groupMovesBuildings = group.some((member) => member.kind === "building");
+      const nextBuildings = groupMovesBuildings ? buildings.map((b) => {
         const start = startById.get(b.id);
         return start?.kind === "building" ? { ...b, x: start.x + dx, y: start.y + dy } : b;
-      });
-      const nextMarkers = markers.map((marker) => {
+      }) : buildings;
+      const groupMovesMarkers = group.some((member) => member.kind === "marker");
+      const nextMarkers = groupMovesMarkers ? markers.map((marker) => {
         const start = startById.get(marker.id);
         return start?.kind === "marker" ? { ...marker, x: start.x + dx, y: start.y + dy } : marker;
-      });
+      }) : markers;
       const groupTouchesGraphOwner = group.some((member) => member.kind !== "decorAsset");
       const movedPathIds = new Set(group.filter((member) => member.kind === "path").map((member) => member.id));
       const movedSharedRefs = new Set<string>();
@@ -3822,7 +4056,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         // byte-for-byte instead of running the graph synchronizers as a side
         // effect of a visual-only gesture. Building, gate, and Pathway groups
         // still use their established owner-specific synchronization below.
-        navNodes: groupTouchesGraphOwner ? syncEntranceNodePositions(nextBuildings, navNodes) : navNodes,
+        navNodes: groupMovesBuildings
+          ? previewEntranceNodePositionsForBuildings(nextBuildings, navNodes, new Set(group.filter((member) => member.kind === "building").map((member) => member.id)))
+          : navNodes,
         paths: paths.map((path) => {
           const start = startById.get(path.id);
           const originPoints = pathGroupOriginRef.current?.get(path.id) ?? path.points;
@@ -3841,33 +4077,26 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           return start?.kind === "decorAsset" ? { ...da, x: start.x + dx, y: start.y + dy } : da;
         }),
       };
-      if (movedPathIds.size > 0) {
-        const proposedPaths = groupedCampusBase.paths;
-        const movedOwnerIds = new Set([...movedPathIds, ...[...movedSharedRefs].map((key) => key.split(":")[0])]);
-        const join = wholePathJoinForSnapshot(proposedPaths, movedPathIds, movedOwnerIds);
-        if (join && join.sourcePathId === drag.id) {
-          drag.pathJoinTarget = join.target;
-          drag.pathJoinSourcePointIndex = join.sourcePointIndex;
-        } else {
-          drag.pathJoinTarget = undefined;
-          drag.pathJoinSourcePointIndex = undefined;
-        }
-      }
-      const groupedCampus = groupTouchesGraphOwner
-        ? syncCampusGateNavigation(groupedCampusBase)
-        : groupedCampusBase;
-      const nextCampus = groupTouchesGraphOwner
-        ? reconcileExteriorApproachNavigation(reconcilePathwayNavigation(syncExteriorEmergencyStairGraph({
-            ...groupedCampus,
-          }), genId, { preserveAuthoredGeometry: group.some((member) => member.kind === "path") }))
-        : groupedCampus;
+      // Whole-Path join discovery is finalized once at pointer-up. Rechecking
+      // every stationary Pathway vertex on every movement sample dominated
+      // the gesture cost on a large campus.
+      drag.pathJoinTarget = undefined;
+      drag.pathJoinSourcePointIndex = undefined;
+      const nextCampus = groupedCampusBase;
       // Keep the ref in lockstep with rapid pointer moves.  React may batch
-      // parent updates until the next frame; the next gesture frame must still
-      // see the authoritative snapshot used by reconciliation.
+      // parent updates until the next frame. Expensive owner/pathway graph
+      // reconciliation is performed once when the gesture is released.
       campusRef.current = nextCampus;
-      onUpdate(nextCampus);
+      if (groupTouchesGraphOwner) {
+        const pending = {
+          buildings: group.some((member) => member.kind === "building"),
+          gates: group.some((member) => member.kind === "marker" && markers.some((marker) => marker.id === member.id && isCampusGate(marker))),
+          pathways: movedPathIds.size > 0,
+        };
+        if (pending.buildings || pending.gates || pending.pathways) pendingCampusDragReconcileRef.current = pending;
+      }
+      previewGestureCampus(nextCampus);
       const bbox = groupBBoxAfterTranslation(group, dx, dy);
-      setOverlappingBuildings(computeOverlaps(nextBuildings));
       setGuides(computeGroupAlignmentGuides(
         bbox.x,
         bbox.y,
@@ -3882,7 +4111,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
 
     if (drag.type === "decorAsset") {
-      const movingAsset = decorAssets.find((asset) => asset.id === drag.id);
+      const movingAsset = (drag.physicalOrigin as CampusDecorAsset | undefined) ?? decorAssets.find((asset) => asset.id === drag.id);
       if (!movingAsset) return;
       const template = DECOR_ASSET_MAP[movingAsset.type];
       if (!template) return;
@@ -3898,7 +4127,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // committed movement in lock-step at every zoom level.
       const aligned = snapRectToVisibleBounds(
         { x: visible.x + rawDx, y: visible.y + rawDy, width: visible.width, height: visible.height },
-        physicalAlignmentRefs(new Set([movingAsset.id])),
+        physicalAlignmentRefs(new Set([movingAsset.id]), { x: visible.x + rawDx, y: visible.y + rawDy, width: visible.width, height: visible.height }),
         physicalSnapDistance,
       );
       const centered = snapRectToCanvasCenter(
@@ -3920,11 +4149,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         ch,
         CAMPUS_OBJECT_SAFE_INSET,
       );
-      const updatedAssets = decorAssets.map((da) => da.id === drag.id
-        ? { ...da, x: movingAsset.x + bounded.dx, y: movingAsset.y + bounded.dy }
-        : da);
       gestureChangedRef.current = true;
-      onUpdate({ ...campus, decorAssets: updatedAssets });
+      previewGestureObject({ type: "decorAsset", id: drag.id, kind: "move", after: { ...movingAsset, x: movingAsset.x + bounded.dx, y: movingAsset.y + bounded.dy } });
       return;
     }
     if (drag.type === "path") {
@@ -3950,15 +4176,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         for (const group of explicitSharedPathwayGroups) {
           if (group.some((ref) => ref.pathId === drag.id)) group.forEach((ref) => movedPathIds.add(ref.pathId));
         }
-        const join = wholePathJoinForSnapshot(movedPaths, new Set([drag.id]), movedPathIds);
-        drag.pathJoinTarget = join?.target;
-        drag.pathJoinSourcePointIndex = join?.sourcePointIndex;
-        const nextCampus = reconcilePathwayNavigation({
-          ...campus,
-          paths: syncVisualPathAttachments(movedPaths),
-        }, genId, { preserveAuthoredGeometry: true });
+        const previewPaths = syncVisualPathAttachments(movedPaths);
+        pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+        const nextCampus = previewGeneratedPathNodePositions(
+          campus,
+          previewPaths,
+          new Set(previewPaths.filter((path, index) => path !== paths[index]).map((path) => path.id)),
+        );
         campusRef.current = nextCampus;
-        onUpdate(nextCampus);
+        previewGestureCampus(nextCampus);
         return;
       }
       const selectedPathIds = new Set(multiSelected.filter((id) => paths.some((path) => path.id === id)));
@@ -3989,12 +4215,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           : point);
         return { ...p, points };
       });
-      const join = wholePathJoinForSnapshot(movedPaths, new Set([drag.id]), movedPathIds);
-      drag.pathJoinTarget = join?.target;
-      drag.pathJoinSourcePointIndex = join?.sourcePointIndex;
-      const nextCampus = reconcilePathwayNavigation({
-        ...campus,
-        paths: syncVisualPathAttachments(movedPaths.map((p) => p.id === drag.id
+      const previewPaths = syncVisualPathAttachments(movedPaths.map((p) => p.id === drag.id
           ? { ...p, points: p.points.map((point, index) => {
               const originalPoint = startPoints[index];
               // Preserve the historical separation for legacy coordinate-only
@@ -4005,10 +4226,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 ? { x: point.x + 0.001, y: point.y }
                 : point;
             }) }
-          : p)),
-      }, genId, { preserveAuthoredGeometry: true });
+          : p));
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      const nextCampus = previewGeneratedPathNodePositions(campus, previewPaths, movedPathIds);
       campusRef.current = nextCampus;
-      onUpdate(nextCampus);
+      previewGestureCampus(nextCampus);
       return;
     }
     if (drag.type === "pathPoint") {
@@ -4107,31 +4329,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const attachedNextPaths = visualTarget && drag.pointIndex !== undefined
         ? attachVisualPathEndpoint(nextPaths, path.id, drag.pointIndex, visualAttachmentTargetForSnap(visualTarget))
         : nextPaths;
-      const reconciled = reconcilePathwayNavigation({ ...campus, paths: attachedNextPaths }, genId, { preserveAuthoredGeometry: true });
-       // Reconciliation updates generated node/edge ownership. Refresh only
-       // coordinate-derived costs below; authored connector bendPoints remain
-       // untouched during a Pathway vertex gesture.
-       const movedNodeIds = new Set<string>();
-       if (drag.generatedNodeId) movedNodeIds.add(drag.generatedNodeId);
-       const movedRefKeys = new Set((explicitProxyRefs ?? []).map((ref) => `${ref.pathId}:${ref.pointIndex}`));
-       const movedVertexId = drag.pointIndex !== undefined ? path.navigationVertexIds?.[drag.pointIndex] : undefined;
-       reconciled.navNodes?.forEach((node) => {
-         if ((node.generatedFromPathVertices ?? []).some((ref) =>
-           movedRefKeys.has(`${ref.pathId}:${path.navigationVertexIds?.indexOf(ref.vertexId) ?? -1}`)
-           || (movedVertexId && ref.pathId === path.id && ref.vertexId === movedVertexId)
-         )) movedNodeIds.add(node.id);
-       });
-       // Refresh only coordinate-derived costs for moved generated nodes. Do
-       // not rebuild endpoint geometry: authored connector bendPoints are
-       // immutable during a Pathway vertex gesture and generated edge IDs/
-       // provenance have already been reconciled above.
-       let nextCampus = reconciled;
-       for (const movedNodeId of movedNodeIds) {
-         const movedNode = nextCampus.navNodes?.find((node) => node.id === movedNodeId);
-         if (movedNode) nextCampus = moveOutdoorWaypointLocally(nextCampus, movedNodeId, { x: movedNode.x, y: movedNode.y });
-       }
-       campusRef.current = nextCampus;
-       onUpdate(nextCampus);
+      const movedPathIds = new Set<string>([path.id]);
+      for (const ref of explicitProxyRefs ?? []) movedPathIds.add(ref.pathId);
+      if (moveLinkedJunction && oldKey) {
+        for (const candidate of attachedNextPaths) {
+          if (candidate.points.some((point) => pathPointKey(point) === pathPointKey(nextPoint))) movedPathIds.add(candidate.id);
+        }
+      }
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      const nextCampus = previewGeneratedPathNodePositions(campus, attachedNextPaths, movedPathIds);
+      campusRef.current = nextCampus;
+      previewGestureCampus(nextCampus);
        return;
     }
     // B5 Phase 1: waypoint drag — same one-gesture/one-history pattern as
@@ -4151,10 +4359,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (lastCompletedPathIdRef.current === path.id) {
         lastCompletedPathStyleRef.current = { type: path.type, color: path.color, width: nextWidth };
       }
-      onUpdate(reconcilePathwayNavigation({
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      previewGestureCampus({
         ...campus,
         paths: syncVisualPathAttachments(paths.map((p) => p.id === drag.id ? { ...p, width: nextWidth } : p)),
-      }, genId));
+      });
       return;
     }
     if (drag.type === "navEdgeBend") {
@@ -4216,7 +4425,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       }
       bends[drag.pointIndex] = { x: nx, y: ny };
       gestureChangedRef.current = true;
-      onUpdate(reconcileExteriorApproachNavigation({
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: false, entranceConnections: true };
+      previewGestureCampus({
         ...campus,
         navEdges: navEdges.map((ed) => ed.id === edge.id
           ? {
@@ -4225,7 +4435,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               distance: outdoorEdgeDistance(ed.startNodeId, ed.endNodeId, bends),
             }
           : ed),
-      }));
+      });
       return;
     }
     if (drag.type === "navNode") {
@@ -4291,11 +4501,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
              .filter(Boolean) as { x: number; y: number }[];
            return rebuildOutdoorEdgeGeometry(translated, nextNodes, stalePositions);
          });
-         onUpdate(reconcileEntranceOutdoorConnections({
-           ...campus,
-           navNodes: nextNodes,
-           navEdges: nextEdges,
-         }));
+          pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: false, entranceConnections: true };
+          previewGestureCampus({
+            ...campus,
+            navNodes: nextNodes,
+            navEdges: nextEdges,
+          });
         return;
       }
       // B5 Phase 6.9/6.10: Floor Editor parity — nav node drags are NOT
@@ -4346,12 +4557,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
          drag.id,
          aligned.point,
        );
-       campusRef.current = nextCampus;
-       onUpdate(nextCampus);
+        campusRef.current = nextCampus;
+        previewGestureCampus(nextCampus);
       return;
     }
     if (drag.type === "building") {
-      const b = buildings.find((b) => b.id === drag.id)!;
+      const b = (drag.physicalOrigin as CampusBuilding | undefined) ?? buildings.find((b) => b.id === drag.id)!;
       // Direct 1:1 tracking: the building follows the cursor with the grab
       // offset preserved, snapping instantly to grid/edges (no easing lag,
       // so the grabbed point stays put under the cursor).
@@ -4362,7 +4573,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // Snap + guides from the SAME visible-bounds result (rotation-aware):
       // a single alignment pass drives both the snapped position and the
       // guide lines, so the guide always matches the committed position.
-      const refsForSnap = physicalAlignmentRefs(new Set([drag.id]));
+      const snapCandidate = memberVisibleBounds({ kind: "building", id: drag.id, x: targetX, y: targetY, width: b.width, height: b.height, rotation: b.rotation ?? 0 });
+      const refsForSnap = physicalAlignmentRefs(new Set([drag.id]), snapCandidate);
       const snapResult = snapRectToVisibleBounds(
         { x: targetX, y: targetY, width: b.width, height: b.height, rotation: b.rotation ?? 0 },
         refsForSnap,
@@ -4389,22 +4601,15 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       );
       const targetB = { ...snappedBuilding, x: b.x + boundedBuildingDelta.dx, y: b.y + boundedBuildingDelta.dy };
       gestureChangedRef.current = true;
-      const nextBuildings = buildings.map((bld) => (bld.id === drag.id ? { ...bld, x: targetB.x, y: targetB.y } : bld));
-      onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
-        ...campus,
-        buildings: nextBuildings,
-        navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-      })));
+      pendingCampusDragReconcileRef.current = { buildings: true, gates: false, pathways: false };
+      previewGestureObject({ type: "building", id: drag.id, kind: "move", after: targetB });
       // Alignment guides — same visible-bounds result that drove the snap.
       const guidesList: { type: "h" | "v"; pos: number }[] = compactAlignmentGuides([...centeredResult.guides, ...snapResult.guides]);
       // Check overlaps during drag
-      const movedBldgs = buildings.map((bld) => (bld.id === drag.id ? targetB : bld));
-      const overlaps = computeOverlaps(movedBldgs);
-      setOverlappingBuildings(overlaps);
       setGuides(guidesList);
     } else {
       gestureChangedRef.current = true;
-      const movingMarker = markers.find((marker) => marker.id === drag.id);
+      const movingMarker = (drag.physicalOrigin as CampusMarker | undefined) ?? markers.find((marker) => marker.id === drag.id);
       const markerSize = movingMarker
         ? { width: movingMarker.width ?? 24, height: movingMarker.height ?? 24 }
         : { width: 24, height: 24 };
@@ -4420,21 +4625,16 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           x: snap(drag.ox + (pt.x - drag.sx)),
           y: snap(drag.oy + (pt.y - drag.sy)),
         };
-        const gateNodeId = movingMarker.navNodeId
-          ?? navNodes.find((node) => node.gateId === movingMarker.id)?.id;
-        const connectedTargets = gateNodeId
-          ? navEdges
-            .filter((edge) => edge.type !== "floor_transition" && edge.type !== "entrance_transition")
-            .flatMap((edge) => {
-              if (edge.startNodeId === gateNodeId) return [edge.endNodeId];
-              if (edge.endNodeId === gateNodeId) return [edge.startNodeId];
-              return [];
-            })
-            .map((id) => navNodes.find((node) => node.id === id))
-            .filter((node): node is NavigationNode => !!node && !node.floorId && node.id !== gateNodeId)
-            .sort((a, b) => Math.hypot(a.x - proposed.x, a.y - proposed.y) - Math.hypot(b.x - proposed.x, b.y - proposed.y))
+        const connectedTargets = cachedGateAlignmentTargetsRef.current?.markerId === movingMarker.id
+          ? cachedGateAlignmentTargetsRef.current.targets
           : [];
-        const aligned = alignCampusGateAnchor(proposed, connectedTargets[0], SNAP_DIST);
+        let nearestTarget: { x: number; y: number } | undefined;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        for (const target of connectedTargets) {
+          const distance = Math.hypot(target.x - proposed.x, target.y - proposed.y);
+          if (distance < nearestDistance) { nearestDistance = distance; nearestTarget = target; }
+        }
+        const aligned = alignCampusGateAnchor(proposed, nearestTarget, SNAP_DIST);
         setGuides(aligned.guides);
         rawMarker = { dx: aligned.point.x - movingMarker.x, dy: aligned.point.y - movingMarker.y };
       } else {
@@ -4460,12 +4660,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             )
             : { dx: 0, dy: 0 };
       }
-      const nextMarkers = markers.map((m) => (m.id === drag.id
-        ? { ...m, x: movingMarker ? movingMarker.x + rawMarker.dx : m.x, y: movingMarker ? movingMarker.y + rawMarker.dy : m.y }
-        : m));
-      const moved = nextMarkers.find((marker) => marker.id === drag.id);
-      const nextCampus = { ...campus, markers: nextMarkers };
-      onUpdate(moved && isCampusGate(moved) ? syncCampusGateNavigation(nextCampus, genId) : nextCampus);
+      const moved = movingMarker
+        ? { ...movingMarker, x: movingMarker.x + rawMarker.dx, y: movingMarker.y + rawMarker.dy }
+        : undefined;
+      if (moved) {
+        if (isCampusGate(moved)) pendingCampusDragReconcileRef.current = { buildings: false, gates: true, pathways: false };
+        previewGestureObject({ type: "marker", id: drag.id, kind: "move", after: moved });
+      }
     }
   };
 
@@ -4474,6 +4675,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // B8 Phase 1: unified editor — resize works in all layers.
     const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
+    cachePhysicalAlignmentRefs(new Set([b.id]));
     setResizing({ id: b.id, corner, sx: pt.x, sy: pt.y, ox: b.x, oy: b.y, ow: b.width, oh: b.height });
   };
 
@@ -4485,7 +4687,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const size = campusGateSize(marker);
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
-    markerResizing.current = { id: marker.id, corner, sx: pt.x, sy: pt.y, ox: marker.x, oy: marker.y, ow: size.width, oh: size.height };
+    markerResizing.current = { id: marker.id, corner, sx: pt.x, sy: pt.y, ox: marker.x, oy: marker.y, ow: size.width, oh: size.height, origin: marker };
     setMarkerResizingId(marker.id);
   }, [cw, ch, getPoint, tool]);
 
@@ -4500,12 +4702,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // spinning across the ±180° atan2 wrap stays smooth (no ±360° jumps).
     const startAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
     const startRot = normalizeDeg(b.rotation ?? 0);
+    cachePhysicalAlignmentRefs(new Set([b.id]));
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
-    rotating.current = { id: b.id, cx, cy, prevAngle: startAngle, rotation: startRot };
+    rotating.current = { id: b.id, cx, cy, prevAngle: startAngle, rotation: startRot, origin: b };
     setRotatingId(b.id);
     setRotatingAngle(startRot);
-  }, [getPoint, cw, ch, layer]);
+  }, [getPoint, cw, ch, layer, cachePhysicalAlignmentRefs]);
 
   // ── Decor asset rotation handler ──
   const handleDecorRotateStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset) => {
@@ -4514,12 +4717,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const pt = getPoint(e, cw, ch);
     const startAngle = Math.atan2(pt.y - da.y, pt.x - da.x) * (180 / Math.PI);
     const startRot = normalizeDeg(da.rotation ?? 0);
+    cachePhysicalAlignmentRefs(new Set([da.id]));
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
-    decorRotating.current = { id: da.id, cx: da.x, cy: da.y, prevAngle: startAngle, rotation: startRot };
+    decorRotating.current = { id: da.id, cx: da.x, cy: da.y, prevAngle: startAngle, rotation: startRot, origin: da };
     setDecorRotatingId(da.id);
     setRotatingAngle(startRot);
-  }, [getPoint, cw, ch]);
+  }, [getPoint, cw, ch, cachePhysicalAlignmentRefs]);
 
   // ── Decor asset resize handler (uniform scale via corners, rotation-aware) ──
   const handleDecorResizeStart = useCallback((e: React.MouseEvent, da: CampusDecorAsset, corner: string) => {
@@ -4529,6 +4733,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (!template) return;
     const pt = getPoint(e, cw, ch);
     const s = decorRenderScale(da.scale);
+    cachePhysicalAlignmentRefs(new Set([da.id]));
     gestureHistoryPushed.current = false;
     const isGround = isDecorAreaType(da.type);
     decorResizing.current = {
@@ -4542,9 +4747,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       width: (isGround ? da.width : undefined) ?? template.defaultWidth * s,
       height: (isGround ? da.height : undefined) ?? template.defaultHeight * s,
       kind: isGround ? "ground" : "decor",
+      origin: da,
     };
     setDecorResizingId(da.id);
-  }, [getPoint, cw, ch]);
+  }, [getPoint, cw, ch, cachePhysicalAlignmentRefs]);
 
   const handleCanvasResizeStart = useCallback((e: React.MouseEvent, handle: CanvasResizeHandle) => {
     if (!canvasResizeMode || e.button !== 0) return;
@@ -4567,7 +4773,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setCanvasResizePreview(base);
   }, [canvasResizeMode, cw, ch, canvasResizePreview, pendingCanvasResize]);
 
-  const handleSvgMoveResize = (e: React.MouseEvent) => {
+  const processCanvasMoveResize = (e: React.MouseEvent | MouseEvent) => {
     if (canvasResizeRef.current) {
       const gesture = canvasResizeRef.current;
       const rect = svgRef.current?.getBoundingClientRect();
@@ -4601,13 +4807,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const dH = nh - gesture.oh;
       const cx = gesture.ox + (gesture.corner.includes("e") ? dW / 2 : gesture.corner.includes("w") ? -dW / 2 : 0);
       const cy = gesture.oy + (gesture.corner.includes("s") ? dH / 2 : gesture.corner.includes("n") ? -dH / 2 : 0);
-      const nextMarkers = markers.map((marker) => marker.id === gesture.id
-        ? { ...marker, x: Math.max(0, Math.min(cw, Math.round(cx))), y: Math.max(0, Math.min(ch, Math.round(cy))), width: Math.round(nw), height: Math.round(nh) }
-        : marker);
-      const next = syncCampusGateNavigation({ ...campus, markers: nextMarkers }, genId);
+      const resizedMarker = { ...gesture.origin, x: Math.max(0, Math.min(cw, Math.round(cx))), y: Math.max(0, Math.min(ch, Math.round(cy))), width: Math.round(nw), height: Math.round(nh) };
       gestureChangedRef.current = true;
-      campusRef.current = next;
-      onUpdate(next);
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: true, pathways: false };
+      previewGestureObject({ type: "marker", id: gesture.id, kind: "resize", after: resizedMarker });
       return;
     }
     if (pathGroupRotating.current) {
@@ -4630,12 +4833,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       });
       gestureChangedRef.current = true;
       beginGestureHistory();
-      onUpdate(reconcilePathwayNavigation({
+      const next = {
         ...campus,
         paths: paths.map((path) => starts.has(path.id)
           ? { ...path, points: (starts.get(path.id) ?? path.points).map(rotatePt) }
           : path),
-      }, genId, { preserveAuthoredGeometry: true }));
+      };
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      previewGestureCampus(next);
       setRotatingAngle(angle);
       // B5 Phase 5.14: update the rotated frame's angle so Canvas renders
       // the selection outline with SVG transform.
@@ -4661,7 +4866,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       gestureChangedRef.current = true;
       beginGestureHistory();
       campusRef.current = next;
-      onUpdate(next);
+      pendingCampusDragReconcileRef.current = { buildings: true, gates: true, pathways: false };
+      previewGestureCampus(next);
       setRotatingAngle(angle);
       return;
     }
@@ -4706,17 +4912,24 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         // reconciliation. Building/gate members retain their established
         // owner-specific synchronization, while decor-only groups remain
         // graph-neutral and preserve nav arrays verbatim.
-        navNodes: groupTouchesGraphOwner
-          ? syncEntranceNodePositions(nextBuildings, currentCampus.navNodes ?? [])
+        navNodes: gesture.members.some((member) => member.kind === "building")
+          ? previewEntranceNodePositionsForBuildings(
+              nextBuildings,
+              currentCampus.navNodes ?? [],
+              new Set(gesture.members.filter((member) => member.kind === "building").map((member) => member.id)),
+            )
           : currentCampus.navNodes,
       };
-      const next = groupTouchesGraphOwner
-        ? syncCampusGateNavigation(syncExteriorEmergencyStairGraph(nextBase))
-        : nextBase;
+      const next = nextBase;
       gestureChangedRef.current = true;
       beginGestureHistory();
       campusRef.current = next;
-      onUpdate(next);
+      if (groupTouchesGraphOwner) pendingCampusDragReconcileRef.current = {
+        buildings: gesture.members.some((member) => member.kind === "building"),
+        gates: gesture.members.some((member) => member.kind === "marker"),
+        pathways: false,
+      };
+      previewGestureCampus(next);
       setGuides([]);
       return;
     }
@@ -4735,18 +4948,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       });
       const starts = new globalThis.Map(pathGroupScale.starts.map((path) => [path.id, path.points]));
       gestureChangedRef.current = true;
-      onUpdate(reconcilePathwayNavigation({
+      const next = {
         ...campus,
         paths: paths.map((path) => starts.has(path.id)
           ? { ...path, points: (starts.get(path.id) ?? path.points).map(scalePoint) }
           : path),
-      }, genId, { preserveAuthoredGeometry: true }));
+      };
+      pendingCampusDragReconcileRef.current = { buildings: false, gates: false, pathways: true };
+      previewGestureCampus(next);
       return;
     }
     // ── Handle active decor rotation first ──
     if (decorRotating.current) {
       const pt = getPoint(e, cw, ch);
-      const { id, cx, cy, prevAngle, rotation } = decorRotating.current;
+      const { id, cx, cy, prevAngle, rotation, origin } = decorRotating.current;
       const currentAngle = Math.atan2(pt.y - cy, pt.x - cx) * (180 / Math.PI);
       // Shortest-path delta across the ±180° atan2 wrap boundary
       let delta = currentAngle - prevAngle;
@@ -4757,7 +4972,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const accumulated = normalizeDeg(rotation + delta);
       const snapped = snapRotationAngle(accumulated, e.shiftKey);
       decorRotating.current = { ...decorRotating.current, prevAngle: currentAngle, rotation: accumulated };
-      const da = decorAssets.find((d) => d.id === id);
+      const da = origin;
       if (da) {
         const template = DECOR_ASSET_MAP[da.type];
         const size = template
@@ -4774,8 +4989,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           CAMPUS_OBJECT_SAFE_INSET,
         );
         gestureChangedRef.current = true;
-        onUpdate({ ...campus, decorAssets: decorAssets.map((d) => (d.id === id ? { ...d, rotation: snapped, x: Math.round(d.x + boundedRotation.dx), y: Math.round(d.y + boundedRotation.dy) } : d)) });
-        setRotatingAngle(snapped);
+        previewGestureObject({ type: "decorAsset", id, kind: "rotation", after: { ...da, rotation: snapped, x: Math.round(da.x + boundedRotation.dx), y: Math.round(da.y + boundedRotation.dy) } });
       }
       return;
     }
@@ -4828,16 +5042,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         );
         beginGestureHistory();
         gestureChangedRef.current = true;
-        const currentCampus = campusRef.current;
-        const currentDecorAssets = currentCampus.decorAssets ?? [];
-        const next = {
-          ...currentCampus,
-          decorAssets: currentDecorAssets.map((d) => (d.id === rs.id
-            ? { ...d, x: Math.round(nextCenter.x + bounded.dx), y: Math.round(nextCenter.y + bounded.dy), width: nextW, height: nextH, scale: undefined }
-            : d)),
-        };
-        campusRef.current = next;
-        onUpdate(next);
+        previewGestureObject({ type: "decorAsset", id: rs.id, kind: "resize", after: { ...rs.origin, x: Math.round(nextCenter.x + bounded.dx), y: Math.round(nextCenter.y + bounded.dy), width: nextW, height: nextH, scale: undefined } });
         return;
       }
       // Uniform scale factor along the dragged corner's axes (anchored at center)
@@ -4848,7 +5053,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (rs.corner.includes("n")) fy = rs.hh > 0 ? (rs.hh - localDy) / rs.hh : 1;
       const factor = Math.max(fx, fy, 0.05);
       let newScale = Math.max(0.1, Math.min(12, rs.scale * factor));
-      const currentAsset = campusRef.current.decorAssets?.find((asset) => asset.id === rs.id);
+      const currentAsset = rs.origin;
       if (currentAsset) {
         // Resolve the descriptor from the live asset rather than the resize
         // start closure.  The latter owns the initial half-extents only; the
@@ -4868,14 +5073,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       // have committed the previous onUpdate yet, so the render-time
       // `campus`/`decorAssets` closure can otherwise rewind a multi-frame drag
       // to the first sample even though the handle itself remains visible.
-      const currentCampus = campusRef.current;
-      const currentDecorAssets = currentCampus.decorAssets ?? [];
-      const next = {
-        ...currentCampus,
-        decorAssets: currentDecorAssets.map((d) => (d.id === rs.id ? { ...d, scale: newScale } : d)),
-      };
-      campusRef.current = next;
-      onUpdate(next);
+      previewGestureObject({ type: "decorAsset", id: rs.id, kind: "resize", after: { ...rs.origin, scale: newScale } });
       return;
     }
     // Handle active rotation first
@@ -4892,7 +5090,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const accumulated = normalizeDeg(rotation + delta);
       const snapped = snapRotationAngle(accumulated, e.shiftKey);
       rotating.current = { ...rotating.current, prevAngle: currentAngle, rotation: accumulated };
-      const b = buildings.find(bld => bld.id === id);
+      const b = rotating.current.origin;
       if (b) {
         const boundedRotation = clampMemberTranslation(
           { kind: "building", id: b.id, x: b.x, y: b.y, width: b.width, height: b.height, rotation: snapped },
@@ -4902,18 +5100,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           ch,
           CAMPUS_OBJECT_SAFE_INSET,
         );
-        const nextBuildings = buildings.map(bld => bld.id === id
-          ? { ...bld, rotation: snapped, x: Math.round(bld.x + boundedRotation.dx), y: Math.round(bld.y + boundedRotation.dy) }
-          : bld);
         gestureChangedRef.current = true;
-        onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
-          ...campus,
-          buildings: nextBuildings,
-          // B5 Phase 1.8: rotating a building moves its entrances → the linked
-          // nav nodes follow in the same gesture.
-          navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-        })));
-        setRotatingAngle(snapped);
+        pendingCampusDragReconcileRef.current = { buildings: true, gates: false, pathways: false };
+        previewGestureObject({ type: "building", id, kind: "rotation", after: { ...b, rotation: snapped, x: Math.round(b.x + boundedRotation.dx), y: Math.round(b.y + boundedRotation.dy) } });
       }
       return;
     }
@@ -5018,7 +5207,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 : stair),
             });
         beginGestureHistory();
-        onUpdate(syncExteriorEmergencyStairGraph({ ...campus, buildings: nextBuildings, navNodes: syncEntranceNodePositions(nextBuildings, navNodes) }));
+        pendingCampusDragReconcileRef.current = { buildings: true, gates: false, pathways: false };
+        previewGestureCampus({ ...campus, buildings: nextBuildings });
         gesture.currentEdge = edge;
         gesture.currentOffset = offset;
         gesture.edge = edge;
@@ -5030,8 +5220,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const pt = getPoint(e, cw, ch);
     const ddx = pt.x - resizing.sx;
     const ddy = pt.y - resizing.sy;
-    const nextBuildings = buildings.map((b) => {
-      if (b.id !== resizing.id) return b;
+    const buildingToResize = buildings.find((b) => b.id === resizing.id);
+    if (!buildingToResize) return;
+    const nextBuilding = (() => {
+      const b = buildingToResize;
       const rotVal = b.rotation ?? 0;
       const rotRad = (rotVal * Math.PI) / 180;
       const cosR = Math.cos(rotRad);
@@ -5098,7 +5290,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
        // only; entrance/nav synchronization below remains unchanged.
        const aligned = snapRectToVisibleBounds(
          { x: boundedPosition.x, y: boundedPosition.y, width: sized.width, height: sized.height, rotation: sized.rotation ?? 0 },
-         physicalAlignmentRefs(new Set([sized.id])),
+         physicalAlignmentRefs(new Set([sized.id]), memberVisibleBounds({ kind: "building", id: sized.id, x: boundedPosition.x, y: boundedPosition.y, width: sized.width, height: sized.height, rotation: sized.rotation ?? 0 })),
          physicalSnapDistance,
        );
        setGuides(aligned.guides);
@@ -5116,18 +5308,115 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
          )
          : { dx: 0, dy: 0 };
        return { ...sized, x: Math.round(boundedPosition.x + alignedDelta.dx), y: Math.round(boundedPosition.y + alignedDelta.dy) };
-    });
+    })();
     beginGestureHistory();
-    onUpdate(reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph({
-      ...campus,
-      buildings: nextBuildings,
-      // B5 Phase 1.8: resizing a building moves its entrances → the linked nav
-      // nodes follow in the same gesture.
-      navNodes: syncEntranceNodePositions(nextBuildings, navNodes),
-    })));
+    pendingCampusDragReconcileRef.current = { buildings: true, gates: false, pathways: false };
+    previewGestureObject({ type: "building", id: resizing.id, kind: "resize", after: nextBuilding });
   };
 
+  const processCanvasMoveResizeRef = useRef(processCanvasMoveResize);
+  processCanvasMoveResizeRef.current = processCanvasMoveResize;
+  const handleSvgMoveResize = (e: React.MouseEvent) => {
+    const activeGesture = Boolean(
+      dragging.current || buildingDrag || rubberBand || resizing || markerResizing.current || groupResizing.current
+      || groupRotating.current || rotating.current || decorResizing.current || decorRotating.current
+      || pathGroupRotating.current || pathGroupScale || exteriorStairDragging.current,
+    );
+    // The camera owns pan frames already; keep the shared outdoor pan path
+    // immediate and coalesce object manipulation to one newest sample/frame.
+    if (!activeGesture || panning.current) {
+      processCanvasMoveResizeRef.current(e);
+      return;
+    }
+    latestCampusMoveEventRef.current = e.nativeEvent;
+    if (campusMoveFrameRef.current !== null) return;
+    campusMoveFrameRef.current = requestAnimationFrame(() => {
+      campusMoveFrameRef.current = null;
+      const latest = latestCampusMoveEventRef.current;
+      latestCampusMoveEventRef.current = null;
+      if (latest) {
+        processCanvasMoveResizeRef.current(latest);
+      }
+    });
+  };
+
+  useEffect(() => () => {
+    if (campusMoveFrameRef.current !== null) cancelAnimationFrame(campusMoveFrameRef.current);
+    campusMoveFrameRef.current = null;
+    latestCampusMoveEventRef.current = null;
+  }, []);
+
   const handleSvgUpResize = () => {
+    if (campusMoveFrameRef.current !== null) {
+      cancelAnimationFrame(campusMoveFrameRef.current);
+      campusMoveFrameRef.current = null;
+    }
+    const latest = latestCampusMoveEventRef.current;
+    latestCampusMoveEventRef.current = null;
+    if (latest) processCanvasMoveResizeRef.current(latest);
+    // Promote an imperative physical-object preview to the canonical campus
+    // once, before final graph/overlap reconciliation and the single history
+    // commit below.
+    flushPendingPhysicalGestureObject();
+    // Whole-Path join discovery scans candidate Pathway vertices. Perform it
+    // once on the final pointer sample, alongside the canonical graph commit,
+    // rather than once for every movement frame.
+    const completedPathGesture = dragging.current;
+    if (completedPathGesture?.type === "path") {
+      const movedPathIds = new Set(
+        (dragGroupStartRef.current ?? [])
+          .filter((member) => member.kind === "path")
+          .map((member) => member.id),
+      );
+      movedPathIds.add(completedPathGesture.id);
+      for (const sharedGroup of explicitSharedPathwayGroups) {
+        if (sharedGroup.some((ref) => movedPathIds.has(ref.pathId))) {
+          sharedGroup.forEach((ref) => movedPathIds.add(ref.pathId));
+        }
+      }
+      const join = wholePathJoinForSnapshot(
+        campusRef.current.paths,
+        new Set([completedPathGesture.id]),
+        movedPathIds,
+      );
+      completedPathGesture.pathJoinTarget = join?.target;
+      completedPathGesture.pathJoinSourcePointIndex = join?.sourcePointIndex;
+    }
+    const pendingReconcile = pendingCampusDragReconcileRef.current;
+    if (pendingReconcile) {
+      pendingCampusDragReconcileRef.current = null;
+      let nextCampus = campusRef.current;
+      if (pendingReconcile.gates) nextCampus = syncCampusGateNavigation(nextCampus, genId);
+      if (pendingReconcile.buildings) {
+        nextCampus = syncExteriorEmergencyStairGraph({
+          ...nextCampus,
+          navNodes: syncEntranceNodePositions(nextCampus.buildings, nextCampus.navNodes ?? []),
+        });
+      }
+      // An explicit endpoint/vertex join needs both pre-gesture generated
+      // owners intact. The join helper performs final reconciliation after
+      // it merges those identities.
+      const explicitPathJoinPending = Boolean(
+        completedPathGesture
+        && (completedPathGesture.type === "pathPoint" || completedPathGesture.type === "path")
+        && completedPathGesture.pathJoinTarget,
+      );
+      if (pendingReconcile.pathways && !explicitPathJoinPending) {
+        nextCampus = reconcilePathwayNavigation(nextCampus, genId, { preserveAuthoredGeometry: true });
+      }
+      if (pendingReconcile.entranceConnections) {
+        nextCampus = reconcileEntranceOutdoorConnections(nextCampus);
+      }
+      nextCampus = reconcileExteriorApproachNavigation(nextCampus);
+      campusRef.current = nextCampus;
+      transientGestureCampusRef.current = nextCampus;
+      if (pendingReconcile.buildings) setOverlappingBuildings(computeOverlaps(nextCampus.buildings));
+      // A direct physical-object preview already has the final visible transform.
+      // Don't mount the entire transient Campus into Canvas for a single pointer-up
+      // reconciliation frame; commitGestureCampus publishes the canonical snapshot
+      // immediately after this handler completes.
+      if (!imperativeGesturePreviewRef.current) previewGestureCampus(nextCampus);
+    }
     // A locked physical click has no transform gesture to commit. Clearing the
     // pending candidate here keeps a simple click history-neutral and lets the
     // existing marquee branch below finalize only when a real drag occurred.
@@ -5281,7 +5570,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         genId,
       );
       campusRef.current = merged;
-      onUpdate(merged);
+      previewGestureCampus(merged);
       // Pointer-up closes over the pre-publish render. Carry the canonical
       // merged state into the single history commit below so redo restores
       // the joined topology rather than the pre-merge snapshot.
@@ -5330,8 +5619,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
 
     // Finalize rubber-band selection
-    if (rubberBand) {
-      const rect = selectionRectFromPoints(rubberBand.sx, rubberBand.sy, rubberBand.cx, rubberBand.cy);
+    const releasedRubberBand = rubberBandRef.current;
+    if (releasedRubberBand) {
+      const rect = selectionRectFromPoints(releasedRubberBand.sx, releasedRubberBand.sy, releasedRubberBand.cx, releasedRubberBand.cy);
       const rw = rect.width;
       const rh = rect.height;
       if (rw > 5 || rh > 5) {
@@ -5363,7 +5653,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           setShowAlignTools(false);
         }
       }
-      setRubberBand(null);
+      updateRubberBand(null);
       return;
     }
 
@@ -5529,6 +5819,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setWaypointEdgeSnap(null);
     setConnectBlocked(false);
     gestureHistoryPushed.current = false;
+  };
+  const handleCanvasPointerUp = () => {
+    handleSvgUpResize();
+    commitGestureCampus();
+  };
+  const handleCanvasPointerLeave = () => {
+    handleSvgLeave();
+    commitGestureCampus();
   };
 
   // ── Tool switching — clears stale drawing/preview state so switching tools
@@ -6065,6 +6363,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       setGuides([]);
       return;
     }
+    const physicalOrigin = type === "building"
+      ? buildings.find((building) => building.id === id)
+      : type === "decorAsset"
+        ? decorAssets.find((asset) => asset.id === id)
+        : type === "marker" || type === "gate"
+          ? markers.find((marker) => marker.id === id)
+          : undefined;
     // Clicking an object that is already part of the current multi-selection
     // keeps the group: dragging it moves the entire selection (Figma-style).
     // Clicking an unselected object collapses to single-object editing.
@@ -6092,8 +6397,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const pt = getPoint(e, cw, ch);
       gestureHistoryPushed.current = false;
       gestureChangedRef.current = false;
-      dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
+      dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy, physicalOrigin };
       dragGroupStartRef.current = buildDragGroup({ type, id }, multiSelected);
+      if (dragGroupStartRef.current?.length) cachePhysicalAlignmentRefs(new Set(dragGroupStartRef.current.map((member) => member.id)));
+      else if (type === "building" || type === "decorAsset" || type === "marker" || type === "gate") {
+        cachePhysicalAlignmentRefs(new Set([id]));
+        if (type === "gate" || type === "marker") cacheGateAlignmentTargets(id);
+      }
       pathGroupOriginRef.current = dragGroupStartRef.current?.some((member) => member.kind === "path")
         ? new globalThis.Map(paths.filter((path) => multiSelected.includes(path.id)).map((path) => [path.id, structuredClone(path.points)]))
         : null;
@@ -6136,8 +6446,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const pt = getPoint(e, cw, ch);
     gestureHistoryPushed.current = false;
     gestureChangedRef.current = false;
-    dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy };
+    dragging.current = { type, id, sx: pt.x, sy: pt.y, ox, oy, physicalOrigin };
     dragGroupStartRef.current = null;
+    if (type === "building" || type === "decorAsset" || type === "marker" || type === "gate") {
+      cachePhysicalAlignmentRefs(new Set([id]));
+      if (type === "gate" || type === "marker") cacheGateAlignmentTargets(id);
+    }
     pathGroupOriginRef.current = null;
   };
 
@@ -6226,15 +6540,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       ...baseCampus,
       buildings: nextBuildings,
       decorAssets: nextDecorAssets,
-      // Building rotation already owns the established Entrance/nav-anchor
-      // synchronization. Pure decor rotation remains graph-neutral.
+      // Keep only entrance anchor coordinates live. The complete emergency
+      // stair/exterior approach graph sync is committed at pointer-up.
       navNodes: touchesBuilding
-        ? syncEntranceNodePositions(nextBuildings, baseCampus.navNodes ?? [])
+        ? previewEntranceNodePositionsForBuildings(
+            nextBuildings,
+            baseCampus.navNodes ?? [],
+            new Set(members.filter((member) => member.kind === "building").map((member) => member.id)),
+          )
         : baseCampus.navNodes,
     };
-    return touchesBuilding
-      ? reconcileExteriorApproachNavigation(syncExteriorEmergencyStairGraph(nextBase))
-      : nextBase;
+    return nextBase;
   }, [ch, cw]);
 
   const getPhysicalRotationMembers = useCallback(() => {
@@ -6421,9 +6737,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
 
   const onUpdateBuilding = (id: string, changes: Partial<CampusBuilding>) => {
+    // Upload completion can arrive after another sidebar edit. Merge against
+    // the latest complete editor draft, not the render that started upload.
+    const currentCampus = campusRef.current;
     const geometryChanged = changes.x !== undefined || changes.y !== undefined
       || changes.width !== undefined || changes.height !== undefined || changes.rotation !== undefined;
-    const nextBuildings = buildings.map((building) => {
+    const nextBuildings = currentCampus.buildings.map((building) => {
       if (building.id !== id) return building;
       const next = { ...building, ...changes };
       return geometryChanged ? constrainBuildingToCanvas(next, cw, ch) : next;
@@ -6438,13 +6757,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // Names, colors, visibility, and lock state are ordinary Building/UI
     // properties. They must not re-run Entrance/Pathway reconciliation: a
     // hierarchy interaction or a visibility toggle is not a graph edit.
-    const next = { ...campus, buildings: nextBuildings };
+    const next = { ...currentCampus, buildings: nextBuildings };
     campusRef.current = next;
-    const textOnlyChange = Object.keys(changes).length > 0
-      && Object.keys(changes).every((key) => key === "name" || key === "code" || key === "description");
-    const committed = textOnlyChange ? next : reconcileExteriorApproachNavigation(next);
-    onUpdate(committed);
-    pushHistory(committed);
+    // Non-geometric Building properties, including the cover photo and hours,
+    // cannot change the authored navigation graph.
+    onUpdate(next);
+    pushHistory(next);
   };
 
   const onAddExteriorEmergencyStair = (buildingId: string) => {
@@ -8265,7 +8583,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     try {
       const candidate = { ...campus, updatedAt: new Date().toISOString() };
       const saved = onSave ? await onSave(candidate) : candidate;
-      onUpdate(saved);
+      onUpdate(saved, { persistAsBaseline: true });
       savedSnapshotRef.current = JSON.stringify(saved);
       setSaveScreen({ open: true, state: "success" });
       setIsProcessing(false);
@@ -9994,7 +10312,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         {/* ── SVG Canvas ── */}
         <div className="flex-1 relative flex min-w-0" data-testid="map-editor-workspace" data-tutorial="outdoor-canvas">
         <Canvas
-          campus={campus}
+          campus={canvasCampus}
+          transientCampusPreviewRef={transientCanvasPreviewRef}
           tool={tool}
           layer={layer}
           selected={selected}
@@ -10156,8 +10475,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           rotatingAngle={rotatingAngle}
           resizingId={resizing?.id ?? null}
           onCanvasMove={handleSvgMoveResize}
-          onCanvasUp={handleSvgUpResize}
-          onCanvasLeave={handleSvgLeave}
+          onCanvasUp={handleCanvasPointerUp}
+          onCanvasLeave={handleCanvasPointerLeave}
           onCanvasDblClick={handleDblClick}
           onItemDown={onItemDown}
           onPathDown={onPathDown}

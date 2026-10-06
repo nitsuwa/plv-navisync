@@ -94,7 +94,7 @@ export function FloorOverviewSidebar({
   const showWallJunctions = floor.showWallJunctions !== false;
 
   return (
-    <div className="w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
+    <div className="h-full min-h-0 w-64 shrink-0 flex flex-col border-l border-border overflow-hidden bg-card">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <div className="min-w-0">
           <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">Floor Overview</span>
@@ -110,7 +110,7 @@ export function FloorOverviewSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div data-testid="floor-overview-scroll-content" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
         {/* ── GENERAL ── */}
         <section>
           <SectionLabel>General</SectionLabel>

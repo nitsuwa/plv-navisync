@@ -48,6 +48,14 @@ const baseProps = {
 };
 
 describe("Part D — FloorOverviewSidebar Perimeter Wall section", () => {
+  it("keeps the sidebar content in its own vertically scrollable viewport", () => {
+    render(<FloorOverviewSidebar floor={makeFloor()} {...baseProps} />);
+    const content = screen.getByTestId("floor-overview-scroll-content");
+    expect(content.className).toContain("min-h-0");
+    expect(content.className).toContain("overflow-y-auto");
+    expect(content.parentElement?.className).toContain("h-full");
+  });
+
   it("renders the Perimeter Wall section", () => {
     render(<FloorOverviewSidebar floor={makeFloor()} {...baseProps} />);
     expect(screen.getByText("Perimeter Wall")).toBeTruthy();
