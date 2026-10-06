@@ -21,6 +21,8 @@ interface MobileBuildingSheetProps {
   onReport: (building: Building) => void;
   onSignInPrompt: (message: string) => void;
   saved: Set<string>;
+  savedStateLoading?: boolean;
+  savedStateUnavailable?: boolean;
   studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
   floorPlanCount: number;
@@ -71,6 +73,7 @@ export function resolveMobileBuildingSheetSnap(
 export function MobileBuildingSheet({
   selected, campusId, onClose, onDirections, onEnterBuilding, onSave, onReport,
   onSignInPrompt, saved, studentAuth, hasFloorPlans, floorPlanCount, facilities,
+  savedStateLoading = false, savedStateUnavailable = false,
   accessibility, showQR, onToggleQR, onStateChange,
   onBackToRoutePlanner,
   interactionPaused = false,
@@ -303,6 +306,8 @@ export function MobileBuildingSheet({
             campusId={campusId}
             hasFloorPlans={hasFloorPlans}
             saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
             studentAuth={studentAuth}
             showQR={showQR}
             showSecondaryActions={sheetState !== "peek"}

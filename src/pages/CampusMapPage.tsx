@@ -750,14 +750,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const displayZoomRef = useRef(1);
   const [pan,          setPan]          = useState<Pt>({ x:0, y:0 });
   const [saved,        setSaved]        = useState<Set<string>>(new Set());
+  const [savedStateLoading, setSavedStateLoading] = useState(true);
+  const [savedStateUnavailable, setSavedStateUnavailable] = useState(false);
   const animFrameRef   = useRef<number>(undefined);
 
-  // Load initial bookmarked buildings from studentAccountService
+  // Load favorites only after auth and campus resolution. Cancel stale reads so
+  // an earlier empty-campus response cannot overwrite the selected campus's
+  // saved state when a deep link opens a building from Home.
   useEffect(() => {
-    Promise.all([
+    let current = true;
+    if (studentAuth.loading || isCampusLoading) {
+      setSavedStateLoading(true);
+      return () => { current = false; };
+    }
+    if (!activeCampus) {
+      setSaved(new Set());
+      setSavedStateUnavailable(false);
+      setSavedStateLoading(false);
+      return () => { current = false; };
+    }
+
+    setSavedStateLoading(true);
+    setSavedStateUnavailable(false);
+    void Promise.all([
       studentAccountService.getSavedBuildings(MOCK_BUILDINGS),
       studentAccountService.getSavedCampusPlaceIdsAsync(),
     ]).then(([buildings, campusPlaceIds]) => {
+      if (!current) return;
       const idSet = new Set<string>();
       buildings.forEach((b) => {
         idSet.add(b.id);
@@ -768,8 +787,15 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       });
       campusPlaceIds.forEach((id) => idSet.add(`campus-place:${id}`));
       setSaved(idSet);
+    }).catch(() => {
+      if (!current) return;
+      setSaved(new Set());
+      setSavedStateUnavailable(true);
+    }).finally(() => {
+      if (current) setSavedStateLoading(false);
     });
-  }, [MOCK_BUILDINGS]);
+    return () => { current = false; };
+  }, [MOCK_BUILDINGS, activeCampus, isCampusLoading, studentAuth.loading, studentAuth.profile?.id]);
 
   // Floor plan state (replaces buildingView — floor plans now render in the main SVG)
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
@@ -5233,6 +5259,8 @@ const buildingFill = (id: string) =>
             onDirections={startDirectionsTo}
             onEnterBuilding={(building) => openFloorPlan(building)}
             saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
             studentAuth={studentAuth}
             onToggleSave={toggleSave}
             onReport={building => { setReportCampusPlace(null); setReportRoomContext(null); setReportModal(building); }}
@@ -5565,6 +5593,8 @@ const buildingFill = (id: string) =>
             onReport={building => { setReportCampusPlace(null); setReportRoomContext(null); setReportModal(building); }}
             onSignInPrompt={setSignInPrompt}
             saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
             studentAuth={studentAuth}
             hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
             floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
