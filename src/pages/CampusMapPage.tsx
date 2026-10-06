@@ -29,7 +29,19 @@ import type { CampusPlaceDest, RoomDest } from "../lib/combinedPathfinding";
 import { snapToNearest } from "../lib/geo";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
-import { clampStudentMapZoom, dampCameraZoomLogarithm, getCameraSmoothingFactor, STUDENT_MAP_ZOOM_STEP, clampViewportPan, getBuildingFocusPan, getPanToKeepWorldPoint, getSoftBoundedPan, getViewportPanBounds, normalizeStudentMapWheelDelta } from "../lib/mapViewport";
+import {
+  clampStudentMapZoom,
+  clampViewportPan,
+  dampCameraZoomLogarithm,
+  getBuildingFocusPan,
+  getCameraSmoothingFactor,
+  getPanToKeepWorldPoint,
+  getSoftBoundedPan,
+  getViewportPanBounds,
+  normalizeStudentMapWheelDelta,
+  STUDENT_MAP_MIN_ZOOM,
+  STUDENT_MAP_ZOOM_STEP,
+} from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
 import { routeEndpointFromSearchResult, routeEndpointKey, type RouteEndpoint } from "../lib/routeEndpoints";
 import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walkingAnimation";
@@ -5169,7 +5181,12 @@ const buildingFill = (id: string) =>
       <div
         data-no-drag
         data-map-layer="account-trigger"
-        className="absolute right-2 map-layer-controls pointer-events-auto md:hidden"
+        aria-hidden={searchFocused}
+        inert={searchFocused ? ("" as never) : undefined}
+        className={cn(
+          "absolute right-2 map-layer-controls pointer-events-auto transition-[opacity,transform] duration-200 ease-out motion-reduce:duration-0 md:hidden",
+          searchFocused && "pointer-events-none translate-x-1 scale-95 opacity-0",
+        )}
         style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
       >
         <MobileMapAccountMenu open={profileMenuOpen} onOpenChange={handleProfileMenuOpenChange} />
@@ -5420,19 +5437,9 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
-      {/* ══════════════ CAMPUS SELECTOR / MAP LABEL ══════════════ */}
-      <div data-no-drag className={cn("absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20 hidden md:block", (route || directionsMode || isFloorMode) && "hidden")}>
-        {isFloorMode ? (
-          /* Floor plan: breadcrumb label */
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border shadow-sm"
-            style={{ background:"var(--card)", color:"var(--muted-foreground)", fontSize:"10px", fontWeight:600, fontFamily:"var(--font-body)", pointerEvents:"none" }}>
-            <MapPin className="h-3 w-3 shrink-0" style={{ color:"var(--primary)" }}/>
-            <span style={{ color:"var(--foreground)" }}>{floorView?.building.name}</span>
-            <span style={{ color:"var(--border)" }}>·</span>
-            <span>{currentFloor?.label ?? "Floor " + floorView?.floor}</span>
-          </div>
-        ) : (
-          /* Campus map: tappable campus selector */
+      {/* ══════════════ CAMPUS SELECTOR ══════════════ */}
+      {!route && !directionsMode && !isFloorMode && (
+        <div data-testid="student-campus-selector" data-no-drag className="absolute bottom-[76px] md:bottom-6 left-1/2 -translate-x-1/2 z-20 hidden md:block">
           <div className="relative">
             <button
               onClick={() => setShowCampusSelector(v => !v)}
@@ -5477,8 +5484,8 @@ const buildingFill = (id: string) =>
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ══════════════ MOBILE: immersive floating UI ══════════════ */}
       <div data-no-drag className="hidden" aria-hidden="true">

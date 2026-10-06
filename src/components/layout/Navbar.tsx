@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
-  Map, Home, Compass, CalendarDays, LogIn, LogOut, User, Bookmark, Flag, Settings,
+  Map, Home, Compass, CalendarDays, LayoutDashboard, LogIn, LogOut, User, Bookmark, Flag, Settings,
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -40,7 +40,7 @@ export function Navbar() {
   const dropdownTriggerRef = useRef<HTMLButtonElement>(null);
   const suppressOutsideClickRef = useRef(false);
   const suppressOutsideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { loading: authLoading, isStudent, isStudentOrg, username, role, profile, signOut } = useStudentAuth();
+  const { loading: authLoading, isAdmin, isStudent, isStudentOrg, username, role, profile, signOut } = useStudentAuth();
   const toast = useToast();
   const [reportNotifCount, setReportNotifCount] = useState(0);
   const notifiedRef = useRef(false);
@@ -305,6 +305,14 @@ export function Navbar() {
                   )}
                 </AnimatePresence>
               </div>
+            ) : isAdmin ? (
+              <Link
+                to="/admin-dashboard"
+                className="inline-flex items-center gap-1.5 h-9 px-3 sm:px-4 rounded-xl border border-primary text-primary text-xs sm:text-sm font-bold transition-all duration-200 hover:bg-primary/5 active:scale-95"
+              >
+                <LayoutDashboard className="h-3.5 w-3.5 shrink-0" />
+                <span>Dashboard</span>
+              </Link>
             ) : (
               <Link to="/admin"
                 className="inline-flex items-center gap-1 h-9 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 hover:brightness-110 active:scale-95"

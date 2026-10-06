@@ -61,6 +61,17 @@ describe("StudentMapControls", () => {
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
   });
 
+  it("expands the focused mobile search into the profile-button space", () => {
+    render(<StudentMapControls {...props({ searchFocused: true, search: "science", searchResults: [result] })} />);
+
+    const panel = screen.getByTestId("student-map-search-panel");
+    expect(panel).toHaveClass("right-2", "transition-[right]");
+    expect(panel).not.toHaveClass("right-16");
+    const results = screen.getByRole("listbox", { name: "Campus destination results" });
+    expect(results.getAttribute("style")).toContain("100dvh");
+    expect(results.getAttribute("style")).toContain("safe-area-inset-bottom");
+  });
+
   it("keeps route modes and building shortcuts out of the search area", () => {
     render(<StudentMapControls {...props()} />);
 

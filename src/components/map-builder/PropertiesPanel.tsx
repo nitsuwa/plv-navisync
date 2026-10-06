@@ -84,6 +84,7 @@ const TABS: TabDef[] = [
 interface PropertiesPanelProps {
   /** Explicit inspector visibility, separate from object selection. */
   open?: boolean;
+  /** Suppress position-only inspector churn while the canvas owns a gesture. */
   selected: CampusSelection | null;
   /** B7 Phase 2: live validation issues for the currently selected object. */
   issueItems?: ObjectIssueItem[];
@@ -713,6 +714,8 @@ export function PropertiesPanel({
   const [entranceSettingsOpen, setEntranceSettingsOpen] = useState(false);
   const [buildingCoverUploading, setBuildingCoverUploading] = useState(false);
   const [buildingCoverError, setBuildingCoverError] = useState<string | null>(null);
+  const [buildingCoverPreviewUrl, setBuildingCoverPreviewUrl] = useState<string | null>(null);
+  const buildingCoverPreviewUrlRef = useRef<string | null>(null);
   const [buildingCoverDragActive, setBuildingCoverDragActive] = useState(false);
   const [placeCoverUploading, setPlaceCoverUploading] = useState(false);
   const [placeCoverError, setPlaceCoverError] = useState<string | null>(null);
@@ -720,12 +723,20 @@ export function PropertiesPanel({
   const [exteriorStairsOpen, setExteriorStairsOpen] = useState(false);
   const [expandedStairId, setExpandedStairId] = useState<string | null>(null);
   const buildingCoverInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { setBuildingCoverError(null); }, [selBldg?.id]);
+  useEffect(() => {
+    setBuildingCoverError(null);
+    if (buildingCoverPreviewUrlRef.current) URL.revokeObjectURL(buildingCoverPreviewUrlRef.current);
+    buildingCoverPreviewUrlRef.current = null;
+    setBuildingCoverPreviewUrl(null);
+  }, [selBldg?.id]);
+  useEffect(() => () => {
+    if (buildingCoverPreviewUrlRef.current) URL.revokeObjectURL(buildingCoverPreviewUrlRef.current);
+  }, []);
   useEffect(() => { setPlaceCoverError(null); }, [selMkr?.id]);
   useEffect(() => { setExpandedStairId(null); setExteriorStairsOpen(false); }, [selBldg?.id]);
   const navigationHealth = useMemo(() => navigationCampus && selBldg
     ? buildingNavigationHealth(navigationCampus, selBldg)
-    : null, [navigationCampus, selBldg]);
+    : null, [navigationCampus, selBldg?.id, selBldg?.floors]);
   const buildingEntranceNavigationSummary = useMemo(() => {
     if (!navigationCampus || !selBldg) return null;
     const entrances = selBldg.entrances ?? [];
@@ -741,15 +752,27 @@ export function PropertiesPanel({
       indoorLinked,
       indoorMissing,
     };
-  }, [navigationCampus, selBldg]);
+  }, [navigationCampus, selBldg?.id, selBldg?.entrances]);
   const uploadCoverFile = useCallback(async (file: File) => {
     if (!selBldg) return;
+    const buildingId = selBldg.id;
+    const previewUrl = URL.createObjectURL(file);
+    if (buildingCoverPreviewUrlRef.current) URL.revokeObjectURL(buildingCoverPreviewUrlRef.current);
+    buildingCoverPreviewUrlRef.current = previewUrl;
+    setBuildingCoverPreviewUrl(previewUrl);
     setBuildingCoverError(null);
     setBuildingCoverUploading(true);
     try {
-      const path = await uploadBuildingCoverImage(selBldg.id, file);
-      onUpdateBuilding(selBldg.id, { coverImagePath: path });
+      const path = await uploadBuildingCoverImage(buildingId, file);
+      const storedImageUrl = buildingCoverPublicUrl(path);
+      onUpdateBuilding(buildingId, { coverImagePath: path });
+      URL.revokeObjectURL(previewUrl);
+      buildingCoverPreviewUrlRef.current = null;
+      if (selBldg?.id === buildingId) setBuildingCoverPreviewUrl(storedImageUrl);
     } catch (error) {
+      URL.revokeObjectURL(previewUrl);
+      if (buildingCoverPreviewUrlRef.current === previewUrl) buildingCoverPreviewUrlRef.current = null;
+      if (selBldg?.id === buildingId) setBuildingCoverPreviewUrl(null);
       setBuildingCoverError(error instanceof Error && /JPEG|PNG|WebP|5 MB/.test(error.message)
         ? error.message
         : "The cover photo could not be uploaded. Try again.");
@@ -829,6 +852,7 @@ export function PropertiesPanel({
   // B5 Phase 5.12 — while editing ONE path inside its network, the panel shows
   // the single-path (member) controls instead of the network batch section.
   const isMultiMode = selectedOutdoorCount > 0 && !pathMemberEditing;
+  const isCompactDecorInspector = Boolean(selDecorAsset && !isDecorAreaType(selDecorAsset.type) && !isMultiMode);
   const isBuildingOnlyMultiMode = isMultiMode && selectedOutdoorCount === multiSelectedBuildings.length;
   const isPathOnlyMultiMode = isMultiMode && selectedOutdoorCount === multiSelectedPaths.length && multiSelectedPaths.length > 1;
 
@@ -968,7 +992,13 @@ export function PropertiesPanel({
     <>
     <div
       data-testid="properties-panel"
-      className="absolute top-0 right-0 bottom-0 z-30 flex min-h-0 w-[min(400px,34vw)] flex-col border-l border-border shadow-2xl overflow-hidden max-[1023px]:w-[min(380px,calc(100vw-24px))]"
+      data-compact-decor-inspector={isCompactDecorInspector || undefined}
+      className={cn(
+        "absolute top-0 right-0 bottom-0 z-30 flex min-h-0 flex-col border-l border-border shadow-2xl overflow-hidden",
+        isCompactDecorInspector
+          ? "w-[320px] max-[1023px]:w-[min(320px,calc(100vw-24px))]"
+          : "w-[min(400px,34vw)] max-[1023px]:w-[min(380px,calc(100vw-24px))]",
+      )}
       style={{
         background: "var(--card)",
         transform: visible ? "translateX(0)" : "translateX(100%)",
@@ -998,7 +1028,7 @@ export function PropertiesPanel({
       {selBldg && !isMultiMode && <TabBar active={tab} onChange={setTab} />}
 
       {/* Content */}
-      <div data-testid="properties-panel-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-show-on-hover p-4 space-y-4">
+      <div data-testid="properties-panel-content" className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-show-on-hover space-y-4", isCompactDecorInspector ? "p-3 space-y-3" : "p-4")}>
         {/* ── B7 Phase 2: contextual issue guidance for the selected object ── */}
         <ObjectIssueSection items={issueItems} scrollable={false} />
 
@@ -1452,8 +1482,8 @@ export function PropertiesPanel({
                       if (file) await uploadCoverFile(file);
                     }}
                   />
-                  {selBldg.coverImagePath ? (
-                    <img src={buildingCoverPublicUrl(selBldg.coverImagePath)} alt={`${selBldg.name} cover photo preview`} className="aspect-[16/8] w-full rounded-lg object-cover ring-1 ring-border" />
+                  {(buildingCoverPreviewUrl || selBldg.coverImagePath) ? (
+                    <img src={buildingCoverPreviewUrl ?? buildingCoverPublicUrl(selBldg.coverImagePath!)} alt={`${selBldg.name} cover photo preview`} className="aspect-[16/8] w-full rounded-lg object-cover ring-1 ring-border" />
                   ) : (
                     <button type="button" disabled={buildingCoverUploading || selBldg.locked}
                       onClick={() => buildingCoverInputRef.current?.click()}
@@ -1468,8 +1498,8 @@ export function PropertiesPanel({
                   )}
                   <div className="flex gap-2">
                     <button type="button" onClick={() => buildingCoverInputRef.current?.click()} disabled={buildingCoverUploading || selBldg.locked} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-card px-2 text-[10px] font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50">
-                      {selBldg.coverImagePath ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}
-                      {buildingCoverUploading ? "Uploading…" : selBldg.coverImagePath ? "Replace photo" : "Upload photo"}
+                      {selBldg.coverImagePath || buildingCoverPreviewUrl ? <Upload className="h-3 w-3" /> : <ImagePlus className="h-3 w-3" />}
+                      {buildingCoverUploading ? "Uploading…" : selBldg.coverImagePath || buildingCoverPreviewUrl ? "Replace photo" : "Upload photo"}
                     </button>
                     {selBldg.coverImagePath && <button type="button" disabled={buildingCoverUploading || selBldg.locked} onClick={() => onUpdateBuilding(selBldg.id, { coverImagePath: undefined })} className="h-8 rounded-lg border border-border px-2 text-[10px] font-bold text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50">Remove</button>}
                   </div>
@@ -1477,6 +1507,7 @@ export function PropertiesPanel({
                 </div>
 
                 <BuildingWeeklyHoursEditor
+                  key={selBldg.id}
                   value={selBldg.operatingHoursSchedule}
                   legacyValue={selBldg.operatingHours}
                   disabled={!!selBldg.locked}
@@ -3552,6 +3583,12 @@ export function PropertiesPanel({
     )}
     </>
   );
+}
+
+function samePanelSelection(a: CampusSelection | null, b: CampusSelection | null): boolean {
+  return a?.type === b?.type
+    && a?.id === b?.id
+    && (a?.type !== "entrance" || (b?.type === "entrance" && a.buildingId === b.buildingId));
 }
 
 // ── Committed controls (B2 Phase 3) ──

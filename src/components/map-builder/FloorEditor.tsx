@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { Fragment, memo, useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { entranceDirectionLabel } from "../../lib/buildingEntrances";
-import { useCanvasControls, isSpacePressed, useSpacePressedState } from "./useCanvasControls";
+import { useCanvasControls, isSpacePressed, subscribeSpacePressedState } from "./useCanvasControls";
 import { useFloorHistory } from "./useFloorHistory";
 import {
   ROOM_MAP,
@@ -224,6 +224,8 @@ import {
   rotatedRectBounds,
   roomAnchorAtPoint,
   roomAnchorSegments,
+  selectableFloorBounds,
+  selectionIdsInCachedBounds,
   scaleFloorItemFromBounds,
   selectionIdsInRect,
   rotationAwareResizeCursor,
@@ -236,7 +238,6 @@ import {
   wallLengthLabelPosition,
   wallLength,
   formatWallLength,
-  nearestEqualWallLength,
   type WallLengthAnchor,
   type WallStraightenAxis,
   type FloorIssue,
@@ -251,6 +252,13 @@ import type {
   FloorExteriorZone, ExteriorZoneType, FloorEntranceSteps, FloorEntranceRamp, FloorExtensionSide,
   BuildingEntranceEdge, FurnitureItemTemplate,
 } from "./types";
+
+const TransientPreviewSidebar = memo(
+  function TransientPreviewSidebarView({ children }: { freeze: boolean; children: ReactNode }) {
+    return <>{children}</>;
+  },
+  (previous, next) => previous.freeze && next.freeze,
+);
 import { elevatorSystemNumberOf, nextElevatorSystemNumber } from "./types";
 import { clampExteriorZone, exteriorZoneCoversEntrance, exteriorZoneGeometry, exteriorZoneSafeOffsetRange, exteriorZoneSpansOverlap, exteriorZoneTypeLabel, exteriorZoneSideLabel, EXTERIOR_ZONE_WORKSPACE_MARGIN, EXTERIOR_ZONE_MIN_SPAN, isExteriorAccessParent, exteriorZoneAccessFeatureGeometry, exteriorZoneAccessFeatureEdgeForPoint, exteriorZoneAccessFeatureSafeOffsetRange, exteriorZoneAccessFeaturesOverlap, exteriorZoneAccessFeatureFits, exteriorZoneSideForPointStable, resizeExteriorZoneAtPoint, resizeExteriorAccessFeatureAtPoint, mirrorExteriorZoneAccessAttachment, type ExteriorZoneResizeHandle, type ExteriorZoneAccessAttachmentEdge } from "../../lib/exteriorFloorZones";
 import { alignFurnitureItems, canGroupFurniture, distributeFurnitureItems, findEqualSpacingCandidate, findNearbyDuplicatePosition, FURNITURE_DUPLICATE_OFFSET, furnitureGroupId, placeFurnitureCopiesAboveSources } from "../../lib/floorFurnitureEditing";
@@ -1939,10 +1947,10 @@ function RoomTemplateDrawing({ template, x = 0, y = 0, invalid = false }: { temp
   );
 }
 
-function RoomTemplatePlacementOverlay({ template, x, y, invalid }: { template: RoomTemplateDefinition; x: number; y: number; invalid: boolean }) {
+function RoomTemplatePlacementOverlay({ template, x, y, invalid, previewRef }: { template: RoomTemplateDefinition; x: number; y: number; invalid: boolean; previewRef?: React.Ref<SVGGElement> }) {
   const safeTemplate = roomFurnitureOnlyTemplate(template);
   return (
-    <g data-testid="room-template-placement-ghost" data-valid={!invalid} transform={`translate(${x} ${y})`} pointerEvents="none">
+    <g ref={previewRef} data-testid="room-template-placement-ghost" data-valid={!invalid} transform={`translate(${x} ${y})`} pointerEvents="none">
       {renderRoomTemplateContent(safeTemplate, { ghost: true, invalid, keyPrefix: "room-template-placement", showLabel: true })}
     </g>
   );
@@ -2561,15 +2569,19 @@ function wallOpeningCollisionReason(
   windows: FloorWindow[],
   walls: FloorWall[],
   ignoreId?: string,
+  openingsByWall?: ReadonlyMap<string, Array<{ kind: OpeningKind; item: FloorDoor | FloorWindow }>>,
+  wallById?: ReadonlyMap<string, FloorWall>,
 ) {
   const wallId = candidate.wallId;
   if (!wallId) return undefined;
-  const wall = walls.find((item) => item.id === wallId);
+  const wall = wallById?.get(wallId) ?? walls.find((item) => item.id === wallId);
   if (!wall) return undefined;
-  const candidates: Array<{ kind: OpeningKind; item: FloorDoor | FloorWindow }> = [
-    ...doors.filter((item) => item.id !== ignoreId).map((item) => ({ kind: item.openingType === "open_passage" ? "open_passage" as const : "door" as const, item })),
-    ...windows.filter((item) => item.id !== ignoreId).map((item) => ({ kind: "window" as const, item })),
-  ];
+  const candidates: Array<{ kind: OpeningKind; item: FloorDoor | FloorWindow }> = openingsByWall
+    ? (openingsByWall.get(wallId) ?? []).filter(({ item }) => item.id !== ignoreId)
+    : [
+        ...doors.filter((item) => item.id !== ignoreId).map((item) => ({ kind: item.openingType === "open_passage" ? "open_passage" as const : "door" as const, item })),
+        ...windows.filter((item) => item.id !== ignoreId).map((item) => ({ kind: "window" as const, item })),
+      ];
   const overlap = candidates.find(({ item }) => item.wallId === wallId && wallOpeningSpansOverlap(candidate, item, wall));
   if (!overlap) return undefined;
   if ("direction" in candidate) {
@@ -2580,6 +2592,32 @@ function wallOpeningCollisionReason(
   return overlap.kind === "window"
     ? "Overlaps another Window"
     : overlap.kind === "open_passage" ? "Overlaps an Open Passage" : "Overlaps a Door";
+}
+
+type FloorSpatialGrid<T> = { cellSize: number; buckets: Map<string, T[]> };
+function buildFloorSpatialGrid<T>(
+  entries: { value: T; x: number; y: number; width: number; height: number }[],
+  padding: number,
+  cellSize = 128,
+): FloorSpatialGrid<T> {
+  const buckets = new Map<string, T[]>();
+  for (const entry of entries) {
+    const minX = Math.floor((entry.x - padding) / cellSize);
+    const minY = Math.floor((entry.y - padding) / cellSize);
+    const maxX = Math.floor((entry.x + entry.width + padding) / cellSize);
+    const maxY = Math.floor((entry.y + entry.height + padding) / cellSize);
+    for (let x = minX; x <= maxX; x += 1) for (let y = minY; y <= maxY; y += 1) {
+      const key = `${x}:${y}`;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(entry.value);
+      else buckets.set(key, [entry.value]);
+    }
+  }
+  return { cellSize, buckets };
+}
+function floorSpatialCandidates<T>(grid: FloorSpatialGrid<T>, point: { x: number; y: number }): T[] {
+  const key = `${Math.floor(point.x / grid.cellSize)}:${Math.floor(point.y / grid.cellSize)}`;
+  return grid.buckets.get(key) ?? [];
 }
 
 /**
@@ -3302,8 +3340,9 @@ function PhysicalNavPropertiesPanel({
 const FLOOR_PROPERTIES_PANEL_WIDTH = 256;
 
 export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, onSwitchFloor, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = false, savedSnapshot, initialSelection }: FloorEditorProps) {
+  const [transientFloorPreview, setTransientFloorPreview] = useState<FloorPlan | null>(null);
   const building = campus.buildings.find((b) => b.id === buildingId);
-  const rawFloor = building?.floors.find((f) => f.id === floorId);
+  const rawFloor = transientFloorPreview?.id === floorId ? transientFloorPreview : building?.floors.find((f) => f.id === floorId);
 
   if (!building || !rawFloor) {
     return (
@@ -3545,57 +3584,129 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // B5 Phase 2.8: always-on alignment guides (outdoor-editor philosophy, no
   // Shift) — temporary h/v lines shown while a free node / bend drags near
   // another routing node's X or Y center. Cleared on release/cancel/tool-switch.
-  const [navAlignGuides, setNavAlignGuides] = useState<{ type: "h" | "v"; pos: number }[]>([]);
-  const setNavPreviewIfChanged = (next: { x: number; y: number } | null) => setNavPreview((previous) =>
-    previous?.x === next?.x && previous?.y === next?.y ? previous : next,
-  );
-  const setNavAlignGuidesIfChanged = (next: { type: "h" | "v"; pos: number }[]) => setNavAlignGuides((previous) =>
-    previous.length === next.length && previous.every((guide, index) => guide.type === next[index]?.type && guide.pos === next[index]?.pos)
-      ? previous
-      : next,
-  );
+  const navAlignGuidesRef = useRef<{ type: "h" | "v"; pos: number }[]>([]);
+  const navAlignGuides = navAlignGuidesRef.current;
+  const navInteractionOverlayRef = useRef<SVGGElement | null>(null);
+  const navGesturePendingRef = useRef<{ nodes: NavigationNode[]; edges: NavigationEdge[] } | null>(null);
+  const navGestureVisualRef = useRef<{
+    group: SVGGElement;
+    hidden: { source: SVGElement; visibility: string | null }[];
+    baseNodePositions: Map<string, { x: number; y: number }>;
+    nodes: Map<string, { x: number; y: number; clones: SVGGElement[] }>;
+    edges: Map<string, {
+      edge: NavigationEdge;
+      path: SVGPolylineElement;
+      handles: SVGGElement;
+      issue: { node: SVGGElement; origin: { x: number; y: number } } | null;
+    }>;
+  } | null>(null);
+  const navConnectLiveRef = useRef<SVGGElement | null>(null);
+  const navPlacementLiveRef = useRef<SVGGElement | null>(null);
+  const navEdgeSnapLiveRef = useRef<SVGGElement | null>(null);
+  const renderNavGuidesImperatively = (guides: { type: "h" | "v"; pos: number }[]) => {
+    const layer = navInteractionOverlayRef.current;
+    if (!layer) return;
+    for (const axis of ["h", "v"] as const) {
+      const guide = guides.find((candidate) => candidate.type === axis);
+      let line = layer.querySelector<SVGLineElement>(`[data-nav-guide-axis="${axis}"]`);
+      if (!line && guide) {
+        line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("data-nav-guide-axis", axis);
+        line.setAttribute("data-testid", "nav-align-guide");
+        line.setAttribute("stroke", "var(--accent)");
+        line.setAttribute("stroke-width", "1.2");
+        line.setAttribute("stroke-dasharray", "4 3");
+        line.setAttribute("opacity", "0.75");
+        layer.append(line);
+      }
+      if (!line) continue;
+      line.setAttribute("visibility", guide ? "visible" : "hidden");
+      if (!guide) continue;
+      line.setAttribute("x1", String(axis === "v" ? guide.pos : 0));
+      line.setAttribute("x2", String(axis === "v" ? guide.pos : FP_W));
+      line.setAttribute("y1", String(axis === "h" ? guide.pos : 0));
+      line.setAttribute("y2", String(axis === "h" ? guide.pos : FP_H));
+    }
+  };
+  const setNavAlignGuides = (guides: { type: "h" | "v"; pos: number }[]) => {
+    navAlignGuidesRef.current = guides;
+    renderNavGuidesImperatively(guides);
+  };
+  const setNavAlignGuidesIfChanged = setNavAlignGuides;
   // B5 Phase 2.8: one-time wall warning per drag gesture (avoid toast spam).
   const navDragWallWarnedRef = useRef(false);
   // B7 Authoring: one-time room overlap warning per move gesture (avoid toast spam).
   const roomOverlapWarnedRef = useRef(false);
+  const floorCanvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
+  const FP_W = floorCanvas.w;
+  const FP_H = floorCanvas.h;
   // B7 QA: room alignment + same-size guide lines shown during move/resize.
-  const [alignGuides, setAlignGuides] = useState<{
+  type FloorGuide = {
     type: "h" | "v";
     pos: number;
     x1: number;
     y1: number;
     x2: number;
     y2: number;
-  }[]>([]);
-  const alignGuideFrameRef = useRef<number | null>(null);
-  const pendingAlignGuidesRef = useRef<typeof alignGuides>([]);
-  const setAlignGuidesSmooth = useCallback((guides: typeof alignGuides) => {
-    pendingAlignGuidesRef.current = guides;
-    // Clearing is a gesture boundary. Cancel a queued frame so a guide from
-    // the final pointermove cannot be painted back after mouse-up/cancel.
-    if (guides.length === 0 && alignGuideFrameRef.current !== null) {
-      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(alignGuideFrameRef.current);
-      else if (typeof window !== "undefined") window.clearTimeout(alignGuideFrameRef.current);
-      alignGuideFrameRef.current = null;
-      setAlignGuides([]);
-      return;
+  };
+  const alignGuidesRef = useRef<FloorGuide[]>([]);
+  const alignGuides = alignGuidesRef.current;
+  const floorAlignmentGuidesLayerRef = useRef<SVGGElement | null>(null);
+  const renderFloorGuidesImperatively = useCallback((guides: FloorGuide[]) => {
+    const group = floorAlignmentGuidesLayerRef.current;
+    if (!group) return;
+    const ns = "http://www.w3.org/2000/svg";
+    const compact = compactAlignmentGuides(guides);
+    for (const axis of ["v", "h"] as const) {
+      const guide = compact.find((candidate) => candidate.type === axis);
+      let wrapper = group.querySelector<SVGGElement>(`[data-guide-axis="${axis}"]`);
+      if (!wrapper && guide) {
+        wrapper = document.createElementNS(ns, "g");
+        wrapper.setAttribute("data-guide-axis", axis);
+        wrapper.setAttribute("class", "pointer-events-none");
+        const halo = document.createElementNS(ns, "line");
+        halo.setAttribute("data-testid", "room-align-guide");
+        halo.setAttribute("stroke", "var(--accent)");
+        halo.setAttribute("stroke-width", "4");
+        halo.setAttribute("opacity", "0.2");
+        const stroke = document.createElementNS(ns, "line");
+        stroke.setAttribute("stroke", "var(--accent)");
+        stroke.setAttribute("stroke-width", "1.5");
+        stroke.setAttribute("stroke-dasharray", "5 3");
+        stroke.setAttribute("opacity", "0.95");
+        const badge = document.createElementNS(ns, "rect");
+        badge.setAttribute("width", "30"); badge.setAttribute("height", "12");
+        badge.setAttribute("rx", "3"); badge.setAttribute("fill", "var(--accent)");
+        const label = document.createElementNS(ns, "text");
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", "white"); label.setAttribute("font-size", "7");
+        label.setAttribute("font-weight", "700");
+        wrapper.append(halo, stroke, badge, label);
+        group.append(wrapper);
+      }
+      if (!wrapper) continue;
+      wrapper.setAttribute("visibility", guide ? "visible" : "hidden");
+      if (!guide) continue;
+      const vertical = guide.type === "v";
+      for (const line of wrapper.querySelectorAll<SVGLineElement>("line")) {
+        line.setAttribute("x1", String(vertical ? guide.pos : 0));
+        line.setAttribute("y1", String(vertical ? 0 : guide.pos));
+        line.setAttribute("x2", String(vertical ? guide.pos : FP_W));
+        line.setAttribute("y2", String(vertical ? FP_H : guide.pos));
+      }
+      const badge = wrapper.querySelector("rect")!;
+      badge.setAttribute("x", String(vertical ? guide.pos - 15 : FP_W - 34));
+      badge.setAttribute("y", String(vertical ? 6 : guide.pos - 6));
+      const label = wrapper.querySelector("text")!;
+      label.setAttribute("x", String(vertical ? guide.pos : FP_W - 19));
+      label.setAttribute("y", String(vertical ? 14.5 : guide.pos + 3.5));
+      label.textContent = String(Math.round(guide.pos));
     }
-    if (alignGuideFrameRef.current !== null) return;
-    const schedule = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
-      ? window.requestAnimationFrame.bind(window)
-      : (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0);
-    alignGuideFrameRef.current = schedule(() => {
-      alignGuideFrameRef.current = null;
-      setAlignGuides(pendingAlignGuidesRef.current);
-    }) as unknown as number;
-  }, []);
-  useEffect(() => () => {
-    if (alignGuideFrameRef.current !== null) {
-      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(alignGuideFrameRef.current);
-      else if (typeof window !== "undefined") window.clearTimeout(alignGuideFrameRef.current);
-      alignGuideFrameRef.current = null;
-    }
-  }, []);
+  }, [FP_H, FP_W]);
+  const setAlignGuidesSmooth = useCallback((guides: FloorGuide[]) => {
+    alignGuidesRef.current = guides;
+    renderFloorGuidesImperatively(guides);
+  }, [renderFloorGuidesImperatively]);
   const [exteriorStairPreview, setExteriorStairPreview] = useState<{
     stairId: string;
     edge: PerimeterSide;
@@ -3626,7 +3737,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // showing the attempted footprint as a scene-top candidate.  This mirrors
   // the Exterior Architecture placement language without changing the
   // existing collision rules or history contract.
-  const [roomInteractionPreview, setRoomInteractionPreview] = useState<{
+  const [roomInteractionPreview, setRoomInteractionPreviewState] = useState<{
     room: FloorRoom;
     reason: string;
     kind: "move" | "resize";
@@ -3692,7 +3803,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // ── Drawing state ──
   const [wallStart, setWallStart] = useState<WallSnapTarget | null>(null);
   const [wallSnapIndicator, setWallSnapIndicator] = useState<WallSnapTarget | null>(null);
-  const [wallEqualLengthGuide, setWallEqualLengthGuide] = useState<{ wallId: string; sourceWallId: string; length: number } | null>(null);
+  const wallEqualLengthGuideRef = useRef<SVGGElement | null>(null);
   const [wallLengthMatchMode, setWallLengthMatchMode] = useState<{ sourceWallId: string } | null>(null);
   const [wallLengthMatchHoverId, setWallLengthMatchHoverId] = useState<string | null>(null);
   const [wallLengthAnchorOverride, setWallLengthAnchorOverride] = useState<{ wallId: string; anchor: WallLengthAnchor } | null>(null);
@@ -3715,12 +3826,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const [contextMenu, setContextMenu] = useState<FloorContextMenuState | null>(null);
   // ── Wall endpoint dragging ──
   const wallEndpointDrag = useRef<{ wallId: string; endpoint: "x1" | "x2"; origin: FloorWall } | null>(null);
+  const wallEndpointSnapLockRef = useRef<{ point: { x: number; y: number }; indicator: WallSnapTarget } | null>(null);
+  const wallEndpointJointClonesRef = useRef<{ node: SVGGElement; origin: { x: number; y: number }; transform: string | null }[]>([]);
+  const wallEndpointPendingRef = useRef<FloorWall | null>(null);
+  const wallEndpointOverlayRef = useRef<SVGGElement | null>(null);
+  const wallEndpointOpeningClonesRef = useRef<{ type: "door" | "door-badge" | "window"; origin: FloorDoor | FloorWindow; node: SVGGElement; transform: string | null }[]>([]);
   const roomShapeDrag = useRef<{ roomId: string; vertexIndex: number; origin: FloorRoom } | null>(null);
   const roomShapeEditOrigin = useRef<FloorRoom | null>(null);
   const wallEndpointOpeningWarnedRef = useRef(false);
   const openingDrag = useRef<{ type: "door" | "open_passage" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow } | null>(null);
+  const openingNavNodeIdsRef = useRef<string[]>([]);
   const openingResize = useRef<{ type: "door" | "open_passage" | "window"; id: string; wallId: string; origin: FloorDoor | FloorWindow; handleSign: -1 | 1 } | null>(null);
   const [wallPreview, setWallPreview] = useState<{ x: number; y: number } | null>(null);
+  const wallDrawOverlayRef = useRef<SVGGElement | null>(null);
+  const wallSnapOverlayRef = useRef<SVGGElement | null>(null);
+  const openingPlacementOverlayRef = useRef<SVGGElement | null>(null);
   const [openingPreview, setOpeningPreview] = useState<{
     type: "door" | "open_passage" | "window";
     wallId: string;
@@ -3735,6 +3855,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     reason?: string;
   } | null>(null);
   const [roomDrag, setRoomDrag] = useState<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  const roomDragLiveRef = useRef<typeof roomDrag>(null);
   // Space+drag is a temporary camera gesture. Keep a small bit of gesture
   // state outside React so releasing Space before mouseup cannot accidentally
   // commit an Exterior Zone/Steps/Ramp placement click.
@@ -3844,7 +3965,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     if (cursorReadoutFrameRef.current !== null) cancelAnimationFrame(cursorReadoutFrameRef.current);
     if (navHoverMoveFrameRef.current !== null) cancelAnimationFrame(navHoverMoveFrameRef.current);
     if (navEdgeHoverFrameRef.current !== null) cancelAnimationFrame(navEdgeHoverFrameRef.current);
-  }, []);
+  }, [renderFloorGuidesImperatively]);
   // B5 Phase 3.1: Add Floor / floor switching with unsaved changes first asks
   // Save/Discard (SHARED unsaved-changes guard — see the useUnsavedChangesGuard
   // hook below) so the CURRENT floor's changes are persisted exactly once
@@ -3982,9 +4103,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setExteriorEntranceLinkingZoneId(null);
     }
   }, [exteriorEntranceLinkingZoneId, exteriorZones]);
-  const floorCanvas = normalizeFloorCanvasSize(floor.canvasW, floor.canvasH);
-  const FP_W = floorCanvas.w;
-  const FP_H = floorCanvas.h;
   const floorAppearance = normalizeFloorAppearance(floor.appearance, floor.backgroundColor ?? "#e8e1d7");
   const authoringGridEligible = isFloorAuthoringGridEligible(floorAppearance.material, floorAppearance.texture);
   const showAuthoringGrid = floor.showGrid !== false && authoringGridEligible;
@@ -4330,12 +4448,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       insets: floorViewportInsets,
       worldBounds: renderFloorShapeBounds,
       imperativeCamera: true,
+      immediatePan: true,
+      svgPanCoordinateSpace: true,
       onCameraFrame: updateZoomReadouts,
   });
-  const spacePanActive = useSpacePressedState();
-  useEffect(() => {
-    if (!spacePanActive && !panning.current) temporaryPanRef.current = false;
-  }, [panning, spacePanActive]);
+  const spacePanVisualActiveRef = useRef(false);
+  const spacePanIndicatorRef = useRef<HTMLDivElement | null>(null);
+  const spacePanToolButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => subscribeSpacePressedState((pressed) => {
+    const active = pressed && !dragging.current;
+    spacePanVisualActiveRef.current = active;
+    if (!pressed && !panning.current) temporaryPanRef.current = false;
+    if (spacePanIndicatorRef.current) spacePanIndicatorRef.current.hidden = !active;
+    const button = spacePanToolButtonRef.current;
+    if (button) {
+      const selected = active || tool === "pan";
+      button.setAttribute("aria-pressed", String(selected));
+      if (active) button.setAttribute("data-temporary-pan-active", "true");
+      else button.removeAttribute("data-temporary-pan-active");
+      button.classList.toggle("bg-primary", selected);
+      button.classList.toggle("text-primary-foreground", selected);
+      button.classList.toggle("shadow-sm", selected);
+      button.classList.toggle("text-muted-foreground", !selected);
+    }
+  }), [panning, tool]);
   useEffect(() => {
     const cancelTemporaryPan = () => {
       if (!temporaryPanRef.current && !panning.current) return;
@@ -4444,7 +4580,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
   // ── Data refs for drag operations ──
   const dragging = useRef<{ entries: { type: FloorSelection["type"]; id: string; origin: any }[]; sx: number; sy: number; fromBackground?: boolean } | null>(null);
-  const spacePanVisualActive = spacePanActive && !dragging.current;
   const roomAssemblyDraggingRef = useRef(false);
   const roomAssemblyPendingCommitRef = useRef<{
     rooms: FloorRoom[];
@@ -4466,6 +4601,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   // This transient flag never changes navigation state; it only prevents the
   // nav marquee finalizer from consuming an editor marquee gesture.
   const physicalMarqueeRef = useRef(false);
+  const physicalMarqueeGestureRef = useRef<{
+    sx: number; sy: number; cx: number; cy: number;
+    selectable: ReturnType<typeof selectableFloorBounds>;
+  } | null>(null);
+  const physicalMarqueeRectRef = useRef<SVGRectElement | null>(null);
+  const physicalMarqueeFrameRef = useRef<number | null>(null);
+  const latestPhysicalMarqueePointerRef = useRef<MouseEvent | null>(null);
+  const physicalMarqueeWindowHandlersRef = useRef<{
+    move: (event: MouseEvent) => void;
+    up: (event: MouseEvent) => void;
+    cancel: () => void;
+  }>({ move: () => {}, up: () => {}, cancel: () => {} });
   // Furniture is allowed to travel through the wall while the pointer crosses
   // between an indoor floor and an exterior zone.  Keep this transient marker
   // so the live drag does not get re-clamped to the indoor canvas on each
@@ -4474,12 +4621,67 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const furnitureDragCommittedRef = useRef(false);
   const furnitureDragPendingRef = useRef<Map<string, FloorFurniture>>(new Map());
   const furnitureDragDomNodesRef = useRef<Map<string, { node: SVGGElement; originalTransform: string | null; originalOpacity: string | null; invalidOverlay: SVGGElement | null }[]>>(new Map());
+  const floorInteractionWorldRef = useRef<SVGGElement | null>(null);
+  const floorInteractionItemsRef = useRef<SVGGElement | null>(null);
+  // React-owned preview children (such as Room Template placement) share the
+  // stable interaction root, but imperative gesture nodes live in this
+  // dedicated child so cleanup never removes a node React owns.
+  const floorImperativePreviewItemsRef = useRef<SVGGElement | null>(null);
+  const roomPlacementOverlayRef = useRef<SVGGElement | null>(null);
+  const hiddenFloorGestureSourcesRef = useRef<Map<SVGElement, string | null>>(new Map());
+  const floorGestureClonesRef = useRef<Map<SVGGElement, SVGGElement>>(new Map());
+  const floorGestureLinkedNodeIdsRef = useRef<Map<string, string[]>>(new Map());
   const furnitureDragDomCapturePendingRef = useRef(false);
   const furnitureDragAlignRefsRef = useRef<{ x: number; y: number; w: number; h: number; id: string }[]>([]);
   const furnitureDragSpacingRefsRef = useRef<FloorFurniture[]>([]);
+  const activeFloorAlignRefsRef = useRef<{ excludedIds: Set<string>; refs: { x: number; y: number; w: number; h: number; id: string }[] } | null>(null);
+  useEffect(() => {
+    return () => {
+      if (physicalMarqueeFrameRef.current !== null) cancelAnimationFrame(physicalMarqueeFrameRef.current);
+      physicalMarqueeFrameRef.current = null;
+      latestPhysicalMarqueePointerRef.current = null;
+      physicalMarqueeGestureRef.current = null;
+      physicalMarqueeRef.current = false;
+      physicalMarqueeRectRef.current?.setAttribute("visibility", "hidden");
+    };
+  }, [floorId]);
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => physicalMarqueeWindowHandlersRef.current.move(event);
+    const onUp = (event: MouseEvent) => physicalMarqueeWindowHandlersRef.current.up(event);
+    const onPointerCancel = () => physicalMarqueeWindowHandlersRef.current.cancel();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !physicalMarqueeGestureRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      physicalMarqueeWindowHandlersRef.current.cancel();
+    };
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
+    window.addEventListener("pointercancel", onPointerCancel, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+      window.removeEventListener("pointercancel", onPointerCancel, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+  const roomAssemblyAlignRefsRef = useRef<{ x: number; y: number; w: number; h: number; id: string }[]>([]);
+  const roomDragStaticRoomsRef = useRef<FloorRoom[]>([]);
+  const roomDragStaticWallsRef = useRef<FloorWall[]>([]);
+  const restoreFloorGestureDomRef = useRef<() => void>(() => {});
+  const floorGestureDomNodesRef = useRef<Map<string, { node: SVGGElement; originalTransform: string | null }[]>>(new Map());
+  const floorGestureDomPreviewRef = useRef<(items: { type: string; id: string; origin: any; item: any }[]) => void>(() => {});
   const furnitureDragGuideSignatureRef = useRef("");
+  // Coalesce all active canvas gestures to the newest sample per display frame.
   const furnitureDragMoveFrameRef = useRef<number | null>(null);
-  const latestFurnitureDragPointerRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean } | null>(null);
+  const latestFurnitureDragPointerRef = useRef<MouseEvent | null>(null);
+  const lastActiveGesturePointerRef = useRef<MouseEvent | null>(null);
+  const finalizeFastGestureRef = useRef(false);
+  const floorGraphCommitPendingRef = useRef(false);
+  const forceFloorGraphCommitRef = useRef(false);
+  const deferredFloorSnapshotRef = useRef<FloorUndoEntry | null>(null);
+  const finalizedFloorGestureSnapshotRef = useRef<FloorUndoEntry | null>(null);
   // A generated Exterior Emergency Stair is owned by the Building, not by a
   // Floor occurrence.  This transient gesture stores only the canonical owner
   // and starting offset; each move writes the owner and re-syncs every served
@@ -4517,7 +4719,63 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     startAngle: number;
     previousAngle?: number;
     rawRotation?: number;
+    origin: any;
   } | null>(null);
+  const furniturePlacementOverlayRef = useRef<SVGGElement | null>(null);
+  const roomInvalidOverlayRef = useRef<SVGGElement | null>(null);
+  const setRoomInteractionPreview = (preview: typeof roomInteractionPreview) => {
+    let group = roomInvalidOverlayRef.current;
+    if (preview && (dragging.current || resizing.current)) {
+      const layer = floorImperativePreviewItemsRef.current;
+      if (!layer) return;
+      if (!group || group.parentNode !== layer) {
+        group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.setAttribute("data-testid", "room-invalid-preview");
+        group.setAttribute("pointer-events", "none");
+        const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        shape.setAttribute("fill", "#dc2626");
+        shape.setAttribute("fill-opacity", "0.16");
+        shape.setAttribute("stroke", "#dc2626");
+        shape.setAttribute("stroke-width", "2.2");
+        shape.setAttribute("stroke-dasharray", "7 4");
+        const bounds = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        bounds.setAttribute("fill", "none");
+        bounds.setAttribute("stroke", "none");
+        const badge = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        badge.setAttribute("data-testid", "placement-warning-badge");
+        badge.setAttribute("fill", "#b91c1c");
+        badge.setAttribute("font-size", "9");
+        badge.setAttribute("font-weight", "700");
+        group.append(shape, bounds, badge);
+        layer.append(group);
+        roomInvalidOverlayRef.current = group;
+      }
+      const { room } = preview;
+      const shape = group.querySelector("path")!;
+      shape.setAttribute("d", roomShapePath(roomOutlinePoints(room)));
+      const bounds = group.querySelector("rect")!;
+      bounds.setAttribute("x", String(room.x)); bounds.setAttribute("y", String(room.y));
+      bounds.setAttribute("width", String(room.w)); bounds.setAttribute("height", String(room.h));
+      const badge = group.querySelector("text")!;
+      badge.setAttribute("x", String(room.x + room.w / 2));
+      badge.setAttribute("y", String(room.y - 6));
+      badge.setAttribute("text-anchor", "middle");
+      badge.setAttribute("data-anchor-center-y", String(room.y + room.h / 2));
+      badge.textContent = preview.reason;
+      group.setAttribute("data-preview-kind", preview.kind);
+      group.setAttribute("visibility", "visible");
+      return;
+    }
+    if (group) {
+      group.remove();
+      roomInvalidOverlayRef.current = null;
+    }
+    setRoomInteractionPreviewState(preview);
+  };
+  const setAlignGuides = useCallback((guides: FloorGuide[]) => {
+    alignGuidesRef.current = guides;
+    renderFloorGuidesImperatively(guides);
+  }, [renderFloorGuidesImperatively]);
   const [floorCreationChooserOpen, setFloorCreationChooserOpen] = useState(false);
   const [floorTemplateCatalogueOpen, setFloorTemplateCatalogueOpen] = useState(false);
   const [floorTemplateContext, setFloorTemplateContext] = useState<FloorTemplateExperienceContext>("use-on-current");
@@ -4530,6 +4788,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const [roomTemplateSaving, setRoomTemplateSaving] = useState(false);
   const [roomTemplateSaveError, setRoomTemplateSaveError] = useState<string | null>(null);
   const [roomTemplatePlacement, setRoomTemplatePlacement] = useState<RoomTemplateDefinition | null>(null);
+  const roomTemplatePlacementGhostRef = useRef<SVGGElement | null>(null);
+  const roomTemplatePlacementStatusRef = useRef<HTMLDivElement | null>(null);
+  const roomTemplatePlacementValidityRef = useRef<boolean | null>(null);
   const templateGraphProtectedRef = useRef(false);
   const [templateMetadataDialog, setTemplateMetadataDialog] = useState<{
     mode: "create" | "edit";
@@ -4830,7 +5091,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   });
   // B5 Phase 2: the dirty key includes this floor's indoor nav graph so graph
   // edits enable the floor Save button exactly like physical-object edits do.
-  const fullStateKey = floorDirtyKeyOf(floor, indoorNodes, indoorEdges);
+  // The full Floor key is a controlled dirty-state comparison, never a
+  // pointer-frame cost. Live geometry previews remain local until release.
+  const canonicalFloorForDirty = useMemo(
+    () => normalizeFloor(building.floors.find((candidate) => candidate.id === floorId) ?? floor, { buildingId }),
+    [building.floors, floorId, buildingId],
+  );
+  const committedFloorForDirty = transientFloorPreview ? canonicalFloorForDirty : floor;
+  const fullStateKey = useMemo(
+    () => floorDirtyKeyOf(committedFloorForDirty, indoorNodes, indoorEdges),
+    [committedFloorForDirty, indoorNodes, indoorEdges],
+  );
   const baselineFloorRef = useRef<FloorPlan>(structuredClone(floor));
   const baselineEntryRef = useRef<FloorUndoEntry>(floorUndoEntryFromFloor(floor));
   const [baselineKey, setBaselineKey] = useState(fullStateKey);
@@ -5064,13 +5335,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [buildingId, doors, elevators, floor, floorId, indoorEdges, mergeFloorNavIntoCampus, onUpdate, pushHistory, ramps, rooms, stairs, walls]);
 
   const clearTransientEditorState = useCallback(() => {
+    restoreFloorGestureDomRef.current();
+    clearNavGesturePreview();
+    clearNavConnectLive();
+    updateNavPlacementLive(null);
+    updateNavEdgeSnapLive(null);
+    setAlignGuides([]);
+    setNavAlignGuides([]);
     setSelected(null);
     setMultiSelected([]);
     setRubberBand(null);
     setWallStart(null);
     setWallSnapIndicator(null);
     setWallPreview(null);
-    setWallEqualLengthGuide(null);
+    updateWallEqualLengthGuide(null, null);
     setWallLengthMatchMode(null);
     setWallLengthMatchHoverId(null);
     setRoomDrag(null);
@@ -5108,6 +5386,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [clearRoomDoorLinkState]);
 
   useEffect(() => {
+    setTransientFloorPreview(null);
     templateGraphProtectedRef.current = false;
     baselineFloorRef.current = structuredClone(floor);
     const entry: FloorUndoEntry = {
@@ -5136,6 +5415,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       graphOptions: {
         pruneNavNodeIds?: ReadonlySet<string>;
         visualOnly?: boolean;
+        transient?: boolean;
         preserveEntranceDoorGeometry?: boolean;
         validateBeforeDispatch?: (nextCampus: Campus) => void;
       } = {},
@@ -5149,20 +5429,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           campusNavNodes: _visualCampusNavNodes,
           campusNavEdges: _visualCampusNavEdges,
           visualOnly: _visualOnly,
+          transient: _transient,
           ...visualFloorUpdates
-        } = updates as FloorUndoEntry;
+        } = updates as FloorUndoEntry & { transient?: boolean };
+        const visualFloor = normalizeFloor({ ...floor, ...visualFloorUpdates }, { buildingId });
+        if (graphOptions.transient && !buildingUpdates) {
+          // Keep pointer-frame geometry local to the current editor Floor.
+          // No full Campus/building array is assembled or sent through the
+          // page-level update/draft pipeline until the gesture commits.
+          setTransientFloorPreview(visualFloor);
+          return campus;
+        }
         const visualCampus: Campus = {
           ...campus,
-          buildings: campus.buildings.map((buildingItem) => buildingItem.id !== buildingId
-            ? buildingItem
-            : {
-                ...buildingItem,
-                ...buildingUpdates,
-                floors: buildingItem.floors.map((floorItem) => floorItem.id === floorId
-                  ? normalizeFloor({ ...floorItem, ...visualFloorUpdates }, { buildingId: buildingItem.id })
-                  : normalizeFloor(floorItem, { buildingId: buildingItem.id })),
-              }),
+          buildings: campus.buildings.map((buildingItem) => {
+            if (buildingItem.id !== buildingId) return buildingItem;
+            return {
+              ...buildingItem,
+              ...buildingUpdates,
+              floors: buildingItem.floors.map((floorItem) => floorItem.id === floorId
+                ? visualFloor
+                : floorItem),
+            };
+          }),
         };
+        setTransientFloorPreview(null);
         onUpdate(visualCampus);
         return visualCampus;
       }
@@ -5264,10 +5555,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         : reconciledCampus;
       const approachSynced = reconcileExteriorApproachNavigation(entranceSynced);
       graphOptions.validateBeforeDispatch?.(approachSynced);
+      setTransientFloorPreview(null);
       onUpdate(approachSynced);
       return approachSynced;
     },
-    [campus, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators, walls]
+    [campus, floor, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators, walls]
   );
 
   // Appearance/grid edits do not change physical floor geometry. Keep these
@@ -5352,10 +5644,18 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
      newFurniture?: FloorFurniture[], newStairs?: FloorStairs[], newElevators?: FloorElevatorItem[], newLabels?: FloorLabel[], newRamps?: FloorRamp[],
      newExteriorZones?: FloorExteriorZone[], newEntranceSteps?: FloorEntranceSteps[], newEntranceRamps?: FloorEntranceRamp[],
      newNavNodes?: NavigationNode[], newNavEdges?: NavigationEdge[],
-     graphOptions: { pruneNavNodeIds?: ReadonlySet<string>; visualOnly?: boolean; preserveOpeningGeometry?: boolean } = {}) => {
-      const visualOnly = graphOptions.visualOnly === true;
+     graphOptions: { pruneNavNodeIds?: ReadonlySet<string>; visualOnly?: boolean; transient?: boolean; preserveOpeningGeometry?: boolean; livePreviewItems?: { type: string; id: string; origin: any; item: any }[] } = {}) => {
+      const livePointerGesture = !forceFloorGraphCommitRef.current && Boolean(
+        dragging.current || openingDrag.current || openingResize.current || roomShapeDrag.current || resizing.current || furnitureResizing.current
+        || circulationResizing.current || rotating.current || exteriorStairDragging.current
+        || exteriorZoneDragging.current || exteriorZoneResizing.current
+        || localApproachDragging.current || localApproachResizing.current
+        || groupTransforming.current || labelTransforming.current,
+      );
+      const effectiveGraphOptions = livePointerGesture ? { ...graphOptions, visualOnly: true, transient: true } : graphOptions;
+      const visualOnly = effectiveGraphOptions.visualOnly === true;
       const nextWalls = newWalls ?? walls;
-      const syncedOpenings = graphOptions.preserveOpeningGeometry
+      const syncedOpenings = livePointerGesture || graphOptions.preserveOpeningGeometry
         ? { doors: newDoors ?? doors, windows: newWindows ?? windows }
         : syncOpeningsToWalls(newDoors ?? doors, newWindows ?? windows, nextWalls);
       const next: FloorUndoEntry = {
@@ -5391,10 +5691,33 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           nextWalls,
         ),
       };
+      if (livePointerGesture) {
+        floorGraphCommitPendingRef.current = true;
+        deferredFloorSnapshotRef.current = next;
+      }
+      if (livePointerGesture && graphOptions.livePreviewItems) {
+        // The current Floor's changed SVG groups follow the pointer directly;
+        // keep React, the enclosing Campus, and every other Floor out of this
+        // display-frame path. The canonical Floor graph is reconciled at drop.
+        floorGestureDomPreviewRef.current(graphOptions.livePreviewItems);
+        return;
+      }
       // Record the POST-change state as the new history tip (unless we are in the
       // middle of a drag gesture — that commit happens once on pointer release).
-      const committed = buildFloorUpdates({ ...next, ...(visualOnly ? { visualOnly: true } : {}) }, undefined, graphOptions);
-      if (!suppressHistoryRef.current) {
+      const committed = buildFloorUpdates({ ...next, ...(visualOnly ? { visualOnly: true } : {}) }, undefined, effectiveGraphOptions);
+      if (forceFloorGraphCommitRef.current) {
+        const committedNodes = indoorNavNodes(committed.navNodes, buildingId, floorId);
+        const committedEdges = indoorNavEdges(committed.navEdges, committedNodes, buildingId, floorId);
+        finalizedFloorGestureSnapshotRef.current = {
+          ...next,
+          navNodes: committedNodes,
+          navEdges: committedEdges,
+          buildingEntrances: structuredClone(committed.buildings.find((candidate) => candidate.id === buildingId)?.entrances ?? []),
+          campusNavNodes: structuredClone(committed.navNodes ?? []),
+          campusNavEdges: structuredClone(committed.navEdges ?? []),
+        };
+      }
+      if (!suppressHistoryRef.current && !livePointerGesture) {
         const committedNodes = indoorNavNodes(committed.navNodes, buildingId, floorId);
         const committedEdges = indoorNavEdges(committed.navEdges, committedNodes, buildingId, floorId);
         pushHistory({
@@ -5410,6 +5733,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     },
     [buildFloorUpdates, buildingId, exteriorZones, entranceRamps, entranceSteps, floor.canvasW, floor.canvasH, floor.backgroundColor, floor.appearance, floor.showGrid, floor.showWallJunctions, floor.gridSize, floor.backgroundImage, floor.calibration, floor.label, floorId, walls, doors, windows, furniture, stairs, ramps, elevators, labels, pushHistory, indoorNodes, indoorEdges]
   );
+
+  const flushDeferredFloorGraphCommit = useCallback((options: { preserveOpeningGeometry?: boolean; visualOnly?: boolean } = {}) => {
+    const draft = deferredFloorSnapshotRef.current;
+    if (!floorGraphCommitPendingRef.current || !draft) return;
+    floorGraphCommitPendingRef.current = false;
+    deferredFloorSnapshotRef.current = null;
+    const wasSuppressed = suppressHistoryRef.current;
+    suppressHistoryRef.current = true;
+    forceFloorGraphCommitRef.current = true;
+    try {
+      // Live frames only publish physical geometry; reconcile navigation once
+      // against the final dropped geometry.
+      updFloor(
+        draft.rooms, draft.paths, draft.walls, draft.doors, draft.windows,
+        draft.furniture, draft.stairs, draft.elevators, draft.labels, draft.ramps,
+        draft.exteriorZones, draft.entranceSteps, draft.entranceRamps,
+        draft.navNodes, draft.navEdges, options,
+      );
+    } finally {
+      forceFloorGraphCommitRef.current = false;
+      suppressHistoryRef.current = wasSuppressed;
+    }
+  }, [updFloor]);
 
   const linkExteriorEntrance = useCallback((zoneId: string, entranceId: string) => {
     const zone = exteriorZones.find((candidate) => candidate.id === zoneId);
@@ -6886,6 +7232,884 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     return refs;
   }, [FP_H, FP_W, doors, elevators, entranceRamps, entranceSteps, exteriorZones, furniture, ramps, rooms, stairs, walls, windows]);
 
+  const cacheFloorGestureAlignment = (excludeIds: Set<string>) => {
+    activeFloorAlignRefsRef.current = { excludedIds: new Set(excludeIds), refs: collectAlignRefs(excludeIds) };
+  };
+  const floorGestureAlignmentRefs = (excludeIds: Set<string>) => {
+    const cached = activeFloorAlignRefsRef.current;
+    return cached && cached.excludedIds.size === excludeIds.size
+      && [...cached.excludedIds].every((id) => excludeIds.has(id))
+      ? cached.refs
+      : collectAlignRefs(excludeIds);
+  };
+
+  const beginRoomPlacementPreview = (point: { x: number; y: number }) => {
+    cacheFloorGestureAlignment(new Set());
+    const start = { sx: point.x, sy: point.y, cx: point.x, cy: point.y };
+    roomDragLiveRef.current = start;
+    setRoomDrag(start);
+    roomPlacementOverlayRef.current?.remove();
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    const transform = cameraTransformRef.current?.getAttribute("transform");
+    if (transform) floorInteractionWorldRef.current?.setAttribute("transform", transform);
+    const ns = "http://www.w3.org/2000/svg";
+    const group = document.createElementNS(ns, "g");
+    group.setAttribute("data-testid", "room-placement-interaction-overlay");
+    group.setAttribute("pointer-events", "none");
+    const rect = document.createElementNS(ns, "rect");
+    rect.setAttribute("data-placement-rect", "true");
+    rect.setAttribute("rx", "2");
+    rect.setAttribute("fill-opacity", "0.1");
+    rect.setAttribute("stroke-width", "2");
+    rect.setAttribute("stroke-dasharray", "6 3");
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("data-placement-label", "true");
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("dominant-baseline", "middle");
+    label.setAttribute("font-size", "7");
+    label.setAttribute("font-weight", "700");
+    group.append(rect, label);
+    layer.append(group);
+    roomPlacementOverlayRef.current = group;
+  };
+  const updateRoomPlacementPreview = (next: NonNullable<typeof roomDrag>) => {
+    roomDragLiveRef.current = next;
+    const group = roomPlacementOverlayRef.current;
+    if (!group) return;
+    svgRef.current?.querySelector('[data-testid="room-placement-preview"]')?.setAttribute("visibility", "hidden");
+    const width = Math.max(Math.abs(next.cx - next.sx), tool === "room" ? 20 : 0);
+    const height = Math.max(Math.abs(next.cy - next.sy), tool === "room" ? 15 : 0);
+    const candidate = { x: Math.min(next.sx, next.cx), y: Math.min(next.sy, next.cy), w: width, h: height };
+    // Keep pointer frames to preview geometry only. Floor containment and Room
+    // overlap validation run once when the placement commits on pointer-up.
+    const color = tool === "stairs" ? "#9ca3af" : tool === "ramp" ? "#34d399" : tool === "elevator" ? "#86efac" : "var(--primary)";
+    const rect = group.querySelector<SVGRectElement>('[data-placement-rect]');
+    const label = group.querySelector<SVGTextElement>('[data-placement-label]');
+    if (!rect || !label) return;
+    rect.setAttribute("x", String(candidate.x));
+    rect.setAttribute("y", String(candidate.y));
+    rect.setAttribute("width", String(width));
+    rect.setAttribute("height", String(height));
+    rect.setAttribute("fill", color);
+    rect.setAttribute("stroke", color);
+    label.setAttribute("x", String(candidate.x + width / 2));
+    label.setAttribute("y", String(candidate.y + height / 2));
+    label.setAttribute("fill", color);
+    label.textContent = tool === "room" ? `${Math.round(width)} × ${Math.round(height)}` : "";
+  };
+  const updateWallDrawPreview = (start: { x: number; y: number }, end: { x: number; y: number }) => {
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    let group = wallDrawOverlayRef.current;
+    if (!group) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "wall-draw-interaction-overlay");
+      group.setAttribute("pointer-events", "none");
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("stroke", "var(--primary)");
+      line.setAttribute("stroke-width", "4");
+      line.setAttribute("stroke-dasharray", "6 3");
+      line.setAttribute("opacity", "0.7");
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("fill", "var(--primary)");
+      label.setAttribute("font-size", "7");
+      label.setAttribute("font-weight", "700");
+      label.setAttribute("text-anchor", "middle");
+      group.append(line, label);
+      layer.append(group);
+      wallDrawOverlayRef.current = group;
+    }
+    const line = group.querySelector("line")!;
+    line.setAttribute("x1", String(start.x)); line.setAttribute("y1", String(start.y));
+    line.setAttribute("x2", String(end.x)); line.setAttribute("y2", String(end.y));
+    const label = group.querySelector("text")!;
+    const position = wallLengthLabelPosition({ id: "preview", x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness: 4, color: "#000" });
+    label.setAttribute("x", String(position.x)); label.setAttribute("y", String(position.y));
+    label.setAttribute("transform", `rotate(${position.angle}, ${position.x}, ${position.y})`);
+    label.textContent = String(Math.round(dist(start.x, start.y, end.x, end.y)));
+  };
+  const updateWallSnapPreview = (indicator: WallSnapTarget | null) => {
+    if (!indicator) {
+      wallSnapOverlayRef.current?.remove();
+      wallSnapOverlayRef.current = null;
+      return;
+    }
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    let group = wallSnapOverlayRef.current;
+    if (!group) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "wall-snap-interaction-overlay");
+      group.setAttribute("pointer-events", "none");
+      const guide = document.createElementNS(ns, "line");
+      guide.setAttribute("data-snap-guide", "true"); guide.setAttribute("stroke", "var(--primary)"); guide.setAttribute("stroke-dasharray", "5 3"); guide.setAttribute("opacity", "0.5");
+      const edge = document.createElementNS(ns, "line");
+      edge.setAttribute("data-snap-edge", "true"); edge.setAttribute("stroke", "var(--primary)"); edge.setAttribute("stroke-width", "2.5"); edge.setAttribute("opacity", "0.55");
+      const ring = document.createElementNS(ns, "circle");
+      ring.setAttribute("data-snap-ring", "true"); ring.setAttribute("r", "7"); ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "var(--primary)"); ring.setAttribute("stroke-width", "1.5"); ring.setAttribute("opacity", "0.75");
+      const dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("data-snap-dot", "true"); dot.setAttribute("r", "2.5"); dot.setAttribute("fill", "var(--primary)");
+      const angle = document.createElementNS(ns, "text");
+      angle.setAttribute("data-snap-angle", "true"); angle.setAttribute("fill", "var(--primary)"); angle.setAttribute("font-size", "7"); angle.setAttribute("font-weight", "700");
+      group.append(guide, edge, ring, dot, angle);
+      layer.append(group);
+      wallSnapOverlayRef.current = group;
+    }
+    const guide = group.querySelector<SVGLineElement>("[data-snap-guide]")!;
+    guide.setAttribute("visibility", indicator.guide ? "visible" : "hidden");
+    if (indicator.guide === "h") { guide.setAttribute("x1", "0"); guide.setAttribute("x2", String(FP_W)); guide.setAttribute("y1", String(indicator.y)); guide.setAttribute("y2", String(indicator.y)); }
+    else if (indicator.guide === "v") { guide.setAttribute("x1", String(indicator.x)); guide.setAttribute("x2", String(indicator.x)); guide.setAttribute("y1", "0"); guide.setAttribute("y2", String(FP_H)); }
+    const edge = group.querySelector<SVGLineElement>("[data-snap-edge]")!;
+    edge.setAttribute("visibility", indicator.edge ? "visible" : "hidden");
+    if (indicator.edge) {
+      edge.setAttribute("x1", String(indicator.edge.x1)); edge.setAttribute("y1", String(indicator.edge.y1));
+      edge.setAttribute("x2", String(indicator.edge.x2)); edge.setAttribute("y2", String(indicator.edge.y2));
+    }
+    for (const selector of ["[data-snap-ring]", "[data-snap-dot]"]) {
+      const node = group.querySelector<SVGCircleElement>(selector)!;
+      node.setAttribute("cx", String(indicator.x)); node.setAttribute("cy", String(indicator.y));
+    }
+    const angle = group.querySelector<SVGTextElement>("[data-snap-angle]")!;
+    angle.setAttribute("visibility", indicator.angle === undefined ? "hidden" : "visible");
+    angle.setAttribute("x", String(indicator.x + 9)); angle.setAttribute("y", String(indicator.y - 8));
+    angle.textContent = indicator.angle === undefined ? "" : `${Math.round(indicator.angle)}°`;
+  };
+  const updateWallEqualLengthGuide = (wall: FloorWall | null, length: number | null, sourceWallId?: string) => {
+    let group = wallEqualLengthGuideRef.current;
+    if (!wall || length === null) {
+      group?.remove();
+      wallEqualLengthGuideRef.current = null;
+      return;
+    }
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    if (!group || group.parentNode !== layer) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "wall-equal-length-guide");
+      group.setAttribute("pointer-events", "none");
+      const background = document.createElementNS(ns, "rect");
+      background.setAttribute("width", "60"); background.setAttribute("height", "11");
+      background.setAttribute("rx", "2.5"); background.setAttribute("fill", "var(--card)");
+      background.setAttribute("stroke", "var(--primary)"); background.setAttribute("stroke-width", "0.8");
+      background.setAttribute("opacity", "0.96");
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("text-anchor", "middle"); label.setAttribute("fill", "var(--primary)");
+      label.setAttribute("font-size", "5.5"); label.setAttribute("font-weight", "800");
+      group.append(background, label);
+      layer.append(group);
+      wallEqualLengthGuideRef.current = group;
+    }
+    group.setAttribute("data-source-wall-id", sourceWallId ?? "");
+    const position = wallLengthLabelPosition(wall);
+    group.querySelector("rect")?.setAttribute("x", String(position.x - 30));
+    group.querySelector("rect")?.setAttribute("y", String(position.y - 22));
+    const label = group.querySelector("text");
+    label?.setAttribute("x", String(position.x));
+    label?.setAttribute("y", String(position.y - 14.5));
+    if (label) label.textContent = `Equal length · ${formatWallLength(length)}`;
+  };
+  const updateOpeningPlacementPreview = (candidate: {
+    type: "door" | "open_passage" | "window"; x: number; y: number; angle: number;
+    width: number; wallThickness: number; valid: boolean;
+  } | null) => {
+    if (!candidate) {
+      openingPlacementOverlayRef.current?.remove();
+      openingPlacementOverlayRef.current = null;
+      return;
+    }
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    let group = openingPlacementOverlayRef.current;
+    if (!group) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "opening-placement-interaction-overlay");
+      group.setAttribute("pointer-events", "none");
+      const back = document.createElementNS(ns, "rect");
+      back.setAttribute("data-opening-back", "true");
+      back.setAttribute("rx", "1.5");
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("data-opening-line", "true");
+      line.setAttribute("stroke-width", "2");
+      group.append(back, line);
+      layer.append(group);
+      openingPlacementOverlayRef.current = group;
+    }
+    group.setAttribute("data-testid", candidate.type === "window" ? "window-wall-preview" : "door-wall-preview");
+    group.setAttribute("data-preview-kind", candidate.type);
+    const color = !candidate.valid ? "#dc2626" : candidate.type === "window" ? "#0284c7" : candidate.type === "open_passage" ? "#64748b" : "#b45309";
+    group.setAttribute("transform", `translate(${candidate.x} ${candidate.y}) rotate(${candidate.angle})`);
+    group.setAttribute("data-preview-valid", String(candidate.valid));
+    const back = group.querySelector<SVGRectElement>("[data-opening-back]")!;
+    back.setAttribute("x", String(-candidate.width / 2));
+    back.setAttribute("y", String(-candidate.wallThickness / 2));
+    back.setAttribute("width", String(candidate.width));
+    back.setAttribute("height", String(candidate.wallThickness));
+    back.setAttribute("fill", color);
+    back.setAttribute("fill-opacity", candidate.valid ? "0.2" : "0.35");
+    back.setAttribute("stroke", color);
+    back.setAttribute("stroke-dasharray", candidate.valid ? "" : "5 3");
+    const line = group.querySelector<SVGLineElement>("[data-opening-line]")!;
+    line.setAttribute("x1", String(-candidate.width / 2));
+    line.setAttribute("x2", String(candidate.width / 2));
+    line.setAttribute("y1", "0"); line.setAttribute("y2", "0");
+    line.setAttribute("stroke", color);
+  };
+  const updateFurniturePlacementOverlay = (preview: ReturnType<typeof furniturePlacementCandidateAtPoint> | null) => {
+    if (!preview) {
+      furniturePlacementOverlayRef.current?.remove();
+      furniturePlacementOverlayRef.current = null;
+      return;
+    }
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    let group = furniturePlacementOverlayRef.current;
+    if (!group) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "furniture-placement-interaction-overlay");
+      group.setAttribute("pointer-events", "none");
+      group.setAttribute("opacity", "0.82");
+      const footprint = document.createElementNS(ns, "rect");
+      footprint.setAttribute("data-placement-footprint", "true");
+      footprint.setAttribute("rx", "3");
+      const name = document.createElementNS(ns, "text");
+      name.setAttribute("data-placement-name", "true");
+      name.setAttribute("text-anchor", "middle");
+      name.setAttribute("dominant-baseline", "middle");
+      name.setAttribute("font-size", "7");
+      name.setAttribute("font-weight", "700");
+      group.append(footprint, name);
+      layer.append(group);
+      furniturePlacementOverlayRef.current = group;
+    }
+    const { item, valid } = preview;
+    const tone = valid ? "var(--primary)" : "#dc2626";
+    group.setAttribute("transform", `rotate(${item.rotation ?? 0}, ${item.x + item.width / 2}, ${item.y + item.height / 2})`);
+    const footprint = group.querySelector<SVGRectElement>("[data-placement-footprint]")!;
+    footprint.setAttribute("x", String(item.x)); footprint.setAttribute("y", String(item.y));
+    footprint.setAttribute("width", String(item.width)); footprint.setAttribute("height", String(item.height));
+    footprint.setAttribute("fill", item.color ?? tone); footprint.setAttribute("fill-opacity", "0.3");
+    footprint.setAttribute("stroke", tone); footprint.setAttribute("stroke-width", "1.8");
+    footprint.setAttribute("stroke-dasharray", "5 3");
+    const name = group.querySelector<SVGTextElement>("[data-placement-name]")!;
+    name.setAttribute("x", String(item.x + item.width / 2)); name.setAttribute("y", String(item.y + item.height / 2));
+    name.setAttribute("fill", tone); name.textContent = item.name ?? item.type.replaceAll("_", " ");
+  };
+  useEffect(() => {
+    if (wallStart && tool === "wall") return;
+    wallDrawOverlayRef.current?.remove();
+    wallDrawOverlayRef.current = null;
+    wallSnapOverlayRef.current?.remove();
+    wallSnapOverlayRef.current = null;
+    openingPlacementOverlayRef.current?.remove();
+    openingPlacementOverlayRef.current = null;
+  }, [wallStart, tool]);
+  useEffect(() => {
+    if (tool === "furniture" && furnitureTemplate) cacheFloorGestureAlignment(new Set());
+    else activeFloorAlignRefsRef.current = null;
+    updateFurniturePlacementOverlay(null);
+  }, [tool, furnitureTemplate, collectAlignRefs]);
+  useEffect(() => {
+    if (roomDrag) return;
+    roomPlacementOverlayRef.current?.remove();
+    roomPlacementOverlayRef.current = null;
+    roomInvalidOverlayRef.current = null;
+    roomDragLiveRef.current = null;
+    svgRef.current?.querySelector('[data-testid="room-placement-preview"]')?.removeAttribute("visibility");
+  }, [roomDrag]);
+
+  const captureFloorGestureDomNodes = (entries: { type: string; id: string }[], includeNavigationFollowers = true) => {
+    const svg = svgRef.current;
+    floorGestureDomNodesRef.current.clear();
+    floorGestureLinkedNodeIdsRef.current.clear();
+    if (!svg || entries.length === 0) return;
+    const followerNodeIds = new Set<string>();
+    const wanted = new Map<string, string>();
+    for (const entry of entries) {
+      wanted.set(`${entry.type}:${entry.id}`, entry.id);
+      wanted.set(`${entry.type}-controls:${entry.id}`, entry.id);
+      wanted.set(`room-overlay:${entry.id}`, entry.id);
+      wanted.set(`room-controls:${entry.id}`, entry.id);
+      if (entry.type === "door") wanted.set(`door-direction:${entry.id}`, entry.id);
+    }
+    for (const node of Array.from(svg.querySelectorAll<SVGGElement>("[data-layer-key]"))) {
+      const id = wanted.get(node.getAttribute("data-layer-key") ?? "");
+      if (!id) continue;
+      const nodes = floorGestureDomNodesRef.current.get(id) ?? [];
+      const previewNode = cloneFloorGestureNode(node);
+      if (!previewNode) continue;
+      nodes.push({ node: previewNode, originalTransform: previewNode.getAttribute("transform") });
+      floorGestureDomNodesRef.current.set(id, nodes);
+    }
+    for (const entry of entries) {
+      if (entry.type !== "wall") continue;
+      for (const joint of wallJoints) {
+        if (!joint.wallIds.has(entry.id)) continue;
+        const key = `${Math.round(joint.x * 100) / 100},${Math.round(joint.y * 100) / 100}`;
+        const source = svg.querySelector<SVGGElement>(`[data-wall-joint-key="${CSS.escape(key)}"]`);
+        const previewNode = source ? cloneFloorGestureNode(source) : null;
+        if (!previewNode) continue;
+        const nodes = floorGestureDomNodesRef.current.get(entry.id) ?? [];
+        nodes.push({ node: previewNode, originalTransform: previewNode.getAttribute("transform") });
+        floorGestureDomNodesRef.current.set(entry.id, nodes);
+      }
+    }
+    for (const entry of entries) {
+      const linkedNodes = showNavOverlay && includeNavigationFollowers ? indoorNodes.filter((node) => (
+        entry.type === "room" ? node.roomId === entry.id
+          : entry.type === "door" ? node.doorId === entry.id
+            : entry.type === "stairs" ? node.stairId === entry.id
+              : entry.type === "elevator" ? node.elevatorId === entry.id
+                : entry.type === "ramp" ? node.rampId === entry.id : false
+      )) : [];
+      if (linkedNodes.length > 0) {
+        floorGestureLinkedNodeIdsRef.current.set(entry.id, linkedNodes.map((node) => node.id));
+        linkedNodes.forEach((node) => followerNodeIds.add(node.id));
+      }
+      const sources = [
+        svg.querySelector<SVGGElement>(`[data-issue-object="${entry.type}:${entry.id}"]`),
+        ...linkedNodes.flatMap((node) => [
+          svg.querySelector<SVGGElement>(`[data-nav-node-id="${node.id}"]`),
+          svg.querySelector<SVGGElement>(`[data-issue-object="navNode:${node.id}"]`),
+        ]),
+      ];
+      for (const source of sources) {
+        if (!source) continue;
+        const previewNode = cloneFloorGestureNode(source);
+        if (!previewNode) continue;
+        const nodes = floorGestureDomNodesRef.current.get(entry.id) ?? [];
+        nodes.push({ node: previewNode, originalTransform: previewNode.getAttribute("transform") });
+        floorGestureDomNodesRef.current.set(entry.id, nodes);
+      }
+    }
+    if (followerNodeIds.size > 0) {
+      const linkedIds = followerNodeIds;
+      beginNavGesturePreview([], indoorEdges
+        .filter((edge) => linkedIds.has(edge.startNodeId) || linkedIds.has(edge.endNodeId))
+        .map((edge) => edge.id));
+    }
+  };
+
+  const cloneFloorGestureNode = (source: SVGGElement): SVGGElement | null => {
+    const cached = floorGestureClonesRef.current.get(source);
+    if (cached?.parentNode === floorImperativePreviewItemsRef.current) return cached;
+    if (cached) floorGestureClonesRef.current.delete(source);
+    const layer = floorImperativePreviewItemsRef.current;
+    // Never return a React-owned scene node to the imperative preview path.
+    // If the stable overlay is unavailable during unmount, skip the preview.
+    if (!layer || !layer.isConnected) return null;
+    const clone = source.cloneNode(true) as SVGGElement;
+    clone.removeAttribute("id");
+    clone.style.pointerEvents = "none";
+    clone.style.transition = "none";
+    clone.querySelectorAll<SVGElement>("*").forEach((child) => {
+      child.removeAttribute("id");
+      child.style.pointerEvents = "none";
+      child.style.transition = "none";
+    });
+    layer.appendChild(clone);
+    hiddenFloorGestureSourcesRef.current.set(source, source.getAttribute("visibility"));
+    source.setAttribute("visibility", "hidden");
+    floorGestureClonesRef.current.set(source, clone);
+    return clone;
+  };
+
+  const syncFloorInteractionCamera = () => {
+    const transform = cameraTransformRef.current?.getAttribute("transform");
+    if (transform && floorInteractionWorldRef.current?.getAttribute("transform") !== transform) {
+      floorInteractionWorldRef.current?.setAttribute("transform", transform);
+    }
+  };
+
+  const beginWallEndpointPreview = (wall: FloorWall) => {
+    const layer = floorImperativePreviewItemsRef.current;
+    if (!layer) return;
+    syncFloorInteractionCamera();
+    wallEndpointPendingRef.current = null;
+    wallEndpointSnapLockRef.current = null;
+    wallEndpointJointClonesRef.current = [];
+    wallEndpointOverlayRef.current?.remove();
+    wallEndpointOpeningClonesRef.current = [];
+    const source = svgRef.current?.querySelector<SVGGElement>(`[data-layer-key="wall:${wall.id}"]`);
+    if (source) {
+      hiddenFloorGestureSourcesRef.current.set(source, source.getAttribute("visibility"));
+      source.setAttribute("visibility", "hidden");
+    }
+    const movingOrigin = wallEndpointDrag.current?.endpoint === "x1"
+      ? { x: wall.x1, y: wall.y1 }
+      : { x: wall.x2, y: wall.y2 };
+    for (const joint of wallJoints) {
+      if (!joint.wallIds.has(wall.id) || Math.hypot(joint.x - movingOrigin.x, joint.y - movingOrigin.y) > 0.02) continue;
+      const key = `${Math.round(joint.x * 100) / 100},${Math.round(joint.y * 100) / 100}`;
+      const cap = svgRef.current?.querySelector<SVGGElement>(`[data-wall-joint-key="${CSS.escape(key)}"]`);
+      const clone = cap ? cloneFloorGestureNode(cap) : null;
+      if (clone) wallEndpointJointClonesRef.current.push({ node: clone, origin: { x: joint.x, y: joint.y }, transform: clone.getAttribute("transform") });
+    }
+    for (const [type, opening] of [
+      ...doors.filter((item) => item.wallId === wall.id).map((item) => ["door", item] as const),
+      ...windows.filter((item) => item.wallId === wall.id).map((item) => ["window", item] as const),
+    ]) {
+      const original = svgRef.current?.querySelector<SVGGElement>(`[data-layer-key="${type}:${opening.id}"]`);
+      const clone = original ? cloneFloorGestureNode(original) : null;
+      if (clone) wallEndpointOpeningClonesRef.current.push({ type, origin: opening, node: clone, transform: clone.getAttribute("transform") });
+      if (type === "door") {
+        const badgeSource = svgRef.current?.querySelector<SVGGElement>(`[data-layer-key="door-direction:${opening.id}"]`);
+        const badgeClone = badgeSource ? cloneFloorGestureNode(badgeSource) : null;
+        if (badgeClone) wallEndpointOpeningClonesRef.current.push({ type: "door-badge", origin: opening, node: badgeClone, transform: badgeClone.getAttribute("transform") });
+      }
+    }
+    const ns = "http://www.w3.org/2000/svg";
+    const group = document.createElementNS(ns, "g");
+    group.setAttribute("data-testid", "wall-endpoint-interaction-overlay");
+    group.setAttribute("pointer-events", "none");
+    const casing = document.createElementNS(ns, "line");
+    casing.setAttribute("data-wall-casing", "true");
+    casing.setAttribute("stroke", "var(--card)");
+    const core = document.createElementNS(ns, "line");
+    core.setAttribute("data-wall-core", "true");
+    const fixed = document.createElementNS(ns, "circle");
+    fixed.setAttribute("data-wall-fixed", "true");
+    const moving = document.createElementNS(ns, "circle");
+    moving.setAttribute("data-wall-moving", "true");
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("data-wall-length", "true");
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("font-size", "6");
+    label.setAttribute("font-weight", "700");
+    label.setAttribute("fill", "var(--foreground)");
+    group.append(casing, core, fixed, moving, label);
+    layer.append(group);
+    wallEndpointOverlayRef.current = group;
+    updateWallEndpointPreview(wall);
+  };
+  const updateWallEndpointPreview = (wall: FloorWall) => {
+    const group = wallEndpointOverlayRef.current;
+    if (!group) return;
+    syncFloorInteractionCamera();
+    const endpoint = wallEndpointDrag.current?.endpoint;
+    for (const line of group.querySelectorAll<SVGLineElement>("line")) {
+      line.setAttribute("x1", String(wall.x1)); line.setAttribute("y1", String(wall.y1));
+      line.setAttribute("x2", String(wall.x2)); line.setAttribute("y2", String(wall.y2));
+      line.setAttribute("stroke-linecap", "round");
+    }
+    group.querySelector<SVGLineElement>("[data-wall-casing]")?.setAttribute("stroke-width", String(wall.thickness + 2));
+    const core = group.querySelector<SVGLineElement>("[data-wall-core]");
+    core?.setAttribute("stroke", wall.color);
+    core?.setAttribute("stroke-width", String(wall.thickness));
+    const fixed = group.querySelector<SVGCircleElement>("[data-wall-fixed]");
+    const moving = group.querySelector<SVGCircleElement>("[data-wall-moving]");
+    for (const [node, x, y, radius] of [
+      [fixed, endpoint === "x1" ? wall.x2 : wall.x1, endpoint === "x1" ? wall.y2 : wall.y1, 4],
+      [moving, endpoint === "x1" ? wall.x1 : wall.x2, endpoint === "x1" ? wall.y1 : wall.y2, 6],
+    ] as const) {
+      if (!node) continue;
+      node.setAttribute("cx", String(x)); node.setAttribute("cy", String(y));
+      node.setAttribute("r", String(radius)); node.setAttribute("fill", "var(--card)");
+      node.setAttribute("stroke", "var(--accent)"); node.setAttribute("stroke-width", "2");
+    }
+    const position = wallLengthLabelPosition(wall);
+    const label = group.querySelector<SVGTextElement>("[data-wall-length]");
+    if (label) {
+      label.setAttribute("x", String(position.x)); label.setAttribute("y", String(position.y));
+      label.setAttribute("transform", `rotate(${position.angle}, ${position.x}, ${position.y})`);
+      label.textContent = formatWallLength(wallLength(wall));
+    }
+    const movingPoint = endpoint === "x1" ? { x: wall.x1, y: wall.y1 } : { x: wall.x2, y: wall.y2 };
+    for (const entry of wallEndpointJointClonesRef.current) {
+      const transform = `translate(${movingPoint.x - entry.origin.x} ${movingPoint.y - entry.origin.y})`;
+      entry.node.setAttribute("transform", [transform, entry.transform].filter(Boolean).join(" "));
+    }
+    if (wallEndpointOpeningClonesRef.current.length) {
+      const attachedDoors = wallEndpointOpeningClonesRef.current.filter((entry) => entry.type === "door").map((entry) => entry.origin as FloorDoor);
+      const attachedWindows = wallEndpointOpeningClonesRef.current.filter((entry) => entry.type === "window").map((entry) => entry.origin as FloorWindow);
+      const synced = syncOpeningsToWalls(attachedDoors, attachedWindows, [wall]);
+      const projected = new Map([...synced.doors, ...synced.windows].map((entry) => [entry.id, entry]));
+      const originalWall = wallEndpointDrag.current?.origin ?? wall;
+      const deltaAngle = (Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) - Math.atan2(originalWall.y2 - originalWall.y1, originalWall.x2 - originalWall.x1)) * 180 / Math.PI;
+      for (const entry of wallEndpointOpeningClonesRef.current) {
+        const next = projected.get(entry.origin.id);
+        if (!next) continue;
+        entry.node.setAttribute("transform", `translate(${next.x - entry.origin.x} ${next.y - entry.origin.y}) rotate(${deltaAngle}, ${entry.origin.x}, ${entry.origin.y}) ${entry.transform ?? ""}`);
+      }
+    }
+  };
+
+  const clearNavGesturePreview = () => {
+    const visual = navGestureVisualRef.current;
+    if (visual) {
+      for (const { source, visibility } of visual.hidden) {
+        if (visibility === null) source.removeAttribute("visibility");
+        else source.setAttribute("visibility", visibility);
+      }
+      visual.group.remove();
+    }
+    navGestureVisualRef.current = null;
+    navGesturePendingRef.current = null;
+  };
+  const beginNavGesturePreview = (nodeIds: string[], edgeIds: string[]) => {
+    clearNavGesturePreview();
+    const svg = svgRef.current;
+    const layer = navInteractionOverlayRef.current;
+    if (!svg || !layer) return;
+    syncFloorInteractionCamera();
+    const ns = "http://www.w3.org/2000/svg";
+    const group = document.createElementNS(ns, "g");
+    group.setAttribute("data-testid", "floor-nav-gesture-preview");
+    group.setAttribute("pointer-events", "none");
+    layer.append(group);
+    const visual: NonNullable<typeof navGestureVisualRef.current> = {
+      group,
+      hidden: [],
+      baseNodePositions: new Map(indoorNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
+      nodes: new Map(),
+      edges: new Map(),
+    };
+    const hide = (source: SVGElement) => {
+      if (visual.hidden.some((entry) => entry.source === source)) return;
+      visual.hidden.push({ source, visibility: source.getAttribute("visibility") });
+      source.setAttribute("visibility", "hidden");
+    };
+    for (const id of nodeIds) {
+      const origin = indoorNodes.find((node) => node.id === id);
+      if (!origin) continue;
+      const clones: SVGGElement[] = [];
+      for (const source of [
+        svg.querySelector<SVGGElement>(`[data-nav-node-id="${id}"]`),
+        svg.querySelector<SVGGElement>(`[data-issue-object="navNode:${id}"]`),
+      ]) {
+        if (!source) continue;
+        const clone = source.cloneNode(true) as SVGGElement;
+        clone.removeAttribute("id");
+        clone.style.pointerEvents = "none";
+        clone.querySelectorAll<SVGElement>("*").forEach((child) => { child.removeAttribute("id"); child.style.pointerEvents = "none"; });
+        group.append(clone);
+        clones.push(clone);
+        hide(source);
+      }
+      visual.nodes.set(id, { x: origin.x, y: origin.y, clones });
+    }
+    for (const id of edgeIds) {
+      const edge = indoorEdges.find((candidate) => candidate.id === id);
+      if (!edge) continue;
+      const source = svg.querySelector<SVGGElement>(`[data-nav-edge-id="${id}"]`);
+      if (source) hide(source);
+      const path = document.createElementNS(ns, "polyline");
+      path.setAttribute("data-preview-edge-id", id);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", source?.querySelector("polyline, line")?.getAttribute("stroke") ?? "var(--accent)");
+      path.setAttribute("stroke-width", "2.4");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      const handles = document.createElementNS(ns, "g");
+      handles.setAttribute("data-preview-bend-handles", id);
+      group.append(path, handles);
+      const issueSource = svg.querySelector<SVGGElement>(`[data-issue-object="navEdge:${id}"]`);
+      let issue: { node: SVGGElement; origin: { x: number; y: number } } | null = null;
+      if (issueSource) {
+        const start = visual.baseNodePositions.get(edge.startNodeId);
+        const end = visual.baseNodePositions.get(edge.endNodeId);
+        if (start && end) {
+          const clone = issueSource.cloneNode(true) as SVGGElement;
+          clone.removeAttribute("id");
+          clone.style.pointerEvents = "none";
+          clone.querySelectorAll<SVGElement>("*").forEach((child) => { child.removeAttribute("id"); child.style.pointerEvents = "none"; });
+          group.append(clone);
+          issue = { node: clone, origin: polylineMidpoint([start, ...(edge.bendPoints ?? []), end]) };
+          hide(issueSource);
+        }
+      }
+      visual.edges.set(id, { edge, path, handles, issue });
+    }
+    navGestureVisualRef.current = visual;
+  };
+  const previewNavGraph = (nodes: NavigationNode[], edges: NavigationEdge[]) => {
+    navGesturePendingRef.current = { nodes, edges };
+    const visual = navGestureVisualRef.current;
+    if (!visual) return;
+    syncFloorInteractionCamera();
+    const byNode = new Map(nodes.map((node) => [node.id, node]));
+    const byEdge = new Map(edges.map((edge) => [edge.id, edge]));
+    for (const [id, entry] of visual.nodes) {
+      const node = byNode.get(id);
+      if (!node) continue;
+      const transform = `translate(${node.x - entry.x} ${node.y - entry.y})`;
+      for (const clone of entry.clones) clone.setAttribute("transform", transform);
+    }
+    for (const [id, entry] of visual.edges) {
+      const edge = byEdge.get(id);
+      const points = edge ? edgePolylinePoints(edge, nodes) : null;
+      if (!points) continue;
+      entry.path.setAttribute("points", points.map((point) => `${point.x},${point.y}`).join(" "));
+      if (edge && entry.issue) {
+        const start = byNode.get(edge.startNodeId);
+        const end = byNode.get(edge.endNodeId);
+        if (start && end) {
+          const anchor = polylineMidpoint([{ x: start.x, y: start.y }, ...(edge.bendPoints ?? []), { x: end.x, y: end.y }]);
+          entry.issue.node.setAttribute("transform", `translate(${anchor.x - entry.issue.origin.x} ${anchor.y - entry.issue.origin.y})`);
+        }
+      }
+      const bends = edge?.bendPoints ?? [];
+      while (entry.handles.children.length < bends.length) {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("r", "4"); circle.setAttribute("fill", "var(--card)");
+        circle.setAttribute("stroke", "var(--accent)"); circle.setAttribute("stroke-width", "1.5");
+        entry.handles.append(circle);
+      }
+      while (entry.handles.children.length > bends.length) entry.handles.lastElementChild?.remove();
+      bends.forEach((bend, index) => {
+        const handle = entry.handles.children[index];
+        handle?.setAttribute("cx", String(bend.x)); handle?.setAttribute("cy", String(bend.y));
+      });
+    }
+  };
+  const previewNavNodePositions = (positions: Map<string, { x: number; y: number }>) => {
+    const visual = navGestureVisualRef.current;
+    if (!visual || positions.size === 0) return;
+    syncFloorInteractionCamera();
+    for (const [id, entry] of visual.nodes) {
+      const position = positions.get(id);
+      if (!position) continue;
+      const transform = `translate(${position.x - entry.x} ${position.y - entry.y})`;
+      for (const clone of entry.clones) clone.setAttribute("transform", transform);
+    }
+    for (const entry of visual.edges.values()) {
+      const { edge } = entry;
+      const start = positions.get(edge.startNodeId) ?? visual.baseNodePositions.get(edge.startNodeId);
+      const end = positions.get(edge.endNodeId) ?? visual.baseNodePositions.get(edge.endNodeId);
+      if (!start || !end) continue;
+      const points = edgePolylinePoints(edge, [
+        { id: edge.startNodeId, ...start },
+        { id: edge.endNodeId, ...end },
+      ]);
+      if (!points) continue;
+      entry.path.setAttribute("points", points.map((point) => `${point.x},${point.y}`).join(" "));
+      if (entry.issue) {
+        const anchor = polylineMidpoint([start, ...(edge.bendPoints ?? []), end]);
+        entry.issue.node.setAttribute("transform", `translate(${anchor.x - entry.issue.origin.x} ${anchor.y - entry.issue.origin.y})`);
+      }
+    }
+  };
+
+  const clearNavConnectLive = () => {
+    navConnectLiveRef.current?.remove();
+    navConnectLiveRef.current = null;
+    svgRef.current?.removeAttribute("data-floor-connect-live");
+  };
+  const updateNavConnectLive = (
+    point: { x: number; y: number } | null,
+    targetNode?: NavigationNode | null,
+    physicalTarget?: typeof navTargetHover,
+    explicitPathTarget?: { x: number; y: number },
+  ) => {
+    const start = navConnectStart ? indoorNodes.find((node) => node.id === navConnectStart) : null;
+    const layer = navInteractionOverlayRef.current;
+    if (!point || !start || !layer) { clearNavConnectLive(); return; }
+    syncFloorInteractionCamera();
+    const pathTargetEdge = navPathTargetHover?.edgeId
+      ? indoorEdges.find((edge) => edge.id === navPathTargetHover.edgeId)
+      : undefined;
+    const pathTarget = explicitPathTarget ?? (!targetNode && !physicalTarget && pathTargetEdge
+      && isManualIndoorWalkingEdge(pathTargetEdge, indoorNodes)
+      ? navPathTargetHover?.point
+      : undefined);
+    const destination = targetNode ?? pathTarget ?? physicalTarget ?? point;
+    const last = navConnectBends.length
+      ? navConnectBends[navConnectBends.length - 1]
+      : { x: start.x, y: start.y };
+    const hostedZone = exteriorZoneForConnection(start, targetNode ?? undefined);
+    const freeTarget = !targetNode && !physicalTarget && !pathTarget;
+    const proposed = freeTarget
+      ? navPinGeometryFor(
+          exteriorConnectionPoint(destination, start), last, indoorNodes,
+          hostedZone ? undefined : walls, hostedZone ? undefined : doors,
+          hostedZone ? undefined : { width: FP_W, height: FP_H },
+          hostedZone ? undefined : renderFloorShapeRegions,
+        ).pins
+      : [
+          ...orthogonalBendsFor(
+            last, destination,
+            hostedZone ? undefined : walls, hostedZone ? undefined : doors,
+            hostedZone ? undefined : { width: FP_W, height: FP_H },
+            hostedZone ? undefined : renderFloorShapeRegions,
+          ),
+          { x: destination.x, y: destination.y },
+        ];
+    const ring = proposed[proposed.length - 1] ?? destination;
+    const points = [{ x: start.x, y: start.y }, ...navConnectBends, ...proposed];
+    const invalid = (!hostedZone && !floorShapeContainsPolyline(renderFloorShapeRegions, [last, ...proposed]))
+      || exteriorConnectionWallBlocked([last, ...proposed], start, targetNode ?? undefined) !== null
+      || (!hostedZone && freeTarget && proposed.some((candidate) => pointInsideWallObstacle(candidate, walls, doors) !== null));
+    let group = navConnectLiveRef.current;
+    if (!group || group.parentNode !== layer) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "floor-nav-connect-live-preview");
+      group.setAttribute("pointer-events", "none");
+      const line = document.createElementNS(ns, "polyline");
+      line.setAttribute("data-connect-line", "true");
+      line.setAttribute("fill", "none"); line.setAttribute("stroke-width", "1.8");
+      line.setAttribute("stroke-dasharray", "5 4");
+      const tail = document.createElementNS(ns, "polyline");
+      tail.setAttribute("data-connect-invalid-tail", "true");
+      tail.setAttribute("fill", "none"); tail.setAttribute("stroke", "#dc2626");
+      tail.setAttribute("stroke-width", "2"); tail.setAttribute("stroke-dasharray", "5 4");
+      const target = document.createElementNS(ns, "circle");
+      target.setAttribute("data-connect-target", "true");
+      target.setAttribute("r", "5"); target.setAttribute("fill", "none");
+      target.setAttribute("stroke-width", "1.5"); target.setAttribute("stroke-dasharray", "2 2");
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("data-connect-invalid-label", "true");
+      label.setAttribute("font-size", "9"); label.setAttribute("font-weight", "700");
+      label.setAttribute("fill", "#dc2626");
+      label.textContent = "Path blocked by wall";
+      group.append(line, tail, target, label);
+      layer.append(group);
+      navConnectLiveRef.current = group;
+    }
+    svgRef.current?.setAttribute("data-floor-connect-live", "true");
+    group.querySelector<SVGPolylineElement>("[data-connect-line]")?.setAttribute("points", points.map((candidate) => `${candidate.x},${candidate.y}`).join(" "));
+    const line = group.querySelector<SVGPolylineElement>("[data-connect-line]");
+    line?.setAttribute("stroke", invalid ? "#dc2626" : "var(--accent)");
+    const tail = group.querySelector<SVGPolylineElement>("[data-connect-invalid-tail]");
+    tail?.setAttribute("visibility", invalid ? "visible" : "hidden");
+    if (invalid) tail?.setAttribute("points", [last, ...proposed].map((candidate) => `${candidate.x},${candidate.y}`).join(" "));
+    const target = group.querySelector<SVGCircleElement>("[data-connect-target]");
+    target?.setAttribute("cx", String(ring.x)); target?.setAttribute("cy", String(ring.y));
+    target?.setAttribute("stroke", invalid ? "#dc2626" : "var(--accent)");
+    const label = group.querySelector<SVGTextElement>("[data-connect-invalid-label]");
+    label?.setAttribute("visibility", invalid ? "visible" : "hidden");
+    label?.setAttribute("x", String(ring.x + 8)); label?.setAttribute("y", String(ring.y - 10));
+  };
+
+  const updateNavPlacementLive = (point: { x: number; y: number } | null, blocked = false) => {
+    const layer = navInteractionOverlayRef.current;
+    if (!point || !layer) { navPlacementLiveRef.current?.remove(); navPlacementLiveRef.current = null; return; }
+    syncFloorInteractionCamera();
+    let group = navPlacementLiveRef.current;
+    if (!group || group.parentNode !== layer) {
+      group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.setAttribute("data-testid", "floor-nav-placement-live-preview");
+      group.setAttribute("pointer-events", "none");
+      const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      ring.setAttribute("r", "6"); ring.setAttribute("fill-opacity", "0.25");
+      ring.setAttribute("stroke-width", "1.5"); ring.setAttribute("stroke-dasharray", "3 2");
+      group.append(ring); layer.append(group); navPlacementLiveRef.current = group;
+    }
+    const ring = group.firstElementChild;
+    ring?.setAttribute("cx", String(point.x)); ring?.setAttribute("cy", String(point.y));
+    ring?.setAttribute("fill", blocked ? "#dc2626" : "#16a34a");
+    ring?.setAttribute("stroke", blocked ? "#dc2626" : "#16a34a");
+  };
+  const updateNavEdgeSnapLive = (point: { x: number; y: number } | null) => {
+    const layer = navInteractionOverlayRef.current;
+    if (!point || !layer) { navEdgeSnapLiveRef.current?.remove(); navEdgeSnapLiveRef.current = null; return; }
+    let group = navEdgeSnapLiveRef.current;
+    if (!group || group.parentNode !== layer) {
+      const ns = "http://www.w3.org/2000/svg";
+      group = document.createElementNS(ns, "g");
+      group.setAttribute("data-testid", "floor-nav-edge-snap-live");
+      group.setAttribute("pointer-events", "none");
+      const circle = document.createElementNS(ns, "circle");
+      circle.setAttribute("r", "5"); circle.setAttribute("fill", "var(--card)");
+      circle.setAttribute("stroke", "var(--accent)"); circle.setAttribute("stroke-width", "1.5");
+      const horizontal = document.createElementNS(ns, "line");
+      horizontal.setAttribute("x1", "-4"); horizontal.setAttribute("x2", "4");
+      horizontal.setAttribute("stroke", "var(--accent)");
+      const vertical = document.createElementNS(ns, "line");
+      vertical.setAttribute("y1", "-4"); vertical.setAttribute("y2", "4");
+      vertical.setAttribute("stroke", "var(--accent)");
+      group.append(circle, horizontal, vertical); layer.append(group); navEdgeSnapLiveRef.current = group;
+    }
+    group.setAttribute("transform", `translate(${point.x} ${point.y})`);
+  };
+  useEffect(() => {
+    if (!navConnectStart || navTool !== "connect") clearNavConnectLive();
+    if (navTool !== "waypoint" && navTool !== "destination" && !navLibraryDragRef.current) updateNavPlacementLive(null);
+  }, [navConnectStart, navTool]);
+
+  const applyFloorGestureDomPreview = (items: { type: string; id: string; origin: any; item: any }[]) => {
+    syncFloorInteractionCamera();
+    const bounds = (item: any, type: string) => {
+      if (type === "label") {
+        const label = labelBounds(item);
+        return { x: label.x, y: label.y, width: label.w, height: label.h };
+      }
+      if (Array.isArray(item?.points) && item.points.length > 0) {
+        const xs = item.points.map((point: any) => point.x);
+        const ys = item.points.map((point: any) => point.y);
+        const x = Math.min(...xs), y = Math.min(...ys);
+        return { x, y, width: Math.max(1, Math.max(...xs) - x), height: Math.max(1, Math.max(...ys) - y) };
+      }
+      if ([item?.x1, item?.y1, item?.x2, item?.y2].every(Number.isFinite)) {
+        const x = Math.min(item.x1, item.x2), y = Math.min(item.y1, item.y2);
+        return { x, y, width: Math.max(1, Math.abs(item.x2 - item.x1)), height: Math.max(1, Math.abs(item.y2 - item.y1)) };
+      }
+      if (Number.isFinite(item?.x) && Number.isFinite(item?.y)) {
+        return { x: item.x, y: item.y, width: Math.max(1, item.width ?? item.w ?? 1), height: Math.max(1, item.height ?? item.h ?? 1) };
+      }
+      return null;
+    };
+    for (const entry of items) {
+      const before = bounds(entry.origin, entry.type);
+      const after = bounds(entry.item, entry.type);
+      if (!before || !after) continue;
+      let rotationDelta = (entry.item.rotation ?? 0) - (entry.origin.rotation ?? 0);
+      if (entry.type === "door" || entry.type === "window") {
+        const originWall = wallById.get(entry.origin.wallId);
+        const previewWall = wallById.get(entry.item.wallId);
+        const originGeometry = resolveWallOpeningGeometry(entry.origin, originWall);
+        const previewGeometry = resolveWallOpeningGeometry(entry.item, previewWall);
+        if (originGeometry && previewGeometry) rotationDelta = previewGeometry.angle - originGeometry.angle;
+      }
+      const widthBefore = entry.origin.width ?? entry.origin.w;
+      const heightBefore = entry.origin.height ?? entry.origin.h;
+      const widthAfter = entry.item.width ?? entry.item.w;
+      const heightAfter = entry.item.height ?? entry.item.h;
+      const fontScale = entry.type === "label" && entry.origin.fontSize > 0 ? entry.item.fontSize / entry.origin.fontSize : 1;
+      const sx = entry.type === "label" ? fontScale : Number.isFinite(widthBefore) && Number.isFinite(widthAfter) && widthBefore > 0 ? widthAfter / widthBefore : 1;
+      const sy = entry.type === "label" ? fontScale : Number.isFinite(heightBefore) && Number.isFinite(heightAfter) && heightBefore > 0 ? heightAfter / heightBefore : 1;
+      const beforeCx = before.x + before.width / 2, beforeCy = before.y + before.height / 2;
+      const afterCx = after.x + after.width / 2, afterCy = after.y + after.height / 2;
+      const changed = Math.abs(afterCx - beforeCx) > 0.0001 || Math.abs(afterCy - beforeCy) > 0.0001
+        || Math.abs(rotationDelta) > 0.0001 || Math.abs(sx - 1) > 0.0001 || Math.abs(sy - 1) > 0.0001;
+      const previewTransform = changed
+        ? `translate(${afterCx} ${afterCy}) rotate(${rotationDelta}) scale(${sx} ${sy}) translate(${-beforeCx} ${-beforeCy})`
+        : "";
+      for (const nodeEntry of floorGestureDomNodesRef.current.get(entry.id) ?? []) {
+        const transform = [previewTransform, nodeEntry.originalTransform].filter(Boolean).join(" ");
+        if (transform) nodeEntry.node.setAttribute("transform", transform);
+        else nodeEntry.node.removeAttribute("transform");
+      }
+    }
+    if (floorGestureLinkedNodeIdsRef.current.size > 0) {
+      const positions = new Map<string, { x: number; y: number }>();
+      for (const entry of items) {
+        const nodeIds = floorGestureLinkedNodeIdsRef.current.get(entry.id);
+        if (!nodeIds?.length) continue;
+        let position: { x: number; y: number } | null = null;
+        if (entry.type === "room") position = roomLinkedCuePosition(entry.item as FloorRoom);
+        else if (entry.type === "door") position = { x: Math.round(entry.item.x), y: Math.round(entry.item.y) };
+        else if (entry.type === "stairs") position = stairEntryPosition(entry.item as FloorStairs);
+        else if (entry.type === "elevator") position = elevatorEntryPosition(entry.item as FloorElevatorItem);
+        else if (entry.type === "ramp") position = { x: Math.round(entry.item.x + entry.item.width / 2), y: Math.round(entry.item.y + entry.item.height / 2) };
+        if (!position) continue;
+        for (const id of nodeIds) positions.set(id, position);
+      }
+      previewNavNodePositions(positions);
+    }
+  };
+  floorGestureDomPreviewRef.current = applyFloorGestureDomPreview;
+
   const beginFurnitureDragPreview = (entries: { type: string; id: string; origin: unknown }[]) => {
     const furnitureEntries = entries.filter((entry): entry is { type: "furniture"; id: string; origin: FloorFurniture } => entry.type === "furniture");
     furnitureDragRef.current = furnitureEntries.length > 0 && furnitureEntries.length === entries.length;
@@ -6894,14 +8118,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     furnitureDragDomNodesRef.current = new Map();
     furnitureDragDomCapturePendingRef.current = furnitureEntries.length > 0 && furnitureEntries.length === entries.length;
     furnitureDragGuideSignatureRef.current = "";
+    const ids = new Set(entries.map((entry) => entry.id));
+    cacheFloorGestureAlignment(ids);
+    captureFloorGestureDomNodes(entries);
     if (!furnitureDragRef.current) {
       furnitureDragAlignRefsRef.current = [];
       furnitureDragSpacingRefsRef.current = [];
       return;
     }
     setAlignGuides([]);
-    const ids = new Set(furnitureEntries.map((entry) => entry.id));
-    furnitureDragAlignRefsRef.current = collectAlignRefs(ids);
+    furnitureDragAlignRefsRef.current = activeFloorAlignRefsRef.current?.refs ?? collectAlignRefs(ids);
     furnitureDragSpacingRefsRef.current = furniture.filter((item) => !ids.has(item.id));
     captureFurnitureDragDomNodes(furnitureEntries.map((entry) => entry.id));
   };
@@ -6920,7 +8146,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (!id) continue;
       const entries = furnitureDragDomNodesRef.current.get(id) ?? [];
       if (entries.some((entry) => entry.node === node)) continue;
-      entries.push({ node, originalTransform: node.getAttribute("transform"), originalOpacity: node.getAttribute("opacity"), invalidOverlay: null });
+      const previewNode = cloneFloorGestureNode(node);
+      if (!previewNode) continue;
+      entries.push({ node: previewNode, originalTransform: previewNode.getAttribute("transform"), originalOpacity: previewNode.getAttribute("opacity"), invalidOverlay: null });
       furnitureDragDomNodesRef.current.set(id, entries);
     }
   };
@@ -6930,6 +8158,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     items: Map<string, FloorFurniture>,
     invalid = false,
   ) => {
+    syncFloorInteractionCamera();
     if (furnitureDragDomCapturePendingRef.current) {
       captureFurnitureDragDomNodes(entries.map((entry) => entry.id));
       furnitureDragDomCapturePendingRef.current = false;
@@ -6979,6 +8208,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   };
 
   const restoreFurnitureDragDom = () => {
+    if (furnitureDragMoveFrameRef.current !== null) cancelAnimationFrame(furnitureDragMoveFrameRef.current);
+    furnitureDragMoveFrameRef.current = null;
+    latestFurnitureDragPointerRef.current = null;
+    lastActiveGesturePointerRef.current = null;
+    finalizeFastGestureRef.current = false;
     for (const entries of furnitureDragDomNodesRef.current.values()) {
       for (const entry of entries) {
         entry.invalidOverlay?.remove();
@@ -6994,7 +8228,37 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     furnitureDragAlignRefsRef.current = [];
     furnitureDragSpacingRefsRef.current = [];
     furnitureDragGuideSignatureRef.current = "";
+    for (const entries of floorGestureDomNodesRef.current.values()) {
+      for (const entry of entries) {
+        if (entry.originalTransform === null) entry.node.removeAttribute("transform");
+        else entry.node.setAttribute("transform", entry.originalTransform);
+      }
+    }
+    floorGestureDomNodesRef.current.clear();
+    for (const [source, visibility] of hiddenFloorGestureSourcesRef.current) {
+      if (visibility === null) source.removeAttribute("visibility");
+      else source.setAttribute("visibility", visibility);
+    }
+    hiddenFloorGestureSourcesRef.current.clear();
+    floorGestureClonesRef.current.clear();
+    wallEndpointJointClonesRef.current = [];
+    wallEndpointSnapLockRef.current = null;
+    openingNavNodeIdsRef.current = [];
+    wallEqualLengthGuideRef.current = null;
+    const layer = floorImperativePreviewItemsRef.current;
+    if (layer) for (const child of Array.from(layer.children)) {
+      // The marquee rect is a stable React-owned child. Clear only nodes that
+      // this imperative preview system created and owns.
+      if (child !== physicalMarqueeRectRef.current) child.remove();
+    }
+    wallDrawOverlayRef.current = null;
+    wallSnapOverlayRef.current = null;
+    openingPlacementOverlayRef.current = null;
+    furniturePlacementOverlayRef.current = null;
+    roomPlacementOverlayRef.current = null;
+    activeFloorAlignRefsRef.current = null;
   };
+  restoreFloorGestureDomRef.current = restoreFurnitureDragDom;
 
   const setFurnitureDragGuides = (guides: typeof alignGuides) => {
     const signature = guides.map((guide) => `${guide.type}:${Math.round(guide.pos * 2) / 2}`).join("|");
@@ -7007,6 +8271,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     furnitureDragMoveFrameRef.current = null;
     latestFurnitureDragPointerRef.current = null;
     restoreFurnitureDragDom();
+    clearNavGesturePreview();
+    clearNavConnectLive();
+    updateNavPlacementLive(null);
+    updateNavEdgeSnapLive(null);
   }, []);
 
   const resolveRoomTemplatePlacement = useCallback((template: RoomTemplateDefinition, pointer: { x: number; y: number }) => {
@@ -7039,6 +8307,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     if (!roomTemplatePlacement) return null;
     return resolveRoomTemplatePlacement(roomTemplatePlacement, cursorPos ?? { x: FP_W / 2, y: FP_H / 2 });
   }, [FP_H, FP_W, cursorPos, resolveRoomTemplatePlacement, roomTemplatePlacement]);
+  const updateRoomTemplatePlacementDom = (pointer: { x: number; y: number }) => {
+    if (!roomTemplatePlacement) return;
+    const preview = resolveRoomTemplatePlacement(roomTemplatePlacement, { x: Math.round(pointer.x), y: Math.round(pointer.y) });
+    syncFloorInteractionCamera();
+    const ghost = roomTemplatePlacementGhostRef.current;
+    if (ghost) {
+      ghost.setAttribute("transform", `translate(${preview.origin.x} ${preview.origin.y})`);
+      ghost.setAttribute("data-valid", String(preview.valid));
+      const outline = ghost.querySelector<SVGPathElement>("path");
+      if (outline) {
+        if (outline.dataset.previewDefaultFill === undefined) outline.dataset.previewDefaultFill = outline.getAttribute("fill") ?? "#dc2626";
+        if (outline.dataset.previewDefaultStroke === undefined) outline.dataset.previewDefaultStroke = outline.getAttribute("stroke") ?? "#2563eb";
+        outline.setAttribute("fill", preview.valid ? outline.dataset.previewDefaultFill : "#dc2626");
+        outline.setAttribute("stroke", preview.valid ? outline.dataset.previewDefaultStroke : "#dc2626");
+        outline.setAttribute("fill-opacity", preview.valid ? "0.2" : "0.14");
+      }
+    }
+    if (roomTemplatePlacementValidityRef.current !== preview.valid) {
+      roomTemplatePlacementValidityRef.current = preview.valid;
+      const status = roomTemplatePlacementStatusRef.current;
+      if (status) {
+        status.className = preview.valid
+          ? "rounded-lg border border-border px-3 py-1.5 text-[11px] font-semibold shadow-sm bg-card text-foreground"
+          : "rounded-lg border border-destructive/40 px-3 py-1.5 text-[11px] font-semibold shadow-sm bg-card text-destructive";
+        status.textContent = `${preview.valid ? "Click to place Room Template" : "Room Template does not fit here"} · Esc/right-click to cancel`;
+      }
+    }
+  };
 
   // Resolve the same snapped footprint used by the commit path so the
   // furniture ghost is an honest preview of what a canvas click will place.
@@ -7057,7 +8353,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     const rawFy = zoneBounds
       ? clamp(point.y - height / 2, zoneBounds.y, zoneBounds.y + zoneBounds.height - height)
       : floorOrigin.y;
-    const alignResult = computeAlignmentGuides({ x: rawFx, y: rawFy, w: width, h: height }, collectAlignRefs(), alignmentSnapThreshold);
+    const snapRefs = activeFloorAlignRefsRef.current?.refs ?? collectAlignRefs();
+    const alignResult = computeAlignmentGuides({ x: rawFx, y: rawFy, w: width, h: height }, snapRefs, alignmentSnapThreshold);
     const fx = zoneBounds
       ? clamp(edgeSnapOn ? alignResult.snappedX : rawFx, zoneBounds.x, zoneBounds.x + zoneBounds.width - width)
       : clamp(edgeSnapOn ? alignResult.snappedX : rawFx, renderFloorShapeBounds.x, renderFloorShapeBounds.x + renderFloorShapeBounds.width - width);
@@ -7370,7 +8667,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       toast.info("Calibrate floor scale first", "Measure uses the calibrated floor scale and will not fake meters.");
       return;
     }
+    restoreFloorGestureDomRef.current();
+    dragging.current = null;
+    openingDrag.current = null;
+    openingResize.current = null;
+    roomDragLiveRef.current = null;
+    roomAssemblyDraggingRef.current = false;
+    roomAssemblyPendingCommitRef.current = null;
+    finalizeFastGestureRef.current = false;
+    lastActiveGesturePointerRef.current = null;
+    latestFurnitureDragPointerRef.current = null;
+    if (furnitureDragMoveFrameRef.current !== null) cancelAnimationFrame(furnitureDragMoveFrameRef.current);
+    furnitureDragMoveFrameRef.current = null;
     setTool(next);
+    setAlignGuides([]);
+    setNavAlignGuides([]);
     setRoomTemplatePlacement(null);
     rotating.current = null;
     setFurnitureRotationFeedback(null);
@@ -7394,7 +8705,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     setWallStart(null);
     setWallPreview(null);
     setWallSnapIndicator(null);
-    setWallEqualLengthGuide(null);
+    updateWallEqualLengthGuide(null, null);
     setWallLengthMatchMode(null);
     setWallLengthMatchHoverId(null);
     setOpeningPreview(null);
@@ -7431,7 +8742,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     };
   }, [toast]);
 
-  const applyTransformedEntries = useCallback((entries: { type: FloorSelection["type"]; id: string; item: any }[]) => {
+  const applyTransformedEntries = useCallback((entries: { type: FloorSelection["type"]; id: string; item: any }[], origins?: { type: FloorSelection["type"]; id: string; origin: any }[]) => {
     const byId = new Map(entries.map((entry) => [entry.id, entry.item]));
     const changedRoomIds = new Set(entries.filter((entry) => entry.type === "room").map((entry) => entry.id));
     const transformedWallIds = new Set(entries.filter((entry) => entry.type === "wall").map((entry) => entry.id));
@@ -7446,6 +8757,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     const anchored = anchoredRoomUpdate(nextRooms, nextWalls, changedRoomIds, transformedWallIds);
     if (anchored.blocked) return false;
     nextWalls = anchored.walls;
+    const livePreviewItems = [
+      ...(origins ?? []).flatMap((entry) => {
+        const transformed = entries.find((candidate) => candidate.id === entry.id);
+        return transformed ? [{ type: entry.type, id: entry.id, origin: entry.origin, item: transformed.item }] : [];
+      }),
+      ...nextWalls.flatMap((wall, index) => wall !== walls[index] && walls[index]
+        ? [{ type: "wall", id: wall.id, origin: walls[index], item: wall }]
+        : []),
+    ];
     updFloor(
       nextRooms,
       fpaths,
@@ -7456,7 +8776,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       stairs.map((s) => byId.get(s.id) ?? s),
       elevators.map((el) => byId.get(el.id) ?? el),
       labels.map((lb) => byId.get(lb.id) ?? lb),
-      ramps.map((rp) => byId.get(rp.id) ?? rp)
+      ramps.map((rp) => byId.get(rp.id) ?? rp),
+      undefined, undefined, undefined, undefined, undefined,
+      { livePreviewItems },
     );
     return true;
   }, [rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, updFloor, anchoredRoomUpdate]);
@@ -8625,13 +9947,103 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   //   6. grid/angle snap (applied by callers before invoking these helpers)
   // The wall candidates are measured from the RAW point so endpoint/segment
   // snapping always beats boundary snapping instead of the two fighting.
+  const roomSnapEntries = useMemo(() => rooms.filter((room) => room.visible !== false).flatMap((room) => {
+    const segments = roomGuideSegments(room);
+    if (segments.length === 0) return [];
+    const xs = segments.flatMap((segment) => [segment.x1, segment.x2]);
+    const ys = segments.flatMap((segment) => [segment.y1, segment.y2]);
+    const x = Math.min(...xs), y = Math.min(...ys);
+    return [{ room, segments, x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y }];
+  }), [rooms]);
+  const wallSnapGrid = useMemo(() => buildFloorSpatialGrid(walls.map((wall) => ({
+    value: wall,
+    x: Math.min(wall.x1, wall.x2),
+    y: Math.min(wall.y1, wall.y2),
+    width: Math.abs(wall.x2 - wall.x1),
+    height: Math.abs(wall.y2 - wall.y1),
+  })), SNAP_THRESHOLD), [walls]);
+  const floorWallById = useMemo(() => new Map(walls.map((wall) => [wall.id, wall])), [walls]);
+  const equalWallLengthCandidates = useMemo(() => {
+    const byLength = new Map<number, string[]>();
+    for (const wall of walls) {
+      if (wall.managedKind === "perimeter") continue;
+      const length = wallLength(wall);
+      const ids = byLength.get(length);
+      if (ids) ids.push(wall.id);
+      else byLength.set(length, [wall.id]);
+    }
+    return Array.from(byLength, ([length, wallIds]) => ({ length, wallIds }))
+      .sort((a, b) => a.length - b.length);
+  }, [walls]);
+  const nearestCachedEqualWallLength = useCallback((candidateLength: number, excludedWallId: string) => {
+    let low = 0;
+    let high = equalWallLengthCandidates.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (equalWallLengthCandidates[middle].length < candidateLength) low = middle + 1;
+      else high = middle;
+    }
+    let best: { wallId: string; length: number; distance: number } | null = null;
+    for (const index of [low - 1, low]) {
+      const group = equalWallLengthCandidates[index];
+      if (!group) continue;
+      const wallId = group.wallIds.find((id) => id !== excludedWallId);
+      if (!wallId) continue;
+      const distance = Math.abs(group.length - candidateLength);
+      if (distance > WALL_LENGTH_SNAP_TOLERANCE) continue;
+      if (!best || distance < best.distance || (distance === best.distance && group.length < best.length)) {
+        best = { wallId, length: group.length, distance };
+      }
+    }
+    return best;
+  }, [equalWallLengthCandidates]);
+  const openingsByWall = useMemo(() => {
+    const grouped = new Map<string, Array<{ kind: OpeningKind; item: FloorDoor | FloorWindow }>>();
+    const append = (wallId: string | undefined, value: { kind: OpeningKind; item: FloorDoor | FloorWindow }) => {
+      if (!wallId) return;
+      const list = grouped.get(wallId);
+      if (list) list.push(value);
+      else grouped.set(wallId, [value]);
+    };
+    for (const door of doors) append(door.wallId, { kind: door.openingType === "open_passage" ? "open_passage" : "door", item: door });
+    for (const window of windows) append(window.wallId, { kind: "window", item: window });
+    return grouped;
+  }, [doors, windows]);
+  const openingWallSearchPadding = useMemo(
+    () => Math.max(OPENING_HIT_TOLERANCE / 0.35, ...walls.map((wall) => (wall.thickness ?? 6) * 1.5 + 12)),
+    [walls],
+  );
+  const openingWallGrid = useMemo(() => buildFloorSpatialGrid(walls.map((wall) => ({
+    value: wall,
+    x: Math.min(wall.x1, wall.x2),
+    y: Math.min(wall.y1, wall.y2),
+    width: Math.abs(wall.x2 - wall.x1),
+    height: Math.abs(wall.y2 - wall.y1),
+  })), openingWallSearchPadding), [openingWallSearchPadding, walls]);
+  const roomSnapGrid = useMemo(() => buildFloorSpatialGrid(roomSnapEntries.map((entry) => ({
+    value: entry, x: entry.x, y: entry.y, width: entry.width, height: entry.height,
+  })), SNAP_THRESHOLD), [roomSnapEntries]);
+  const cachedRoomWallIntersections = useMemo(() => {
+    const intersections: { x: number; y: number; wallId: string; roomAnchor?: FloorWallEndpointAnchor }[] = [];
+    for (const entry of roomSnapEntries) for (const roomSegment of entry.segments) for (const wall of walls) {
+      const point = segmentIntersectionPoint(wall, roomSegment);
+      if (!point) continue;
+      const anchor = roomAnchorAtPoint(entry.room, point, 0.75)?.anchor
+        ?? roomAnchorAtPoint(entry.room, point, SNAP_THRESHOLD)?.anchor;
+      intersections.push({ ...point, wallId: wall.id, roomAnchor: anchor });
+    }
+    return intersections;
+  }, [roomSnapEntries, walls]);
+  const roomIntersectionGrid = useMemo(() => buildFloorSpatialGrid(cachedRoomWallIntersections.map((entry) => ({
+    value: entry, x: entry.x, y: entry.y, width: 0, height: 0,
+  })), SNAP_THRESHOLD), [cachedRoomWallIntersections]);
   const findWallSnapTarget = useCallback((point: { x: number; y: number }, ignoreWallId?: string) => {
     let bestEndpoint: { x: number; y: number; d: number } | null = null;
     let bestIntersection: { x: number; y: number; d: number; roomAnchor?: FloorWallEndpointAnchor } | null = null;
     let bestSegment: { x: number; y: number; d: number } | null = null;
     let bestRoomCorner: { x: number; y: number; d: number; roomAnchor: FloorWallEndpointAnchor } | null = null;
     let bestRoomEdge: { x: number; y: number; d: number; edge: { x1: number; y1: number; x2: number; y2: number }; roomAnchor: FloorWallEndpointAnchor } | null = null;
-    for (const wall of walls) {
+    for (const wall of floorSpatialCandidates(wallSnapGrid, point)) {
       if (wall.id === ignoreWallId) continue;
       for (const endpoint of [{ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]) {
         const d = dist(point.x, point.y, endpoint.x, endpoint.y);
@@ -8646,32 +10058,25 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         bestSegment = { x: segmentPoint.x, y: segmentPoint.y, d: segmentDist };
       }
     }
-    for (const room of rooms) {
-      if (room.visible === false) continue;
-      const roomSegments = roomGuideSegments(room);
-      for (const roomSegment of roomSegments) {
-        for (const wall of walls) {
-          if (wall.id === ignoreWallId) continue;
-          const intersection = segmentIntersectionPoint(wall, roomSegment);
-          if (!intersection) continue;
-          const d = dist(point.x, point.y, intersection.x, intersection.y);
-          if (d > SNAP_THRESHOLD || (bestIntersection && d >= bestIntersection.d)) continue;
-          const anchor = roomAnchorAtPoint(room, intersection, 0.75)?.anchor
-            ?? roomAnchorAtPoint(room, intersection, SNAP_THRESHOLD)?.anchor;
-          bestIntersection = { ...intersection, d, roomAnchor: anchor };
-        }
-      }
+    for (const intersection of floorSpatialCandidates(roomIntersectionGrid, point)) {
+      if (intersection.wallId === ignoreWallId) continue;
+      const d = dist(point.x, point.y, intersection.x, intersection.y);
+      if (d > SNAP_THRESHOLD || (bestIntersection && d >= bestIntersection.d)) continue;
+      bestIntersection = { x: intersection.x, y: intersection.y, d, roomAnchor: intersection.roomAnchor };
+    }
+    for (const entry of floorSpatialCandidates(roomSnapGrid, point)) {
+      const { room, segments } = entry;
       const roomAnchor = roomAnchorAtPoint(room, point, SNAP_THRESHOLD);
       if (!roomAnchor) continue;
       if (roomAnchor.anchor.offset === 0 || roomAnchor.anchor.offset === 1) {
         if (!bestRoomCorner || roomAnchor.d < bestRoomCorner.d) bestRoomCorner = { ...roomAnchor, roomAnchor: roomAnchor.anchor };
       } else {
-        const edge = roomGuideSegments(room).find((segment) => segment.edge === roomAnchor.anchor.edge)!;
+        const edge = segments.find((segment) => segment.edge === roomAnchor.anchor.edge)!;
         if (!bestRoomEdge || roomAnchor.d < bestRoomEdge.d) bestRoomEdge = { ...roomAnchor, edge, roomAnchor: roomAnchor.anchor };
       }
     }
     return bestEndpoint ?? bestIntersection ?? bestSegment ?? bestRoomCorner ?? bestRoomEdge ?? null;
-  }, [walls, rooms]);
+  }, [roomIntersectionGrid, roomSnapGrid, wallSnapGrid]);
 
   const snapFloorPoint = useCallback((point: { x: number; y: number }, ignoreWallId?: string) => {
     const wallSnap = findWallSnapTarget(point, ignoreWallId);
@@ -8689,7 +10094,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const findWallEndpointSnap = useCallback((point: { x: number; y: number }, ignoreWallId?: string) => {
     const maxDistance = Math.min(SNAP_THRESHOLD, 6);
     let best: (WallSnapTarget & { d: number }) | null = null;
-    for (const wall of walls) {
+    for (const wall of floorSpatialCandidates(wallSnapGrid, point)) {
       if (wall.id === ignoreWallId) continue;
       for (const endpoint of [{ x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }]) {
         const d = dist(point.x, point.y, endpoint.x, endpoint.y);
@@ -8697,7 +10102,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
     }
     return best;
-  }, [walls]);
+  }, [wallSnapGrid]);
 
   // Resolve an endpoint that is simultaneously axis-aligned with its fixed
   // endpoint and attached to another wall. Structural snapping used to win
@@ -8709,7 +10114,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     ignoreWallId?: string,
   ): WallSnapTarget | null => {
     let best: (WallSnapTarget & { d: number }) | null = null;
-    for (const wall of walls) {
+    for (const wall of floorSpatialCandidates(wallSnapGrid, raw)) {
       if (wall.id === ignoreWallId) continue;
       const dx = wall.x2 - wall.x1;
       const dy = wall.y2 - wall.y1;
@@ -8729,7 +10134,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (d <= SNAP_THRESHOLD * 1.5 && (!best || d < best.d)) best = { ...point, guide: axis, d };
     }
     return best;
-  }, [walls]);
+  }, [wallSnapGrid]);
 
   const resolveShiftWallCursor = useCallback((
     raw: { x: number; y: number },
@@ -8941,7 +10346,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const openingWallTarget = useCallback((point: { x: number; y: number }, type: "door" | "open_passage" | "window") => {
     const width = type === "window" ? WINDOW_DEFAULT_WIDTH : DOOR_DEFAULT_WIDTH;
     let best: { wall: FloorWall; x: number; y: number; offset: number; width: number; angle: number; d: number } | null = null;
-    for (const wall of walls) {
+    for (const wall of floorSpatialCandidates(openingWallGrid, point)) {
       if (wall.visible === false) continue;
       const nearest = nearestPointOnWall(point, wall);
       const len = Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
@@ -8956,7 +10361,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (!best || nearest.d < best.d) best = { wall, x, y, offset, width: clampedWidth, angle, d: nearest.d };
     }
     return best;
-  }, [walls, zoom]);
+  }, [openingWallGrid, zoom]);
 
   // B5 Phase 2.11: LIVE validity of every existing indoor edge — the same strict
   // thick-wall model as Connect creation, recomputed against the CURRENT nodes
@@ -9228,6 +10633,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const buildingFloors = useMemo(
     () => (campus.buildings ?? []).find((b) => b.id === buildingId)?.floors ?? [],
     [buildingId, campus.buildings]
+  );
+  const buildingFloorsForPanel = useMemo(
+    () => buildingFloors.map((f) => ({ id: f.id, label: f.label, number: f.number })),
+    [buildingFloors],
   );
 
   const activeFloorIndex = buildingFloors.findIndex((f) => f.id === floorId);
@@ -10143,6 +11552,110 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       y: Math.max(renderFloorShapeBounds.y - EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.min(renderFloorShapeBounds.y + renderFloorShapeBounds.height + EXTERIOR_ZONE_WORKSPACE_MARGIN, Math.round(pt.y))),
     };
   };
+  const setPhysicalMarqueeRect = (rect: { x: number; y: number; w: number; h: number } | null) => {
+    const node = physicalMarqueeRectRef.current;
+    if (!node) return;
+    if (!rect) {
+      node.setAttribute("visibility", "hidden");
+      return;
+    }
+    node.setAttribute("x", String(rect.x));
+    node.setAttribute("y", String(rect.y));
+    node.setAttribute("width", String(rect.w));
+    node.setAttribute("height", String(rect.h));
+    node.setAttribute("visibility", "visible");
+  };
+  const updatePhysicalMarqueePoint = (point: { x: number; y: number }) => {
+    const gesture = physicalMarqueeGestureRef.current;
+    if (!gesture) return;
+    gesture.cx = point.x;
+    gesture.cy = point.y;
+    setPhysicalMarqueeRect({
+      x: Math.min(gesture.sx, gesture.cx),
+      y: Math.min(gesture.sy, gesture.cy),
+      w: Math.abs(gesture.cx - gesture.sx),
+      h: Math.abs(gesture.cy - gesture.sy),
+    });
+  };
+  const queuePhysicalMarqueeMove = (event: MouseEvent) => {
+    if (!physicalMarqueeGestureRef.current) return;
+    latestPhysicalMarqueePointerRef.current = event;
+    if (physicalMarqueeFrameRef.current !== null) return;
+    physicalMarqueeFrameRef.current = requestAnimationFrame(() => {
+      physicalMarqueeFrameRef.current = null;
+      const latest = latestPhysicalMarqueePointerRef.current;
+      latestPhysicalMarqueePointerRef.current = null;
+      if (latest && physicalMarqueeGestureRef.current) updatePhysicalMarqueePoint(navPointFromEvent(latest));
+    });
+  };
+  const beginPhysicalMarquee = (point: { x: number; y: number }) => {
+    physicalMarqueeRef.current = true;
+    physicalMarqueeGestureRef.current = {
+      sx: point.x,
+      sy: point.y,
+      cx: point.x,
+      cy: point.y,
+      selectable: selectableFloorBounds(floor),
+    };
+    setPhysicalMarqueeRect({ x: point.x, y: point.y, w: 0, h: 0 });
+  };
+  const cancelPhysicalMarquee = () => {
+    if (physicalMarqueeFrameRef.current !== null) cancelAnimationFrame(physicalMarqueeFrameRef.current);
+    physicalMarqueeFrameRef.current = null;
+    latestPhysicalMarqueePointerRef.current = null;
+    physicalMarqueeGestureRef.current = null;
+    physicalMarqueeRef.current = false;
+    setPhysicalMarqueeRect(null);
+  };
+  const finishPhysicalMarquee = (event?: MouseEvent | React.MouseEvent) => {
+    const gesture = physicalMarqueeGestureRef.current;
+    if (!gesture) return false;
+    if (physicalMarqueeFrameRef.current !== null) cancelAnimationFrame(physicalMarqueeFrameRef.current);
+    physicalMarqueeFrameRef.current = null;
+    const latest = event ? ("nativeEvent" in event ? event.nativeEvent : event) : latestPhysicalMarqueePointerRef.current;
+    latestPhysicalMarqueePointerRef.current = null;
+    if (latest) updatePhysicalMarqueePoint(navPointFromEvent(latest));
+    const rect = {
+      x: Math.min(gesture.sx, gesture.cx),
+      y: Math.min(gesture.sy, gesture.cy),
+      w: Math.abs(gesture.cx - gesture.sx),
+      h: Math.abs(gesture.cy - gesture.sy),
+    };
+    const captured = rect.w >= 3 || rect.h >= 3
+      ? selectionIdsInCachedBounds(gesture.selectable, rect)
+      : [];
+    physicalMarqueeGestureRef.current = null;
+    physicalMarqueeRef.current = false;
+    setPhysicalMarqueeRect(null);
+    if (navMode && navTool === "select") {
+      setNavSelected(null);
+      setNavMultiSelected([]);
+      setNavPhysicalSelected(null);
+      setNavSelectedBend(null);
+      setNavSegmentHover(null);
+    }
+    if (captured.length > 1) {
+      setMultiSelected(captured);
+      setSelected(null);
+      setShowProperties(true);
+    } else if (captured.length === 1) {
+      setMultiSelected([]);
+      selectFloorItem(selectionForId(captured[0]));
+    } else {
+      setMultiSelected([]);
+      setSelected(null);
+      setShowProperties(true);
+    }
+    return true;
+  };
+  physicalMarqueeWindowHandlersRef.current = {
+    move: queuePhysicalMarqueeMove,
+    up: (event) => { finishPhysicalMarquee(event); },
+    cancel: cancelPhysicalMarquee,
+  };
+  useEffect(() => {
+    if (tool !== "select" || floorId !== floor.id) physicalMarqueeWindowHandlersRef.current.cancel();
+  }, [floorId, floor.id, tool]);
   // Navigation targets look the same size on screen at every camera zoom.
   // Convert the intended 12px interaction radius with the live camera refs so
   // an in-flight zoom cannot temporarily enlarge the snap radius.
@@ -10667,6 +12180,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
     }
     navDragRef.current = { ids, origins, edgeOrigins, sx: pt.x, sy: pt.y };
+    beginNavGesturePreview(ids, indoorEdges.filter((edge) => ids.includes(edge.startNodeId) || ids.includes(edge.endNodeId)).map((edge) => edge.id));
   };
 
   // ── B5 correction: empty-space drag surface inside the nav group outline ──
@@ -10705,6 +12219,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
     }
     navDragRef.current = { ids: freeIds, origins, edgeOrigins, sx: pt.x, sy: pt.y };
+    beginNavGesturePreview(freeIds, indoorEdges.filter((edge) => freeIds.includes(edge.startNodeId) || freeIds.includes(edge.endNodeId)).map((edge) => edge.id));
   };
 
   const handleNavEdgeDown = (e: React.MouseEvent, edge: NavigationEdge) => {
@@ -10808,6 +12323,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             isHorizontal: p0.y === p1.y || (diagonal && Math.abs(p1.x - p0.x) >= Math.abs(p1.y - p0.y)),
             isDiagonal: diagonal,
           };
+          beginNavGesturePreview([], [edge.id]);
           return;
         }
       }
@@ -10853,14 +12369,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         ? resolveConnectPathTargetPoint(source, nearest, segmentStart, segmentEnd)
         : nearest;
       // This exact resolved point drives both the preview and the click commit.
-      setNavPathTargetHover((previous) => previous?.edgeId === edge.id
-        && previous.index === hit.nearest.segIndex
-        && Math.abs(previous.point.x - resolvedPoint.x) < 0.25
-        && Math.abs(previous.point.y - resolvedPoint.y) < 0.25
-        ? previous
-        : { edgeId: edge.id, index: hit.nearest.segIndex, point: resolvedPoint });
-      setNavPreview((previous) => previous && Math.abs(previous.x - resolvedPoint.x) < 0.25 && Math.abs(previous.y - resolvedPoint.y) < 0.25
-        ? previous : resolvedPoint);
+      updateNavConnectLive(resolvedPoint, null, null, resolvedPoint);
       setNavSegmentHover(null);
       return;
     }
@@ -10904,6 +12413,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     navBendDragRef.current = { edgeId: edge.id, index, ox: orig.x, oy: orig.y };
+    beginNavGesturePreview([], [edge.id]);
     setNavSelected({ type: "edge", id: edge.id });
     setNavSelectedBend({ edgeId: edge.id, index });
     setShowProperties(true);
@@ -10962,6 +12472,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [showNavOverlay, toggleNavigation]);
 
   const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    clearNavGesturePreview();
+    clearNavConnectLive();
+    updateNavPlacementLive(null);
+    updateNavEdgeSnapLive(null);
     cancelPendingNavHoverMove();
     cancelPendingNavEdgeHover();
     setRoomTemplatePlacement(null);
@@ -11855,6 +13369,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setNavConnectStart(startId);
       const startNode = indoorNodes.find((n) => n.id === startId);
       setNavPreview({ x: startNode?.x ?? result.node.x, y: startNode?.y ?? result.node.y });
+      setNavTargetHover(null);
+      setNavNodeHover(null);
       setNavSelected({ type: "node", id: startId });
       return;
     }
@@ -12095,28 +13611,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const insideFloor = floorShapeContainsPoint(renderFloorShapeRegions, pt.x, pt.y);
       const hostZone = walkableExteriorZoneAtPoint(pt, exteriorZones, FP_W, FP_H);
       if (!insideFloor && !hostZone) {
-        setNavDragPreview(null);
-        setNavDragBlocked(pt);
+        updateNavPlacementLive(pt, true);
         setNavTargetHover(null);
         return;
       }
       // B5 Phase 2.3: free placement is blocked on linked-location semantic
       // targets — show a not-allowed preview instead of a green ghost.
       const blocked = linkedPlacementBlockAt(pt, rooms, doors, stairs, elevators, ramps);
-      if (blocked) {
-        setNavDragPreview(null);
-        setNavDragBlocked(pt);
-      } else {
-        setNavDragPreview(pt);
-        setNavDragBlocked(null);
-      }
+      updateNavPlacementLive(pt, Boolean(blocked));
       setNavTargetHover(null);
       return;
     }
     // B5 Phase 2.2: linked kinds are not draggable — the unified Link Location
     // tool (click-to-target) replaces the old per-kind drag items.
-    setNavDragPreview(null);
-    setNavDragBlocked(null);
+    updateNavPlacementLive(null);
     setNavTargetHover(null);
   }, [doors, elevators, ramps, rooms, stairs, renderFloorShapeRegions, renderFloorShapeBounds.x, renderFloorShapeBounds.y, renderFloorShapeBounds.width, renderFloorShapeBounds.height, FP_W, FP_H]);
 
@@ -12124,6 +13632,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     e.preventDefault();
     const kind = navLibraryDragRef.current;
     navLibraryDragRef.current = null;
+    updateNavPlacementLive(null);
     setNavDragPreview(null);
     setNavDragBlocked(null);
     setNavTargetHover(null);
@@ -12625,18 +14134,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           setRubberBand(null);
           return;
         }
-        // Navigation selections live in a separate state domain from floor
-        // objects.  Clear both domains together when Select is used on empty
-        // canvas; otherwise a nav node/edge can keep the Properties panel open
-        // after its visible highlight is gone.  Exclusive navigation tools are
-        // handled by handleNavSvgDown above and never reach this branch.
-        if (navMode && navTool === "select") {
-          setNavSelected(null);
-          setNavMultiSelected([]);
-          setNavPhysicalSelected(null);
-          setNavSelectedBend(null);
-          setNavSegmentHover(null);
-        }
         if (
           !e.shiftKey &&
           multiBounds &&
@@ -12663,13 +14160,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             return;
           }
         }
-        if (!e.shiftKey) {
-          setSelected(null);
-          setMultiSelected([]);
-          setShowProperties(navMode && navTool === "select" ? false : true);
-        }
         const workspacePoint = navPointFromEvent(e);
-        setRubberBand({ sx: workspacePoint.x, sy: workspacePoint.y, cx: workspacePoint.x, cy: workspacePoint.y });
+        beginPhysicalMarquee(workspacePoint);
       }
       if (isBg && tool === "erase" && !e.shiftKey) { setSelected(null); setShowProperties(true); }
       return;
@@ -12686,7 +14178,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (!wallStart) {
         const resolved = wallStartCursor(raw);
         setWallStart(resolved.point);
-        setWallSnapIndicator(resolved.indicator ?? null);
+        updateWallSnapPreview(resolved.indicator ?? null);
       } else {
         // Complete the wall — resolve the endpoint with the same live snapping
         // as the preview so the committed geometry terminates at the EXACT snap
@@ -12719,7 +14211,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
 
     if (tool === "room") {
-      setRoomDrag({ sx: clamped.x, sy: clamped.y, cx: clamped.x, cy: clamped.y });
+      beginRoomPlacementPreview(clamped);
       return;
     }
 
@@ -12922,12 +14414,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
 
     if (tool === "stairs" || tool === "ramp") {
-      setRoomDrag({ sx: clamped.x, sy: clamped.y, cx: clamped.x, cy: clamped.y });
+      beginRoomPlacementPreview(clamped);
       return;
     }
 
     if (tool === "elevator") {
-      setRoomDrag({ sx: clamped.x, sy: clamped.y, cx: clamped.x, cy: clamped.y });
+      beginRoomPlacementPreview(clamped);
       return;
     }
 
@@ -12949,6 +14441,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       updFloor(rooms, fpaths, walls, doors, windows, [...furniture, newItem]);
+      updateFurniturePlacementOverlay(null);
       setRecentFurnitureTypes((current) => addRecentFurnitureType(current, furnitureTemplate.type));
       selectFloorItem({ type: "furniture", id: newItem.id });
       setFurniturePlacementPreview(null);
@@ -13000,9 +14493,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // These interactions render pointer-following authored geometry. Ordinary
     // cursor movement only updates the tiny readout above and must not rerender
     // the full Floor scene.
-    if (calibrationDraft.active || tool === "measure" || roomTemplatePlacement) {
+    if (calibrationDraft.active || tool === "measure") {
       setCursorPos({ x: Math.round(pt.x), y: Math.round(pt.y) });
     }
+    if (roomTemplatePlacement) updateRoomTemplatePlacementDom(pt);
     const boundedPt = clampFloorShapePoint({ x: Math.round(pt.x), y: Math.round(pt.y) });
 
     if (roomShapeDrag.current) {
@@ -13074,10 +14568,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (movedPx < LOCKED_MARQUEE_THRESHOLD_PX) return;
       lockedSelectionCandidateRef.current = null;
       physicalMarqueeRef.current = true;
-      setSelected(null);
-      setMultiSelected([]);
-      setShowProperties(true);
-      setRubberBand({ sx: candidate.sx, sy: candidate.sy, cx: boundedPt.x, cy: boundedPt.y });
+      beginPhysicalMarquee({ x: candidate.sx, y: candidate.sy });
+      queuePhysicalMarqueeMove(e as MouseEvent);
       return;
     }
 
@@ -13109,8 +14601,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // before clicking to place it.
     if (tool === "furniture" && furnitureTemplate && !dragging.current && !resizing.current && !furnitureResizing.current && !rotating.current && !roomDrag && !localApproachDragging.current && !localApproachResizing.current && !exteriorZoneDragging.current && !exteriorZoneResizing.current) {
       const preview = furniturePlacementCandidateAtPoint(pt, furnitureTemplate);
-      setFurniturePlacementPreview(preview);
-      setAlignGuides(preview.guides);
+      updateFurniturePlacementOverlay(preview);
+      renderFloorGuidesImperatively(preview.guides);
       return;
     }
 
@@ -13497,6 +14989,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
 
     if (navMode) {
+      const navGeometryGesture = Boolean(navDragRef.current || navBendDragRef.current || navSegDragRef.current);
       // Navigation authoring is allowed in explicit walkable exterior zones as
       // well as the indoor rectangle.  `boundedPt` is intentionally retained
       // for physical-floor tools below, but must never be used as a Connect
@@ -13507,22 +15000,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // is active, so marquee + group drags are unaffected.
       movePan(e);
       // Connect preview follows the pointer; authoring targets highlight live.
-      if (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link") {
+      if (!navGeometryGesture && (navTool === "waypoint" || navTool === "destination" || navTool === "connect" || navTool === "link")) {
         const resolvedTarget = resolveNavTargetAt(navWorkspacePt, { includeRoom: navTool === "link" });
-        setNavTargetHover((previous) => previous?.kind === resolvedTarget?.kind && previous?.id === resolvedTarget?.id
-          && previous?.x === resolvedTarget?.x && previous?.y === resolvedTarget?.y
-          ? previous : resolvedTarget);
-      } else {
+        // Once Connect has a start, its live target ring/path are rendered in
+        // the stable imperative interaction layer. Updating React hover state
+        // for every target transition needlessly rerenders the Floor scene.
+        if (!(navTool === "connect" && navConnectStart)) {
+          setNavTargetHover((previous) => previous?.kind === resolvedTarget?.kind && previous?.id === resolvedTarget?.id
+            && previous?.x === resolvedTarget?.x && previous?.y === resolvedTarget?.y
+            ? previous : resolvedTarget);
+        }
+      } else if (!navGeometryGesture) {
         setNavTargetHover(null);
       }
       // B5 Phase 6.4: detect edge snap for waypoint insertion in Floor Editor
-      if (navTool === "waypoint" || navTool === "destination") {
+      if (!navGeometryGesture && (navTool === "waypoint" || navTool === "destination")) {
         const edgeHit = findIndexedNavEdgeAtPoint(editableWaypointHitIndex, pt, navHitRadiusWorld());
-        setFloorEdgeSnap(edgeHit ? { edgeId: edgeHit.edge.id, nearest: edgeHit.nearest } : null);
-      } else {
+        updateNavEdgeSnapLive(edgeHit?.nearest ?? null);
+        const placementPoint = edgeHit?.nearest ?? navWorkspacePt;
+        const inside = floorShapeContainsPoint(renderFloorShapeRegions, placementPoint.x, placementPoint.y)
+          || Boolean(walkableExteriorZoneAtPoint(placementPoint, exteriorZones, FP_W, FP_H));
+        updateNavPlacementLive(placementPoint, !inside || Boolean(linkedPlacementBlockAt(placementPoint, rooms, doors, stairs, elevators, ramps)));
+      } else if (!navGeometryGesture) {
         setFloorEdgeSnap(null);
+        updateNavEdgeSnapLive(null);
       }
-      if (navConnectStart) {
+      if (!navGeometryGesture && navConnectStart) {
         const startNode = indoorNodes.find((node) => node.id === navConnectStart);
         // Resolve the live pointer target directly as well as from hover state.
         // Mouse-enter state can lag one render behind a fast Connect move (and
@@ -13546,7 +15049,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             8,
             new Set([startNode.id]),
           );
-          setNavPreviewIfChanged({ x: targetNode.x, y: targetNode.y });
+          updateNavConnectLive({ x: targetNode.x, y: targetNode.y }, targetNode, livePhysicalTarget);
           setNavAlignGuidesIfChanged(aligned.guides);
         } else if (startNode) {
           // Empty-space Connect uses the same pin helper as click/commit, so
@@ -13564,10 +15067,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             hostedZone ? undefined : renderFloorShapeRegions,
           );
           const previewPoint = geo.pins[geo.pins.length - 1] ?? candidate;
-          setNavPreviewIfChanged(previewPoint);
+          updateNavConnectLive(previewPoint, null, livePhysicalTarget);
           setNavAlignGuidesIfChanged(geo.snapped ? geo.guides : []);
         } else {
-          setNavPreviewIfChanged(navWorkspacePt);
+          updateNavConnectLive(navWorkspacePt, null, livePhysicalTarget);
           setNavAlignGuidesIfChanged([]);
         }
       }
@@ -13656,7 +15159,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           }
           return;
         }
-        commitNavGraph(
+        previewNavGraph(
           indoorNodes,
           indoorEdges.map((ed) => (ed.id === segDrag.edgeId ? { ...ed, bendPoints: nextBends } : ed))
         );
@@ -13753,7 +15256,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           }
           return;
         }
-        commitNavGraph(indoorNodes, nextEdges);
+        previewNavGraph(indoorNodes, nextEdges);
         return;
       }
       // Free-waypoint group drag — edges follow derived node positions.
@@ -13882,7 +15385,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               )
             : translated;
         });
-        commitNavGraph(nextNodes, nextEdges);
+        previewNavGraph(nextNodes, nextEdges);
         return;
       }
       // Navigation visibility alone must not own the physical pointer stream.
@@ -13897,7 +15400,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const openingType = tool === "open-passage" ? "open_passage" as const : tool;
       const target = openingWallTarget(pt, openingType);
       if (!target) {
-        setOpeningPreview(null);
+        updateOpeningPlacementPreview(null);
       } else {
         const candidate = tool === "door"
           ? {
@@ -13934,21 +15437,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               height: 4,
               color: "#0284c7",
             };
-        const reason = wallOpeningCollisionReason(candidate, doors, windows, walls);
-        setOpeningPreview({
-          type: openingType,
-          wallId: target.wall.id,
-          x: target.x,
-          y: target.y,
-          offset: target.offset,
-          width: target.width,
-          angle: target.angle,
-          valid: !reason,
-          reason,
+        const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, undefined, openingsByWall, floorWallById);
+        updateOpeningPlacementPreview({
+          type: openingType, x: target.x, y: target.y, angle: target.angle,
+          width: target.width, wallThickness: target.wall.thickness ?? 6, valid: !reason,
         });
       }
     } else if (openingPreview) {
       setOpeningPreview(null);
+      updateOpeningPlacementPreview(null);
     }
 
     if (rubberBand) {
@@ -13997,7 +15494,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // Restrained navigation guide (same subtle accent line used when a
       // Walking Point or nav-linked object aligns) — the door's derived anchor
       // is lining up with a connected/nearby routing node axis.
-      setNavAlignGuides(doorAlignment.guides);
+      if (finalizeFastGestureRef.current) setNavAlignGuides(doorAlignment.guides);
       const length = Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1);
       if (length < OPENING_MIN_WIDTH) return;
       const minWidth = state.type !== "window" ? doorMinWidth(effectiveDoorType(state.origin as FloorDoor)) : OPENING_MIN_WIDTH;
@@ -14010,7 +15507,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const candidate = state.type !== "window"
         ? { ...state.origin as FloorDoor, x, y, wallId: wall.id, offset, width: Math.round(width) }
         : { ...state.origin as FloorWindow, x, y, wallId: wall.id, offset, width: Math.round(width) };
-      const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id);
+      const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id, openingsByWall, floorWallById);
       if (reason) {
         setOpeningPreview({
           type: state.type,
@@ -14035,23 +15532,35 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
       setOpeningPreview(null);
       if (Math.abs((state.origin.offset ?? 0) - offset) > 0.001 || state.origin.x !== x || state.origin.y !== y) gestureMoved.current = true;
+      if (!finalizeFastGestureRef.current) {
+        if (state.type !== "window" && openingNavNodeIdsRef.current.length > 0) {
+          previewNavNodePositions(new Map(openingNavNodeIdsRef.current.map((id) => [id, { x: Math.round(x), y: Math.round(y) }])));
+        }
+        floorGestureDomPreviewRef.current([{
+          type: state.type === "window" ? "window" : "door",
+          id: state.id,
+          origin: state.origin,
+          item: { ...candidate, rotation: (Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) * 180) / Math.PI },
+        }]);
+        return;
+      }
       const preserveOpeningGeometry = roomCenterSnapped && state.type === "window";
       if (state.type !== "window") {
         updFloor(
           rooms, fpaths, walls,
-          doors.map((door) => door.id === state.id ? { ...door, x, y, offset, width: Math.round(width) } : door),
+          doors.map((door) => door.id === state.id ? { ...door, x, y, wallId: wall.id, offset, width: Math.round(width) } : door),
           windows,
           undefined, undefined, undefined, undefined, undefined,
           undefined, undefined, undefined, undefined, undefined,
-          { preserveOpeningGeometry },
+          { preserveOpeningGeometry, livePreviewItems: [{ type: "door", id: state.id, origin: state.origin, item: candidate }] },
         );
       } else {
         updFloor(
           rooms, fpaths, walls, doors,
-          windows.map((win) => win.id === state.id ? { ...win, x, y, offset, width: Math.round(width) } : win),
+          windows.map((win) => win.id === state.id ? { ...win, x, y, wallId: wall.id, offset, width: Math.round(width) } : win),
           undefined, undefined, undefined, undefined, undefined,
           undefined, undefined, undefined, undefined, undefined,
-          { preserveOpeningGeometry },
+          { preserveOpeningGeometry, livePreviewItems: [{ type: "window", id: state.id, origin: state.origin, item: candidate }] },
         );
       }
       return;
@@ -14080,7 +15589,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const candidate = state.type !== "window"
         ? { ...state.origin as FloorDoor, x, y, wallId: wall.id, offset, width: Math.round(width) }
         : { ...state.origin as FloorWindow, x, y, wallId: wall.id, offset, width: Math.round(width) };
-      const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id);
+      const reason = wallOpeningCollisionReason(candidate, doors, windows, walls, state.id, openingsByWall, floorWallById);
       if (reason) {
         setOpeningPreview({
           type: state.type,
@@ -14105,10 +15614,26 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       }
       setOpeningPreview(null);
       if (Math.abs(state.origin.width - width) > 0.5 || Math.abs((state.origin.offset ?? 0.5) - offset) > 0.001) gestureMoved.current = true;
+      if (!finalizeFastGestureRef.current) {
+        if (state.type !== "window" && openingNavNodeIdsRef.current.length > 0) {
+          previewNavNodePositions(new Map(openingNavNodeIdsRef.current.map((id) => [id, { x: Math.round(x), y: Math.round(y) }])));
+        }
+        floorGestureDomPreviewRef.current([{
+          type: state.type === "window" ? "window" : "door",
+          id: state.id,
+          origin: state.origin,
+          item: { ...candidate, rotation: (Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) * 180) / Math.PI },
+        }]);
+        return;
+      }
       if (state.type !== "window") {
-        updFloor(rooms, fpaths, walls, doors.map((door) => door.id === state.id ? { ...door, x, y, offset, width: Math.round(width) } : door), windows);
+        updFloor(rooms, fpaths, walls, doors.map((door) => door.id === state.id ? candidate as FloorDoor : door), windows,
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "door", id: state.id, origin: state.origin, item: candidate }] });
       } else {
-        updFloor(rooms, fpaths, walls, doors, windows.map((win) => win.id === state.id ? { ...win, x, y, offset, width: Math.round(width) } : win));
+        updFloor(rooms, fpaths, walls, doors, windows.map((win) => win.id === state.id ? candidate as FloorWindow : win),
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "window", id: state.id, origin: state.origin, item: candidate }] });
       }
       return;
     }
@@ -14117,8 +15642,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // grid/angle assistance; otherwise grid + 45° angle assistance apply.
     if (wallStart && tool === "wall") {
       const resolved = wallDrawCursor({ x: pt.x, y: pt.y }, e.shiftKey);
-      setWallPreview(resolved.point);
-      setWallSnapIndicator(resolved.indicator ?? null);
+      updateWallDrawPreview(wallStart, resolved.point);
       return;
     }
 
@@ -14129,7 +15653,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // editing. Falls through: nothing else is active before the first click.
     if (tool === "wall" && !wallStart) {
       const resolved = wallStartCursor({ x: pt.x, y: pt.y });
-      setWallSnapIndicator(resolved.indicator ?? null);
+      updateWallSnapPreview(resolved.indicator ?? null);
+      return;
     }
 
     // Wall endpoint editing: free movement by default (drag an endpoint away to
@@ -14138,16 +15663,27 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // holds 15° angle assistance around the fixed endpoint.
     if (wallEndpointDrag.current) {
       const ep = wallEndpointDrag.current;
-      const resolved = wallEndpointCursor({ x: pt.x, y: pt.y }, e.shiftKey, ep);
+      const rawPointer = { x: pt.x, y: pt.y };
+      const snapLock = !e.shiftKey ? wallEndpointSnapLockRef.current : null;
+      let resolved: ReturnType<typeof wallEndpointCursor>;
+      if (snapLock && dist(rawPointer.x, rawPointer.y, snapLock.point.x, snapLock.point.y) <= SNAP_THRESHOLD + 2) {
+        resolved = { point: snapLock.point, indicator: snapLock.indicator, structural: true };
+      } else {
+        wallEndpointSnapLockRef.current = null;
+        resolved = wallEndpointCursor(rawPointer, e.shiftKey, ep);
+        if (!e.shiftKey && resolved.structural && resolved.indicator?.structural) {
+          wallEndpointSnapLockRef.current = { point: { ...resolved.point }, indicator: { ...resolved.indicator } };
+        }
+      }
       const hardAxisLocked = Boolean((resolved as { axisLocked?: "h" | "v" }).axisLocked);
       let resolvedPoint = resolved.point;
-      let equalTarget: ReturnType<typeof nearestEqualWallLength> = null;
+      let equalTarget: ReturnType<typeof nearestCachedEqualWallLength> = null;
       if (!resolved.structural && edgeSnapOn && !hardAxisLocked) {
         const candidateLength = Math.hypot(
           resolved.point.x - (ep.endpoint === "x1" ? ep.origin.x2 : ep.origin.x1),
           resolved.point.y - (ep.endpoint === "x1" ? ep.origin.y2 : ep.origin.y1),
         );
-        equalTarget = nearestEqualWallLength(walls, candidateLength, ep.wallId, WALL_LENGTH_SNAP_TOLERANCE);
+        equalTarget = nearestCachedEqualWallLength(candidateLength, ep.wallId);
         if (equalTarget) {
           const equalWall = resizeWallToLength(ep.origin, equalTarget.length, ep.endpoint === "x1" ? "end" : "start");
           resolvedPoint = ep.endpoint === "x1"
@@ -14155,14 +15691,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             : { x: equalWall.x2, y: equalWall.y2 };
         }
       }
-      setWallEqualLengthGuide(equalTarget ? { wallId: ep.wallId, sourceWallId: equalTarget.wallId, length: equalTarget.length } : null);
-      setWallSnapIndicator(resolvedPoint.x === resolved.point.x && resolvedPoint.y === resolved.point.y
+      updateWallSnapPreview(resolvedPoint.x === resolved.point.x && resolvedPoint.y === resolved.point.y
         ? resolved.indicator
         : { ...(resolved.indicator ?? resolvedPoint), x: resolvedPoint.x, y: resolvedPoint.y });
       const resolvedRoomAnchor = (resolved.indicator as WallSnapTarget | null | undefined)?.roomAnchor;
       const clampedX = resolvedPoint.x;
       const clampedY = resolvedPoint.y;
-      const currentWall = walls.find((candidate) => candidate.id === ep.wallId);
+      const currentWall = floorWallById.get(ep.wallId);
       const candidateWall = currentWall
         ? ep.endpoint === "x1"
           ? { ...currentWall, x1: clampedX, y1: clampedY }
@@ -14173,12 +15708,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         { x: candidateWall.x1, y: candidateWall.y1 },
         { x: candidateWall.x2, y: candidateWall.y2 },
       )) {
-        setWallEqualLengthGuide(null);
+        updateWallEqualLengthGuide(null, null);
         return;
       }
       const openingIssue = currentWall && candidateWall ? wallLengthOpeningIssue(currentWall, candidateWall) : undefined;
       if (openingIssue) {
-        setWallEqualLengthGuide(null);
+        updateWallEqualLengthGuide(null, null);
         if (!wallEndpointOpeningWarnedRef.current) {
           wallEndpointOpeningWarnedRef.current = true;
           toast.warning("Wall is too short", openingIssue);
@@ -14188,16 +15723,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       wallEndpointOpeningWarnedRef.current = false;
       const originPt = ep.endpoint === "x1" ? { x: ep.origin.x1, y: ep.origin.y1 } : { x: ep.origin.x2, y: ep.origin.y2 };
       if (originPt.x !== clampedX || originPt.y !== clampedY) gestureMoved.current = true;
-      // Update the wall endpoint in real time
-      updFloor(rooms, fpaths,
-        walls.map((w) => {
-          if (w.id !== ep.wallId) return w;
-          const edited = ep.endpoint === "x1"
-            ? { ...w, x1: clampedX, y1: clampedY, startAnchor: resolvedRoomAnchor }
-            : { ...w, x2: clampedX, y2: clampedY, endAnchor: resolvedRoomAnchor };
-          return normalizeWallRoomAnchors(edited, rooms);
-        })
-      );
+      const edited = ep.endpoint === "x1"
+        ? { ...ep.origin, x1: clampedX, y1: clampedY, startAnchor: resolvedRoomAnchor }
+        : { ...ep.origin, x2: clampedX, y2: clampedY, endAnchor: resolvedRoomAnchor };
+      wallEndpointPendingRef.current = edited;
+      updateWallEndpointPreview(edited);
+      updateWallEqualLengthGuide(edited, equalTarget?.length ?? null, equalTarget?.wallId);
       return;
     }
 
@@ -14228,11 +15759,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         const guideResult = edgeSnapOn
           ? computeRoomAlignmentGuides({ x: snapped.x, y: snapped.y, w: rw, h: rh }, rooms, false, alignmentSnapThreshold)
           : alignment;
-        if (guideResult.guides.length > 0) {
-          setAlignGuides(guideResult.guides);
-        } else {
-          setAlignGuides([]);
-        }
+        renderFloorGuidesImperatively(guideResult.guides);
       } else {
         // Stairs/ramp/elevator: alignment snap against all objects
         const minW = tool === "elevator" ? 14 : 16;
@@ -14241,7 +15768,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         const rh = Math.max(Math.abs(cy - roomDrag.sy), minH);
         const rx = Math.min(roomDrag.sx, cx);
         const ry = Math.min(roomDrag.sy, cy);
-        const refs = collectAlignRefs();
+        const refs = floorGestureAlignmentRefs(new Set());
         const alignResult = computeAlignmentGuides({ x: rx, y: ry, w: rw, h: rh }, refs, alignmentSnapThreshold);
         if (edgeSnapOn && (alignResult.snappedX !== rx || alignResult.snappedY !== ry)) {
           const dsx = alignResult.snappedX - rx;
@@ -14249,13 +15776,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           cx = Math.round(cx + dsx);
           cy = Math.round(cy + dsy);
         }
-       if (alignResult.guides.length > 0) {
-         setAlignGuidesSmooth(compactAlignmentGuides(alignResult.guides));
-        } else {
-         setAlignGuidesSmooth([]);
-        }
+        renderFloorGuidesImperatively(compactAlignmentGuides(alignResult.guides));
       }
-      setRoomDrag({ ...roomDrag, cx, cy });
+      updateRoomPlacementPreview({ ...roomDrag, cx, cy });
       return;
     }
 
@@ -14432,17 +15955,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       if (candidate.x !== origin.x || candidate.y !== origin.y || candidate.w !== origin.w || candidate.h !== origin.h) gestureMoved.current = true;
+      const livePreviewItems = [
+        { type: "room", id: state.id, origin, item: candidate },
+        ...anchored.walls.flatMap((wall, index) => wall !== walls[index] && walls[index]
+          ? [{ type: "wall", id: wall.id, origin: walls[index], item: wall }]
+          : []),
+      ];
       if (customRoomTransform) {
         updFloor(nextRooms, fpaths, anchored.walls, doors, windows, furniture, stairs, elevators, labels, ramps,
           undefined, undefined, undefined, undefined, undefined,
-          { visualOnly: true, preserveOpeningGeometry: true });
+          { visualOnly: true, preserveOpeningGeometry: true, livePreviewItems });
       } else {
         // Resizing a Room is a visual/physical edit. Keep the shared campus
         // navigation graph untouched while preserving the existing wall and
         // opening synchronization behavior.
         updFloor(nextRooms, fpaths, anchored.walls, doors, windows, furniture, stairs, elevators, labels, ramps,
           undefined, undefined, undefined, undefined, undefined,
-          { visualOnly: true });
+          { visualOnly: true, livePreviewItems });
       }
       return;
     }
@@ -14478,7 +16007,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // Alignment guides are informational during furniture resize.  The
       // proposed geometry follows the pointer directly; guides must never
       // pull an edge or change dimensions mid-gesture.
-      const refs = collectAlignRefs(new Set([state.id]));
+      const refs = floorGestureAlignmentRefs(new Set([state.id]));
       const alignResult = computeResizeAlignmentGuides(
         { x: resized.x, y: resized.y, w: resized.width, h: resized.height, id: state.id },
         refs, true,
@@ -14505,7 +16034,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         furnitureCandidate.width !== state.origin.width || furnitureCandidate.height !== state.origin.height) {
         gestureMoved.current = true;
       }
-      updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === state.id ? furnitureCandidate : f));
+      updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === state.id ? furnitureCandidate : f),
+        undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        { livePreviewItems: [{ type: "furniture", id: state.id, origin: state.origin, item: furnitureCandidate }] });
       return;
     }
 
@@ -14517,7 +16048,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       const dx = Math.round(curCanvas.x - startCanvas.x);
       const dy = Math.round(curCanvas.y - startCanvas.y);      const resized = resizeCirculationWithinFloor(state.origin as any, state.corner, dx, dy, FP_W, FP_H, e.shiftKey, renderFloorShapeRegions, state.type as "stairs" | "ramp" | "elevator");
       // Alignment snap: match edges/size to nearby objects
-      const refs = collectAlignRefs(new Set([state.id]));
+      const refs = floorGestureAlignmentRefs(new Set([state.id]));
       const alignResult = computeResizeAlignmentGuides(
         { x: resized.x, y: resized.y, w: resized.width, h: resized.height, id: state.id },
         refs, true,
@@ -14539,12 +16070,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         circCandidate.width !== state.origin.width || circCandidate.height !== state.origin.height) {
         gestureMoved.current = true;
       }
+      const livePreviewItems = [{ type: state.type, id: state.id, origin: state.origin, item: circCandidate }];
       if (state.type === "stairs") {
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === state.id ? circCandidate : s));
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === state.id ? circCandidate : s), elevators, labels, ramps,
+          undefined, undefined, undefined, undefined, undefined, { livePreviewItems });
       } else if (state.type === "ramp") {
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === state.id ? circCandidate : r));
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === state.id ? circCandidate : r),
+          undefined, undefined, undefined, undefined, undefined, { livePreviewItems });
       } else {
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((el) => el.id === state.id ? circCandidate : el));
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((el) => el.id === state.id ? circCandidate : el), labels, ramps,
+          undefined, undefined, undefined, undefined, undefined, { livePreviewItems });
       }
       return;
     }
@@ -14580,12 +16115,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           : anchoredRoomUpdate(nextRooms, walls, new Set([state.id]));
         if (anchored.blocked) return;
         if (rotation !== state.originRotation) gestureMoved.current = true;
+        const livePreviewItems = [
+          { type: "room", id: state.id, origin: state.origin ?? currentRoom, item: nextRoom },
+          ...anchored.walls.flatMap((wall, index) => wall !== walls[index] && walls[index]
+            ? [{ type: "wall", id: wall.id, origin: walls[index], item: wall }]
+            : []),
+        ];
         if (customRoomTransform) {
           updFloor(nextRooms, fpaths, anchored.walls, doors, windows, furniture, stairs, elevators, labels, ramps,
             undefined, undefined, undefined, undefined, undefined,
-            { visualOnly: true, preserveOpeningGeometry: true });
+            { visualOnly: true, preserveOpeningGeometry: true, livePreviewItems });
         } else {
-          updFloor(nextRooms, fpaths, anchored.walls);
+          updFloor(nextRooms, fpaths, anchored.walls, doors, windows, furniture, stairs, elevators, labels, ramps,
+            undefined, undefined, undefined, undefined, undefined, { livePreviewItems });
         }
       } else if (state.type === "furniture") {
         const candidate = furniture.find((item) => item.id === state.id);
@@ -14595,23 +16137,34 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           if (host ? !furnitureFitsExteriorZone(rotated, host, FP_W, FP_H) : !floorItemFitsFloorShape("furniture", rotated, renderFloorShapeRegions)) return;
         }
         if (rotation !== state.originRotation) gestureMoved.current = true;
-        setFurnitureRotationFeedback({ id: state.id, angle: rotation });
-        updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === state.id ? { ...f, rotation } : f));
+        const rotated = { ...(candidate ?? state.origin), rotation };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture.map((f) => f.id === state.id ? rotated : f),
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "furniture", id: state.id, origin: state.origin, item: rotated }] });
       } else if (state.type === "stairs") {
         const candidate = stairs.find((item) => item.id === state.id);
         if (candidate && !floorItemFitsFloorShape("stairs", { ...candidate, rotation }, renderFloorShapeRegions)) return;
         if (rotation !== state.originRotation) gestureMoved.current = true;
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === state.id ? { ...s, rotation } : s));
+        const rotated = { ...(candidate ?? state.origin), rotation };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs.map((s) => s.id === state.id ? rotated : s), elevators, labels, ramps,
+          undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "stairs", id: state.id, origin: state.origin, item: rotated }] });
       } else if (state.type === "ramp") {
         const candidate = ramps.find((item) => item.id === state.id);
         if (candidate && !floorItemFitsFloorShape("ramp", { ...candidate, rotation }, renderFloorShapeRegions)) return;
         if (rotation !== state.originRotation) gestureMoved.current = true;
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === state.id ? { ...r, rotation } : r));
+        const rotated = { ...(candidate ?? state.origin), rotation };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps.map((r) => r.id === state.id ? rotated : r),
+          undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "ramp", id: state.id, origin: state.origin, item: rotated }] });
       } else {
         const candidate = elevators.find((item) => item.id === state.id);
         if (candidate && !floorItemFitsFloorShape("elevator", { ...candidate, rotation }, renderFloorShapeRegions)) return;
         if (rotation !== state.originRotation) gestureMoved.current = true;
-        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((el) => el.id === state.id ? { ...el, rotation } : el));
+        const rotated = { ...(candidate ?? state.origin), rotation };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators.map((el) => el.id === state.id ? rotated : el), labels, ramps,
+          undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "elevator", id: state.id, origin: state.origin, item: rotated }] });
       }
       return;
     }
@@ -14623,11 +16176,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         const scale = clamp(currentDistance / Math.max(1, state.startDistance ?? currentDistance), 0.45, 3);
         const nextFontSize = clamp(Math.round(state.origin.fontSize * scale), 6, 48);
         if (nextFontSize !== state.origin.fontSize) gestureMoved.current = true;
-        updateLabel(state.id, { fontSize: nextFontSize });
+        const nextLabel = { ...state.origin, fontSize: nextFontSize };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((label) => label.id === state.id ? nextLabel : label), ramps,
+          undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "label", id: state.id, origin: state.origin, item: nextLabel }] });
         const resizedBounds = labelBounds({ ...state.origin, fontSize: nextFontSize });
         const resizeGuides = computeResizeAlignmentGuides(
           { x: resizedBounds.x, y: resizedBounds.y, w: resizedBounds.w, h: resizedBounds.h, id: state.id },
-          collectAlignRefs(new Set([state.id])),
+          floorGestureAlignmentRefs(new Set([state.id])),
           false,
           alignmentSnapThreshold,
         ).guides;
@@ -14637,7 +16193,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         const rawDelta = currentAngle - (state.startAngle ?? currentAngle);
         const rotation = normalizeRotation((state.originRotation ?? 0) + (e.shiftKey ? Math.round(rawDelta / 15) * 15 : rawDelta));
         if (rotation !== (state.originRotation ?? 0)) gestureMoved.current = true;
-        updateLabel(state.id, { rotation });
+        const nextLabel = { ...state.origin, rotation };
+        updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels.map((label) => label.id === state.id ? nextLabel : label), ramps,
+          undefined, undefined, undefined, undefined, undefined,
+          { livePreviewItems: [{ type: "label", id: state.id, origin: state.origin, item: nextLabel }] });
       }
       return;
     }
@@ -14701,7 +16260,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         };
         const groupGuides = computeResizeAlignmentGuides(
           groupBounds,
-          collectAlignRefs(new Set(state.entries.map((entry) => entry.id))),
+          floorGestureAlignmentRefs(new Set(state.entries.map((entry) => entry.id))),
           true,
           alignmentSnapThreshold,
         ).guides;
@@ -14726,7 +16285,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return floorItemFitsFloorShape(entry.type, entry.item, renderFloorShapeRegions);
       });
       if (fits) {
-        if (applyTransformedEntries(transformed)) gestureMoved.current = true;
+        if (applyTransformedEntries(transformed, state.entries)) gestureMoved.current = true;
       }
       return;
     }
@@ -14734,6 +16293,65 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     movePan(e);
     if (!dragging.current) return;
     const drag = dragging.current;
+    if (!finalizeFastGestureRef.current && !furnitureDragRef.current) {
+      const rawDx = Math.round(pt.x - drag.sx);
+      const rawDy = Math.round(pt.y - drag.sy);
+      const constrained = constrainFloorItemsDelta(
+        drag.entries.map((entry) => ({ type: entry.type, item: entry.origin })),
+        rawDx,
+        rawDy,
+        renderFloorShapeRegions,
+      );
+      const roomEntry = drag.entries.find((entry) => entry.type === "room");
+      if (roomEntry) {
+        const origin = roomEntry.origin as FloorRoom;
+        const roomDelta = constrainFloorItemsDelta([{ type: "room", item: origin }], rawDx, rawDy, renderFloorShapeRegions);
+        const rawRoom = translateRoomShape(origin, roomDelta.dx, roomDelta.dy);
+        const movedWalls = drag.entries.filter((entry) => entry.type === "wall")
+          .map((entry) => translateFloorItemRigid("wall", entry.origin, roomDelta.dx, roomDelta.dy) as FloorWall);
+        const targets = computeRoomAssemblyAlignmentTargets(
+          rawRoom, movedWalls, roomDragStaticWallsRef.current, roomDragStaticRoomsRef.current,
+          roomAssemblyAlignRefsRef.current, FP_W, FP_H, alignmentSnapThreshold, floorGridSize, snapOn,
+        );
+        const stableX = resolveStableAlignmentAxis(rawRoom.x, targets.x?.candidatePosition ?? rawRoom.x,
+          targets.x?.guide, alignmentSnapLocksRef.current.x, alignmentSnapThreshold, alignmentSnapThreshold + 3);
+        const stableY = resolveStableAlignmentAxis(rawRoom.y, targets.y?.candidatePosition ?? rawRoom.y,
+          targets.y?.guide, alignmentSnapLocksRef.current.y, alignmentSnapThreshold, alignmentSnapThreshold + 3);
+        alignmentSnapLocksRef.current = edgeSnapOn ? { x: stableX.lock, y: stableY.lock } : { x: null, y: null };
+        const snapped = constrainFloorItemsDelta([{ type: "room", item: origin }],
+          roomDelta.dx + (edgeSnapOn ? stableX.delta : 0), roomDelta.dy + (edgeSnapOn ? stableY.delta : 0), renderFloorShapeRegions);
+        let previewDelta = snapped;
+        let candidate = translateRoomShape(origin, previewDelta.dx, previewDelta.dy);
+        let overlap = findOverlappingRoom(candidate, roomDragStaticRoomsRef.current);
+        if (overlap && (snapped.dx !== roomDelta.dx || snapped.dy !== roomDelta.dy)) {
+          previewDelta = roomDelta;
+          candidate = rawRoom;
+          overlap = findOverlappingRoom(candidate, roomDragStaticRoomsRef.current);
+        }
+        if (overlap) {
+          setAlignGuides([]);
+          setRoomInteractionPreview({ room: candidate, reason: "Overlaps another Room", kind: "move" });
+          return;
+        }
+        setRoomInteractionPreview(null);
+        setAlignGuides(edgeSnapOn ? [stableX.lock?.guide, stableY.lock?.guide].filter((guide): guide is RoomAlignGuide => !!guide) : []);
+        constrained.dx = previewDelta.dx;
+        constrained.dy = previewDelta.dy;
+      } else {
+        const first = drag.entries.find((entry) => entry.type !== "wall" && entry.type !== "door" && entry.type !== "window");
+        const translated = first && translateFloorItemRigid(first.type, first.origin, constrained.dx, constrained.dy);
+        const bounds = translated && first && itemBounds(first.type, translated);
+        const guides = bounds ? computeAlignmentGuides({ ...bounds, id: first.id }, activeFloorAlignRefsRef.current?.refs ?? [], alignmentSnapThreshold).guides : [];
+        setAlignGuides(guides);
+      }
+      const previewItems = drag.entries.flatMap((entry) => {
+        const item = translateFloorItemRigid(entry.type, entry.origin, constrained.dx, constrained.dy);
+        return item ? [{ type: entry.type, id: entry.id, origin: entry.origin, item }] : [];
+      });
+      if (previewItems.length) floorGestureDomPreviewRef.current(previewItems);
+      gestureMoved.current = constrained.dx !== 0 || constrained.dy !== 0;
+      return;
+    }
     const rawDx = Math.round(pt.x - drag.sx);
     const rawDy = Math.round(pt.y - drag.sy);
     let { dx, dy } = constrainFloorItemsDelta(
@@ -14748,12 +16366,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // delta and are never independently clamped or alignment-snapped.
     const roomEntry = drag.entries.find((entry) => entry.type === "room");
     const roomAssembly = roomEntry ? roomSetupForId(roomEntry.id) : null;
+    const roomAssemblyLabelIds = roomAssembly ? labels
+      .filter((label) => (label as FloorLabel & { roomId?: string }).roomId === roomAssembly.room.id)
+      .map((label) => label.id) : [];
     const roomAssemblyIds = roomAssembly ? new Set([
       roomAssembly.room.id,
       ...roomAssembly.setup.wallIds,
       ...roomAssembly.setup.doorIds,
       ...roomAssembly.setup.windowIds,
       ...roomAssembly.setup.furnitureIds,
+      ...roomAssemblyLabelIds,
     ]) : null;
     const draggedIds = new Set(drag.entries.map((entry) => entry.id));
     const isCompleteRoomAssembly = !!roomAssemblyIds
@@ -14766,7 +16388,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // stroke width, opening padding, handles, and rotated child bounds must
       // never stop a valid Room edge at x=0/y=0 or the opposite perimeter.
       const constrainedRoomDelta = constrainFloorItemsDelta(
-        drag.entries.map((entry) => ({ type: entry.type, item: entry.origin })), rawDx, rawDy, renderFloorShapeRegions,
+        [{ type: "room", item: roomOrigin }], rawDx, rawDy, renderFloorShapeRegions,
       );
       dx = constrainedRoomDelta.dx;
       dy = constrainedRoomDelta.dy;
@@ -14777,7 +16399,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         .map((entry) => translateFloorItemRigid("wall", entry.origin, dx, dy) as FloorWall);
       const externalRooms = rooms.filter((room) => room.id !== roomOrigin.id);
       const externalWalls = walls.filter((wall) => !movedWallIds.has(wall.id));
-      const assemblyRefs = collectAlignRefs(roomAssemblyIds);
+      const assemblyRefs = roomAssemblyAlignRefsRef.current;
       const targets = computeRoomAssemblyAlignmentTargets(
         candidateRoom,
         candidateWalls,
@@ -14817,7 +16439,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       // contact with all four Floor edges while preventing a snap target from
       // pushing the authoritative Room outside the canvas.
       const finalRoomDelta = constrainFloorItemsDelta(
-        drag.entries.map((entry) => ({ type: entry.type, item: entry.origin })), dx, dy, renderFloorShapeRegions,
+        [{ type: "room", item: roomOrigin }], dx, dy, renderFloorShapeRegions,
       );
       dx = finalRoomDelta.dx;
       dy = finalRoomDelta.dy;
@@ -14908,7 +16530,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         undefined,
         undefined,
         undefined,
-        { visualOnly: true, preserveOpeningGeometry: true },
+        { visualOnly: true, preserveOpeningGeometry: true, livePreviewItems: movedAssembly.map((entry) => ({ type: entry.type, id: entry.id, origin: drag.entries.find((source) => source.id === entry.id)?.origin ?? entry.item, item: entry.item })) },
       );
       return;
     }
@@ -15035,7 +16657,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // ── Universal alignment: snap ALL supported moved objects ──
     let allMoveGuides: { type: "h" | "v"; pos: number; x1: number; y1: number; x2: number; y2: number }[] = [];
     const movedIds = new Set(moved.map((e) => e.id));
-    const refs = furnitureDragRef.current ? furnitureDragAlignRefsRef.current : collectAlignRefs(movedIds);
+    const activeAlignCache = activeFloorAlignRefsRef.current;
+    const cachedForGesture = activeAlignCache
+      && activeAlignCache.excludedIds.size === movedIds.size
+      && [...activeAlignCache.excludedIds].every((id) => movedIds.has(id));
+    const refs = furnitureDragRef.current
+      ? furnitureDragAlignRefsRef.current
+      : cachedForGesture ? activeAlignCache.refs : collectAlignRefs(movedIds);
     // Resolve alignment once per axis from the first eligible RAW object in
     // this gesture.  The lock keeps a nearly-equal edge/centre target stable;
     // applying one delta to the selected set also prevents multi-selection
@@ -15367,22 +16995,48 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       nextStairs,
       nextElevators,
       nextLabels,
-      nextRamps
+      nextRamps,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        livePreviewItems: drag.entries.flatMap((entry) => {
+          const item = byId.get(entry.id) ?? moved.find((candidate) => candidate.id === entry.id)?.item;
+          return item ? [{ type: entry.type, id: entry.id, origin: entry.origin, item }] : [];
+        }),
+      },
     );
   };
 
   const processSvgMoveRef = useRef(processSvgMove);
   processSvgMoveRef.current = processSvgMove;
   const handleSvgMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (furnitureDragRef.current && dragging.current && !panning.current
-      && !furnitureResizing.current && !circulationResizing.current && !rotating.current) {
-      latestFurnitureDragPointerRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
+    if (physicalMarqueeGestureRef.current) {
+      queuePhysicalMarqueeMove(e.nativeEvent);
+      return;
+    }
+    const activeCanvasGesture = Boolean(
+      dragging.current || roomDragLiveRef.current || wallEndpointDrag.current || navDragRef.current || navBendDragRef.current || navSegDragRef.current || openingDrag.current || openingResize.current || roomShapeDrag.current || resizing.current || furnitureResizing.current
+      || circulationResizing.current || rotating.current || exteriorStairDragging.current
+      || exteriorZoneDragging.current || exteriorZoneResizing.current
+      || localApproachDragging.current || localApproachResizing.current
+      || groupTransforming.current || labelTransforming.current,
+    );
+    const activePlacementPreview = (tool === "furniture" && !!furnitureTemplate)
+      || !!roomTemplatePlacement
+      || tool === "wall"
+      || tool === "door" || tool === "open-passage" || tool === "window";
+    if ((activeCanvasGesture || activePlacementPreview) && !panning.current) {
+      latestFurnitureDragPointerRef.current = e.nativeEvent;
+      lastActiveGesturePointerRef.current = e.nativeEvent;
       if (furnitureDragMoveFrameRef.current === null) {
         furnitureDragMoveFrameRef.current = requestAnimationFrame(() => {
           furnitureDragMoveFrameRef.current = null;
           const latest = latestFurnitureDragPointerRef.current;
           latestFurnitureDragPointerRef.current = null;
-          if (latest && furnitureDragRef.current && dragging.current) processSvgMoveRef.current(latest as MouseEvent);
+          if (latest) processSvgMoveRef.current(latest);
         });
       }
       return;
@@ -15407,7 +17061,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     });
   };
 
-  const handleSvgUp = () => {
+  const handleSvgUp = (event?: React.MouseEvent<SVGSVGElement> | MouseEvent) => {
+    if (physicalMarqueeGestureRef.current) {
+      finishPhysicalMarquee(event);
+      return;
+    }
+    finalizedFloorGestureSnapshotRef.current = null;
     cancelPendingNavHoverMove();
     cancelPendingNavEdgeHover();
     if (floorShapeMode) return;
@@ -15416,16 +17075,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setAlignGuides([]);
       return;
     }
-    if (furnitureDragRef.current && dragging.current
-      && !furnitureResizing.current && !circulationResizing.current && !rotating.current) {
-      if (furnitureDragMoveFrameRef.current !== null) {
-        cancelAnimationFrame(furnitureDragMoveFrameRef.current);
-        furnitureDragMoveFrameRef.current = null;
-      }
-      const latest = latestFurnitureDragPointerRef.current;
-      latestFurnitureDragPointerRef.current = null;
-      if (latest) processSvgMoveRef.current(latest as MouseEvent);
+    if (furnitureDragMoveFrameRef.current !== null) {
+      cancelAnimationFrame(furnitureDragMoveFrameRef.current);
+      furnitureDragMoveFrameRef.current = null;
     }
+    const latestDragPointer = latestFurnitureDragPointerRef.current;
+    latestFurnitureDragPointerRef.current = null;
+    const releasePointer = latestDragPointer ?? lastActiveGesturePointerRef.current;
+    const hasFastGeometryGesture = Boolean((dragging.current && !furnitureDragRef.current) || wallEndpointDrag.current || openingDrag.current || openingResize.current);
+    if (releasePointer && hasFastGeometryGesture) {
+      finalizeFastGestureRef.current = true;
+      try { processSvgMoveRef.current(releasePointer); }
+      finally { finalizeFastGestureRef.current = false; }
+    } else if (latestDragPointer) {
+      processSvgMoveRef.current(latestDragPointer);
+    }
+    lastActiveGesturePointerRef.current = null;
     const wasPanning = temporaryPanRef.current || panning.current !== null;
     const furnitureGestureActive = furnitureDragRef.current;
     const furnitureGestureCommitted = furnitureDragCommittedRef.current;
@@ -15463,8 +17128,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       dragging.current = null;
       return;
     }
+        // Room Setup is a rigid authored transform. Its nav graph belongs to
+        // the map author and must retain its exact saved coordinates while the
+        // room and attached physical content move as one history transaction.
+        flushDeferredFloorGraphCommit({
+          preserveOpeningGeometry: roomAssemblyGestureActive,
+          visualOnly: roomAssemblyGestureActive,
+        });
     if (roomShapeDrag.current) {
-      if (gestureMoved.current) pushHistory(floorSnapshot());
+      if (gestureMoved.current) pushHistory(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot());
       suppressHistoryRef.current = false;
       gestureMoved.current = false;
       roomShapeDrag.current = null;
@@ -15473,7 +17145,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (localApproachResizing.current) {
-      if (gestureMoved.current) pushHistory(floorSnapshot());
+      if (gestureMoved.current) pushHistory(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot());
       suppressHistoryRef.current = false;
       gestureMoved.current = false;
       localApproachResizing.current = null;
@@ -15482,7 +17154,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (exteriorZoneResizing.current) {
-      if (gestureMoved.current) pushHistory(floorSnapshot());
+      if (gestureMoved.current) pushHistory(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot());
       suppressHistoryRef.current = false;
       gestureMoved.current = false;
       exteriorZoneResizing.current = null;
@@ -15491,7 +17163,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (localApproachDragging.current) {
-      if (gestureMoved.current) pushHistory(floorSnapshot());
+      if (gestureMoved.current) pushHistory(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot());
       suppressHistoryRef.current = false;
       gestureMoved.current = false;
       localApproachDragging.current = null;
@@ -15500,7 +17172,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
     if (exteriorZoneDragging.current) {
-      if (gestureMoved.current) pushHistory(floorSnapshot());
+      if (gestureMoved.current) pushHistory(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot());
       suppressHistoryRef.current = false;
       gestureMoved.current = false;
       exteriorZoneDragging.current = null;
@@ -15517,7 +17189,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         const ownerSnapshot = canonicalExteriorEmergencyStairsForBuilding(building).map((stair) => stair.id === gesture.stairId
           ? { ...stair, attachment: { ...stair.attachment, edge: gesture.currentEdge, offset: gesture.currentOffset } }
           : stair);
-        pushHistory({ ...floorSnapshot(), exteriorEmergencyStairs: ownerSnapshot });
+        pushHistory({ ...(finalizedFloorGestureSnapshotRef.current ?? floorSnapshot()), exteriorEmergencyStairs: ownerSnapshot });
       }
       if (exteriorStairPreview && !exteriorStairPreview.valid) {
         toast.warning("Cannot place exterior stair here", "The wall space is occupied; the previous placement was kept.");
@@ -15572,53 +17244,31 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         setRubberBand(null);
         return;
       }
+      const pendingNavGesture = navGesturePendingRef.current;
+      const navCommitted = Boolean(pendingNavGesture && gestureMoved.current);
+      if (pendingNavGesture && navCommitted) commitNavGraph(pendingNavGesture.nodes, pendingNavGesture.edges);
+      clearNavGesturePreview();
       // Commit the nav drag as ONE history entry.
       if (navDragRef.current) {
-        if (gestureMoved.current) pushHistory(navSnapshot());
+        if (navCommitted) pushHistory(navSnapshot());
         suppressHistoryRef.current = false;
         gestureMoved.current = false;
         navDragRef.current = null;
       }
       // B5 Phase 2.5: bend drags commit the same way — ONE undoable gesture.
       if (navBendDragRef.current) {
-        if (gestureMoved.current) pushHistory(navSnapshot());
+        if (navCommitted) pushHistory(navSnapshot());
         suppressHistoryRef.current = false;
         gestureMoved.current = false;
         navBendDragRef.current = null;
       }
       // B5 Phase 2.7: segment drags commit the same way — ONE undoable gesture.
       if (navSegDragRef.current) {
-        if (gestureMoved.current) pushHistory(navSnapshot());
+        if (navCommitted) pushHistory(navSnapshot());
         suppressHistoryRef.current = false;
         gestureMoved.current = false;
         navSegDragRef.current = null;
       }
-      return;
-    }
-    if (rubberBand) {
-      const rect = {
-        x: Math.min(rubberBand.sx, rubberBand.cx),
-        y: Math.min(rubberBand.sy, rubberBand.cy),
-        w: Math.abs(rubberBand.cx - rubberBand.sx),
-        h: Math.abs(rubberBand.cy - rubberBand.sy),
-      };
-      const captured = rect.w >= 3 || rect.h >= 3
-        ? selectionIdsInRect(floor, rect).filter((id) => !isSelectionLocked(selectionForId(id)))
-        : [];
-      if (captured.length > 1) {
-        setMultiSelected(captured);
-        setSelected(null);
-        setShowProperties(true);
-      } else if (captured.length === 1) {
-        setMultiSelected([]);
-        selectFloorItem(selectionForId(captured[0]));
-      } else {
-        setMultiSelected([]);
-        setSelected(null);
-        setShowProperties(true);
-      }
-      setRubberBand(null);
-      physicalMarqueeRef.current = false;
       return;
     }
     if (dragging.current?.fromBackground && !gestureMoved.current) {
@@ -15629,32 +17279,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       setShowProperties(true);
       return;
     }
-    // Re-submit the last authoritative Room/Setup frame on release. This is
-    // intentionally the same visual-only write used during dragging: it keeps
-    // the final stored coordinates identical to the frame that produced the
-    // visible snap guide, even when the parent has not rendered that frame
-    // before mouseup arrives.
-    if (roomAssemblyGestureActive && pendingRoomAssemblyCommit) {
-      updFloor(
-        pendingRoomAssemblyCommit.rooms,
-        fpaths,
-        pendingRoomAssemblyCommit.walls,
-        pendingRoomAssemblyCommit.doors,
-        pendingRoomAssemblyCommit.windows,
-        pendingRoomAssemblyCommit.furniture,
-        stairs,
-        elevators,
-        labels,
-        ramps,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { visualOnly: true, preserveOpeningGeometry: true },
-      );
-    }
-
     // Furniture positions are only transient SVG transforms while the pointer
     // is down. Commit the final snapped group once on release so campus/floor
     // synchronization and dirty-state work never runs per pointer frame.
@@ -15662,15 +17286,32 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       ? furniture.map((item) => pendingFurnitureItems.get(item.id) ?? item)
       : null;
     if (committedFurniture) {
-      updFloor(rooms, fpaths, walls, doors, windows, committedFurniture, stairs, elevators, labels, ramps);
+      forceFloorGraphCommitRef.current = true;
+      try {
+        updFloor(rooms, fpaths, walls, doors, windows, committedFurniture, stairs, elevators, labels, ramps);
+      } finally {
+        forceFloorGraphCommitRef.current = false;
+      }
     }
+    const committedWallEndpoint = wallEndpointPendingRef.current;
+    if (committedWallEndpoint && wallEndpointDrag.current && gestureMoved.current) {
+      forceFloorGraphCommitRef.current = true;
+      try {
+        updFloor(rooms, fpaths, walls.map((wall) => wall.id === committedWallEndpoint.id
+          ? normalizeWallRoomAnchors(committedWallEndpoint, rooms)
+          : wall));
+      } finally {
+        forceFloorGraphCommitRef.current = false;
+      }
+    }
+    wallEndpointPendingRef.current = null;
 
     // Commit exactly ONE history entry per completed gesture: the POST-gesture
     // state (per-frame pushes were suppressed during the drag). Undo therefore
     // restores the pre-gesture snapshot and redo re-applies the gesture.
     if (gestureMoved.current && (!furnitureGestureActive || furnitureGestureCommitted)) {
       lastLabelClickRef.current = null;
-      const postGestureSnapshot = pendingRoomAssemblyCommit && roomAssemblyGestureActive
+      const postGestureSnapshot = finalizedFloorGestureSnapshotRef.current ?? (pendingRoomAssemblyCommit && roomAssemblyGestureActive
         ? {
             ...floorSnapshot(),
             rooms: pendingRoomAssemblyCommit.rooms,
@@ -15679,19 +17320,21 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             windows: pendingRoomAssemblyCommit.windows,
             furniture: pendingRoomAssemblyCommit.furniture,
           }
-        : committedFurniture
+          : committedFurniture
           ? { ...floorSnapshot(), furniture: committedFurniture }
-          : floorSnapshot();
+          : floorSnapshot());
       pushHistory({ ...postGestureSnapshot, ...(roomAssemblyGestureActive ? { visualOnly: true } : {}) }); /* post-gesture commit */
     }
     suppressHistoryRef.current = false;
     gestureMoved.current = false;
     wallEndpointDrag.current = null;
+    wallEndpointOverlayRef.current = null;
+    wallEndpointOpeningClonesRef.current = [];
     wallEndpointOpeningWarnedRef.current = false;
     openingDrag.current = null;
     openingResize.current = null;
     setOpeningPreview(null);
-    setWallEqualLengthGuide(null);
+    updateWallEqualLengthGuide(null, null);
     // While a wall-drawing gesture is in progress the snap indicator stays put
     // (it is cleared explicitly when the wall completes, on Escape, on tool
     // switch, and on floor switch) — do not wipe it on the mid-gesture mouseup.
@@ -15705,18 +17348,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     if (resizing.current) { resizing.current = null; return; }
 
     // Finalize room/stairs/elevator creation
+    const activeRoomDrag = roomDragLiveRef.current ?? roomDrag;
     // If the placement tool was switched while a pointer gesture was still
     // pending, discard that stale gesture instead of allowing an empty click
     // in Select/Connect/Pan mode to create an object.
-    if (roomDrag && tool !== "room" && tool !== "stairs" && tool !== "ramp" && tool !== "elevator") {
+    if (activeRoomDrag && tool !== "room" && tool !== "stairs" && tool !== "ramp" && tool !== "elevator") {
       setRoomDrag(null);
       return;
     }
     setNavPathTargetHover(null);
-    if (roomDrag && tool === "room") {
-      const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 20);
-      const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 15);
-      const roomOrigin = clampFloorShapeRectOrigin(Math.min(roomDrag.sx, roomDrag.cx), Math.min(roomDrag.sy, roomDrag.cy), rw, rh);
+    if (activeRoomDrag && tool === "room") {
+      const rw = Math.max(Math.abs(activeRoomDrag.cx - activeRoomDrag.sx), 20);
+      const rh = Math.max(Math.abs(activeRoomDrag.cy - activeRoomDrag.sy), 15);
+      const roomOrigin = clampFloorShapeRectOrigin(Math.min(activeRoomDrag.sx, activeRoomDrag.cx), Math.min(activeRoomDrag.sy, activeRoomDrag.cy), rw, rh);
       const rx = roomOrigin.x;
       const ry = roomOrigin.y;
       // B7 Part F: reject room creation that would overlap an existing room.
@@ -15761,17 +17405,17 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
 
-    if (roomDrag && tool === "stairs") {
+    if (activeRoomDrag && tool === "stairs") {
       // A click-to-place Stair uses a compact, practical stairwell footprint.  A
       // deliberate drag still controls the dimensions exactly as before; this
       // only improves the default size for newly placed objects and never
       // resizes persisted Stairs.
-      const rawWidth = Math.abs(roomDrag.cx - roomDrag.sx);
-      const rawHeight = Math.abs(roomDrag.cy - roomDrag.sy);
+      const rawWidth = Math.abs(activeRoomDrag.cx - activeRoomDrag.sx);
+      const rawHeight = Math.abs(activeRoomDrag.cy - activeRoomDrag.sy);
       const isDefaultPlacement = rawWidth < 2 && rawHeight < 2;
       const rw = isDefaultPlacement ? 36 : Math.max(rawWidth, 16);
       const rh = isDefaultPlacement ? 44 : Math.max(rawHeight, 12);
-      const stairOrigin = clampFloorShapeRectOrigin(Math.min(roomDrag.sx, roomDrag.cx), Math.min(roomDrag.sy, roomDrag.cy), rw, rh);
+      const stairOrigin = clampFloorShapeRectOrigin(Math.min(activeRoomDrag.sx, activeRoomDrag.cx), Math.min(activeRoomDrag.sy, activeRoomDrag.cy), rw, rh);
       const rx = stairOrigin.x;
       const ry = stairOrigin.y;
       if (!rectFitsFloorShape(rx, ry, rw, rh)) {
@@ -15804,10 +17448,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
 
-    if (roomDrag && tool === "ramp") {
-      const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 16);
-      const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 12);
-      const rampOrigin = clampFloorShapeRectOrigin(Math.min(roomDrag.sx, roomDrag.cx), Math.min(roomDrag.sy, roomDrag.cy), rw, rh);
+    if (activeRoomDrag && tool === "ramp") {
+      const rw = Math.max(Math.abs(activeRoomDrag.cx - activeRoomDrag.sx), 16);
+      const rh = Math.max(Math.abs(activeRoomDrag.cy - activeRoomDrag.sy), 12);
+      const rampOrigin = clampFloorShapeRectOrigin(Math.min(activeRoomDrag.sx, activeRoomDrag.cx), Math.min(activeRoomDrag.sy, activeRoomDrag.cy), rw, rh);
       const rx = rampOrigin.x;
       const ry = rampOrigin.y;
       if (!rectFitsFloorShape(rx, ry, rw, rh)) {
@@ -15833,10 +17477,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       return;
     }
 
-    if (roomDrag && tool === "elevator") {
-      const rw = Math.max(Math.abs(roomDrag.cx - roomDrag.sx), 14);
-      const rh = Math.max(Math.abs(roomDrag.cy - roomDrag.sy), 14);
-      const elevatorOrigin = clampFloorShapeRectOrigin(Math.min(roomDrag.sx, roomDrag.cx), Math.min(roomDrag.sy, roomDrag.cy), rw, rh);
+    if (activeRoomDrag && tool === "elevator") {
+      const rw = Math.max(Math.abs(activeRoomDrag.cx - activeRoomDrag.sx), 14);
+      const rh = Math.max(Math.abs(activeRoomDrag.cy - activeRoomDrag.sy), 14);
+      const elevatorOrigin = clampFloorShapeRectOrigin(Math.min(activeRoomDrag.sx, activeRoomDrag.cx), Math.min(activeRoomDrag.sy, activeRoomDrag.cy), rw, rh);
       const rx = elevatorOrigin.x;
       const ry = elevatorOrigin.y;
       if (!rectFitsFloorShape(rx, ry, rw, rh)) {
@@ -15867,6 +17511,47 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     }
 
     setRoomDrag(null);
+  };
+
+  const handleFloorPointerCancel = () => {
+    if (physicalMarqueeGestureRef.current) {
+      cancelPhysicalMarquee();
+      return;
+    }
+    if (panning.current) {
+      handleSvgUp();
+      return;
+    }
+    if (navDragRef.current || navBendDragRef.current || navSegDragRef.current) {
+      clearNavGesturePreview();
+      navDragRef.current = null; navBendDragRef.current = null; navSegDragRef.current = null;
+      suppressHistoryRef.current = false; gestureMoved.current = false;
+      setNavAlignGuides([]);
+      return;
+    }
+    if (!dragging.current && !wallEndpointDrag.current && !openingDrag.current && !openingResize.current && !roomDragLiveRef.current && !wallStart) return;
+    restoreFloorGestureDomRef.current();
+    wallEndpointDrag.current = null;
+    wallEndpointPendingRef.current = null;
+    wallEndpointOverlayRef.current = null;
+    wallEndpointOpeningClonesRef.current = [];
+    dragging.current = null;
+    openingDrag.current = null;
+    openingResize.current = null;
+    roomDragLiveRef.current = null;
+    roomAssemblyDraggingRef.current = false;
+    roomAssemblyPendingCommitRef.current = null;
+    furnitureDragRef.current = false;
+    furnitureDragCommittedRef.current = false;
+    suppressHistoryRef.current = false;
+    gestureMoved.current = false;
+    setWallStart(null);
+    setRoomDrag(null);
+    setFurnitureDragPreview(null);
+    setFurniturePlacementPreview(null);
+    setOpeningPreview(null);
+    setAlignGuides([]);
+    setNavAlignGuides([]);
   };
 
   const handleSvgUpRef = useRef(handleSvgUp);
@@ -16158,13 +17843,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     roomAssemblyPendingCommitRef.current = null;
-    const entries = activeSelectionIds.includes(id)
+    let entries = activeSelectionIds.includes(id)
       ? activeSelectionIds
           .map((selectedId) => selectionForId(selectedId))
           .filter((value): value is FloorSelection => !!value)
           .map((value) => ({ type: value.type, id: value.id, origin: structuredClone(getSelectionItem(value.type, value.id)) }))
           .filter((entry) => !!entry.origin)
       : [{ type: type as FloorSelection["type"], id, origin: structuredClone(item) }];
+    // A Room and the visual content authored as its Room Setup move as one
+    // gesture, one canonical commit, and one history transaction.
+    if (type === "room" && entries.length === 1) {
+      const setup = roomSetupForId(id)?.setup;
+      if (setup) {
+        const setupLabelIds = labels.filter((value) => (value as FloorLabel & { roomId?: string }).roomId === id).map((value) => value.id);
+        const setupIds = new Set([id, ...setup.wallIds, ...setup.doorIds, ...setup.windowIds, ...setup.furnitureIds, ...setupLabelIds]);
+        const related = [
+          ...walls.filter((value) => setupIds.has(value.id)).map((value) => ({ type: "wall", id: value.id, origin: structuredClone(value) })),
+          ...doors.filter((value) => setupIds.has(value.id)).map((value) => ({ type: "door", id: value.id, origin: structuredClone(value) })),
+          ...windows.filter((value) => setupIds.has(value.id)).map((value) => ({ type: "window", id: value.id, origin: structuredClone(value) })),
+          ...furniture.filter((value) => setupIds.has(value.id)).map((value) => ({ type: "furniture", id: value.id, origin: structuredClone(value) })),
+          ...labels.filter((value) => (value as FloorLabel & { roomId?: string }).roomId === id).map((value) => ({ type: "label", id: value.id, origin: structuredClone(value) })),
+        ];
+        entries = [...entries, ...related];
+      }
+    }
     if (entries.some((entry) => (entry.origin as any)?.locked)) {
       suppressHistoryRef.current = false;
       toast.info("Locked selection", "Unlock locked floor objects before moving them.");
@@ -16178,12 +17880,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       openingDrag.current = { type: (item as FloorDoor).openingType === "open_passage" ? "open_passage" : type as "door" | "window", id, wallId: item.wallId, origin: structuredClone(item) };
+      openingNavNodeIdsRef.current = type !== "window" && showNavOverlay
+        ? indoorNodes.filter((node) => node.doorId === id).map((node) => node.id)
+        : [];
+      if (openingNavNodeIdsRef.current.length > 0) {
+        const nodeIds = openingNavNodeIdsRef.current;
+        beginNavGesturePreview(nodeIds, indoorEdges
+          .filter((edge) => nodeIds.includes(edge.startNodeId) || nodeIds.includes(edge.endNodeId))
+          .map((edge) => edge.id));
+      }
+      cacheFloorGestureAlignment(new Set([id]));
+      captureFloorGestureDomNodes([{ type, id }], false);
       alignmentSnapLocksRef.current = { x: null, y: null };
       setNavAlignGuides([]);
       return;
     }
     roomOverlapWarnedRef.current = false;
     if (type === "room") setRoomInteractionPreview(null);
+    roomAssemblyAlignRefsRef.current = type === "room" ? collectAlignRefs(new Set(entries.map((entry) => entry.id))) : [];
+    if (type === "room") {
+      const movingIds = new Set(entries.map((entry) => entry.id));
+      roomDragStaticRoomsRef.current = rooms.filter((room) => !movingIds.has(room.id));
+      roomDragStaticWallsRef.current = walls.filter((wall) => !movingIds.has(wall.id));
+    }
     alignmentSnapLocksRef.current = { x: null, y: null };
     beginFurnitureDragPreview(entries);
     setFurnitureDragPreview(null);
@@ -16206,6 +17925,12 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     lastValidResizeRef.current = customBounds;
     setRoomInteractionPreview(null);
     resizing.current = { id: room.id, corner, sx: e.clientX, sy: e.clientY, ox: customBounds.x, oy: customBounds.y, ow: customBounds.w, oh: customBounds.h, rotation: room.rotation ?? 0 };
+    cacheFloorGestureAlignment(new Set([room.id]));
+    captureFloorGestureDomNodes([
+      { type: "room", id: room.id },
+      ...walls.filter((wall) => wall.startAnchor?.roomId === room.id || wall.endAnchor?.roomId === room.id)
+        .map((wall) => ({ type: "wall", id: wall.id })),
+    ]);
   };
 
   const onExteriorZoneResizeStart = (e: React.MouseEvent, zone: FloorExteriorZone, handle: ExteriorZoneResizeHandle) => {
@@ -16249,6 +17974,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     furnitureResizing.current = { id: item.id, corner, sx: e.clientX, sy: e.clientY, origin: { ...item } };
+    cacheFloorGestureAlignment(new Set([item.id]));
+    captureFloorGestureDomNodes([{ type: "furniture", id: item.id }]);
   };
 
   const onCirculationResizeStart = (
@@ -16266,6 +17993,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     circulationResizing.current = { type, id: item.id, corner, sx: e.clientX, sy: e.clientY, origin: { ...item } };
+    cacheFloorGestureAlignment(new Set([item.id]));
+    captureFloorGestureDomNodes([{ type, id: item.id }]);
   };
 
   const onRotateStart = (
@@ -16290,8 +18019,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       cy: rect.y + rect.height / 2,
       originRotation: rect.rotation ?? 0,
       startAngle,
+      origin: structuredClone(getSelectionItem(type, id)),
       ...(type === "furniture" ? { previousAngle: startAngle, rawRotation: rect.rotation ?? 0 } : {}),
     };
+    cacheFloorGestureAlignment(new Set([id]));
+    captureFloorGestureDomNodes([
+      { type, id },
+      ...(type === "room" ? walls
+        .filter((wall) => wall.startAnchor?.roomId === id || wall.endAnchor?.roomId === id)
+        .map((wall) => ({ type: "wall", id: wall.id })) : []),
+    ]);
     if (type === "furniture") setFurnitureRotationFeedback({ id, angle: rect.rotation ?? 0 });
   };
 
@@ -16446,6 +18183,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         return;
       }
       if (e.key === "Escape") {
+        if (navDragRef.current || navBendDragRef.current || navSegDragRef.current) {
+          e.preventDefault();
+          clearNavGesturePreview();
+          navDragRef.current = null; navBendDragRef.current = null; navSegDragRef.current = null;
+          suppressHistoryRef.current = false; gestureMoved.current = false;
+          setNavAlignGuides([]);
+          return;
+        }
         if (roomTemplatePlacement) {
           e.preventDefault();
           e.stopPropagation();
@@ -16500,6 +18245,29 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         if (floorResizeMode) {
           e.preventDefault();
           cancelFloorResize();
+          return;
+        }
+        if (dragging.current || wallEndpointDrag.current || openingDrag.current || openingResize.current || roomDragLiveRef.current) {
+          e.preventDefault();
+          restoreFloorGestureDomRef.current();
+          dragging.current = null;
+          wallEndpointDrag.current = null;
+          wallEndpointPendingRef.current = null;
+          wallEndpointOverlayRef.current = null;
+          wallEndpointOpeningClonesRef.current = [];
+          openingDrag.current = null;
+          openingResize.current = null;
+          roomDragLiveRef.current = null;
+          roomAssemblyDraggingRef.current = false;
+          roomAssemblyPendingCommitRef.current = null;
+          furnitureDragRef.current = false;
+          furnitureDragCommittedRef.current = false;
+          suppressHistoryRef.current = false;
+          gestureMoved.current = false;
+          setRoomDrag(null);
+          setFurnitureDragPreview(null);
+          setOpeningPreview(null);
+          setAlignGuides([]);
           return;
         }
         if ((exteriorZonePlacementPreview || accessFeaturePlacementPreview) && !localApproachResizing.current && !exteriorZoneResizing.current && !localApproachDragging.current && !exteriorZoneDragging.current) {
@@ -16617,10 +18385,11 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           "furniture", "text", "exterior-zone", "entrance-steps", "entrance-ramp",
         ];
         if (placementTools.includes(tool)) {
+          restoreFloorGestureDomRef.current();
           setWallStart(null);
           setWallPreview(null);
           setWallSnapIndicator(null);
-          setWallEqualLengthGuide(null);
+          updateWallEqualLengthGuide(null, null);
           setOpeningPreview(null);
           setRoomDrag(null);
           setDP([]);
@@ -16664,7 +18433,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           }
           return;
         }
-        setWallStart(null); setWallPreview(null); setWallSnapIndicator(null); setWallEqualLengthGuide(null); setWallLengthMatchMode(null); setWallLengthMatchHoverId(null); setDP([]);
+        setWallStart(null); setWallPreview(null); setWallSnapIndicator(null); updateWallEqualLengthGuide(null, null); setWallLengthMatchMode(null); setWallLengthMatchHoverId(null); setDP([]);
         setSelected(null); setMultiSelected([]); setRubberBand(null); setContextMenu(null);
         setCalibrationDraft({ active: false, distanceInput: "" }); setMeasureDraft({});
         setRoomDrag(null);
@@ -16912,21 +18681,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   ];
 
   // ── Selected item for properties panel ──
-  const selItem = selected ? (
-    selected.type === "room" ? rooms.find((r) => r.id === selected.id)
-    : selected.type === "wall" ? walls.find((w) => w.id === selected.id)
-    : selected.type === "door" ? doors.find((d) => d.id === selected.id)
-    : selected.type === "window" ? windows.find((w) => w.id === selected.id)
-    : selected.type === "furniture" ? furniture.find((f) => f.id === selected.id)
-    : selected.type === "stairs" ? stairs.find((s) => s.id === selected.id)
-    : selected.type === "ramp" ? ramps.find((r) => r.id === selected.id)
-    : selected.type === "elevator" ? elevators.find((e) => e.id === selected.id)
-    : selected.type === "label" ? labels.find((l) => l.id === selected.id)
-    : selected.type === "exteriorZone" ? exteriorZones.find((z) => z.id === selected.id)
-    : selected.type === "entranceSteps" ? entranceSteps.find((s) => s.id === selected.id)
-    : selected.type === "entranceRamp" ? entranceRamps.find((r) => r.id === selected.id)
-    : undefined
-  ) : undefined;
+  const selItem = useMemo(
+    () => selected ? getSelectionItem(selected.type, selected.id) : undefined,
+    [getSelectionItem, selected],
+  );
 
   const allItemsCount = rooms.length + walls.length + doors.length + windows.length +
     furniture.length + stairs.length + ramps.length + elevators.length + labels.length + fpaths.length
@@ -16938,6 +18696,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // searches every registry entry globally (including collapsed categories).
     return getFurniturePaletteCategories(furnitureSearch, !furnitureSearch.trim());
   }, [furnitureSearch]);
+  const sidebarPreviewFreeze = Boolean(
+    rubberBand || roomDrag || wallStart || wallPreview || wallSnapIndicator
+    || wallLengthMatchHoverId || openingPreview || furniturePlacementPreview || roomInteractionPreview
+    || roomShapePreview || exteriorZonePlacementPreview || accessFeaturePlacementPreview || navPreview
+    || navDragPreview || exteriorStairPreview || floorEdgeSnap || floorShapeGuide || navTargetHover
+    || navNodeHover || navSegmentHover || dragging.current || wallEndpointDrag.current || openingDrag.current
+    || openingResize.current || roomShapeDrag.current || resizing.current || furnitureResizing.current
+    || rotating.current || navDragRef.current || navBendDragRef.current || navSegDragRef.current
+    || roomDragLiveRef.current || furnitureDragRef.current,
+  );
   const recentFurnitureItems = useMemo(() => {
     const byType = new Map(FURNITURE_CATEGORIES.flatMap((category) => category.items.map((item) => [item.type, item] as const)));
     return recentFurnitureTypes
@@ -17139,6 +18907,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       center,
       startAngle: kind === "rotate" ? rotationFromPoint(pt, center.x, center.y) : undefined,
     };
+    cacheFloorGestureAlignment(new Set(entries.map((entry) => entry.id)));
+    captureFloorGestureDomNodes(entries.map((entry) => ({ type: entry.type, id: entry.id })));
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     setSelected(null);
@@ -17162,6 +18932,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       originRotation: label.rotation ?? 0,
       startAngle: kind === "rotate" ? rotationFromPoint(pt, center.x, center.y) : undefined,
     };
+    cacheFloorGestureAlignment(new Set([label.id]));
+    captureFloorGestureDomNodes([{ type: "label", id: label.id }]);
     suppressHistoryRef.current = true;
     gestureMoved.current = false;
     setMultiSelected([]);
@@ -17363,6 +19135,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       </div>
     );
   })();
+
+  const floorInspectorVisible = Boolean(
+    showProperties && multiSelected.length <= 1 && selected
+    && (!navMode || (navMode && navTool === "select" && !navSelected))
+    && !(selected.type === "stairs" && stairs.find((item) => item.id === selected.id)?.exteriorEmergencyStairId)
+    && selected.type !== "exteriorZone" && selected.type !== "entranceSteps" && selected.type !== "entranceRamp",
+  );
 
   return (
     <div className="relative flex flex-col w-full flex-1" style={{ minHeight: 0 }}>
@@ -17598,7 +19377,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               <div className="flex items-center gap-0.5 shrink-0">
                 {toolbarTools.map((t) => {
                     const Icon = t.icon;
-                    const isActive = tool === t.id || (t.id === "pan" && spacePanVisualActive);
+                    const isActive = tool === t.id;
                     return (
                       <ToolbarTooltip key={t.id} tool={t.id} isActive={isActive}
                       hint={t.id === "select" ? "Select, move, resize, and edit floor items." : t.id === "pan" ? "Move around the floor canvas without changing objects." : t.id === "path" ? "Draw a floor path through the interior plan." : undefined}>
@@ -17606,7 +19385,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                           aria-label={`${t.label}${t.key ? ` (${t.key})` : ""}`}
                           aria-pressed={isActive}
                           data-tutorial={t.id === "select" ? "floor-select-tool" : t.id === "pan" ? "floor-pan-tool" : undefined}
-                          data-temporary-pan-active={t.id === "pan" && spacePanVisualActive ? "true" : undefined}
+                          ref={t.id === "pan" ? spacePanToolButtonRef : undefined}
+                          data-temporary-pan-active={t.id === "pan" && spacePanVisualActiveRef.current ? "true" : undefined}
                           className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-all sm:h-[30px] sm:w-[30px]",
                             isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                           <Icon className="h-[15px] w-[15px]" />
@@ -17933,6 +19713,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="relative flex flex-1 overflow-hidden min-h-0">
         {/* ── LEFT SIDEBAR ── */}
+        <TransientPreviewSidebar freeze={sidebarPreviewFreeze}>
         <AnimatePresence initial={false}>
         {objectLibraryOpen && <motion.div
           data-tutorial="floor-library"
@@ -17971,7 +19752,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                         e.dataTransfer.effectAllowed = "copy";
                         navLibraryDragRef.current = "waypoint";
                       }}
-                      onDragEnd={() => { navLibraryDragRef.current = null; setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }}
+                      onDragEnd={() => { navLibraryDragRef.current = null; updateNavPlacementLive(null); setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }}
                       onClick={() => selectNavTool("waypoint")}
                       className="h-12 rounded-lg border text-left px-2 py-1.5 transition-all hover:bg-muted/60 text-foreground"
                       title="Place points along hallways and intersections, then connect them to build the walking network."
@@ -18154,6 +19935,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         </motion.div>}
         </AnimatePresence>
         {!objectLibraryOpen && <button type="button" data-testid="object-library-expand" aria-label="Expand Object Library" title="Expand Object Library" onClick={() => setObjectLibraryOpen(true)} className="absolute left-2 top-3 z-40 flex h-7 w-7 items-center justify-center rounded-lg border border-border/80 bg-card/95 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground"><PanelLeftOpen className="h-3.5 w-3.5" /></button>}
+        </TransientPreviewSidebar>
 
         {/* ── CANVAS ── */}
         <motion.div
@@ -18191,21 +19973,22 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
               {testRoutePickKind === "start" ? "Select a starting location · Esc to cancel" : "Select a destination · Esc to cancel"}
             </div>
           )}
-          {spacePanVisualActive && (
-            <div data-testid="floor-space-pan-indicator" role="status" className="absolute top-3 right-3 z-40 flex items-center gap-1.5 rounded-full border border-primary/25 bg-card/95 px-2.5 py-1.5 text-[10px] font-bold text-primary shadow-md pointer-events-none">
+          <div ref={spacePanIndicatorRef} hidden={!spacePanVisualActiveRef.current} data-testid="floor-space-pan-indicator" role="status" className="absolute top-3 right-3 z-40 flex items-center gap-1.5 rounded-full border border-primary/25 bg-card/95 px-2.5 py-1.5 text-[10px] font-bold text-primary shadow-md pointer-events-none">
               <Hand className="h-3.5 w-3.5" />
               <span>Pan mode</span>
               <span className="font-medium text-muted-foreground">· release Space to return</span>
-            </div>
-          )}
+          </div>
           <div className="contents"
           onWheel={handleWheel}
           onDragOver={(e) => handleNavLibraryDragOver(e)}
           onDrop={(e) => handleNavLibraryDrop(e)}
           onDragLeave={(e) => {
-            if (e.target === e.currentTarget) { setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }
+            if (e.target === e.currentTarget) { updateNavPlacementLive(null); setNavDragPreview(null); setNavDragBlocked(null); setNavTargetHover(null); }
           }}
           onMouseDown={(e) => {
+            // Keep the current selection and inspector stable during a physical
+            // marquee gesture; the release handler resolves selection once.
+            if (physicalMarqueeGestureRef.current) return;
             if (floorResizeMode || floorShapeMode) return;
             if (roomDoorLinking) return;
             if (showNavOverlay && navTool !== "select" && navTool !== "pan") return;
@@ -18232,12 +20015,28 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             className="w-full h-full"
             data-connect-tool-active={connectToolActive ? "true" : undefined}
             style={{ cursor: roomTemplatePlacement || roomDoorLinking ? "crosshair" : cursor, userSelect: "none", overflow: "visible" }}
-            onPointerDownCapture={(event) => { if (floorShapeMode) handleFloorShapePointerDown(event); }}
-            onMouseDownCapture={(event) => { if (!floorShapeMode) handleSvgDownCapture(event); }}
+            onPointerDownCapture={(event) => {
+              if (floorShapeMode) handleFloorShapePointerDown(event);
+              else if (event.button === 1 || (event.button === 0 && (isSpacePressed() || tool === "pan" || (showNavOverlay && navTool === "pan")))) {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }
+            }}
+            onMouseDownCapture={(event) => {
+              if (floorShapeMode) return;
+              if (event.button === 1 || (event.button === 0 && (isSpacePressed() || tool === "pan" || (showNavOverlay && navTool === "pan")))) {
+                event.preventDefault();
+                event.stopPropagation();
+                temporaryPanRef.current = isSpacePressed();
+                startPan(event);
+                return;
+              }
+              handleSvgDownCapture(event);
+            }}
             onMouseDown={handleSvgDown}
             onMouseMove={handleSvgMove}
             onMouseUp={handleSvgUp}
-            onMouseLeave={() => { if (!floorResizeGestureRef.current && !panning.current) handleSvgUp(); }}
+            onPointerCancel={handleFloorPointerCancel}
+            onMouseLeave={() => { if (!floorResizeGestureRef.current && !panning.current && !physicalMarqueeGestureRef.current) handleSvgUp(); }}
             onDoubleClick={handleDblClick}
             onContextMenu={(e) => {
               if (roomTemplatePlacement) {
@@ -18266,6 +20065,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             }}
           >
             <style data-testid="connect-tool-overlay-suppression-style">{`
+              [data-floor-connect-live="true"] [data-testid="floor-nav-connect-preview"] { visibility: hidden; }
               [data-connect-tool-active="true"] [data-testid="issue-marker-layer"],
               [data-connect-tool-active="true"] [data-testid="placement-warning-badge"],
               [data-connect-tool-active="true"] [data-testid$="selection-outline"],
@@ -18575,6 +20375,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                             gestureMoved.current = false;
                             wallEndpointOpeningWarnedRef.current = false;
                             wallEndpointDrag.current = { wallId: wall.id, endpoint: "x1", origin: { ...wall } };
+                            beginWallEndpointPreview(wall);
                           }} />
                         {/* Endpoint 2 — draggable */}
                         <circle data-testid="wall-endpoint-handle" cx={wall.x2} cy={wall.y2} r={6} fill={wall.endAnchor ? "var(--accent)" : "white"} stroke="var(--accent)" strokeWidth={2}
@@ -18591,6 +20392,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                             gestureMoved.current = false;
                             wallEndpointOpeningWarnedRef.current = false;
                             wallEndpointDrag.current = { wallId: wall.id, endpoint: "x2", origin: { ...wall } };
+                            beginWallEndpointPreview(wall);
                           }} />
                         {/* Length label */}
                         <text data-testid="wall-selection-dimension-label" x={label.x} y={label.y}
@@ -18615,7 +20417,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
               {/* ═══ WALL ENDPOINT DRAG PREVIEW ═══ */}
               {wallJoints.map((joint) => (
-                <g key={`${joint.x}-${joint.y}`} data-testid="wall-joint-cap" className="pointer-events-none">
+                <g
+                  key={`${joint.x}-${joint.y}`}
+                  data-testid="wall-joint-cap"
+                  data-wall-joint-key={`${Math.round(joint.x * 100) / 100},${Math.round(joint.y * 100) / 100}`}
+                  data-wall-joint-wall-ids={Array.from(joint.wallIds).join(" ")}
+                  className="pointer-events-none"
+                >
                   {/* Render-only structural square. Its normalized size is
                       derived from authored Walls only; a thicker managed
                       perimeter stroke never enlarges this cap. */}
@@ -18817,6 +20625,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                                 suppressHistoryRef.current = true;
                                 gestureMoved.current = false;
                                 openingResize.current = { type: openingKind, id: door.id, wallId: geom.wall.id, origin: structuredClone(door), handleSign };
+                                captureFloorGestureDomNodes([{ type: "door", id: door.id }]);
                               }}
                             />
                             );
@@ -18951,6 +20760,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                                 suppressHistoryRef.current = true;
                                 gestureMoved.current = false;
                                 openingResize.current = { type: "window", id: win.id, wallId: geom.wall.id, origin: structuredClone(win), handleSign };
+                                captureFloorGestureDomNodes([{ type: "window", id: win.id }]);
                               }}
                             />
                             );
@@ -20096,18 +21906,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   )}
                 </g>
               )}
-              {wallEqualLengthGuide && (() => {
-                const equalWall = walls.find((candidate) => candidate.id === wallEqualLengthGuide.wallId);
-                if (!equalWall) return null;
-                const label = wallLengthLabelPosition(equalWall);
-                const text = `Equal length · ${formatWallLength(wallEqualLengthGuide.length)}`;
-                return (
-                  <g data-testid="wall-equal-length-guide" className="pointer-events-none">
-                    <rect x={label.x - 30} y={label.y - 22} width={60} height={11} rx={2.5} fill="var(--card)" stroke="var(--primary)" strokeWidth={0.8} opacity={0.96} />
-                    <text x={label.x} y={label.y - 14.5} textAnchor="middle" fill="var(--primary)" fontSize={5.5} fontWeight={800}>{text}</text>
-                  </g>
-                );
-              })()}
               {/* Wall drawing preview — pointer-events-none so the completion click always reaches the svg background (real-browser hit-testing) */}
               {wallStart && wallPreview && (
                 <g className="pointer-events-none" data-testid="wall-draw-preview">
@@ -20240,7 +22038,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                       && pts[navPathTargetHover.index]
                       && pts[navPathTargetHover.index + 1];
                     return (
-                      <g key={edge.id}>
+                      <g key={edge.id} data-nav-edge-id={edge.id}>
                         {poly ? (
                           <polyline points={pointsStr} fill="none" stroke={edgeStroke}
                             strokeWidth={isSel ? 2.4 : 1.6}
@@ -20435,15 +22233,19 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     })();
                     return (
                       <g key={node.id}
+                        data-nav-node-id={node.id}
                         data-testid={isPresentationLinked ? "nav-linked-node" : isInternalJunction ? "nav-path-junction" : "nav-node"}
                         onMouseDown={(e) => handleNavNodeDown(e, node)}
                         onMouseEnter={() => {
                           if (navTool === "erase") setNavEraseHover({ type: "node", id: node.id });
-                          if (navTool === "connect") setNavNodeHover(node.id);
+                          // The Connect target ring is positioned by the
+                          // imperative live preview, so hover state must not
+                          // rerender the full Floor scene as the pointer moves.
+                          if (navTool === "connect" && !navConnectStart) setNavNodeHover(node.id);
                         }}
                         onMouseLeave={() => {
                           setNavEraseHover((h) => h?.type === "node" && h.id === node.id ? null : h);
-                          setNavNodeHover((h) => (h === node.id ? null : h));
+                          if (!(navTool === "connect" && navConnectStart)) setNavNodeHover((h) => (h === node.id ? null : h));
                         }}
                         style={{ cursor: navTool === "erase" || (isDerivedApproach && navTool === "select") ? "not-allowed" : navTool === "connect" ? "pointer" : isLinked || isDerivedApproach ? "pointer" : isDest ? "move" : "grab" }}
                       >
@@ -20752,31 +22554,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   opacity={0.7} className="pointer-events-none" />
               ))}
 
-              {/* Outdoor-style alignment guides (yellow/orange dashed) for move/resize/place.
-                  Rendered OUTSIDE the navMode block so they show in both design and navigation modes. */}
-              {compactAlignmentGuides(alignGuides).map((guide, i) => {
-                const isV = guide.type === "v";
-                const y1 = isV ? 0 : guide.pos;
-                const y2 = isV ? FP_H : guide.pos;
-                const x1 = isV ? guide.pos : 0;
-                const x2 = isV ? guide.pos : FP_W;
-                return (
-                  <g key={`ra-${i}`} className="pointer-events-none">
-                    <line data-testid="room-align-guide"
-                      x1={x1} y1={y1} x2={x2} y2={y2}
-                      stroke="var(--accent)" strokeWidth={4} opacity={0.12} />
-                    <line
-                      x1={x1} y1={y1} x2={x2} y2={y2}
-                      stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
-                    <rect x={isV ? guide.pos - 15 : FP_W - 34} y={isV ? 6 : guide.pos - 6}
-                      width={30} height={12} rx={3} fill="var(--accent)" fillOpacity={0.7} />
-                    <text x={isV ? guide.pos : FP_W - 19} y={isV ? 14.5 : guide.pos + 3.5}
-                      textAnchor="middle" fill="white" fontSize={7} fontWeight="700"
-                      className="pointer-events-none select-none">{Math.round(guide.pos)}</text>
-                  </g>
-                );
-              })}
-
               {/* B5 Phase 2.5: Design-mode READ-ONLY navigation overlay — shown
                   only while "Show Navigation" is on. Reduced opacity, thinner
                   lines, smaller nodes; pointer-events-none so Design Select keeps
@@ -20791,9 +22568,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     // hidden outside Navigation mode (reuses the live memo).
                     const invalid = navBlockedEdgeIds.has(edge.id) || edge.closed === true;
                     const pointsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                    return pts.length > 2
-                      ? <polyline key={edge.id} points={pointsStr} fill="none" stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />
-                      : <line key={edge.id} x1={pts[0].x} y1={pts[0].y} x2={pts[1].x} y2={pts[1].y} stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />;
+                    return (
+                      <g key={edge.id} data-nav-edge-id={edge.id}>
+                        {pts.length > 2
+                          ? <polyline points={pointsStr} fill="none" stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />
+                          : <line x1={pts[0].x} y1={pts[0].y} x2={pts[1].x} y2={pts[1].y} stroke={invalid ? "#dc2626" : "#3f6212"} strokeWidth={1} opacity={invalid ? 0.55 : 0.4} data-invalid={invalid ? "true" : undefined} />}
+                      </g>
+                    );
                   })}
                   {indoorNodes.map((node) => {
                     // B5 Phase 2.6: the read-only overlay keeps SEMANTIC colors
@@ -20806,8 +22587,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     if (node.roomId) return null;
                     const isDest = !isLinked && node.type === "room_access";
                     return (
-                      <circle key={node.id} cx={node.x} cy={node.y} r={isDest ? 2.6 : 2.2}
-                        fill={isLinked ? "rgba(21,128,61,0.7)" : isDest ? "rgba(124,58,237,0.65)" : "rgba(22,163,74,0.55)"} />
+                      <g key={node.id} data-nav-node-id={node.id}>
+                        <circle cx={node.x} cy={node.y} r={isDest ? 2.6 : 2.2}
+                          fill={isLinked ? "rgba(21,128,61,0.7)" : isDest ? "rgba(124,58,237,0.65)" : "rgba(22,163,74,0.55)"} />
+                      </g>
                     );
                   })}
                 </g>
@@ -20829,27 +22612,6 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     stroke="var(--accent)" strokeWidth={1.2} opacity={0.7} />
                 </g>
               )}
-
-              {rubberBand && (() => {
-                const rx = Math.min(rubberBand.sx, rubberBand.cx);
-                const ry = Math.min(rubberBand.sy, rubberBand.cy);
-                const rw = Math.abs(rubberBand.cx - rubberBand.sx);
-                const rh = Math.abs(rubberBand.cy - rubberBand.sy);
-                return (
-                  <rect
-                    data-testid="floor-marquee-selection"
-                    x={rx}
-                    y={ry}
-                    width={rw}
-                    height={rh}
-                    fill="var(--primary)"
-                    fillOpacity={0.08}
-                    stroke="var(--primary)"
-                    strokeWidth={1}
-                    strokeDasharray="4 3"
-                  />
-                );
-              })()}
 
               {/* ── B7 Phase 1: validation issue markers — one small badge per
                   affected object, derived live from the same issue list the
@@ -20987,14 +22749,15 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     ? resolveWallOpeningGeometry(door, wallById.get(door.wallId))
                     : undefined;
                   return (
-                    <EntranceDirectionBadge
-                      key={`floor-entrance-direction-badge-${door.id}`}
-                      x={geometry?.x ?? door.x}
-                      y={geometry?.y ?? door.y}
-                      edge={linkedEntrance.edge}
-                      direction={linkedEntrance.direction}
-                      type={linkedEntrance.type}
-                    />
+                    <g key={`floor-entrance-direction-badge-${door.id}`} data-layer-key={`door-direction:${door.id}`}>
+                      <EntranceDirectionBadge
+                        x={geometry?.x ?? door.x}
+                        y={geometry?.y ?? door.y}
+                        edge={linkedEntrance.edge}
+                        direction={linkedEntrance.direction}
+                        type={linkedEntrance.type}
+                      />
+                    </g>
                   );
                 })}
               </g>
@@ -21266,15 +23029,36 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                 );
               })()}
 
-              {roomTemplatePlacement && roomTemplatePlacementPreview && (
-                <RoomTemplatePlacementOverlay
-                  template={roomTemplatePlacement}
-                  x={roomTemplatePlacementPreview.origin.x}
-                  y={roomTemplatePlacementPreview.origin.y}
-                  invalid={!roomTemplatePlacementPreview.valid}
-                />
-              )}
+            </g>
+          </svg>
 
+          <svg aria-hidden="true" data-testid="floor-interaction-overlay" viewBox={renderFloorViewBox} className="pointer-events-none absolute inset-0 z-[5] h-full w-full" style={{ overflow: "visible", isolation: "isolate" }}>
+            <g ref={floorInteractionWorldRef} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+              <g ref={floorInteractionItemsRef} data-testid="floor-interaction-items">
+                {roomTemplatePlacement && roomTemplatePlacementPreview && (
+                  <RoomTemplatePlacementOverlay
+                    previewRef={roomTemplatePlacementGhostRef}
+                    template={roomTemplatePlacement}
+                    x={roomTemplatePlacementPreview.origin.x}
+                    y={roomTemplatePlacementPreview.origin.y}
+                    invalid={!roomTemplatePlacementPreview.valid}
+                  />
+                )}
+                <rect
+                  ref={physicalMarqueeRectRef}
+                  data-testid="floor-marquee-selection"
+                  fill="var(--primary)"
+                  fillOpacity="0.08"
+                  stroke="var(--primary)"
+                  strokeWidth="1"
+                  strokeDasharray="4 3"
+                  pointerEvents="none"
+                  visibility="hidden"
+                />
+                <g ref={floorImperativePreviewItemsRef} data-testid="floor-imperative-preview-items" />
+              </g>
+              <g ref={floorAlignmentGuidesLayerRef} data-testid="floor-alignment-guides-layer" />
+              <g ref={navInteractionOverlayRef} data-testid="floor-nav-interaction-overlay" pointerEvents="none" />
             </g>
           </svg>
 
@@ -21371,7 +23155,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
 
           {roomTemplatePlacement && (
             <div data-testid="room-template-placement-instruction" className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-              <div className={cn("rounded-lg border px-3 py-1.5 text-[11px] font-semibold shadow-sm", roomTemplatePlacementPreview?.valid === false ? "border-destructive/40 bg-card text-destructive" : "border-border bg-card text-foreground")}>
+              <div ref={roomTemplatePlacementStatusRef} className={cn("rounded-lg border px-3 py-1.5 text-[11px] font-semibold shadow-sm", roomTemplatePlacementPreview?.valid === false ? "border-destructive/40 bg-card text-destructive" : "border-border bg-card text-foreground")}>
                 {roomTemplatePlacementPreview?.valid === false ? "Room Template does not fit here" : `Click to place Room Template`} · Esc/right-click to cancel
               </div>
             </div>
@@ -22011,28 +23795,30 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             data-testid="floor-properties-panel"
             className="absolute inset-y-0 right-0 z-50 flex h-full w-64 pointer-events-auto"
           >
-            <FloorOverviewSidebar
-              floor={floor}
-              canvasW={FP_W}
-              canvasH={FP_H}
-              isFirst={building.floors.findIndex((f) => f.id === floorId) <= 0}
-              isLast={building.floors.findIndex((f) => f.id === floorId) >= building.floors.length - 1}
-              isOnly={building.floors.length <= 1}
-              onClose={() => setShowProperties(false)}
-              onRename={renameActiveFloorFromSidebar}
-              onCanvasSize={(w, h) => applySidebarFloorSettings({ canvasW: w, canvasH: h })}
-              onShowGrid={(v) => applySidebarFloorSettings({ showGrid: v })}
-              onShowWallJunctions={(v) => applySidebarFloorSettings({ showWallJunctions: v })}
-              onGridSize={(size) => applySidebarFloorSettings({ gridSize: size })}
-              onOpenSettings={() => setShowFloorSettings(true)}
-              onEditFloorShape={startFloorShapeEdit}
-              onSaveAsTemplate={openSaveFloorTemplate}
-              onDuplicate={() => requestDuplicateFloor(floorId)}
-              onMoveUp={() => requestMoveFloor(floorId, -1)}
-              onMoveDown={() => requestMoveFloor(floorId, 1)}
-              onDelete={() => requestDeleteFloor(floorId)}
-              perimeterEnabled={walls.some(isManagedPerimeterWall)}
-            />
+            <TransientPreviewSidebar freeze={sidebarPreviewFreeze}>
+              <FloorOverviewSidebar
+                floor={floor}
+                canvasW={FP_W}
+                canvasH={FP_H}
+                isFirst={building.floors.findIndex((f) => f.id === floorId) <= 0}
+                isLast={building.floors.findIndex((f) => f.id === floorId) >= building.floors.length - 1}
+                isOnly={building.floors.length <= 1}
+                onClose={() => setShowProperties(false)}
+                onRename={renameActiveFloorFromSidebar}
+                onCanvasSize={(w, h) => applySidebarFloorSettings({ canvasW: w, canvasH: h })}
+                onShowGrid={(v) => applySidebarFloorSettings({ showGrid: v })}
+                onShowWallJunctions={(v) => applySidebarFloorSettings({ showWallJunctions: v })}
+                onGridSize={(size) => applySidebarFloorSettings({ gridSize: size })}
+                onOpenSettings={() => setShowFloorSettings(true)}
+                onEditFloorShape={startFloorShapeEdit}
+                onSaveAsTemplate={openSaveFloorTemplate}
+                onDuplicate={() => requestDuplicateFloor(floorId)}
+                onMoveUp={() => requestMoveFloor(floorId, -1)}
+                onMoveDown={() => requestMoveFloor(floorId, 1)}
+                onDelete={() => requestDeleteFloor(floorId)}
+                perimeterEnabled={walls.some(isManagedPerimeterWall)}
+              />
+            </TransientPreviewSidebar>
           </motion.div>
         )}
         </AnimatePresence>
@@ -22164,16 +23950,16 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           };
           return item ? <motion.div key="entrance-ramp-props" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 1, x: 0 }} className="absolute inset-y-0 right-0 z-50 flex h-full w-64 pointer-events-auto"><LocalApproachInspector kind="ramp" item={item} parent={parent} zones={exteriorZones} entrances={building?.entrances ?? []} onSelectParentZone={selectParentZone} onUpdate={(changes) => { const next = { ...item, ...changes } as FloorEntranceRamp; const siblings = [...entranceRamps.filter((candidate) => candidate.id !== item.id && candidate.parentZoneId === item.parentZoneId), ...entranceSteps.filter((candidate) => candidate.parentZoneId === item.parentZoneId)]; if (parent && (!exteriorZoneAccessFeatureFits(parent, next) || siblings.some((candidate) => exteriorZoneAccessFeaturesOverlap(next, candidate, parent)))) { toast.warning("Accessible Ramp does not fit", "Keep the ramp within the parent zone's outer edge."); return; } updFloor(rooms, fpaths, walls, doors, windows, furniture, stairs, elevators, labels, ramps, exteriorZones, entranceSteps, entranceRamps.map((candidate) => candidate.id === item.id ? next : candidate)); }} onDelete={() => deleteSelection(selected)} onClose={() => setShowProperties(false)} onDuplicateOpposite={() => duplicateAccessFeatureOpposite({ type: "entranceRamp", id: item.id })} /></motion.div> : null;
         })()}
-        <AnimatePresence initial={false}>
-        {showProperties && multiSelected.length <= 1 && selected && (!navMode || (navMode && navTool === "select" && !navSelected)) && !(selected.type === "stairs" && stairs.find((item) => item.id === selected.id)?.exteriorEmergencyStairId) && selected.type !== "exteriorZone" && selected.type !== "entranceSteps" && selected.type !== "entranceRamp" && (
-          <motion.div
-            key="floor-properties"
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute inset-y-0 right-0 z-50 flex h-full w-64 pointer-events-auto"
-          >
+        <div
+          data-testid="floor-properties-shell"
+          aria-hidden={!floorInspectorVisible}
+          className={cn(
+            "absolute inset-y-0 right-0 z-50 flex h-full w-64 transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+            floorInspectorVisible ? "pointer-events-auto translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0",
+          )}
+        >
+        {floorInspectorVisible && (
+          <TransientPreviewSidebar freeze={sidebarPreviewFreeze}>
           <FloorPropertiesPanel
             selected={selected}
             mode={showNavOverlay ? "navigation" : "structure"}
@@ -22188,7 +23974,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             elevators={elevators}
             labels={labels}
             floorId={floor.id}
-            buildingFloors={buildingFloors.map((f) => ({ id: f.id, label: f.label, number: f.number }))}
+            buildingFloors={buildingFloorsForPanel}
             circulationGroups={circulationGroups}
             circulationNavStatus={circulationNavStatus}
             physicalNavStatus={physicalNavStatus}
@@ -22366,9 +24152,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
             layerActionAvailability={selectedLayerActionAvailability}
             onClose={() => setShowProperties(false)}
           />
-          </motion.div>
+          </TransientPreviewSidebar>
         )}
-        </AnimatePresence>
+        </div>
 
         {/* ── CONTEXT MENU ── */}
         <AnimatePresence>

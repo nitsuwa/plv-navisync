@@ -925,13 +925,13 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
     expect(campus.buildings[0].floors[0].doors).toHaveLength(0);
   });
 
-  it("places doors and windows as wall-attached openings with normalized offsets", () => {
+  it("places doors and windows as wall-attached openings with normalized offsets", async () => {
     const { container } = render(<Harness initialCampus={makeSnapCampus()} onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container, 580, 380);
 
     fireEvent.keyDown(window, { key: "d" });
     fireEvent.mouseMove(svg, { clientX: 103, clientY: 58, bubbles: true });
-    expect(screen.getByTestId("door-wall-preview")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("door-wall-preview")).toBeInTheDocument());
     fireEvent.mouseDown(svg, { clientX: 103, clientY: 58, bubbles: true });
 
     let floor = latestCampus!.buildings[0].floors[0];
@@ -943,7 +943,7 @@ describe("Phase 2.1 - room layering, state, and structural snapping", () => {
 
     fireEvent.keyDown(window, { key: "i" });
     fireEvent.mouseMove(svg, { clientX: 303, clientY: 58, bubbles: true });
-    expect(screen.getByTestId("window-wall-preview")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("window-wall-preview")).toBeInTheDocument());
     fireEvent.mouseDown(svg, { clientX: 303, clientY: 58, bubbles: true });
 
     floor = latestCampus!.buildings[0].floors[0];

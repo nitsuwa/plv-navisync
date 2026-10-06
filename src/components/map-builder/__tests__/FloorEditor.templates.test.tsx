@@ -46,6 +46,55 @@ function campusFixture(): Campus {
 }
 
 describe("FloorEditor Floor Templates", () => {
+  it("moves the Room Template preview directly and places at the same world anchor", async () => {
+    const templateData = {
+      id: "room-template-live", scope: "room", name: "Clinic", category: "Office", description: "", width: 120, height: 80, tags: [],
+      boundary: [],
+      objects: [{ kind: "room", x: 0, y: 0, width: 120, height: 80, type: "clinic", name: "Clinic" }],
+    } as unknown as CustomTemplateRecord["templateData"];
+    vi.mocked(listCustomTemplates).mockResolvedValue([{
+      id: "room-template-live", name: "Clinic", description: "", scope: "room", category: "Other", source: "campus", campusId: "campus-1", createdBy: "admin",
+      templateData, previewMetadata: null, isArchived: false, createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    }]);
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    fireEvent.click(screen.getByRole("tab", { name: "Room Templates" }));
+    fireEvent.click(await screen.findByTestId("room-template-place-custom-room-room-template-live"));
+
+    const svg = screen.getByTestId("floor-canvas-boundary").closest("svg")!;
+    Object.defineProperty(svg, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 900, height: 680, right: 900, bottom: 680 }),
+    });
+    fireEvent.mouseMove(svg, { clientX: 260, clientY: 180 });
+    await waitFor(() => expect(screen.getByTestId("room-template-placement-ghost")).toHaveAttribute("transform", "translate(260 180)"));
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseDown(svg, { button: 0, clientX: 260, clientY: 180 });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].rooms.at(-1)).toMatchObject({ x: 260, y: 180, w: 120, h: 80 });
+    expect(screen.queryByTestId("room-template-placement-ghost")).toBeNull();
+  });
+
+  it("cancels a React-owned Room Template preview without removing a React sibling", async () => {
+    const templateData = {
+      id: "room-template-cancel", scope: "room", name: "Clinic", category: "Office", description: "", width: 120, height: 80, tags: [],
+      boundary: [], objects: [{ kind: "room", x: 0, y: 0, width: 120, height: 80, type: "clinic", name: "Clinic" }],
+    } as unknown as CustomTemplateRecord["templateData"];
+    vi.mocked(listCustomTemplates).mockResolvedValue([{
+      id: "room-template-cancel", name: "Clinic", description: "", scope: "room", category: "Other", source: "campus", campusId: "campus-1", createdBy: "admin",
+      templateData, previewMetadata: null, isArchived: false, createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    }]);
+    render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    fireEvent.click(screen.getByTestId("floor-template-button"));
+    fireEvent.click(screen.getByRole("tab", { name: "Room Templates" }));
+    fireEvent.click(await screen.findByTestId("room-template-place-custom-room-room-template-cancel"));
+    expect(screen.getByTestId("room-template-placement-ghost")).toBeInTheDocument();
+    expect(() => fireEvent.keyDown(window, { key: "Escape" })).not.toThrow();
+    expect(screen.queryByTestId("room-template-placement-ghost")).toBeNull();
+  });
+
   it("shows an empty Room Templates library when no user templates exist", async () => {
     vi.mocked(listCustomTemplates).mockResolvedValue([]);
     render(<FloorEditor campus={campusFixture()} buildingId="building-1" floorId="floor-1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
