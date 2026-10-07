@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
-import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
 import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
@@ -80,22 +79,6 @@ export function PublicLayout() {
       >
         Skip to main content
       </a>
-      <Toaster
-        position="bottom-center"
-        toastOptions={{
-          className: "shadow-lg rounded-2xl border",
-          duration: 4000,
-          style: {
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            color: "var(--foreground)",
-            borderRadius: "12px",
-            fontFamily: "var(--font-body)",
-          },
-        }}
-        closeButton
-        richColors
-      />
       <NavigationProgress />
       <ScrollToTop />
       {/* Navbar hidden on mobile map for immersive experience */}

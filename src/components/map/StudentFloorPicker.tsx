@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Layers } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
@@ -14,6 +14,9 @@ interface StudentFloorPickerProps {
   floors: readonly StudentFloorOption[];
   activeFloor: number;
   onSelect: (floorNumber: number) => void;
+  open?: boolean;
+  navigationActive?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 function compactFloorLabel(floor: StudentFloorOption | undefined) {
@@ -25,22 +28,27 @@ function compactFloorLabel(floor: StudentFloorOption | undefined) {
   return `${number}F`;
 }
 
-export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect }: StudentFloorPickerProps) {
-  const [open, setOpen] = useState(false);
+export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect, open: controlledOpen, navigationActive = false, onOpenChange }: StudentFloorPickerProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const reducedMotion = useReducedMotion();
   const current = floors.find((floor) => floor.number === activeFloor) ?? floors[0];
+  const changeOpen = useCallback((nextOpen: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [controlledOpen, onOpenChange]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) changeOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        changeOpen(false);
         triggerRef.current?.focus();
       }
     };
@@ -50,7 +58,9 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [changeOpen, open]);
+
+  useEffect(() => () => onOpenChange?.(false), [onOpenChange]);
 
   useEffect(() => {
     if (open) optionRefs.current[floors.findIndex((floor) => floor.number === activeFloor)]?.focus();
@@ -68,8 +78,14 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
       ref={rootRef}
       data-testid="student-floor-picker"
       data-dock="floor-control-bottom-left"
+      data-navigation-active={navigationActive ? "true" : "false"}
       data-no-drag
-      className="student-map-utility-control absolute bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-3 z-[45] isolate md:bottom-8 md:left-1/2 md:-translate-x-1/2"
+      className={cn(
+        "student-map-utility-control absolute left-3 z-[45] isolate md:bottom-8 md:left-1/2 md:top-auto md:-translate-x-1/2",
+        navigationActive
+          ? "bottom-[calc(100%-var(--student-map-route-dock-top,22rem)+0.5rem)] md:bottom-8"
+          : "bottom-[calc(5rem+env(safe-area-inset-bottom,0px))]",
+      )}
     >
       <button
         ref={triggerRef}
@@ -77,11 +93,11 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
         aria-label={`Choose floor. Current floor: ${current.label}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => changeOpen(!open)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            setOpen(true);
+            changeOpen(true);
           }
         }}
         title={`${buildingName} · ${current.label}`}
@@ -108,7 +124,9 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4, scale: 0.985 }}
             transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
-            className="absolute bottom-full left-0 z-10 mb-3 max-h-[min(22rem,calc(100dvh-12rem))] w-[min(19rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-border/70 bg-card/98 p-1.5 text-foreground shadow-2xl backdrop-blur-xl md:left-1/2 md:w-72 md:-translate-x-1/2"
+            className={cn(
+              "absolute bottom-full left-0 z-10 mb-3 max-h-[min(22rem,calc(100dvh-12rem))] w-[min(19rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-border/70 bg-card/98 p-1.5 text-foreground shadow-2xl backdrop-blur-xl md:left-1/2 md:w-72 md:-translate-x-1/2",
+            )}
             style={{ maxHeight: "var(--student-map-floor-menu-max-height, min(22rem, calc(100dvh - 12rem - env(safe-area-inset-bottom, 0px))))" }}
           >
             <p className="px-3 pb-1.5 pt-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Choose floor</p>
@@ -121,7 +139,7 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
                   type="button"
                   role="option"
                   aria-selected={selected}
-                  onClick={() => { onSelect(floor.number); setOpen(false); triggerRef.current?.focus(); }}
+                  onClick={() => { onSelect(floor.number); changeOpen(false); triggerRef.current?.focus(); }}
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") { event.preventDefault(); moveFocus(index, 1); }
                     if (event.key === "ArrowUp") { event.preventDefault(); moveFocus(index, -1); }

@@ -17,6 +17,8 @@ interface BuildingInfoPanelProps {
   onDirections: (building: Building) => void;
   onEnterBuilding: (building: Building) => void;
   saved: Set<string>;
+  savedStateLoading?: boolean;
+  savedStateUnavailable?: boolean;
   studentAuth: StudentAuthState;
   onToggleSave: (id: string) => void;
   onReport: (building: Building) => void;
@@ -32,6 +34,7 @@ interface BuildingInfoPanelProps {
 
 export function BuildingInfoPanel({
   selected, campusId, onClose, onDirections, onEnterBuilding, saved, studentAuth,
+  savedStateLoading = false, savedStateUnavailable = false,
   onToggleSave, onReport, onSignInPrompt, showQR, onToggleQR, hasFloorPlans,
   floorPlanCount, facilities, accessibility, onBackToRoutePlanner,
 }: BuildingInfoPanelProps) {
@@ -82,6 +85,8 @@ export function BuildingInfoPanel({
           campusId={campusId}
           hasFloorPlans={hasFloorPlans}
           saved={saved}
+          savedStateLoading={savedStateLoading}
+          savedStateUnavailable={savedStateUnavailable}
           studentAuth={studentAuth}
           showQR={showQR}
           onDirections={onDirections}
