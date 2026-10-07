@@ -34,7 +34,8 @@ export function toCsv(rows: Record<string, unknown>[]): string {
 
 /** Download rows as a CSV file. */
 export function downloadCsv(rows: Record<string, unknown>[], filename: string): void {
-  const blob = new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8;" });
+  // Excel uses the UTF-8 BOM to reliably recognize non-ASCII text in CSV files.
+  const blob = new Blob(["\uFEFF", toCsv(rows)], { type: "text/csv;charset=utf-8;" });
   triggerDownload(blob, filename);
 }
 

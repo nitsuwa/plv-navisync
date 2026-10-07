@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, Flag, X, MapPin, Camera, Loader2 } from "lucide-react";
+import { CheckCircle2, Flag, X, Camera, Loader2 } from "lucide-react";
 import type { Building } from "../../types";
 import { cn } from "../../lib/utils";
 import { reportService, validateReportImage } from "../../services/reportService";
@@ -42,11 +42,14 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
   const [warning, setWarning] = useState<string | null>(null);
   const selectedFloor = floors.find(floor => floor.id === floorId);
   const selectedRoom = selectedFloor?.rooms.find(room => room.id === roomId);
+  const hasInitialFloor = floors.some(floor => floor.id === initialFloorId);
   const isRoomLocationFixed = Boolean(
     initialFloorId &&
       initialRoomId &&
       floors.find(floor => floor.id === initialFloorId)?.rooms.some(room => room.id === initialRoomId),
   );
+  const isWholeBuildingLocationFixed = Boolean(building && !hasInitialFloor);
+  const isFloorLocationFixed = isRoomLocationFixed || isWholeBuildingLocationFixed;
   const placeName = building?.name ?? campusPlace?.name ?? "Campus place";
   const locationLabel = [campusPlace ? `${campusPlace.type === "gate" ? "Campus Gate" : "Campus place"} · ${placeName}` : placeName, selectedFloor?.label, selectedRoom?.name].filter(Boolean).join(" · ");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,7 +93,6 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
 
       setSubmitted(true);
       setWarning(report.submissionWarning ?? null);
-      showToast("Report submitted successfully!", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit report. Please try again.");
       showToast("Failed to submit report. Please try again.", "error");
@@ -178,15 +180,15 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {floors.length > 0 && <div className={cn("grid gap-2", selectedFloor ? "grid-cols-2" : "grid-cols-1")}>
             <div className="min-w-0 space-y-1">
-              <label htmlFor="report-floor" className="block text-[11px] font-bold sm:text-xs">Floor{isRoomLocationFixed ? "" : " (optional)"}</label>
-              {isRoomLocationFixed ? (
+              <label htmlFor="report-floor" className="block text-[11px] font-bold sm:text-xs">Floor{isFloorLocationFixed ? "" : " (optional)"}</label>
+              {isFloorLocationFixed ? (
                 <input
                   id="report-floor"
                   type="text"
-                  value={selectedFloor?.label ?? ""}
+                  value={isRoomLocationFixed ? selectedFloor?.label ?? "" : "Whole building"}
                   readOnly
                   aria-readonly="true"
-                  title="The selected room's floor is fixed for this report."
+                  title={isRoomLocationFixed ? "The selected room's floor is fixed for this report." : "The report is fixed to the selected building."}
                   className="h-9 w-full cursor-default rounded-xl border border-border bg-background px-2 text-xs sm:text-sm"
                 />
               ) : (
@@ -216,13 +218,6 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
               )}
             </div>}
           </div>}
-          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-muted/60 px-3 py-1.5 sm:py-2">
-            <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground sm:text-xs">{placeName}</span>
-            <span className="shrink-0 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[9px] font-bold text-green-600 dark:text-green-400 sm:text-[10px]">
-              Auto-set
-            </span>
-          </div>
           <div role="radiogroup" aria-label="Issue type">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-foreground sm:mb-2 sm:text-xs">Issue Type *</label>
             <div className="grid grid-cols-2 gap-1.5 min-[480px]:grid-cols-3 sm:grid-cols-2" role="radiogroup" aria-label="Issue type">

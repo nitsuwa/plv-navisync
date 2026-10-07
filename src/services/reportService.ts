@@ -23,6 +23,8 @@ export interface IssueReport {
   campusPlaceType?: string;
   submissionWarning?: string;
   reporterId: string;
+  reporterName?: string;
+  reporterEmail?: string;
   category: "accessibility" | "maintenance" | "map_error" | "hazard" | string;
   priority: "low" | "medium" | "high" | "urgent" | string;
   title: string;
@@ -61,6 +63,22 @@ export interface CreateReportInput {
 
 export const REPORT_CATEGORIES = ["broken_equipment", "damaged_facility", "electrical_issue", "water_leak", "cleanliness", "accessibility_concern", "safety_concern", "navigation_error", "other"];
 const REPORT_COLUMNS = "id,campus_id,building_id,floor_id,map_element_id,reporter_id,category,priority,title,description,status,resolution_notes,created_at,updated_at";
+const ADMIN_REPORT_COLUMNS = `${REPORT_COLUMNS},reporter:profiles!reports_reporter_id_fkey(first_name,last_name,email)`;
+
+type AdminReportRow = ReportRow & {
+  reporter: Pick<Tables<"profiles">, "first_name" | "last_name" | "email"> | null;
+};
+
+function toAdminIssueReport(row: AdminReportRow): IssueReport {
+  const report = toIssueReport(row);
+  const profile = row.reporter;
+  const reporterName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ");
+  return {
+    ...report,
+    reporterName: reporterName || undefined,
+    reporterEmail: profile?.email ?? undefined,
+  };
+}
 
 export function normalizeReportCategory(category: string): string {
   const legacy: Record<string, string> = { maintenance: "damaged_facility", accessibility: "accessibility_concern", hazard: "safety_concern", map_error: "navigation_error" };
@@ -318,7 +336,7 @@ export async function countPendingReports(): Promise<number> {
 /** List every report for the admin review queue, newest first. */
 export async function listAllReports(filters: ReportFilters = {}): Promise<IssueReport[]> {
   const supabase = getSupabase();
-  let query = supabase.from("reports").select(REPORT_COLUMNS).is("archived_at", null).order("created_at", { ascending: false });
+  let query = supabase.from("reports").select(ADMIN_REPORT_COLUMNS).is("archived_at", null).order("created_at", { ascending: false });
 
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.category && filters.category !== "all") query = query.eq("category", filters.category);
@@ -326,7 +344,7 @@ export async function listAllReports(filters: ReportFilters = {}): Promise<Issue
   const { data, error } = await query;
   if (error) throw error;
 
-  let reports = await hydrateStudentReports((data ?? []).map(row => toIssueReport(row as ReportRow)), supabase);
+  let reports = await hydrateStudentReports((data ?? []).map(row => toAdminIssueReport(row as AdminReportRow)), supabase);
   if (reports.length) {
     const { data: notes, error: notesError } = await supabase.from("report_admin_notes")
       .select("report_id,notes").in("report_id", reports.map(report => report.id));

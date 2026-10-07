@@ -98,7 +98,7 @@ function endpointText(
 }
 
 function EndpointCard({
-  purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel, onChange,
+  purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel, onChange, compact = false,
 }: {
   purpose: RoutePlannerEndpoint;
   building: Building | null;
@@ -108,13 +108,15 @@ function EndpointCard({
   youAreHere?: { x: number; y: number } | null;
   youAreHereLabel?: string | null;
   onChange: () => void;
+  compact?: boolean;
 }) {
   const isStart = purpose === "start";
   const text = endpointText(purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel);
   const selected = Boolean((isStart && useMyLocation && youAreHere) || room || building || campusPlace);
   return (
     <div data-testid={`route-endpoint-card-${isStart ? "start" : "destination"}`} className={cn(
-      "flex min-h-[62px] items-center gap-2.5 rounded-2xl border px-3 py-2.5 transition-colors",
+      "flex items-center gap-2.5 rounded-2xl border transition-colors",
+      compact ? "min-h-[52px] px-2.5 py-1.5" : "min-h-[62px] px-3 py-2.5",
       selected ? "border-primary/25 bg-primary/[0.045]" : "border-border/70 bg-muted/30",
     )}>
       <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black", isStart ? "bg-emerald-500 text-white" : "bg-primary text-primary-foreground")}>{isStart ? "A" : "B"}</span>
@@ -381,14 +383,14 @@ export function UnifiedRoutePlannerDialog({
           aria-valuemax={resizeBounds.max}
           aria-valuenow={currentPanelHeight()}
           data-testid="route-planner-resize-handle"
-          className="mx-auto flex h-11 w-full touch-none cursor-row-resize items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="mx-auto flex h-7 w-full touch-none cursor-row-resize items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-11"
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerEnd}
           onPointerCancel={handleResizePointerEnd}
           onKeyDown={handleResizeKeyDown}
         >
-          <span aria-hidden="true" className="h-1 w-9 rounded-full bg-border" />
+          <span aria-hidden="true" className="h-1 w-8 rounded-full bg-border md:w-9" />
         </div>
         <div className="flex items-center gap-2.5">
           {mapSelectionEndpoint ? (
@@ -468,7 +470,10 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-3.5 py-3 md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4"
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto overscroll-contain md:max-h-[calc(100dvh-14rem)] md:flex-none md:space-y-3 md:px-4 md:py-4",
+              isMobileViewport ? "space-y-1.5 px-3 py-2" : "space-y-2.5 px-3.5 py-3",
+            )}
             initial={reducedMotion ? false : { opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
@@ -486,28 +491,28 @@ export function UnifiedRoutePlannerDialog({
             ) : (
               <>
                 {route && editingRoute && <div className="flex justify-end"><button type="button" onClick={() => setEditingRoute(false)} className="min-h-7 rounded-lg px-2 text-[10px] font-extrabold text-primary hover:bg-primary/10">Done editing route</button></div>}
-                <div className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1" role="group" aria-label="Route modes">
+                <div className="grid grid-cols-3 gap-0.5 rounded-xl bg-muted/60 p-0.5 md:gap-1 md:p-1" role="group" aria-label="Route modes">
                   {MODES.map(({ key, label, icon }) => (
-                    <button key={key} type="button" onClick={() => onModeChange(key)} aria-label={`${label} routing`} aria-pressed={mode === key} className={cn("flex min-h-11 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", mode === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-card hover:text-foreground", mode === key && key === "accessible" && "bg-emerald-700", mode === key && key === "emergency" && "bg-rose-700")}>
+                    <button key={key} type="button" onClick={() => onModeChange(key)} aria-label={`${label} routing`} aria-pressed={mode === key} className={cn("flex min-h-9 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:min-h-11", mode === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-card hover:text-foreground", mode === key && key === "accessible" && "bg-emerald-700", mode === key && key === "emergency" && "bg-rose-700")}>
                       {icon}<span>{label}</span>
                     </button>
                   ))}
                 </div>
                 {mode === "accessible" && <p data-testid="accessible-route-note" className="rounded-lg bg-emerald-700/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-emerald-800 dark:text-emerald-200">Accessible route · Uses ramps and elevators where the authored path supports them.</p>}
                 {mode === "standard" && (
-                  <div data-testid="standard-route-preferences" className="grid grid-cols-3 gap-1 rounded-xl border border-border/70 bg-muted/25 p-1" role="group" aria-label="Standard route preference">
+                  <div data-testid="standard-route-preferences" className="grid grid-cols-3 gap-0.5 rounded-xl border border-border/70 bg-muted/25 p-0.5 md:gap-1 md:p-1" role="group" aria-label="Standard route preference">
                     {([
                       ["best", "Best"],
                       ["stairs", "Prefer stairs"],
                       ["elevator", "Prefer elevator"],
                     ] as const).map(([value, label]) => (
-                      <button key={value} type="button" onClick={() => onStandardPreferenceChange?.(value)} aria-pressed={standardPreference === value} className={cn("min-h-11 rounded-lg px-1.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", standardPreference === value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-card hover:text-foreground")}>
+                      <button key={value} type="button" onClick={() => onStandardPreferenceChange?.(value)} aria-pressed={standardPreference === value} className={cn("min-h-9 rounded-lg px-1.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:min-h-11", standardPreference === value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-card hover:text-foreground")}>
                         {label}
                       </button>
                     ))}
                   </div>
                 )}
-                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
+                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} compact={isMobileViewport} />
                 {canSwapEndpoints && (
                   <div data-testid="route-planner-swap-row" className="flex h-11 items-center justify-center">
                     <button type="button" onClick={swapEndpoints} disabled={sameEndpoint} aria-label="Swap start and destination" title="Swap start and destination" className="flex h-11 w-11 items-center justify-center rounded-full border border-border/80 bg-muted/50 text-muted-foreground transition-[transform,background-color,color,border-color] duration-150 hover:border-primary/30 hover:bg-primary/5 hover:text-primary active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none"><ArrowUpDown className="h-4 w-4" /></button>
@@ -516,7 +521,7 @@ export function UnifiedRoutePlannerDialog({
                 {isEmergency ? (
                   <div data-testid="emergency-destination" className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] px-3 py-2.5"><p className="text-[10px] font-extrabold text-rose-700 dark:text-rose-300">Automatic evacuation destination</p><p className="mt-0.5 truncate text-[12px] font-bold">{toDisplay.label}</p><p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Uses valid emergency exits and excludes elevators.</p></div>
                 ) : (
-                  <EndpointCard purpose="destination" building={to} campusPlace={toCampusPlace} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} />
+                  <EndpointCard purpose="destination" building={to} campusPlace={toCampusPlace} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} compact={isMobileViewport} />
                 )}
                 {sameEndpoint && <p role="alert" data-testid="same-route-endpoint-error" className="rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs font-semibold text-destructive">Choose two different places for your route.</p>}
                 {bothSet && !sameEndpoint && !route && <RouteErrorState fromCode={fromDisplay.label} toCode={toDisplay.label} mode={mode} onSwitchMode={onModeChange} />}
@@ -527,7 +532,10 @@ export function UnifiedRoutePlannerDialog({
       </AnimatePresence>
 
       {canShowMainForm && (
-        <footer className="shrink-0 border-t border-border/60 bg-card/95 px-3.5 pb-2.5 pt-2.5 backdrop-blur-xl md:px-4 md:pb-3">
+        <footer className={cn(
+          "shrink-0 border-t border-border/60 bg-card/95 backdrop-blur-xl md:px-4 md:pb-3",
+          isMobileViewport ? "px-3 pb-1.5 pt-1.5" : "px-3.5 pb-2.5 pt-2.5",
+        )}>
           {route && !editingRoute ? (
             <div className="flex gap-2">
               <button type="button" onClick={() => setEditingRoute(true)} className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Change route</button>

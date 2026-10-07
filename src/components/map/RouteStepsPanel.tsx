@@ -15,6 +15,10 @@ interface RouteStepsPanelProps {
   route: PlannedRoute;
   mode: RouteMode;
   toName: string;
+  originRoomName?: string;
+  originBuildingName?: string;
+  destinationRoomName?: string;
+  destinationBuildingName?: string;
   /** Called when the user ends navigation */
   onEnd: () => void;
   /** Called to zoom the map to fit the route */
@@ -33,9 +37,12 @@ interface RouteStepsPanelProps {
     distanceM: number;
     progress: number;
     statusInstruction?: string;
+    phase?: "origin-indoor" | "outdoor" | "destination-indoor";
   };
   /** Full-width, resizable mobile navigation sheet. */
   compact?: boolean;
+  /** Temporarily hide route details while another mobile map picker is open. */
+  minimized?: boolean;
 }
 
 /** Index of the step currently being walked, based on cumulative distance. */
@@ -121,7 +128,8 @@ function presentInstruction(instruction: string): string | null {
  * (desktop bottom-left card, mobile sheet).
  */
 export function RouteStepsPanel({
-  route, mode, toName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false,
+  route, mode, toName, originRoomName, originBuildingName, destinationRoomName,
+  destinationBuildingName, onEnd, onZoom, walkProgress, onReplay, activeLeg, compact = false, minimized = false,
 }: RouteStepsPanelProps) {
   const [mobilePanelHeight, setMobilePanelHeight] = useState(MOBILE_PANEL_DEFAULT_HEIGHT);
   const [mobilePanelMaxHeight, setMobilePanelMaxHeight] = useState(MOBILE_PANEL_MAX_HEIGHT);
@@ -129,15 +137,187 @@ export function RouteStepsPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number; offset: { x: number; y: number } } | null>(null);
-  const hasActiveLegSteps = Boolean(activeLeg?.steps.length);
-  const steps = hasActiveLegSteps ? activeLeg!.steps : route.steps;
-  const trackedProgress = activeLeg?.progress ?? walkProgress;
-  const trackedDistance = activeLeg?.distanceM ?? route.dist;
+  const steps = [...route.steps];
+  const instructionKey = (instruction: string) => instruction.trim().toLowerCase().replace(/[.!?]+$/, "");
+  const baseStepCounts = new Map<string, number>();
+  steps.forEach((step) => {
+    const key = instructionKey(step.instruction);
+    baseStepCounts.set(key, (baseStepCounts.get(key) ?? 0) + 1);
+  });
+  const matchedBaseInstructions = new Set<string>();
+  const supplementalInstructions = new Set<string>();
+  const missingOriginSteps: PlannedRoute["steps"] = [];
+  const missingDestinationStartSteps: PlannedRoute["steps"] = [];
+  const missingDestinationSteps: PlannedRoute["steps"] = [];
+  const missingDestinationEndSteps: PlannedRoute["steps"] = [];
+  const keepIfMissing = (step: PlannedRoute["steps"][number], target: PlannedRoute["steps"]) => {
+    const key = instructionKey(step.instruction);
+    const count = baseStepCounts.get(key) ?? 0;
+    if (count > 0) {
+      baseStepCounts.set(key, count - 1);
+      matchedBaseInstructions.add(key);
+      return;
+    }
+    if (matchedBaseInstructions.has(key) || supplementalInstructions.has(key)) return;
+    target.push(step);
+    supplementalInstructions.add(key);
+  };
+  const indoorSegments = route.indoorSegments ?? [];
+  const hasOriginIndoorLeg = indoorSegments.some((segment) => !segment.afterOutdoor)
+    || activeLeg?.phase === "origin-indoor";
+  const hasDestinationIndoorLeg = indoorSegments.some((segment) => Boolean(segment.afterOutdoor))
+    || activeLeg?.phase === "destination-indoor";
+  if (originRoomName && hasOriginIndoorLeg) {
+    keepIfMissing({
+      id: "route-origin-room-start",
+      icon: "start",
+      instruction: `Start at the door of ${originRoomName}.`,
+    }, missingOriginSteps);
+  }
+  if (destinationRoomName && destinationBuildingName && hasDestinationIndoorLeg) {
+    keepIfMissing({
+      id: "route-destination-room-enter",
+      icon: "enter",
+      instruction: `Enter ${destinationBuildingName} building.`,
+    }, missingDestinationStartSteps);
+  }
+  const collectActiveIndoorSteps = (phase: "origin-indoor" | "destination-indoor") => {
+    if (activeLeg?.phase !== phase) return;
+    const isBeforePath = (icon: PlannedRoute["steps"][number]["icon"]) =>
+      phase === "origin-indoor" ? icon === "start" : icon === "enter";
+    activeLeg.steps.filter((step) => isBeforePath(step.icon)).forEach((step) => {
+      keepIfMissing(
+        step,
+        phase === "origin-indoor" ? missingOriginSteps : missingDestinationStartSteps,
+      );
+    });
+  };
+  collectActiveIndoorSteps("origin-indoor");
+  collectActiveIndoorSteps("destination-indoor");
+  const appendIndoorSegmentSteps = (afterOutdoor: boolean) => {
+    const segments = indoorSegments.filter((segment) => Boolean(segment.afterOutdoor) === afterOutdoor);
+    const target = afterOutdoor ? missingDestinationSteps : missingOriginSteps;
+    segments.forEach((segment, index) => {
+      segment.steps.forEach((step) => keepIfMissing(step, target));
+      const next = segments[index + 1];
+      const transition = next && segment.floorId && next.floorId
+        && segment.buildingId === next.buildingId
+        && route.transitionDetails?.find((candidate) =>
+        candidate.fromFloorId === segment.floorId && candidate.toFloorId === next.floorId,
+      );
+      if (!transition) return;
+      const targetFloor = next.floorNumber === undefined
+        ? "the connected floor"
+        : next.floorNumber === 1 ? "Ground Floor" : `Floor ${next.floorNumber}`;
+      const place = transition.label.trim() || (transition.kind === "elevator" ? "elevator" : "stairs");
+      const lowerPlace = place.toLowerCase();
+      const hasArticle = lowerPlace.startsWith("the ") || lowerPlace.startsWith("a ") || lowerPlace.startsWith("an ");
+      const articlePlace = hasArticle ? place : `the ${place}`;
+      const direction = segment.floorNumber !== undefined && next.floorNumber !== undefined
+        ? next.floorNumber > segment.floorNumber ? " up" : " down"
+        : "";
+      const instruction = transition.kind === "elevator"
+        ? `Take ${articlePlace} to ${targetFloor}.`
+        : `Take ${articlePlace}${direction} to ${targetFloor}.`;
+      keepIfMissing({
+        id: `route-transition-${transition.nodeId}`,
+        icon: transition.kind === "elevator" ? "elevator" : "stairs",
+        instruction,
+      }, target);
+    });
+  };
+  appendIndoorSegmentSteps(false);
+  appendIndoorSegmentSteps(true);
+  if (activeLeg?.phase === "origin-indoor" || activeLeg?.phase === "destination-indoor") {
+    const target = activeLeg.phase === "origin-indoor" ? missingOriginSteps : missingDestinationSteps;
+    activeLeg.steps.filter((step) => ["walk", "stairs", "elevator"].includes(step.icon)).forEach((step) => {
+      keepIfMissing(step, target);
+    });
+  }
+  const collectActiveIndoorAfterSteps = (phase: "origin-indoor" | "destination-indoor") => {
+    if (activeLeg?.phase !== phase) return;
+    const isAfterPath = (icon: PlannedRoute["steps"][number]["icon"]) =>
+      phase === "origin-indoor" ? icon === "enter" : icon === "arrive";
+    activeLeg.steps.filter((step) => isAfterPath(step.icon)).forEach((step) => {
+      keepIfMissing(
+        step,
+        phase === "origin-indoor" ? missingOriginSteps : missingDestinationEndSteps,
+      );
+    });
+  };
+  collectActiveIndoorAfterSteps("origin-indoor");
+  collectActiveIndoorAfterSteps("destination-indoor");
+  if (originRoomName && originBuildingName && hasOriginIndoorLeg
+    && route.steps.some((step) => step.instruction.toLowerCase().includes("campus path"))) {
+    keepIfMissing({
+      id: "route-origin-room-exit",
+      icon: "enter",
+      instruction: `Exit ${originBuildingName} building.`,
+    }, missingOriginSteps);
+  }
+  if (destinationRoomName && destinationBuildingName && hasDestinationIndoorLeg) {
+    keepIfMissing({
+      id: "route-destination-room-arrive",
+      icon: "arrive",
+      instruction: `Arrive at ${destinationRoomName}.`,
+    }, missingDestinationEndSteps);
+  } else if (route.steps.some((step) => step.instruction.toLowerCase().includes("campus path"))) {
+    keepIfMissing({
+      id: "route-building-arrive",
+      icon: "arrive",
+      instruction: `Arrive at ${toName}.`,
+    }, missingDestinationEndSteps);
+  }
+  const campusStepIndex = steps.findIndex((step) => step.instruction.toLowerCase().includes("campus path"));
+  const sourceExitIndex = steps.findIndex((step) => /^exit\b/i.test(step.instruction));
+  const originInsertIndex = sourceExitIndex >= 0
+    ? sourceExitIndex
+    : campusStepIndex >= 0 ? campusStepIndex : steps.length;
+  steps.splice(originInsertIndex, 0, ...missingOriginSteps);
+  const updatedCampusIndex = steps.findIndex((step) => step.instruction.toLowerCase().includes("campus path"));
+  const destinationStartIndex = updatedCampusIndex >= 0 ? updatedCampusIndex + 1 : 0;
+  const destinationFirstStepIndex = steps.findIndex((step, index) =>
+    index >= destinationStartIndex && /^(enter|follow the indoor path|take )\b/i.test(step.instruction),
+  );
+  steps.splice(
+    destinationFirstStepIndex >= 0 ? destinationFirstStepIndex : destinationStartIndex,
+    0,
+    ...missingDestinationStartSteps,
+  );
+  const destinationArrivalIndex = steps.findIndex((step, index) =>
+    index >= destinationStartIndex && /^arrive\b/i.test(step.instruction),
+  );
+  const destinationInsertIndex = destinationArrivalIndex >= 0 ? destinationArrivalIndex : steps.length;
+  steps.splice(destinationInsertIndex, 0, ...missingDestinationSteps);
+  const updatedDestinationArrivalIndex = steps.findIndex((step, index) =>
+    index >= destinationStartIndex && /^arrive\b/i.test(step.instruction),
+  );
+  steps.splice(
+    updatedDestinationArrivalIndex >= 0 ? updatedDestinationArrivalIndex : steps.length,
+    0,
+    ...missingDestinationEndSteps,
+  );
   const modeColor =
     mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "var(--primary)";
-  const activeIndex =
-    typeof trackedProgress === "number" && (!activeLeg || hasActiveLegSteps)
-      ? activeStepIndex(steps, trackedProgress, trackedDistance)
+  const legStepIndex = activeLeg?.steps.length
+    ? activeStepIndex(activeLeg.steps, activeLeg.progress, activeLeg.distanceM)
+    : null;
+  const legStep = legStepIndex === null ? undefined : activeLeg?.steps[legStepIndex];
+  const normalizeInstruction = instructionKey;
+  const routeCampusStepIndex = steps.findIndex((step) => /\bcampus path\b/i.test(step.instruction));
+  const activeLegRouteIndex = legStep
+    ? steps.findIndex((step, index) => {
+        if (normalizeInstruction(step.instruction) !== normalizeInstruction(legStep.instruction)) return false;
+        if (activeLeg?.phase === "origin-indoor") return routeCampusStepIndex < 0 || index < routeCampusStepIndex;
+        if (activeLeg?.phase === "destination-indoor") return routeCampusStepIndex < 0 || index > routeCampusStepIndex;
+        if (activeLeg?.phase === "outdoor") return step.id === legStep.id || index === routeCampusStepIndex;
+        return true;
+      })
+    : -1;
+  const activeIndex = activeLegRouteIndex >= 0
+    ? activeLegRouteIndex
+    : typeof walkProgress === "number"
+      ? activeStepIndex(steps, walkProgress, route.dist)
       : steps.length > 0 ? 0 : null;
   const currentInstruction = activeLeg?.statusInstruction
     ? presentInstruction(activeLeg.statusInstruction)
@@ -246,7 +426,7 @@ export function RouteStepsPanel({
       ref={panelRef}
       className={cn(
         "rounded-2xl border border-border/60 shadow-xl overflow-hidden will-change-transform",
-        compact && "flex w-full min-h-0 flex-col rounded-t-2xl rounded-b-none",
+        compact && "flex w-full min-h-0 flex-col rounded-t-2xl rounded-b-none transition-[height] duration-200 ease-out motion-reduce:duration-0",
       )}
       role="region"
       aria-label={`Active route to ${toName}`}
@@ -257,14 +437,14 @@ export function RouteStepsPanel({
         WebkitBackdropFilter: "blur(16px)",
         transform: compact ? undefined : `translate3d(${panelOffset.x}px, ${panelOffset.y}px, 0)`,
         ...(compact ? {
-          height: `${mobilePanelHeight}px`,
+          height: `${minimized ? 44 : mobilePanelHeight}px`,
           maxHeight: `${mobilePanelMaxHeight}px`,
         } : {}),
         boxSizing: "border-box",
         width: compact ? "100%" : undefined,
         touchAction: compact ? "auto" : undefined,
       }}>
-      {compact && (
+      {compact && !minimized && (
         <div
           role="slider"
           tabIndex={0}
@@ -300,13 +480,22 @@ export function RouteStepsPanel({
         <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse shrink-0" />
       </div>
 
-      <p data-testid="active-route-source" className={cn("px-3 pt-2 text-[9px] font-semibold text-muted-foreground", compact && "px-2 pt-1.5 text-[8px]")}>
-        {route.isAuthoredGraph
-          ? "Following the admin-authored map paths"
-          : route.isGraphBased
-            ? "Following the built-in walkway graph"
-            : "Approximate route — map path not published"}
-      </p>
+      {!minimized && <div
+        data-testid="active-route-source"
+        className={cn(
+          "mx-3 mt-2 mb-1 inline-flex w-fit max-w-[calc(100%-1.5rem)] items-center gap-1.5 rounded-full border border-primary/15 bg-primary/[0.06] px-2.5 py-1 text-[10px] font-semibold leading-none text-primary",
+          compact && "mt-1.5 text-[10px]",
+        )}
+      >
+        <Footprints aria-hidden="true" className="h-3 w-3 shrink-0 opacity-80" />
+        <span className="min-w-0 truncate">
+          {route.isAuthoredGraph
+            ? "Following the admin-authored map paths"
+            : route.isGraphBased
+              ? "Following the built-in walkway graph"
+              : "Approximate route — map path not published"}
+        </span>
+      </div>}
 
       {currentInstruction && (
         <p
@@ -321,9 +510,9 @@ export function RouteStepsPanel({
       )}
 
       {/* Step-by-step directions */}
-      <div className={cn(
+      {!minimized && <div className={cn(
         "px-3 pt-2 pb-1 max-h-32 overflow-y-auto scrollbar-show-on-hover",
-        compact && "min-h-0 flex-1 px-2 pt-1.5 max-h-none",
+        compact && "min-h-0 flex-1 px-3 pt-1.5 max-h-none",
       )}>
         <div className="relative pl-4 border-l-2 border-primary/30 space-y-1.5">
           {visibleSteps.map(({ step, index: originalIndex, instruction }, i) => {
@@ -337,11 +526,12 @@ export function RouteStepsPanel({
                 data-testid={isActive ? "active-route-step" : "route-step"}
                 className={cn(
                   "relative flex items-start gap-2 rounded-lg transition-all",
-                  isActive && "bg-primary/10 ring-1 ring-primary/30 px-1.5 -mx-1.5 py-1"
+                  isActive && "bg-primary/10 ring-1 ring-primary/30 px-1.5 py-1",
+                  compact && "px-2.5 py-1.5",
                 )}
               >
                 <span className={cn(
-                  "absolute -left-[11px] w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
+                  "absolute -left-6 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
                   stepDot(isFirst, isLast)
                 )}>
                   {isFirst ? <Flag className="h-2 w-2 text-white" /> : isLast ? <CircleCheck className="h-2 w-2 text-white" /> : null}
@@ -350,7 +540,8 @@ export function RouteStepsPanel({
                 <div className="min-w-0 flex-1">
                   <p className={cn(
                     "text-[10px] leading-snug pt-0.5",
-                    isLast ? "font-bold text-foreground" : "text-muted-foreground"
+                    isLast ? "font-bold text-foreground" : "text-muted-foreground",
+                    compact && "text-xs leading-normal",
                   )}>
                     {instruction}
                   </p>
@@ -359,10 +550,10 @@ export function RouteStepsPanel({
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* Actions */}
-      <div className={cn("flex items-center gap-1.5 px-3 pb-2.5", compact && "gap-1 px-2 pb-2")}>
+      {!minimized && <div className={cn("flex items-center gap-1.5 px-3 pb-2.5", compact && "gap-1 px-2 pb-2")}>
         <button
           onClick={onEnd}
           className={cn("flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-[10px] font-bold hover:bg-destructive/10 transition-colors", compact && "h-8")}
@@ -372,7 +563,7 @@ export function RouteStepsPanel({
         {onReplay && (
           <button
             onClick={onReplay}
-            className={cn("h-7 px-2 rounded-lg border border-border text-muted-foreground flex items-center gap-1 hover:bg-muted transition-colors", compact && "h-8 px-1.5")}
+            className={cn("h-7 min-w-7 rounded-lg border border-border text-muted-foreground flex items-center justify-center gap-1 px-2 hover:bg-muted transition-colors", compact && "h-8 min-w-8 px-1.5")}
             title="Replay walk animation"
             aria-label="Replay walk animation"
           >
@@ -388,7 +579,7 @@ export function RouteStepsPanel({
         >
           <Maximize2 className="h-3 w-3" />
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

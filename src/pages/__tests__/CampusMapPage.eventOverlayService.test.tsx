@@ -814,7 +814,7 @@ describe("CampusMapPage event overlays", () => {
     await waitFor(() => expect(screen.getAllByTestId("route-steps-panel").length).toBe(2));
     const [desktopRoutePanel, mobileRoutePanel] = screen.getAllByTestId("route-steps-panel");
     expect(desktopRoutePanel.parentElement?.parentElement).toHaveClass("hidden", "md:block");
-    expect(mobileRoutePanel.parentElement).toHaveClass("inset-x-0", "bottom-0", "md:hidden");
+    expect(mobileRoutePanel.parentElement).toHaveClass("inset-x-2", "bottom-0", "md:hidden");
     expect(mobileRoutePanel.querySelector("button")).toHaveClass("h-8");
     expect(screen.queryByTestId("indoor-route-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Directions to room")).not.toBeInTheDocument();
