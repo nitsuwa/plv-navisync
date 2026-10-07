@@ -133,7 +133,7 @@ interface EventToolDef {
 
 const EVENT_TOOLS: EventToolDef[] = [
   { id: "select", label: "Select", icon: Move },
-  { id: "furniture", label: "Furniture", icon: () => <span className="text-sm">🪑</span> },
+  { id: "furniture", label: "Furniture", icon: () => <span aria-hidden="true" className="text-sm">🪑</span> },
   { id: "text", label: "Label", icon: Type },
   { id: "pan", label: "Pan", icon: Hand },
 ];
@@ -409,6 +409,9 @@ export function EventFloorEditor({
   const [eventLabels, setEventLabels] = useState<FloorLabel[]>(
     initialEventLayout.eventLabels
   );
+  const [inlineLabelEdit, setInlineLabelEdit] = useState<{ id: string; value: string } | null>(null);
+  const inlineLabelEditRef = useRef<{ id: string; value: string } | null>(null);
+  const lastLabelPressRef = useRef<{ id: string; clientX: number; clientY: number } | null>(null);
   const [draftRecovered, setDraftRecovered] = useState(initialEventLayout.recovered);
   const temporarySelectRef = useRef<{ previous: EventTool; startedAt: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -449,6 +452,8 @@ export function EventFloorEditor({
   const [submittingLocal, setSubmittingLocal] = useState(false);
   const { spaceHeld } = useSpacePan(true);
   const [previewPanMode, setPreviewPanMode] = useState(true);
+  const [feedbackCursorPoint, setFeedbackCursorPoint] = useState<{ x: number; y: number } | null>(null);
+  const feedbackCursorRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (readOnly) setPreviewPanMode(!onFeedbackPoint); }, [Boolean(onFeedbackPoint), readOnly]);
   const [resizing, setResizing] = useState<{
     id: string;
@@ -852,6 +857,10 @@ export function EventFloorEditor({
   }, [activeTemplate, activeTool, canvasH, canvasW, eventFurniture, floorPlan.gridSize, placementPoint, presetPreview, protectedRegions, snapEnabled, zoom]);
 
   const effectiveTool: EventTool = isPanning || pinchActive || (spaceHeld && !itemGestureActive) || (readOnly && previewPanMode) ? "pan" : activeTool;
+  const feedbackPlacementActive = readOnly && Boolean(onFeedbackPoint) && effectiveTool !== "pan" && !draftFeedbackPoint;
+  useEffect(() => {
+    if (!feedbackPlacementActive) setFeedbackCursorPoint(null);
+  }, [feedbackPlacementActive]);
   const placementGuides = useMemo(() => dragging?.type === "furniture" && dragging.ids.length === 1 && selectedFurniture
     ? eventPlacementGuides(selectedFurniture, eventFurniture, 3 / zoom)
     : null, [dragging, selectedFurniture, eventFurniture, zoom]);
@@ -1094,12 +1103,16 @@ export function EventFloorEditor({
   // ── Canvas click handler ───────────────────────────────────────────────
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (inlineLabelEditRef.current) return;
       if (readOnly) {
         if (effectiveTool === "pan" || panMovedRef.current || suppressCanvasClickRef.current) { suppressCanvasClickRef.current = false; panMovedRef.current = false; return; }
         if (onFeedbackPoint && !(e.target as Element).closest("[data-event-editor-chrome]")) {
           const rect = e.currentTarget.getBoundingClientRect();
           const point = { x: (e.clientX - rect.left - pan.x) / zoom, y: (e.clientY - rect.top - pan.y) / zoom };
-          if (point.x >= 0 && point.y >= 0 && point.x <= canvasW && point.y <= canvasH) onFeedbackPoint(point);
+          if (point.x >= 0 && point.y >= 0 && point.x <= canvasW && point.y <= canvasH) {
+            setFeedbackCursorPoint(null);
+            onFeedbackPoint(point);
+          }
         }
         return;
       }
@@ -1287,7 +1300,8 @@ export function EventFloorEditor({
         return;
       }
       if (moveHereArmedIds) return;
-      if (activeTool !== "select" && activeTool !== "furniture" && !(activeTool === "text" && type === "label")) return;
+      if (activeTool !== "select" && activeTool !== "furniture" && activeTool !== "text") return;
+      lastLabelPressRef.current = type === "label" ? { id, clientX: e.clientX, clientY: e.clientY } : null;
       e.preventDefault();
 
       if (e.shiftKey) {
@@ -1863,6 +1877,32 @@ export function EventFloorEditor({
     setMoveHerePreview(null);
   }, []);
 
+  const beginInlineLabelEdit = useCallback((label: FloorLabel) => {
+    if (readOnly || label.locked || effectiveTool === "pan") return;
+    finishInteractionRef.current("switch");
+    selectTool("select");
+    setSelectedId(label.id);
+    setSelectedType("label");
+    setSelectedIds([label.id]);
+    const edit = { id: label.id, value: label.text };
+    inlineLabelEditRef.current = edit;
+    setInlineLabelEdit(edit);
+  }, [effectiveTool, readOnly, selectTool]);
+
+  const finishInlineLabelEdit = useCallback((cancel = false) => {
+    const edit = inlineLabelEditRef.current;
+    inlineLabelEditRef.current = null;
+    setInlineLabelEdit(null);
+    if (!edit || cancel || readOnly) return;
+    const label = latestLabelsRef.current.find(item => item.id === edit.id);
+    const value = edit.value.trim();
+    if (!label || label.locked || !value || value === label.text) return;
+    const next = latestLabelsRef.current.map(item => item.id === edit.id ? { ...item, text: value } : item);
+    latestLabelsRef.current = next;
+    setEventLabels(next);
+    pushHistory(latestFurnitureRef.current, next);
+  }, [pushHistory, readOnly]);
+
   const handleTutorialStepChange = useCallback((step: number | null) => {
     if (step === 1) {
       if (tutorialPreviousToolRef.current === null) tutorialPreviousToolRef.current = activeTool;
@@ -2093,7 +2133,7 @@ export function EventFloorEditor({
       return;
     }
     pointerPositionsRef.current.delete(e.pointerId);
-    pointerPressOriginRef.current = origin === "blank" ? "blank" : "none";
+    pointerPressOriginRef.current = origin;
   }, [capturePointer]);
 
   const handleCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -2101,6 +2141,7 @@ export function EventFloorEditor({
     const origin: PointerPressOrigin = target.closest("[data-event-editor-chrome]")
       ? "chrome"
       : target.closest("[data-event-item]") ? "item" : "blank";
+    if (origin === "blank" || origin === "chrome") lastLabelPressRef.current = null;
     if (origin === "blank" && (effectiveTool === "furniture" || moveHereArmedIds) && activePointerIdsRef.current.size === 0) {
       lastCanvasPointerTypeRef.current = e.pointerType === "touch" ? "touch" : e.pointerType === "pen" ? "pen" : "mouse";
     }
@@ -2356,6 +2397,12 @@ export function EventFloorEditor({
         return;
       }
 
+      if (e.key === "Enter" && selectedLabel && selectedIds.length === 1 && canvasRef.current?.contains(e.target as Node)) {
+        e.preventDefault();
+        beginInlineLabelEdit(selectedLabel);
+        return;
+      }
+
       if (e.key.startsWith("Arrow") && selectedIds.length > 0) {
         const distance = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -distance : e.key === "ArrowRight" ? distance : 0;
@@ -2440,7 +2487,7 @@ export function EventFloorEditor({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [activeTool, deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject]);
+  }, [activeTool, deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
 
   // ── Save / Submit handlers ─────────────────────────────────────────────
   const busy = saving || submittingLocal || isSaving || isSubmitting;
@@ -2748,9 +2795,10 @@ export function EventFloorEditor({
             <button type="button" aria-label="Delete selected item" title="Delete selected item (Del)" disabled={selectedFurniture.locked} onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-40">Delete</button>
           </>
         )}
-        {inspectorViewportCompact && selectedLabel && selectedIds.length === 1 && (
+        {inspectorViewportCompact && !inlineLabelEdit && selectedLabel && selectedIds.length === 1 && (
           <>
             <span className="max-w-28 truncate px-1 text-[10px] font-extrabold text-foreground" title={selectedLabel.text}>{selectedLabel.text || "Untitled label"}</span>
+            <button type="button" disabled={selectedLabel.locked} onClick={() => beginInlineLabelEdit(selectedLabel)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold hover:bg-muted disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-primary">Edit text</button>
             <button type="button" aria-label="Duplicate selected label" onClick={duplicateSelection} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Duplicate</button>
             <button type="button" aria-label="Open label details" aria-haspopup="dialog" onClick={(event) => openInspectorFrom(event.currentTarget)} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Details</button>
             <button type="button" aria-label={selectedLabel.locked ? "Unlock selected label" : "Lock selected label"} onClick={toggleSelectedLabelLock} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{selectedLabel.locked ? "Unlock" : "Lock"}</button>
@@ -2800,16 +2848,40 @@ export function EventFloorEditor({
                ? "grabbing"
                : effectiveTool === "pan"
               ? "grab"
+              : feedbackPlacementActive ? "crosshair"
               : activeTool === "select"
               ? "default"
               : "crosshair",
         }}
         onClick={handleCanvasClick}
-        onPointerDown={handleCanvasPointerDown}
+        onDoubleClick={(event) => {
+          // Capturing on the stable canvas also retargets the synthesized double-click.
+          // Only a stationary press on an actual label may open its text editor.
+          const press = lastLabelPressRef.current;
+          if (!press || gestureMovedRef.current || (event.target as Element).closest("[data-event-editor-chrome]") || Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY) > 3) return;
+          const label = latestLabelsRef.current.find(item => item.id === press.id);
+          if (label) beginInlineLabelEdit(label);
+        }}
+        onPointerDown={(event) => {
+          if (event.pointerType === "touch" || event.button === 1) setFeedbackCursorPoint(null);
+          handleCanvasPointerDown(event);
+        }}
         onPointerMove={(event) => {
-          if (activePointerIdsRef.current.size > 0 || (event.target as Element).closest("[data-event-editor-chrome]")) return;
+          if (activePointerIdsRef.current.size > 0 || (event.target as Element).closest("[data-event-editor-chrome]")) {
+            setFeedbackCursorPoint(null);
+            return;
+          }
           const point = getCanvasWorldPoint(event.clientX, event.clientY);
           if (!point) return;
+          if (feedbackPlacementActive && event.pointerType !== "touch" && point.x >= 0 && point.y >= 0 && point.x <= canvasW && point.y <= canvasH) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const cursorPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+            // Move this decorative overlay without rerendering the whole map on every pointer sample.
+            if (feedbackCursorRef.current) {
+              feedbackCursorRef.current.style.left = `${cursorPoint.x}px`;
+              feedbackCursorRef.current.style.top = `${cursorPoint.y}px`;
+            } else setFeedbackCursorPoint(cursorPoint);
+          } else setFeedbackCursorPoint(null);
           if (presetPreview) {
             setPresetPreview((current) => current ? { ...current, point } : null);
           } else if (activeTool === "furniture") {
@@ -2829,6 +2901,8 @@ export function EventFloorEditor({
             setPlacementError(candidate.assessment.blockingReason);
           }
         }}
+        onPointerLeave={() => setFeedbackCursorPoint(null)}
+        onPointerCancel={() => setFeedbackCursorPoint(null)}
         onLostPointerCapture={handleCanvasLostPointerCapture}
         onWheelCapture={(e) => {
           // Capture browser pinch/page-zoom gestures even when the pointer is over the asset picker.
@@ -2838,9 +2912,12 @@ export function EventFloorEditor({
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
-        {draftFeedbackPoint && <div aria-label="Unsaved feedback pin position" className="pointer-events-none absolute z-50 flex h-10 w-10 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-dashed border-white bg-amber-600 text-lg font-bold text-white shadow-lg ring-4 ring-amber-400/40" style={{ left: draftFeedbackPoint.x * zoom + pan.x, top: draftFeedbackPoint.y * zoom + pan.y }}>+</div>}
-        {feedbackPins.map((pin, index) => <button key={pin.id} type="button" data-event-editor-chrome aria-label={`Feedback pin ${index + 1}: ${pin.comment}`} title={`${pin.addressed ? "Addressed" : "Open"}: ${pin.comment}`} onClick={event => { event.stopPropagation(); }} className="absolute z-40 flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-card bg-amber-600 text-xs font-bold text-white shadow-md" style={{ left: pin.x * zoom + pan.x, top: pin.y * zoom + pan.y, backgroundColor: pin.addressed ? "#047857" : undefined }}>{index + 1}</button>)}
-        {feedbackPins.length > 0 && <details data-event-editor-chrome className="absolute bottom-3 right-3 z-40 max-h-40 w-[min(18rem,calc(100%-1.5rem))] overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-lg"><summary className="cursor-pointer text-xs font-bold">GSO map feedback · {feedbackPins.length} pins</summary>{feedbackPins.map((pin, index) => <button key={pin.id} type="button" onClick={event => { event.stopPropagation(); const rect = canvasRef.current?.getBoundingClientRect(); if (rect) animateViewportTo({ zoom: Math.max(zoom, 1), pan: { x: rect.width / 2 - pin.x * Math.max(zoom, 1), y: rect.height / 2 - pin.y * Math.max(zoom, 1) } }, 180); }} className="mb-1 block w-full rounded-lg p-2 text-left text-xs hover:bg-muted"><strong className="text-amber-700 dark:text-amber-400">Pin {index + 1}</strong> · {pin.addressed ? "Addressed · " : "Open · "}{pin.comment}</button>)}</details>}
+        {feedbackPlacementActive && feedbackCursorPoint && <div ref={feedbackCursorRef} data-testid="feedback-pin-cursor-preview" aria-hidden="true" className="pointer-events-none absolute z-50 h-8 w-8 -translate-x-1/2 -translate-y-full" style={{ left: feedbackCursorPoint.x, top: feedbackCursorPoint.y }}>
+          <MapPin className="h-full w-full fill-amber-500 stroke-white drop-shadow-md" strokeWidth={2} />
+        </div>}
+        {draftFeedbackPoint && <div aria-label="Unsaved feedback pin position" className="pointer-events-none absolute z-50 flex h-6 w-6 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-dashed border-white bg-amber-600 text-xs font-bold text-white shadow-sm ring-2 ring-amber-500/25" style={{ left: draftFeedbackPoint.x * zoom + pan.x, top: draftFeedbackPoint.y * zoom + pan.y }}><span className="absolute -bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-amber-600" /><span className="relative">+</span></div>}
+        {feedbackPins.map((pin, index) => <button key={pin.id} type="button" data-event-editor-chrome aria-label={`Feedback pin ${index + 1}: ${pin.comment}`} title={`${pin.addressed ? "Addressed" : "Open"}: ${pin.comment}`} onClick={event => { event.stopPropagation(); }} className="absolute z-40 flex h-6 w-6 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border-2 border-white bg-amber-600 text-[10px] font-bold text-white shadow-sm before:absolute before:-inset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2" style={{ left: pin.x * zoom + pan.x, top: pin.y * zoom + pan.y, backgroundColor: pin.addressed ? "#047857" : undefined }}><span className="absolute -bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-inherit" /><span className="relative">{index + 1}</span></button>)}
+        {feedbackPins.length > 0 && <details data-event-editor-chrome data-map-feedback className="absolute bottom-3 right-3 z-40 max-h-40 w-[min(18rem,calc(100%-1.5rem))] overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-lg"><summary className="cursor-pointer text-xs font-bold">GSO feedback &middot; {feedbackPins.length} {feedbackPins.length === 1 ? "pin" : "pins"}</summary>{feedbackPins.map((pin, index) => <button key={pin.id} type="button" onClick={event => { event.stopPropagation(); const rect = canvasRef.current?.getBoundingClientRect(); if (rect) animateViewportTo({ zoom: Math.max(zoom, 1), pan: { x: rect.width / 2 - pin.x * Math.max(zoom, 1), y: rect.height / 2 - pin.y * Math.max(zoom, 1) } }, 180); }} className="mb-1 block w-full rounded-lg p-2 text-left text-xs hover:bg-muted"><strong className="text-amber-700 dark:text-amber-400">Pin {index + 1}</strong> · {pin.addressed ? "Addressed · " : "Open · "}{pin.comment}</button>)}</details>}
         {!readOnly && activeTool === "furniture" && (
           <div
             data-testid="event-asset-dock"
@@ -3453,7 +3530,7 @@ export function EventFloorEditor({
                 "absolute select-none",
                 !readOnly && (effectiveTool === "pan"
                   ? isPanning || pinchActive ? "cursor-grabbing" : "cursor-grab"
-                  : "cursor-move"),
+                  : l.locked ? "cursor-default" : inlineLabelEdit?.id === l.id ? "cursor-text" : "cursor-move"),
                 selectedIds.includes(l.id)
                   ? "ring-2 ring-primary ring-offset-1 z-20"
                   : "z-10"
@@ -3472,8 +3549,24 @@ export function EventFloorEditor({
                 if (effectiveTool === "pan" || e.button === 1) handlePanStart(e);
                 else handleItemMouseDown(e, l.id, "label");
               }, "item")}
+              title={readOnly || l.locked ? undefined : "Double-click to edit text · drag to move"}
+              onDoubleClick={(event) => { event.stopPropagation(); beginInlineLabelEdit(l); }}
             >
-              {l.text}
+              {inlineLabelEdit?.id === l.id ? <input
+                data-event-editor-chrome
+                aria-label="Edit label text"
+                autoFocus
+                value={inlineLabelEdit.value}
+                style={{ width: `${Math.min(32, Math.max(12, inlineLabelEdit.value.length + 2))}ch`, font: "inherit", color: "inherit" }}
+                className="rounded border border-primary bg-card px-1 py-0.5 text-foreground shadow-sm outline-none select-text"
+                onFocus={(event) => event.currentTarget.select()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onChange={(event) => { const edit = { id: l.id, value: event.target.value }; inlineLabelEditRef.current = edit; setInlineLabelEdit(edit); }}
+                onBlur={() => finishInlineLabelEdit()}
+                onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); finishInlineLabelEdit(event.key === "Escape"); canvasRef.current?.focus(); } }}
+              /> : l.text}
             </div>
           ))}
           {presetPreview && (
@@ -3487,7 +3580,7 @@ export function EventFloorEditor({
               )}
             </div>
 
-        {!readOnly && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
+        {!readOnly && !inlineLabelEdit && !inspectorViewportCompact && !transforming && !isPanning && !pinchActive && selectedLabel && selectedIds.length === 1 && (
           <div
             data-testid="event-label-actions"
             data-event-editor-chrome
@@ -3500,6 +3593,7 @@ export function EventFloorEditor({
           >
             <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl border border-primary/25 bg-card/95 p-2 shadow-xl backdrop-blur-sm">
               <span className="max-w-28 truncate px-1 text-[10px] font-extrabold text-foreground">Label selected</span>
+              <button type="button" disabled={selectedLabel.locked} onClick={() => beginInlineLabelEdit(selectedLabel)} className="min-h-10 shrink-0 rounded-xl border border-border/70 px-3 text-[10px] font-bold hover:bg-muted disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-primary">Edit text</button>
               <button
                 type="button"
                 aria-label="Open label details"

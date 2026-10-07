@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, CalendarDays, ChevronDown, ChevronUp, MapPin, RotateCw, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { formatEventDate } from "../../lib/eventPublication";
@@ -30,8 +30,15 @@ const filterLabels: Array<{ id: EventMapFilter; label: string }> = [
 
 export function EventMapPanel(props: EventMapPanelProps) {
   const [sheetPosition, setSheetPosition] = useState<SheetPosition>("list");
+  const bodyRef = useRef<HTMLDivElement>(null);
   const selected = props.events.find((event) => event.id === props.selectedEventId) ?? null;
+  const viewing = selected?.locations.find(location => location.id === props.selectedLocationId);
   const cards = useMemo(() => visibleEventCards(props.events, props.nowMs, props.filter), [props.events, props.nowMs, props.filter]);
+
+  useEffect(() => {
+    setSheetPosition(props.open && props.selectedEventId ? (props.selectedLocationId ? "peek" : "expanded") : "list");
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [props.open, props.selectedEventId, props.selectedLocationId]);
 
   if (!props.open) return null;
 
@@ -41,9 +48,9 @@ export function EventMapPanel(props: EventMapPanelProps) {
     event.stopPropagation();
     props.onClose();
   };
-  const moveSheet = () => setSheetPosition((current) => current === "peek" ? "list" : current === "list" ? "expanded" : "list");
+  const moveSheet = () => setSheetPosition((current) => current === "peek" ? "list" : current === "list" ? "expanded" : "peek");
   const nextSheetLabel = sheetPosition === "peek" ? "Show event list" : sheetPosition === "expanded" ? "Collapse event panel" : "Expand event panel";
-  const sheetHeight = sheetPosition === "peek" ? "12dvh" : sheetPosition === "expanded" ? "72dvh" : "38dvh";
+  const sheetMaxHeight = sheetPosition === "peek" ? "8rem" : sheetPosition === "expanded" ? "72dvh" : "52dvh";
 
   return (
     <section
@@ -54,9 +61,9 @@ export function EventMapPanel(props: EventMapPanelProps) {
       data-map-layer="building-sheet"
       className={cn(
         "map-layer-building-sheet absolute flex min-h-0 flex-col overflow-hidden border border-border bg-card/95 text-card-foreground shadow-xl backdrop-blur-xl",
-        "left-3 right-3 bottom-[var(--student-map-utility-bottom,1rem)] rounded-2xl md:left-4 md:right-auto md:top-4 md:bottom-4 md:w-[min(360px,calc(100%-2rem))] md:rounded-2xl",
+        "left-3 right-3 bottom-[var(--student-map-utility-bottom,1rem)] h-auto max-h-[min(var(--event-sheet-max-height),calc(100%-1rem))] rounded-2xl md:left-4 md:right-auto md:top-4 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-[min(360px,calc(100%-2rem))]",
       )}
-      style={{ height: `min(${sheetHeight}, calc(100% - 1rem))` }}
+      style={{ "--event-sheet-max-height": sheetMaxHeight } as CSSProperties}
       onKeyDownCapture={onKeyDownCapture}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 md:px-4">
@@ -66,8 +73,8 @@ export function EventMapPanel(props: EventMapPanelProps) {
           </button>
         ) : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><CalendarDays className="h-4 w-4" /></span>}
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-extrabold">{selected?.title ?? "Campus events"}</h2>
-          <p className="text-xs text-muted-foreground">{selected ? "Event map preview" : `${cards.length} published event${cards.length === 1 ? "" : "s"}`}</p>
+          <h2 className={cn("break-words text-sm font-extrabold leading-snug", sheetPosition === "peek" && "max-md:line-clamp-2")}>{selected?.title ?? "Campus events"}</h2>
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{selected ? viewing?.locationRef.label || "Event map preview" : `${cards.length} ${props.filter === "all" ? "published" : props.filter} event${cards.length === 1 ? "" : "s"}`}</p>
         </div>
         <button type="button" onClick={moveSheet} className="hidden min-h-11 min-w-11 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted max-md:inline-flex" aria-label={nextSheetLabel}>
           {sheetPosition === "expanded" ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -75,26 +82,25 @@ export function EventMapPanel(props: EventMapPanelProps) {
         <button type="button" onClick={props.onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted" aria-label="Close campus events"><X className="h-4 w-4" /></button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div ref={bodyRef} className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain", sheetPosition === "peek" && "max-md:hidden")}>
         {selected ? (
           <div className="p-4">
-            <button type="button" onClick={props.onBackToEvents} className="mb-3 inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm font-semibold text-primary hover:bg-primary/5"><ArrowLeft className="h-4 w-4" />Back to events</button>
-            <p className="text-sm font-bold text-foreground">{formatEventDate(selected.dateStart)} – {formatEventDate(selected.dateEnd)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Asia/Manila · Organized by {selected.organizer}</p>
-            {selected.posterUrl && <img src={selected.posterUrl} alt={`${selected.title} poster`} className="mt-4 aspect-video w-full rounded-xl border border-border object-cover" />}
-            {selected.description && <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{selected.description}</p>}
-            <h3 className="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Event locations ({selected.locations.length})</h3>
+            <dl className="space-y-2 rounded-xl bg-muted/50 p-3 text-xs"><div><dt className="font-medium text-muted-foreground">Starts</dt><dd className="mt-0.5 font-semibold">{formatEventDate(selected.dateStart)}</dd></div><div><dt className="font-medium text-muted-foreground">Ends</dt><dd className="mt-0.5 font-semibold">{formatEventDate(selected.dateEnd)}</dd></div></dl>
+            <p className="mt-3 break-words text-xs text-muted-foreground">Asia/Manila · Organized by {selected.organizer}</p>
+            <h3 className="mb-2 mt-4 text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Event locations ({selected.locations.length})</h3>
             <ul className="space-y-2">
               {selected.locations.map((location) => (
                 <li key={location.id}>
-                  <button type="button" onClick={() => props.onViewLocation(selected.id, location.id)} className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left", props.selectedLocationId === location.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}>
+                  <button type="button" onClick={() => { props.onViewLocation(selected.id, location.id); setSheetPosition("peek"); }} className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left", props.selectedLocationId === location.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}>
                     <MapPin className="h-4 w-4 shrink-0 text-primary" />
                     <span className="min-w-0 flex-1 text-sm font-semibold">{location.locationRef.label}</span>
-                    <span className="text-xs font-bold text-primary">View</span>
+                    <span className="shrink-0 text-xs font-bold text-primary">{props.selectedLocationId === location.id ? "Viewing" : "View"}</span>
                   </button>
                 </li>
               ))}
             </ul>
+            {selected.posterUrl && <img src={selected.posterUrl} alt={`${selected.title} poster`} className="mt-4 aspect-video w-full rounded-xl border border-border object-cover" />}
+            {selected.description && <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{selected.description}</p>}
           </div>
         ) : (
           <div className="p-3 md:p-4">

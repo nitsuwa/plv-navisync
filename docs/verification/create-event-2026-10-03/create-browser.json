@@ -1,0 +1,52 @@
+{
+  "title": "QA browser create 7f6b1fe4",
+  "id": "47cb6c43-2100-4f2a-b46b-0d0d2973ca1e",
+  "cleaned": true,
+  "checks": [
+    {
+      "name": "C01-C03 actual inline validation and two-location creation",
+      "status": "PASS"
+    },
+    {
+      "name": "E01-E02 actual chair/label placement, both locations saved and reloaded",
+      "status": "PASS"
+    },
+    {
+      "name": "J1 real UI creation/design/save/reload/submission segment",
+      "status": "PASS"
+    },
+    {
+      "name": "J1 admin previews the actual submitted second location",
+      "status": "PASS"
+    },
+    {
+      "name": "L03 browser cancel/confirm withdrawal preserves both layouts",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "afterGrounds": [
+    {
+      "id": "location-campus",
+      "furniture": 1,
+      "labels": 1
+    },
+    {
+      "id": "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1",
+      "furniture": 0,
+      "labels": 0
+    }
+  ],
+  "afterFloor": [
+    {
+      "id": "location-campus",
+      "furniture": 1,
+      "labels": 1
+    },
+    {
+      "id": "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1",
+      "furniture": 0,
+      "labels": 1
+    }
+  ]
+}

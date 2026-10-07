@@ -1,5 +1,19 @@
 # Findings & Decisions
 
+## Create Event follow-up findings
+
+- A fresh service read is insufficient concurrency protection if the layout originated from an older browser version. Forward the version displayed to the editor/details/submission caller; reject newer rows before merging and retain CAS on writes. Actual two-tab test reproduced this defect and passed after correction.
+- Existing poster removal should clear the reference without deleting stored contents, since duplicated proposals may share URLs. Only QA-owned disposable object paths are deleted by test cleanup.
+- Public storage responses may remain cached after deletion; verify the authoritative storage listing rather than interpreting a cached HTTP 200 as a failed delete.
+- Creation dialog close previously focused a control inside the unmounted dialog; preserve the entry trigger for focus return. Real keyboard RED/GREEN evidence verifies the fix.
+
+## October 3 — final Create Event browser findings
+
+- Supabase JSONB can return equivalent object keys in a different order. Raw JSON.stringify equality falsely reported dirty layouts and failed lost-response creation recovery. Canonical recursive object-key ordering now preserves array order and matches semantic JSON equality.
+- A save callback retained an old active-location closure while its shared editor ref belonged to the newly selected floor. Capturing through the current location ID ref prevents the next floor's snapshot from replacing the old layout; deferred-switch regression and actual two-location persistence checks pass.
+- Mounting the review dialog and direct card preview together left the preview aria-hidden. Open the nested preview on the next animation frame after the parent dialog mounts; actual accessible Pan and second-floor controls pass from the card entry.
+- Final event verification: 263 core + 156 helper/public tests PASS; build PASS; actual J1 and L03 PASS with own disposable fixture removed. Poster SQL, missing configured roles, positive live publication and remaining integrated/manual cases keep acceptance PARTIAL.
+
 ## Requirements
 
 - Improve the student user role UI/UX and frontend experience.
@@ -243,3 +257,13 @@ Announcements and Today's Schedule/classes are intentionally excluded from this 
 - Browser inspection exposed a separate performance defect that source-level interaction tests did not initially reveal: `onDraftChange` was included in an editor effect dependency list while `StudentEventEditPage` recreated that callback whenever the active draft location changed. The resulting feedback loop produced repeated maximum-update-depth warnings and unnecessary rerenders. Callback identity is now decoupled from draft publication.
 - CABA browser parity after the fix: 12 rooms, 32 walls, 14 doors, 4 stair elements, 1 elevator, and 1 authored label. The prior event view exposed only the 12 rooms.
 - The mobile editor at 390x844 has no document-level horizontal overflow. Location cards remain horizontally browsable, primary Save/Submit actions wrap safely, and the viewport controls stay reachable above the map.
+
+## October 3, 2026 — Create Event completion planning
+
+- The user requested a consolidated plan for already implemented work, pending checks, UI/UX improvements and future increments; no implementation was requested in this planning turn.
+- Current code includes pending updates, withdrawal, in-place preview, 12-hour time controls, revision history, furniture summary, feedback pins and student resolution checklist.
+- User screenshots establish successful migration execution and SQL helper/grant assertions. Authenticated role tests, integrated browser journeys and final visual QA remain distinct and unverified.
+- Historical feedback-clearing documentation is superseded by preservation on resubmission. Current acknowledgement matching is location-wide, based on the full encoded feedback string.
+- Risks to reproduce: invalid pin entries suppressing valid neighboring pins, callback-identity changes resetting preview Pan mode, and acknowledgement/autosave/submission overlaps. The public-feed verifier does not yet explicitly list feedbackResolutions as a forbidden key.
+- Main plan: docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md. Detailed test matrix: docs/2026-10-03-create-event-acceptance-matrix.md.
+- Recommended executor: GPT-6.1 Sol Medium for the integrated plan; Luna Max for bounded work and Sol Low for isolated presentation work. This is a workload recommendation, not a measured repository benchmark.

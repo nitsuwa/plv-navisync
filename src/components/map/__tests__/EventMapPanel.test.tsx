@@ -24,7 +24,7 @@ describe("EventMapPanel", () => {
     expect(onSelectEvent).toHaveBeenCalledWith("event-a");
     view.rerender(<EventMapPanel {...props({ events: [event], selectedEventId: "event-a" })} />);
     expect(screen.getByRole("region", { name: /Campus events/i })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Back to events/i })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /Back to events/i })).toHaveLength(1);
     expect(screen.getByText("Campus Grounds")).toBeInTheDocument();
     expect(screen.getByText("Library — Floor 1")).toBeInTheDocument();
     expect(screen.getByText("Gym — Floor 2")).toBeInTheDocument();

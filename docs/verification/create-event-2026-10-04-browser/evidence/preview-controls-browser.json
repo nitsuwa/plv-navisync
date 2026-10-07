@@ -1,0 +1,41 @@
+{
+  "checks": [
+    {
+      "name": "Space temporarily pans while persistent Pan is off, then releases cleanly",
+      "status": "PASS"
+    },
+    {
+      "name": "Ctrl+wheel zooms the map and leaves outer-page scroll unchanged",
+      "status": "PASS",
+      "detail": "0.619203 → 0.677395"
+    },
+    {
+      "name": "Focus items targets requested event assets; 0 refits the map",
+      "status": "PASS"
+    },
+    {
+      "name": "H is scoped to map; H/Space type in comments; nested modal closes restore focus and scrolling",
+      "status": "PASS"
+    },
+    {
+      "name": "Native 200% browser zoom",
+      "status": "BLOCKED",
+      "detail": "Headless Edge did not expose a reliable native browser zoom change; this is not a 200% acceptance PASS."
+    }
+  ],
+  "errors": [],
+  "nativeZoom": {
+    "before": {
+      "dpr": 1,
+      "innerWidth": 1440,
+      "scale": 1
+    },
+    "after": {
+      "dpr": 1,
+      "innerWidth": 1440,
+      "scale": 1
+    },
+    "measuredNear200Percent": false,
+    "note": "Headless Edge did not expose a reliable native browser zoom change; this is not a 200% acceptance PASS."
+  }
+}

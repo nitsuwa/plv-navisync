@@ -15,6 +15,8 @@ import { notificationService } from "../../lib/notificationService";
 import { cn } from "../../lib/utils";
 import { StudentAvatar } from "../ui/StudentAvatar";
 import { loadStudentPreferences } from "../../services/studentPreferencesService";
+import { useStudentOrgEventUpdates } from "../../hooks/useStudentOrgEventUpdates";
+import { EventUnreadBadge } from "../events/EventUnreadBadge";
 
 const ALL_NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
@@ -41,6 +43,7 @@ export function Navbar() {
   const suppressOutsideClickRef = useRef(false);
   const suppressOutsideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { loading: authLoading, isAdmin, isStudent, isStudentOrg, username, role, profile, signOut } = useStudentAuth();
+  const { unreadCount: eventUnreadCount } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
   const toast = useToast();
   const [reportNotifCount, setReportNotifCount] = useState(0);
   const notifiedRef = useRef(false);
@@ -188,10 +191,11 @@ export function Navbar() {
               const active = isActive(path);
               return (
                 <Link key={path} to={path}
+                  aria-label={path === "/student/events" && eventUnreadCount ? `My Events, ${eventUnreadCount} unread layout updates` : undefined}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex items-center gap-1.5 rounded-xl transition-colors duration-150 select-none",
-                    "px-3.5 py-2 text-sm font-semibold",
+                    "whitespace-nowrap px-2.5 py-2 text-sm font-semibold lg:px-3.5",
                     active
                       ? showWhiteText ? "text-white" : "text-primary"
                       : showWhiteText ? "text-white/80 hover:text-white" : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -200,6 +204,7 @@ export function Navbar() {
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   {label}
+                  {path === "/student/events" && <EventUnreadBadge count={eventUnreadCount} />}
                   {active && (
                     <motion.span
                       layoutId="nav-underline"

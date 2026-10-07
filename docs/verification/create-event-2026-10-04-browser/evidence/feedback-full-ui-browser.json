@@ -1,0 +1,43 @@
+{
+  "title": "QA browser full feedback cc4df48b",
+  "id": "a250fdfa-4d7e-4038-a59d-2313f80b9440",
+  "createdByUI": true,
+  "cleaned": true,
+  "cleanedByUI": true,
+  "checks": [
+    {
+      "name": "J3 begins with an actual UI-created event, furniture placement, save and submission",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin UI stages two visible feedback pins; both persist only with Disapprove decision",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner locates pin 1, adds the requested Table in the editor, records note and addresses it",
+      "status": "PASS"
+    },
+    {
+      "name": "One remaining open pin blocks the owner UI resubmission",
+      "status": "PASS"
+    },
+    {
+      "name": "Mobile owner fixes both maps, reloads, confirms 2/2, and resubmits the same event",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin UI sees both student fix notes on the resubmitted Pending review",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner UI withdraws and deletes its own QA fixture; audit history remains",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "locationId": "location-campus",
+  "pinIds": [
+    "b1908f1a-51c6-4cf4-839b-7d4a6e28db70",
+    "ed42662f-bf44-4ebc-be20-1b937086c057"
+  ]
+}

@@ -71,7 +71,7 @@ export function PublicLayout() {
   const isMapPage     = pathname === "/map";
 
   return (
-    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-hidden", !isMapPage && "app-page-bg")}>
+    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-clip", !isMapPage && "app-page-bg")}>
       {/* Skip-to-content link for keyboard and screen reader users */}
       <a
         href="#main-content"
@@ -82,7 +82,7 @@ export function PublicLayout() {
       <NavigationProgress />
       <ScrollToTop />
       {/* Navbar hidden on mobile map for immersive experience */}
-      {!isEventEditor && <div className={isMapPage ? "hidden md:block" : ""}>
+      {!isEventEditor && <div className={cn("sticky top-0 z-40", isMapPage && "hidden md:block")}>
         <Navbar />
       </div>}
       {/* Emergency banner hidden on map view */}

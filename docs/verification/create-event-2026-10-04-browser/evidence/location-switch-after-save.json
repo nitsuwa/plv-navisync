@@ -1,0 +1,16 @@
+{
+  "title": "QA switch after save e0e862fa",
+  "checks": [
+    {
+      "name": "Switch to another requested map three seconds after visible Saved and server readback",
+      "status": "PASS",
+      "persistedLabels": 1,
+      "visibleSaved": true,
+      "promptText": null
+    }
+  ],
+  "cleaned": true,
+  "visibleSaved": true,
+  "persistedLabels": 1,
+  "promptAfterSaved": false
+}

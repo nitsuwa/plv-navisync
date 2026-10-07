@@ -1,0 +1,97 @@
+vite v6.3.5 building for production...
+transforming...
+✓ 3011 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                          6.48 kB │ gzip:   2.25 kB
+dist/assets/plv-logo-DVAF-ypv.png                      384.29 kB
+dist/assets/index-_WAqvrM1.css                         392.85 kB │ gzip:  57.39 kB
+dist/assets/PageTransition-B4hxQ8YM.js                   0.17 kB │ gzip:   0.15 kB
+dist/assets/useDebounce-PooHcYT7.js                      0.20 kB │ gzip:   0.17 kB
+dist/assets/useEscToClose-Bf_mtGWo.js                    0.42 kB │ gzip:   0.30 kB
+dist/assets/index-zV0X8JTB.js                            0.42 kB │ gzip:   0.32 kB
+dist/assets/useSearchHighlight-ZYDbF5iu.js               0.42 kB │ gzip:   0.25 kB
+dist/assets/useReducedMotion-5Q8dGlqz.js                 0.44 kB │ gzip:   0.26 kB
+dist/assets/useScrollReveal-BKGUSU07.js                  0.48 kB │ gzip:   0.34 kB
+dist/assets/vendor-charts-DcJexxSl.js                    0.51 kB │ gzip:   0.32 kB
+dist/assets/Skeleton-D3WaouLr.js                         1.26 kB │ gzip:   0.52 kB
+dist/assets/index-dAuvMUOJ.js                            1.34 kB │ gzip:   0.67 kB
+dist/assets/buildingHours-BRisNsWA.js                    1.34 kB │ gzip:   0.63 kB
+dist/assets/Badge-ChBwLF8z.js                            1.35 kB │ gzip:   0.59 kB
+dist/assets/usageAnalyticsService-Fmi8K4s9.js            1.46 kB │ gzip:   0.77 kB
+dist/assets/EmptyState-C2samcJ0.js                       1.54 kB │ gzip:   0.68 kB
+dist/assets/Button-Dch-GJYS.js                           1.82 kB │ gzip:   0.88 kB
+dist/assets/FormField-DTeViR8F.js                        1.85 kB │ gzip:   0.88 kB
+dist/assets/index-Djq0kL2U.js                            2.13 kB │ gzip:   0.95 kB
+dist/assets/StudentPageHeader-BnYFc6Pv.js                2.27 kB │ gzip:   0.94 kB
+dist/assets/StatCard-DuAfaQ4W.js                         2.45 kB │ gzip:   0.92 kB
+dist/assets/index-BpCGPriv.js                            3.00 kB │ gzip:   1.24 kB
+dist/assets/studentAccountService-B0Y4UEd5.js            3.54 kB │ gzip:   1.18 kB
+dist/assets/EventFeedbackChecklist-DOLc3gIq.js           3.54 kB │ gzip:   1.61 kB
+dist/assets/SearchBar-B_2oe7cf.js                        3.66 kB │ gzip:   1.65 kB
+dist/assets/usePublishedCampus-CK0ycTjt.js               3.91 kB │ gzip:   1.72 kB
+dist/assets/studentAccount-BOxtzLC1.js                   4.09 kB │ gzip:   1.60 kB
+dist/assets/mapData-BXRm6Ndd.js                          4.23 kB │ gzip:   1.40 kB
+dist/assets/mockData-DTstP51-.js                         4.29 kB │ gzip:   1.47 kB
+dist/assets/Reveal-Da-bOxBO.js                           4.74 kB │ gzip:   1.85 kB
+dist/assets/index-0XxMxa72.js                            4.75 kB │ gzip:   1.72 kB
+dist/assets/EventRevisionHistory-BPglym5W.js             5.22 kB │ gzip:   2.10 kB
+dist/assets/index-XuWPmAt2.js                            5.28 kB │ gzip:   2.01 kB
+dist/assets/eventService-AnwfTNXS.js                     5.44 kB │ gzip:   2.11 kB
+dist/assets/ThemedTimeField-B_oe5VKJ.js                  5.73 kB │ gzip:   1.98 kB
+dist/assets/AdminFloorPlansPage-EsU8UG2R.js              6.61 kB │ gzip:   2.43 kB
+dist/assets/HeroBackground-DJN31iYe.js                   7.60 kB │ gzip:   2.76 kB
+dist/assets/BuildingsPage-D_LCsfUi.js                    8.26 kB │ gzip:   2.83 kB
+dist/assets/AdminEventLayoutPreviewPage-B0D9I6LA.js      8.27 kB │ gzip:   3.29 kB
+dist/assets/PageSkeleton-FcU58UaI.js                     8.32 kB │ gzip:   1.30 kB
+dist/assets/AdminActivityLogsPage-D1RUJjVV.js            8.50 kB │ gzip:   2.83 kB
+dist/assets/ReportModal-DmBbO1Jc.js                      9.86 kB │ gzip:   3.20 kB
+dist/assets/AdminAccessibilityPage-7vUtZfJZ.js          10.02 kB │ gzip:   3.22 kB
+dist/assets/mapDataAdapter-D0CZZMBU.js                  10.35 kB │ gzip:   3.65 kB
+dist/assets/ThemedDateTimeField-lMmfCbqP.js             10.49 kB │ gzip:   3.63 kB
+dist/assets/AdminLocationsPage-BmEYUKCQ.js              11.19 kB │ gzip:   3.62 kB
+dist/assets/floorPlans-DOcfd_LK.js                      12.79 kB │ gzip:   2.98 kB
+dist/assets/StudentSettingsPage-CcUyeDEl.js             12.80 kB │ gzip:   4.19 kB
+dist/assets/StudentReportsPage-TCBjJZ-F.js              13.75 kB │ gzip:   4.31 kB
+dist/assets/AdminSettingsPage-CyHnCrtl.js               13.93 kB │ gzip:   4.68 kB
+dist/assets/AdminLoginPage-C0IV0MnC.js                  14.00 kB │ gzip:   4.80 kB
+dist/assets/StudentHomePage-i22RHHMi.js                 14.87 kB │ gzip:   3.49 kB
+dist/assets/AdminAnnouncementsPage-BrK2pV1t.js          15.50 kB │ gzip:   4.34 kB
+dist/assets/AdminDashboardPage-EwfrQd2G.js              16.53 kB │ gzip:   4.99 kB
+dist/assets/BuildingDetailsPage-DLIgXhlq.js             17.19 kB │ gzip:   5.06 kB
+dist/assets/AdminEventsPage-Bemt6TEI.js                 17.64 kB │ gzip:   5.04 kB
+dist/assets/RegistrationPage-CyU_i3ha.js                17.67 kB │ gzip:   4.64 kB
+dist/assets/StudentProfilePage-Bl4CICZK.js              18.14 kB │ gzip:   5.33 kB
+dist/assets/AdminRoutesPage-CPB5KBrV.js                 18.34 kB │ gzip:   4.93 kB
+dist/assets/StudentFavoritesPage-B6APR711.js            19.27 kB │ gzip:   5.48 kB
+dist/assets/AdminReportsPage-DoNY8e6W.js                19.78 kB │ gzip:   5.61 kB
+dist/assets/index-BdZvfAQG.js                           20.64 kB │ gzip:   6.30 kB
+dist/assets/vendor-dates-6efzqLFO.js                    20.79 kB │ gzip:   5.86 kB
+dist/assets/AuthLifecyclePages-Daadqery.js              21.59 kB │ gzip:   5.53 kB
+dist/assets/select-DqG0R7Ly.js                          22.03 kB │ gzip:   7.62 kB
+dist/assets/AdminBuildingsPage-CHllwKWF.js              23.19 kB │ gzip:   7.17 kB
+dist/assets/Combination-yp5uvRJr.js                     24.33 kB │ gzip:   8.75 kB
+dist/assets/roomTemplates-Bx48Jvot.js                   24.60 kB │ gzip:   6.64 kB
+dist/assets/eventOverlayService-BkzFa_XZ.js             26.26 kB │ gzip:   7.65 kB
+dist/assets/index-D8oqiwr7.js                           27.53 kB │ gzip:  10.66 kB
+dist/assets/StudentEventEditPage-D7m7TQWy.js            32.33 kB │ gzip:  10.46 kB
+dist/assets/AdminUsersPage-CIend1Bb.js                  35.49 kB │ gzip:   9.88 kB
+dist/assets/HelpCenterPage-CZ6FgRa6.js                  38.20 kB │ gzip:  10.88 kB
+dist/assets/AdminEventLayoutsPage-BPSXjOlF.js           38.91 kB │ gzip:  10.10 kB
+dist/assets/LandingPage-BrMYR1pC.js                     44.42 kB │ gzip:  12.21 kB
+dist/assets/StudentMyEventsPage-C9C92HEP.js             50.54 kB │ gzip:  13.68 kB
+dist/assets/vendor-icons-BkQkcpLD.js                    80.14 kB │ gzip:  15.52 kB
+dist/assets/vendor-router-CgKXprMm.js                   94.96 kB │ gzip:  32.25 kB
+dist/assets/vendor-motion-BCn1SV14.js                  103.53 kB │ gzip:  34.66 kB
+dist/assets/vendor-react-CeWh3GmI.js                   134.67 kB │ gzip:  43.23 kB
+dist/assets/ReadonlyFloorPlanVisuals-yiQQYXjk.js       152.14 kB │ gzip:  40.10 kB
+dist/assets/EventFloorEditor-B2FWgdqd.js               162.83 kB │ gzip:  43.32 kB
+dist/assets/index-CJaRjYfn.js                          715.72 kB │ gzip: 205.58 kB
+dist/assets/CampusMapPage-B01NAjkJ.js                  837.10 kB │ gzip: 228.42 kB
+dist/assets/AdminMapBuilderPage-C8sEp-pG.js          1,801.88 kB │ gzip: 478.51 kB
+✓ built in 1m 2s
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

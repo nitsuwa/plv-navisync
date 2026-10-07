@@ -647,6 +647,22 @@ export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, 
   return overlayFromAdminResult(data);
 }
 
+/** Admin-only identity enrichment; never added to the public event feed or saved metadata. */
+export async function listEventSubmitterNames(ownerIds: string[]): Promise<Record<string, string>> {
+  const ids = [...new Set(ownerIds.filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const { data, error } = await getSupabase().from("profiles").select("id, first_name, last_name").in("id", ids);
+    if (error) return {};
+    return Object.fromEntries((data ?? []).flatMap(profile => {
+      const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim();
+      return name ? [[profile.id, name]] : [];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 export async function listEventOverlays(
   filters: EventOverlayFilters = {}
 ): Promise<CampusEventOverlay[]> {
@@ -831,6 +847,9 @@ export async function manageEventPublication(
   command: EventPublicationCommand,
 ): Promise<CampusEventOverlay> {
   if (!expectedUpdatedAt) throw new Error("Refresh this event before changing publication.");
+  if (command.action === "schedule" && (!isValidEventInstant(command.publicationAt) || Date.parse(command.publicationAt) <= Date.now())) {
+    throw new Error("Choose a future publication time.");
+  }
   const { data, error } = await getSupabase().rpc("manage_event_publication", {
     p_overlay_id: overlayId,
     p_expected_updated_at: expectedUpdatedAt,
@@ -946,6 +965,7 @@ export const eventOverlayService = {
   submitEventOverlayLayout,
   setEventFeedbackPinAddressed,
   listEventOverlays,
+  listEventSubmitterNames,
   getEventOverlay,
   reviewEventOverlay,
   manageEventPublication,

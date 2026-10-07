@@ -1,0 +1,95 @@
+{
+  "project": "aaketmqvxqjgaznvclqc.supabase.co",
+  "id": "b7a0654c-7140-450b-9d6b-b2fcd2463cb4",
+  "created": true,
+  "cleaned": true,
+  "checks": [
+    {
+      "name": "L01 owner creates disposable draft on published campus",
+      "status": "PASS"
+    },
+    {
+      "name": "regular student cannot read private draft",
+      "status": "PASS"
+    },
+    {
+      "name": "regular student cannot address owner pin",
+      "status": "PASS"
+    },
+    {
+      "name": "anonymous cannot read private draft",
+      "status": "PASS"
+    },
+    {
+      "name": "anonymous cannot address owner pin",
+      "status": "PASS"
+    },
+    {
+      "name": "owner cannot forge resolution audit",
+      "status": "PASS"
+    },
+    {
+      "name": "L01 owner submits draft",
+      "status": "PASS"
+    },
+    {
+      "name": "L02 pending RPC preserves status and submission time",
+      "status": "PASS"
+    },
+    {
+      "name": "admin stale review rejected",
+      "status": "PASS"
+    },
+    {
+      "name": "F03 super admin rejects with persisted pin",
+      "status": "PASS"
+    },
+    {
+      "name": "L04 open-pin resubmission rejected",
+      "status": "PASS"
+    },
+    {
+      "name": "F04 owner acknowledgement actor/time/note persist",
+      "status": "PASS"
+    },
+    {
+      "name": "F08 stale acknowledgement rejected",
+      "status": "PASS"
+    },
+    {
+      "name": "F05 owner reopens pin",
+      "status": "PASS"
+    },
+    {
+      "name": "L05 resubmission preserves feedback and resolution evidence",
+      "status": "PASS"
+    },
+    {
+      "name": "H02 owner revision history contains feedback changes",
+      "status": "PASS"
+    },
+    {
+      "name": "regular student cannot read private history",
+      "status": "PASS"
+    },
+    {
+      "name": "L03 withdrawal preserves saved furniture",
+      "status": "PASS"
+    },
+    {
+      "name": "P02 recursive public privacy and draft exclusion",
+      "status": "PASS"
+    },
+    {
+      "name": "Unrelated Student Org B / separate admin role",
+      "status": "BLOCKED",
+      "reason": "No separate configured identities; no new accounts requested."
+    },
+    {
+      "name": "Live approval/publication positive fixture",
+      "status": "NOT RUN",
+      "reason": "Approved rows cannot be deleted; controlled-clock automated coverage used, no persistent live approved test event introduced."
+    }
+  ],
+  "campusId": "364a3e9b-dc9c-4b2c-89ef-52c4c1aefa6e"
+}

@@ -1,0 +1,16 @@
+// Read-only: opens/closes a clean creation dialog; creates no rows or images.
+import fs from 'node:fs';
+import {createRequire} from 'node:module';
+import {createClient} from '@supabase/supabase-js';
+const env=Object.fromEntries(fs.readFileSync('.env.local','utf8').split(/\r?\n/).filter(l=>/^[A-Z_]+=/.test(l)).map(l=>{const i=l.indexOf('=');return[l.slice(0,i),l.slice(i+1).trim().replace(/^['"]|['"]$/g,'')];}));
+const {chromium}=createRequire(import.meta.url)('C:/Users/Rj/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const report={checks:[],errors:[]};const client=createClient(env.VITE_SUPABASE_URL,env.VITE_SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+function assert(v,m){if(!v)throw new Error(m);}function pass(name){report.checks.push({name,status:'PASS'});console.log('PASS '+name);}
+try{
+ const login=await client.auth.signInWithPassword({email:env.VITE_DEMO_ORG_STUDENT_EMAIL,password:env.VITE_DEMO_ORG_STUDENT_PASSWORD});assert(!login.error,'Org login failed');const context=await browser.newContext({viewport:{width:390,height:844}});await context.addInitScript(({key,session})=>localStorage.setItem(key,JSON.stringify(session)),{key:`sb-${new URL(env.VITE_SUPABASE_URL).hostname.split('.')[0]}-auth-token`,session:login.data.session});const page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));await page.goto('http://127.0.0.1:5173/student/events');
+ const trigger=page.getByRole('button',{name:'Create event',exact:true});await trigger.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'Create event proposal',exact:true}).waitFor();
+ for(const key of [...Array(20).fill('Tab'),...Array(20).fill('Shift+Tab')]){await page.keyboard.press(key);assert(await page.evaluate(()=>document.querySelector('[role="dialog"]')?.contains(document.activeElement)),'Keyboard focus escaped active creation dialog');}pass('Mobile creation Tab/Shift+Tab stays in active dialog');
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Creation has horizontal overflow');await page.evaluate(()=>document.documentElement.classList.add('dark'));await page.screenshot({path:'docs/verification/create-event-2026-10-03/creation-keyboard-mobile-dark.png',fullPage:true});pass('Mobile dark creation remains contained');
+ await page.keyboard.press('Escape');await page.getByRole('dialog',{name:'Create event proposal',exact:true}).waitFor({state:'hidden'});await page.waitForTimeout(300);assert(await trigger.evaluate(el=>el===document.activeElement),'Closing creation did not return focus to Create event');assert(await page.evaluate(()=>!document.body.hasAttribute('data-scroll-locked')),'Body scroll lock not restored');pass('Escape restores trigger focus and body scrolling');
+}catch(e){report.failure=e.message;console.log('FAIL '+e.message);process.exitCode=1;}
+finally{await browser.close();await client.auth.signOut({scope:'local'});fs.writeFileSync('docs/verification/create-event-2026-10-03/keyboard-browser.json',JSON.stringify(report,null,2));}

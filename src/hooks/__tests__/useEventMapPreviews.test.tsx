@@ -3,12 +3,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eventOverlayService } from "../../services/eventOverlayService";
 import { eventPreviewFixture } from "../../test/eventFullPackFixtures";
 import { useEventMapPreviews } from "../useEventMapPreviews";
+import { visibleEventCards } from "../../lib/eventMapView";
 
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: { listPublishedEventPreviews: vi.fn() } }));
 
 describe("useEventMapPreviews", () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-08T02:00:00Z")); });
   afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+
+  it("reveals a scheduled event in Upcoming at the server publication boundary despite a different browser clock", async () => {
+    vi.mocked(eventOverlayService.listPublishedEventPreviews)
+      .mockResolvedValueOnce({ serverNow: "2026-10-05T00:59:59.999Z", events: [] })
+      .mockResolvedValueOnce({ serverNow: "2026-10-05T01:00:00.000Z", events: [eventPreviewFixture()] });
+    const { result } = renderHook(() => useEventMapPreviews({ campusId: "campus-a", enabled: true, open: true, identityKey: "student" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(visibleEventCards(result.current.events, result.current.nowMs, "upcoming")).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(visibleEventCards(result.current.events, result.current.nowMs, "upcoming").map(event => event.id)).toEqual(["event-a"]);
+    expect(visibleEventCards(result.current.events, result.current.nowMs, "ongoing")).toHaveLength(0);
+  });
 
   it("fetches only while open, polls empty feeds, and refreshes on focus/visibility", async () => {
     vi.mocked(eventOverlayService.listPublishedEventPreviews).mockResolvedValue({ serverNow: "2026-10-08T02:00:00.000Z", events: [] });

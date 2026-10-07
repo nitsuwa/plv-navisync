@@ -1,0 +1,28 @@
+{
+  "checks": [
+    {
+      "name": "Desktop Grounds cursor follows movement, hides over controls/outside map and cancels",
+      "status": "PASS"
+    },
+    {
+      "name": "Pan and Space hide the cursor; zoomed placement becomes a draft and adds exactly one staged pin",
+      "status": "PASS"
+    },
+    {
+      "name": "Floor preview uses the same cursor and hides it when switching location",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive portrait: pointer preview and touch placement",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive landscape: pointer preview and touch placement",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteAttempts": 0,
+  "retainedFixtures": 0,
+  "existingSampleUnchanged": true
+}

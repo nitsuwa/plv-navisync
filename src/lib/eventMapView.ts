@@ -65,11 +65,14 @@ export function buildEventVenues(campus: Campus, events: PublicEventPreview[]): 
       let id: string, type: EventVenue["type"], x: number, y: number, label: string;
       if (resolved.kind === "campus") {
         id = "campus"; type = "campus";
-        const authoredMarker = campus.markers.find((marker) => /event|grounds|plaza|quad/i.test(`${marker.type} ${marker.name}`));
-        const authoredEventMarker = event.markers.find((marker) => Number.isFinite(marker.x) && Number.isFinite(marker.y));
-        x = authoredEventMarker?.x ?? authoredMarker?.x ?? campus.canvasW / 2;
-        y = authoredEventMarker?.y ?? authoredMarker?.y ?? campus.canvasH / 2;
-        label = authoredEventMarker?.label || authoredMarker?.name || "Campus Grounds (approximate)";
+        const centralMonument = campus.decorAssets?.find((asset) => asset.type === "monument" && asset.visible !== false && Number.isFinite(asset.x) && Number.isFinite(asset.y));
+        const authoredMarker = campus.markers.find((marker) => /grounds|plaza|quad/i.test(`${marker.type} ${marker.name}`) && Number.isFinite(marker.x) && Number.isFinite(marker.y));
+        const plaza = campus.decorAssets?.find((asset) => asset.visible !== false && (asset.type === "plaza-area" || asset.groundType === "plaza") && Number.isFinite(asset.x) && Number.isFinite(asset.y));
+        // Grounds is a shared campus venue, not the first event-specific stage/booth marker.
+        const center = centralMonument ?? authoredMarker ?? plaza;
+        x = center?.x ?? campus.canvasW / 2;
+        y = center?.y ?? campus.canvasH / 2;
+        label = centralMonument || plaza ? "Campus Grounds" : authoredMarker?.name || "Campus Grounds (approximate)";
       } else {
         const building = campus.buildings.find((item) => item.id === resolved.buildingId)!;
         id = `building:${building.id}`; type = "building";

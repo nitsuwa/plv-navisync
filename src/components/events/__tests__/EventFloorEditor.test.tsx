@@ -230,6 +230,60 @@ afterEach(() => {
 });
 
 describe("EventFloorEditor", () => {
+  it("shows a pin following the pointer only while feedback placement is armed", () => {
+    const point = vi.fn();
+    const props = { floorPlan, overlay, compactPreview: true, readOnly: true, onSave: vi.fn(), onSubmit: vi.fn(), onBack: vi.fn() };
+    const { rerender } = render(<EventFloorEditor {...props} onFeedbackPoint={point} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 50, clientY: 60 });
+    const preview = screen.getByTestId("feedback-pin-cursor-preview");
+    expect(preview).toHaveClass("pointer-events-none");
+    expect(preview.style.left).toBe("50px");
+    expect(preview.style.top).toBe("60px");
+    expect(point).not.toHaveBeenCalled();
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 70, clientY: 80 });
+    expect(preview.style.left).toBe("70px");
+    expect(preview.style.top).toBe("80px");
+    rerender(<EventFloorEditor {...props} />);
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+  });
+
+  it("hides the pin cursor over controls, outside the map, while panning, and for touch", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} compactPreview readOnly onFeedbackPoint={vi.fn()} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    const hover = () => fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 50, clientY: 60 });
+    hover();
+    expect(screen.getByTestId("feedback-pin-cursor-preview")).toBeInTheDocument();
+    fireEvent.pointerMove(screen.getByRole("button", { name: "Zoom in" }), { pointerType: "mouse", clientX: 50, clientY: 60 });
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+    hover();
+    fireEvent.pointerLeave(canvas);
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+    hover();
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: -10, clientY: -10 });
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+    hover();
+    fireEvent.click(screen.getByRole("button", { name: "Pan map" }));
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pan map" }));
+    fireEvent.pointerMove(canvas, { pointerType: "touch", clientX: 50, clientY: 60 });
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+  });
+
+  it("drops one feedback point on click and replaces the hover preview with the draft marker", () => {
+    const point = vi.fn();
+    const props = { floorPlan, overlay, compactPreview: true, readOnly: true, onSave: vi.fn(), onSubmit: vi.fn(), onBack: vi.fn(), onFeedbackPoint: point };
+    const { rerender } = render(<EventFloorEditor {...props} />);
+    const canvas = screen.getByLabelText("Event layout canvas");
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 50, clientY: 60 });
+    expect(screen.getByTestId("feedback-pin-cursor-preview")).toBeInTheDocument();
+    fireEvent.click(canvas, { clientX: 50, clientY: 60 });
+    expect(point).toHaveBeenCalledExactlyOnceWith({ x: 50, y: 60 });
+    rerender(<EventFloorEditor {...props} draftFeedbackPoint={{ x: 50, y: 60 }} />);
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 70, clientY: 80 });
+    expect(screen.queryByTestId("feedback-pin-cursor-preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Unsaved feedback pin position")).toBeInTheDocument();
+  });
   it.each(["chair", "layout"])("warns and refuses %s placement on a campus building footprint", (mode) => {
     const campusFloor = { ...floorPlan, id: "campus", rooms: [{ id: "hall", name: "Student Hall", type: "building", x: 100, y: 70, w: 260, h: 160, floorId: "campus", buildingId: "campus", color: "orange" }] };
     render(<EventFloorEditor floorPlan={campusFloor} overlay={overlay} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
@@ -1256,6 +1310,61 @@ describe("EventFloorEditor", () => {
       [expect.objectContaining({ type: "booth" })],
       [],
     );
+  });
+
+  it("moves existing furniture in Label mode without placing another label", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithChair} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Label$/ }));
+    const chair = screen.getByTestId("event-furniture-chair-1");
+    fireEvent.pointerDown(chair, { pointerId: 901, pointerType: "mouse", button: 0, clientX: 36, clientY: 36 });
+    fireEvent.pointerMove(window, { pointerId: 901, clientX: 100, clientY: 36 });
+    fireEvent.pointerUp(window, { pointerId: 901, clientX: 100, clientY: 36 });
+    fireEvent.click(screen.getByLabelText("Event layout canvas"), { clientX: 100, clientY: 36 });
+    expect(Number.parseFloat(chair.style.left)).toBeGreaterThan(24);
+    expect(screen.queryByText("Event Label")).not.toBeInTheDocument();
+  });
+
+  it("edits a label directly on double-click and commits one undoable change", () => {
+    const onDraftChange = vi.fn();
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithLabel} onDraftChange={onDraftChange} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.doubleClick(screen.getByTestId("event-label-label-1"));
+    const input = screen.getByRole("textbox", { name: "Edit label text" });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "Registration" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("event-label-label-1")).toHaveTextContent("Registration");
+    expect(onDraftChange).toHaveBeenLastCalledWith([], [expect.objectContaining({ id: "label-1", text: "Registration" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByTestId("event-label-label-1")).toHaveTextContent("Welcome desk");
+  });
+
+  it("opens inline editing when pointer capture retargets the label double-click to the canvas", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithLabel} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const label = screen.getByTestId("event-label-label-1");
+    const canvas = screen.getByLabelText("Event layout canvas");
+    for (const pointerId of [903, 904]) {
+      fireEvent.pointerDown(label, { pointerId, pointerType: "mouse", button: 0, clientX: 52, clientY: 52 });
+      fireEvent.pointerUp(window, { pointerId, pointerType: "mouse", clientX: 52, clientY: 52 });
+      fireEvent.click(canvas, { clientX: 52, clientY: 52 });
+    }
+    fireEvent.doubleClick(canvas, { clientX: 52, clientY: 52 });
+    expect(screen.getByRole("textbox", { name: "Edit label text" })).toHaveValue("Welcome desk");
+  });
+
+  it("cancels inline label editing without deleting the label or changing its text", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlayWithLabel} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.doubleClick(screen.getByTestId("event-label-label-1"));
+    const input = screen.getByRole("textbox", { name: "Edit label text" });
+    fireEvent.change(input, { target: { value: "Uncommitted" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Edit label text" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("event-label-label-1")).toHaveTextContent("Welcome desk");
+  });
+
+  it.each([true, false])("keeps protected labels out of inline edit mode (readOnly=%s)", (readOnly) => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={{ ...overlayWithLabel, eventLabels: overlayWithLabel.eventLabels!.map(label => ({ ...label, locked: !readOnly })) }} readOnly={readOnly} onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.doubleClick(screen.getByTestId("event-label-label-1"));
+    expect(screen.queryByRole("textbox", { name: "Edit label text" })).not.toBeInTheDocument();
   });
 
   it("edits a selected event label instead of forcing a replacement label", () => {

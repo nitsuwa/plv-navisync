@@ -2,10 +2,13 @@ import { CalendarDays, Compass, Home, Map } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { cn } from "../../lib/utils";
+import { useStudentOrgEventUpdates } from "../../hooks/useStudentOrgEventUpdates";
+import { EventUnreadBadge } from "../events/EventUnreadBadge";
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
-  const { isStudent, isStudentOrg } = useStudentAuth();
+  const { isStudent, isStudentOrg, profile, loading } = useStudentAuth();
+  const { unreadCount } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !loading);
   const links = isStudent
     ? [
         { label: "Home", path: "/home", icon: Home },
@@ -34,13 +37,14 @@ export function MobileBottomNav() {
             <Link
               key={path}
               to={path}
+              aria-label={path === "/student/events" && unreadCount ? `Events, ${unreadCount} unread layout updates` : undefined}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1 text-[11px] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                 active ? "text-primary" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
               )}
             >
-              <Icon className="h-5 w-5 shrink-0" strokeWidth={active ? 2.5 : 2} aria-hidden="true" />
+              <span className="relative inline-flex"><Icon className="h-5 w-5 shrink-0" strokeWidth={active ? 2.5 : 2} aria-hidden="true" />{path === "/student/events" && <EventUnreadBadge count={unreadCount} className="absolute -right-4 -top-2" />}</span>
               <span className="max-w-full truncate">{label}</span>
             </Link>
           );

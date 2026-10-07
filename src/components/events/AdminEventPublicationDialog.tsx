@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { CheckCircle2, Clock3, Loader2, X, XCircle } from "lucide-react";
 import type { CampusEventOverlay } from "../map-builder/types";
 import type { EventPublicationCommand } from "../../types/eventPreview";
@@ -18,23 +19,33 @@ export function AdminEventPublicationDialog({ overlay, onClose, onSave }: {
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [confirmSchedule, setConfirmSchedule] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const phase = getStudentEventPhase(overlay, Date.now());
-  const stateLabel = !overlay.isActive ? "Unpublished" : phase === "scheduled" ? "Scheduled" : phase === "upcoming" ? "Upcoming" : phase === "ongoing" ? "Ongoing" : phase === "ended" ? "Ended" : "Timing unavailable";
+  const [scheduleTouched, setScheduleTouched] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNowMs(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const phase = getStudentEventPhase(overlay, nowMs);
+  const isVisibleToStudents = phase === "upcoming" || phase === "ongoing";
   const publicationAt = manilaDateTimeToIso(date, time);
   const dateStart = overlay.dateStart ? Date.parse(overlay.dateStart) : NaN;
   const dateEnd = overlay.dateEnd ? Date.parse(overlay.dateEnd) : NaN;
-  const validOccurrence = Number.isFinite(dateStart) && Number.isFinite(dateEnd) && dateStart < dateEnd && dateEnd > Date.now();
-  const scheduleError = !validOccurrence
-    ? "This event needs a valid future start and end schedule before it can be published."
+  const stateLabel = Number.isFinite(dateEnd) && dateEnd <= nowMs ? "Ended" : !overlay.isActive ? "Unpublished" : phase === "scheduled" ? "Scheduled" : phase === "upcoming" ? "Upcoming" : phase === "ongoing" ? "Ongoing" : "Timing unavailable";
+  const validOccurrence = overlay.status === "approved" && Number.isFinite(dateStart) && Number.isFinite(dateEnd) && dateStart < dateEnd && dateEnd > nowMs;
+  const occurrenceError = validOccurrence ? null : Number.isFinite(dateEnd) && dateEnd <= nowMs
+    ? "This event has ended. Request a new event proposal with updated start and end dates before publishing."
+    : "A valid event start and end schedule is required. Request a proposal with updated dates for review.";
+  const scheduleError = occurrenceError
+    ? occurrenceError
     : !publicationAt
-    ? "Choose a valid publication date and 24-hour time."
-    : Date.parse(publicationAt) <= Date.now()
+    ? "Choose a publication date and time using AM or PM."
+    : Date.parse(publicationAt) <= nowMs
       ? "Choose a future publication time."
       : !Number.isFinite(dateEnd) || Date.parse(publicationAt) >= dateEnd
         ? "Publication must be before the event ends."
         : null;
 
   const save = async (command: EventPublicationCommand) => {
+    if (busy || (command.action === "publish_now" && isVisibleToStudents)) return;
+    if (command.action !== "unpublish" && !validOccurrence) { setError(occurrenceError); return; }
+    if (command.action === "schedule" && scheduleError) { setScheduleTouched(true); return; }
     if (!overlay.updatedAt) { setError("This event has no server revision. Reload the event list before changing publication."); return; }
     setBusy(true); setError(null);
     try { await onSave(overlay, command); onClose(); }
@@ -43,9 +54,8 @@ export function AdminEventPublicationDialog({ overlay, onClose, onSave }: {
   };
 
   const requestSchedule = () => {
-    if (!publicationAt) return;
-    const isVisibleToStudents = phase === "upcoming" || phase === "ongoing";
-    if (isVisibleToStudents && Date.parse(publicationAt) > Date.now()) {
+    if (!publicationAt || scheduleError) { setScheduleTouched(true); return; }
+    if (isVisibleToStudents && Date.parse(publicationAt) > nowMs) {
       setConfirmSchedule(true);
       setConfirmUnpublish(false);
       return;
@@ -53,21 +63,24 @@ export function AdminEventPublicationDialog({ overlay, onClose, onSave }: {
     void save({ action: "schedule", publicationAt });
   };
 
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-3 backdrop-blur-sm" onClick={onClose}>
-    <section role="dialog" aria-modal="true" aria-labelledby="publication-dialog-title" className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={(event) => event.stopPropagation()}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose(); }}><Dialog.Portal>
+    <Dialog.Overlay className="fixed inset-0 z-[100] bg-background/70 backdrop-blur-sm" />
+    <Dialog.Content asChild onPointerDownOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}>
+    <section className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
-        <div><h2 id="publication-dialog-title" className="text-sm font-extrabold">Manage event publication</h2><p className="mt-1 text-xs text-muted-foreground">Approval and the event schedule remain unchanged.</p></div>
-        <button type="button" aria-label="Close publication settings" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button>
+        <div><Dialog.Title className="text-sm font-extrabold">Manage event publication</Dialog.Title><Dialog.Description className="mt-1 text-xs text-muted-foreground">Choose when students can see this approved event map.</Dialog.Description></div>
+        <button type="button" disabled={busy} aria-label="Close publication settings" onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-50"><X className="h-4 w-4" /></button>
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-        <div><p className="text-base font-extrabold">{overlay.title}</p><p className="mt-1 text-xs text-muted-foreground">{stateLabel} · {overlay.isActive ? "Visible when publication time is reached" : "Hidden from student maps"}</p></div>
+        <div><p className="break-words text-base font-extrabold">{overlay.title}</p><p className={cn("mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", isVisibleToStudents ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground")}>{isVisibleToStudents ? `Published · ${stateLabel}` : stateLabel}</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">{occurrenceError ? "Update the event schedule before publishing this map." : isVisibleToStudents ? "Students can currently view this event map. Scheduling it for later will hide it until that time." : phase === "scheduled" ? "Hidden from students until the scheduled publication time. It appears as Upcoming only when published before the event starts." : "Publish now to show the map immediately, or choose a future publication time."}</p></div>
         <div className="grid gap-3 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-2">
           <div><p className="text-xs font-bold text-muted-foreground">Event starts</p><p className="mt-1 text-sm font-semibold">{formatEventDate(overlay.dateStart)}</p></div>
           <div><p className="text-xs font-bold text-muted-foreground">Event ends</p><p className="mt-1 text-sm font-semibold">{formatEventDate(overlay.dateEnd)}</p></div>
         </div>
         {overlay.publicationAt && <p className="text-xs text-muted-foreground">Configured publication: {formatEventDate(overlay.publicationAt)}</p>}
-        <ThemedDateTimeField label="Schedule student publication" date={date} time={time} disabled={busy} onDateChange={setDate} onTimeChange={setTime} error={time && !isValidThemedTime(time) ? "Use a valid 24-hour time, for example 09:00." : undefined} />
-        {scheduleError && <p className="text-xs text-destructive">{scheduleError}</p>}
+        {occurrenceError && <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs leading-relaxed text-destructive">{occurrenceError}</p>}
+        <ThemedDateTimeField label="Schedule student publication" date={date} time={time} disabled={busy || !validOccurrence} onDateChange={value => { setDate(value); setScheduleTouched(true); setConfirmSchedule(false); }} onTimeChange={value => { setTime(value); setScheduleTouched(true); setConfirmSchedule(false); }} error={time && !isValidThemedTime(time) ? "Choose a valid time using AM or PM." : undefined} />
+        {validOccurrence && scheduleError && <p role={scheduleTouched ? "alert" : undefined} className={cn("text-xs leading-relaxed", scheduleTouched ? "text-destructive" : "text-muted-foreground")}>{scheduleTouched ? scheduleError : "Choose a future date and time to change the publication schedule. The event dates stay the same."}</p>}
         {error && <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
         {confirmUnpublish && <div role="alertdialog" aria-label="Confirm unpublish event" className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
           <p className="text-sm font-bold">Remove this event map from student view?</p><p className="mt-1 text-xs text-muted-foreground">The approved layout and schedule will be kept. You can publish it again later.</p>
@@ -79,13 +92,13 @@ export function AdminEventPublicationDialog({ overlay, onClose, onSave }: {
           <div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setConfirmSchedule(false)} className="min-h-11 rounded-xl border border-border px-3 text-sm font-semibold">Keep visible</button><button type="button" disabled={busy} onClick={() => void save({ action: "schedule", publicationAt })} className="min-h-11 rounded-xl bg-primary px-3 text-sm font-bold text-primary-foreground">Confirm schedule</button></div>
         </div>}
       </div>
-      <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border p-4">
+      <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-border p-4 sm:grid-cols-3">
         <button type="button" disabled={busy} onClick={onClose} className="min-h-11 flex-1 rounded-xl border border-border px-3 text-sm font-bold text-muted-foreground hover:bg-muted">Cancel</button>
-        <button type="button" disabled={busy || !validOccurrence} onClick={() => void save({ action: "publish_now" })} className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-sm font-bold text-primary-foreground disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />Publish now</button>
-        <button type="button" disabled={busy || Boolean(scheduleError)} onClick={requestSchedule} className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary px-3 text-sm font-bold text-primary disabled:opacity-50"><Clock3 className="h-4 w-4" />Save schedule</button>
-        {overlay.isActive && <button type="button" disabled={busy} onClick={() => setConfirmUnpublish(true)} className={cn("inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-destructive/40 text-sm font-bold text-destructive hover:bg-destructive/5 disabled:opacity-50")}><XCircle className="h-4 w-4" />Unpublish</button>}
+        <button type="button" disabled={busy || !validOccurrence || isVisibleToStudents || !overlay.updatedAt} title={isVisibleToStudents ? "This event map is already visible to students." : undefined} onClick={() => void save({ action: "publish_now" })} className={cn("inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold", isVisibleToStudents ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-primary text-primary-foreground disabled:opacity-50")}><CheckCircle2 className="h-4 w-4" />{isVisibleToStudents ? "Published" : "Publish now"}</button>
+        <button type="button" disabled={busy || Boolean(scheduleError) || !overlay.updatedAt} onClick={requestSchedule} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary px-3 text-sm font-bold text-primary disabled:opacity-50 sm:col-span-1"><Clock3 className="h-4 w-4" />Save schedule</button>
+        {overlay.isActive && <button type="button" disabled={busy} onClick={() => setConfirmUnpublish(true)} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-destructive/40 text-sm font-bold text-destructive hover:bg-destructive/5 disabled:opacity-50 sm:col-span-3"><XCircle className="h-4 w-4" />Unpublish</button>}
         {busy && <span role="status" className="sr-only"><Loader2 className="h-4 w-4 animate-spin" /> Saving</span>}
       </footer>
-    </section>
-  </div>;
+    </section></Dialog.Content>
+  </Dialog.Portal></Dialog.Root>;
 }

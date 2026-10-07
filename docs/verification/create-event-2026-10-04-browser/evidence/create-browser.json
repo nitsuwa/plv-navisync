@@ -1,0 +1,57 @@
+{
+  "title": "QA browser create 29bcf488",
+  "id": "3ac6ceca-11e4-4f8b-9d33-25692ff3b49d",
+  "cleaned": true,
+  "posterObjectCleaned": true,
+  "checks": [
+    {
+      "name": "C01-C03 actual inline validation and two-location creation with uploaded poster",
+      "status": "PASS"
+    },
+    {
+      "name": "E01-E02 actual chair/label placement, both locations saved and reloaded",
+      "status": "PASS"
+    },
+    {
+      "name": "J1 real UI creation/design/save/reload/submission segment",
+      "status": "PASS"
+    },
+    {
+      "name": "J1 admin previews the actual submitted second location",
+      "status": "PASS"
+    },
+    {
+      "name": "A02 same-event preview parity, A06 event-only named furniture summary, T01 midnight/noon/minute59 desktop/mobile, review discarded",
+      "status": "PASS"
+    },
+    {
+      "name": "L03 browser cancel/confirm withdrawal preserves both layouts",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "afterGrounds": [
+    {
+      "id": "location-campus",
+      "furniture": 1,
+      "labels": 1
+    },
+    {
+      "id": "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1",
+      "furniture": 0,
+      "labels": 0
+    }
+  ],
+  "afterFloor": [
+    {
+      "id": "location-campus",
+      "furniture": 1,
+      "labels": 1
+    },
+    {
+      "id": "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1",
+      "furniture": 0,
+      "labels": 1
+    }
+  ]
+}

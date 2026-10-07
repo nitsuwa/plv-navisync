@@ -17,6 +17,7 @@ interface StudentFloorPickerProps {
   open?: boolean;
   navigationActive?: boolean;
   onOpenChange?: (open: boolean) => void;
+  eventPanelOpen?: boolean;
 }
 
 function compactFloorLabel(floor: StudentFloorOption | undefined) {
@@ -28,7 +29,7 @@ function compactFloorLabel(floor: StudentFloorOption | undefined) {
   return `${number}F`;
 }
 
-export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect, open: controlledOpen, navigationActive = false, onOpenChange }: StudentFloorPickerProps) {
+export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect, open: controlledOpen, navigationActive = false, onOpenChange, eventPanelOpen = false }: StudentFloorPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -79,6 +80,7 @@ export function StudentFloorPicker({ buildingName, floors, activeFloor, onSelect
       data-testid="student-floor-picker"
       data-dock="floor-control-bottom-left"
       data-navigation-active={navigationActive ? "true" : "false"}
+      data-event-panel-open={eventPanelOpen ? "true" : "false"}
       data-no-drag
       className={cn(
         "student-map-utility-control absolute left-3 z-[45] isolate md:bottom-8 md:left-1/2 md:top-auto md:-translate-x-1/2",

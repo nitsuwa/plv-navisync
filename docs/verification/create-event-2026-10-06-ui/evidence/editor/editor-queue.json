@@ -1,0 +1,39 @@
+{
+  "title": "QA CE interactions 233488b5",
+  "checks": [
+    {
+      "name": "Placement switch thumb stays inside its track in both states",
+      "status": "PASS"
+    },
+    {
+      "name": "Double-click inline label editing, Enter, undo, and redo",
+      "status": "PASS"
+    },
+    {
+      "name": "Label mode drags existing furniture without placing text",
+      "status": "PASS"
+    },
+    {
+      "name": "Escape cancels; blur/Save commits and persists after reload",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin sees authenticated submitter independently of organizer",
+      "status": "PASS"
+    },
+    {
+      "name": "Compact draft and numbered pins remain visible; discarded review creates no server feedback",
+      "status": "PASS"
+    },
+    {
+      "name": "Withdrawn submission disappears from already-open admin queue automatically",
+      "status": "PASS"
+    },
+    {
+      "name": "UI deletion removes own event without removing unrelated legacy TEST record",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "cleaned": true
+}

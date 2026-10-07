@@ -1,0 +1,48 @@
+{
+  "phase": "fixed",
+  "mode": "read-only existing events; unsaved review controls only",
+  "checks": [
+    {
+      "name": "Admin can select an event start date inside the review dialog",
+      "status": "PASS"
+    },
+    {
+      "name": "Calendar day clicks and scheduled-publication date/time selections work",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin can select hour, minute 59, and PM in the nested time picker",
+      "status": "PASS"
+    },
+    {
+      "name": "Mobile time picker stays inside the viewport and exposes minute 59 and Done",
+      "status": "PASS"
+    },
+    {
+      "name": "Short landscape picker keeps Done visible and restores focus with Escape",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "existingTestRecords": [
+    {
+      "title": "TEST",
+      "status": "pending",
+      "organizer": "VITS",
+      "ownedByExistingOrg": false,
+      "hasOwner": true,
+      "hasSubmissionTime": false,
+      "locations": 0
+    },
+    {
+      "title": "TEST: College Week 2026 (sample)",
+      "status": "pending",
+      "organizer": "VITS",
+      "ownedByExistingOrg": true,
+      "hasOwner": true,
+      "hasSubmissionTime": true,
+      "locations": 2
+    }
+  ],
+  "testTitlesAreDistinctRecords": true
+}

@@ -42,6 +42,12 @@ const props = (overrides: Partial<StudentMapControlsProps> = {}): StudentMapCont
 });
 
 describe("StudentMapControls", () => {
+  it("replaces normal search chrome in event mode while retaining directions and recenter", () => {
+    render(<StudentMapControls {...{ ...props({ onResetView: vi.fn() }), eventMode: true }} />);
+    expect(screen.queryByRole("searchbox", { name: "Search campus map" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recenter map" })).toBeInTheDocument();
+  });
   it("keeps search and the single useful route action in the floating controls", () => {
     render(<StudentMapControls {...props()} />);
 

@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "name": "Student normal indoor/outdoor navigation, filters and non-overlap: desktop",
+      "status": "PASS"
+    },
+    {
+      "name": "Student normal indoor/outdoor navigation, filters and non-overlap: portrait",
+      "status": "PASS"
+    },
+    {
+      "name": "Student normal indoor/outdoor navigation, filters and non-overlap: landscape",
+      "status": "PASS"
+    },
+    {
+      "name": "Student normal indoor/outdoor navigation, filters and non-overlap: tablet",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin compact feedback row, full comment and keyboard removal: desktop",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin compact feedback row, full comment and keyboard removal: portrait",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin compact feedback row, full comment and keyboard removal: landscape",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin compact feedback row, full comment and keyboard removal: tablet",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteAttempts": 0,
+  "retainedFixtures": 0,
+  "existingSampleUnchanged": true
+}

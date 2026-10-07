@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
 import { campusService, resolveActiveCampusId } from "../campusService";
 import { eventOverlayService } from "../eventOverlayService";
@@ -64,7 +64,16 @@ function publishedCampus(id: string) {
   } as never;
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("event overlay service", () => {
+  it.each(["not-a-date", "2026-10-02T00:00:00Z"])("rejects invalid or past publication %s before sending a command", async (publicationAt) => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T00:00:00Z"));
+    const { client } = makeClient();
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.manageEventPublication("event-1", "2026-10-02T00:00:00Z", { action: "schedule", publicationAt })).rejects.toThrow(/future publication time/i);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
   it('rejects stale details and submission callers before writing an old form or map', async () => {
     const {client,mapElements}=makeClient([{id:'event-1',campus_id:'campus-1',updated_at:'2026-10-03T01:00:01Z',metadata:{status:'draft'}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
@@ -278,6 +287,7 @@ describe("event overlay service", () => {
     expect((mapElements.update.mock.calls[0][0] as any).metadata.dateEnd).toBe("2026-10-01T03:00:00Z");
   });
   it("sends an approval decision and revision atomically to the database", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T00:00:00Z"));
     const {client} = makeClient();
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await eventOverlayService.reviewEventOverlay("event-1", "approved", "Ready", {expectedUpdatedAt:"2026-10-02T00:00:00.000Z",dateStart:"2026-10-08T01:00:00Z",dateEnd:"2026-10-09T01:00:00Z",publicationMode:"schedule",publicationAt:"2026-10-05T01:00:00Z",locationFeedback:{campus:"Keep gate clear"}});
@@ -326,6 +336,7 @@ describe("event overlay service", () => {
   });
 
   it("stores the administrator-selected occurrence dates when approving a date-free proposal", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T00:00:00Z"));
     const { client } = makeClient([{ id: "event-1", metadata: { status: "pending" } }]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await eventOverlayService.reviewEventOverlay("event-1", "approved", undefined, {

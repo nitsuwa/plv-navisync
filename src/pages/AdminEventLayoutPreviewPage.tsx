@@ -11,6 +11,7 @@ import { normalizeEventOverlayLocations } from "../lib/eventOverlayModel";
 import { formatEventSubmissionTime } from "../lib/eventSubmissionTime";
 import { feedbackPinsWithStatus, readEventFeedback, type EventFeedbackPin } from "../lib/eventFeedbackPins";
 import { CAMPUS_GROUNDS_ID, resolveFloorPlanForEvent } from "../lib/eventLocationData";
+import { cn } from "../lib/utils";
 import type { Campus, CampusEventOverlay, EventLocationRef } from "../components/map-builder/types";
 
 function PreviewError({ message }: { message: string }) {
@@ -103,12 +104,12 @@ export function AdminEventLayoutPreviewPage({ previewOverlay, onClose, onAddFeed
   };
   const pinCount = readEventFeedback(overlay.locationFeedback?.[activeLocation.id]).pins.length;
   return <div className={previewOverlay ? "flex h-full min-h-0 flex-col" : "flex h-[calc(100dvh-8rem)] min-h-[420px] flex-col"}>
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-3 [@media(max-height:500px)]:py-2">
+    <div className={cn("flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-3 [@media(max-height:500px)]:py-2", pinPoint && "[@media(max-height:500px)]:hidden")}>
       <div className="min-w-0"><h1 className="text-sm font-extrabold">{overlay.title}</h1><p className="mt-1 text-xs text-muted-foreground [@media(max-height:500px)]:hidden">Read-only · {locations.length} requested locations · Submitted {formatEventSubmissionTime(overlay.submittedAt)}</p></div>
       {onAddFeedbackPin && <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{pinCount}/30 pins</span><button type="button" disabled={!placingPin && pinCount >= 30} aria-pressed={placingPin} onClick={() => { if (placingPin) confirmDiscard(cancelPin); else setPlacingPin(true); }} className="min-h-10 rounded-xl border border-border bg-primary/5 px-3 text-xs font-bold text-primary disabled:opacity-40">{placingPin ? "Cancel pin placement" : "Add pin"}</button></div>}
     </div>
-    <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border px-3 py-2" aria-label="Requested locations">{locations.map(location => <button key={location.id} type="button" aria-label={`${previewOverlay ? "View" : "Edit"} ${location.locationRef.label}`} aria-pressed={location.id === activeLocation.id} onClick={() => { if (location.id !== activeLocation.id) confirmDiscard(() => { cancelPin(); setActiveLocationId(location.id); }); }} className="min-h-10 shrink-0 rounded-xl border border-border px-3 text-xs font-semibold aria-pressed:bg-primary aria-pressed:text-primary-foreground">{location.locationRef.label}</button>)}</div>
-    {placingPin && <p role="status" className="shrink-0 bg-amber-500/10 px-3 py-2 text-xs text-foreground">{pinPoint ? "Draft pin marked on the map. Click another point to reposition, then save your comment." : "Click the map to position your feedback pin."}</p>}
+    <div className={cn("flex shrink-0 gap-2 overflow-x-auto border-b border-border px-3 py-2", pinPoint && "[@media(max-height:500px)]:hidden")} aria-label="Requested locations">{locations.map(location => <button key={location.id} type="button" aria-label={`${previewOverlay ? "View" : "Edit"} ${location.locationRef.label}`} aria-pressed={location.id === activeLocation.id} onClick={() => { if (location.id !== activeLocation.id) confirmDiscard(() => { cancelPin(); setActiveLocationId(location.id); }); }} className="min-h-10 shrink-0 rounded-xl border border-border px-3 text-xs font-semibold aria-pressed:bg-primary aria-pressed:text-primary-foreground">{location.locationRef.label}</button>)}</div>
+    {placingPin && <p role="status" className={cn("shrink-0 bg-amber-500/10 px-3 py-2 text-xs text-foreground", pinPoint && "[@media(max-height:500px)]:hidden")}>{pinPoint ? "Draft pin marked on the map. Click another point to reposition, then save your comment." : "Click the map to position your feedback pin."}</p>}
     <div className="relative min-h-0 flex-1">
       <EventFloorEditor key={activeLocation.id} compactPreview floorPlan={floorPlan} overlay={focusedOverlay} activeCampus={eventCampus} feedbackPins={feedbackPinsWithStatus(overlay.locationFeedback?.[activeLocation.id], overlay.feedbackResolutions?.[activeLocation.id])} draftFeedbackPoint={pinPoint?.locationId === activeLocation.id ? pinPoint : null} onFeedbackPoint={onAddFeedbackPin && placingPin ? point => setPinPoint({ ...point, locationId: activeLocation.id }) : undefined} readOnly onSave={async () => {}} onSubmit={async () => {}} onBack={() => onClose ? onClose() : navigate("/admin-dashboard/event-layouts")} />
     </div>

@@ -1,0 +1,36 @@
+{
+  "id": "2f79f329-e0c6-4c48-89f2-c11ddaffde83",
+  "created": true,
+  "cleaned": true,
+  "checks": [
+    {
+      "name": "F01-F03 actual admin UI stages two pins and persists them only with review decision",
+      "status": "PASS"
+    },
+    {
+      "name": "F04 browser note and acknowledgement persisted",
+      "status": "PASS"
+    },
+    {
+      "name": "J3 one remaining open pin blocks browser resubmission",
+      "status": "PASS"
+    },
+    {
+      "name": "J3 mobile acknowledgement, reload and resubmission preserve both pins",
+      "status": "PASS"
+    },
+    {
+      "name": "J3 admin sees persisted student notes after resubmission",
+      "status": "PASS"
+    },
+    {
+      "name": "J2 two owner browsers and stale admin decision preserve newest pending layout/submittedAt",
+      "status": "PASS"
+    },
+    {
+      "name": "J4 later feedback invalidates claims; acknowledgement failure retains note; keyboard retry and reopen persist",
+      "status": "PASS"
+    }
+  ],
+  "errors": []
+}

@@ -4,7 +4,7 @@
  * Displays pending event overlays submitted by student orgs.
  * Admins can review the layout, approve it, or disapprove with comments.
  */
-import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { EventRevisionHistory } from "../components/events/EventRevisionHistory";
@@ -43,6 +43,9 @@ import { formatEventSubmissionTime } from "../lib/eventSubmissionTime";
 import { isValidThemedTime, manilaDateTimeToIso, ThemedDateTimeField } from "../components/ui/ThemedDateTimeField";
 import { AdminEventPublicationDialog } from "../components/events/AdminEventPublicationDialog";
 import type { EventPublicationCommand } from "../types/eventPreview";
+import { useAdminAuth } from "../hooks/useAdminAuth";
+import { clearEventReviewDraft, readEventReviewDraft, writeEventReviewDraft } from "../lib/eventReviewDraft";
+import { EventFeedbackPinList } from "../components/events/EventFeedbackPinList";
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -96,6 +99,8 @@ function publicationStateLabel(overlay: CampusEventOverlay): string {
 
 function ReviewModal({
   overlay,
+  reviewerId,
+  submitterName,
   onClose,
   returnFocusRef,
   onReview,
@@ -104,6 +109,8 @@ function ReviewModal({
   initialPreview = false,
 }: {
   overlay: CampusEventOverlay;
+  reviewerId?: string;
+  submitterName?: string;
   allOverlays: CampusEventOverlay[];
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -116,6 +123,11 @@ function ReviewModal({
     publication?: { expectedUpdatedAt?: string; dateStart?: string; dateEnd?: string; publicationMode?: "now" | "schedule"; publicationAt?: string; locationFeedback?: Record<string, string> }
   ) => Promise<void>;
 }) {
+  const [recovery] = useState(() => readEventReviewDraft(reviewerId, overlay));
+  const recoveredDraft = recovery.status === "restored" ? recovery.draft : undefined;
+  const [draftStorageState, setDraftStorageState] = useState<"empty" | "saved" | "unavailable">("empty");
+  const draftFinished = useRef(false);
+  const draftWritten = useRef(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -132,23 +144,52 @@ function ReviewModal({
     eventOverlayService.listEventOverlays({ allCampuses: true, campusId: overlay.campusId, status: "approved", strict: true }).then(events => { if (!cancelled) setApprovedEvents(events); }).catch(() => { if (!cancelled) setConflictCheckFailed(true); });
     return () => { cancelled = true; };
   }, [overlay.campusId]);
-  const [comment, setComment] = useState("");
-  const [publicationMode, setPublicationMode] = useState<"now" | "schedule">("now");
-  const [eventStartDate, setEventStartDate] = useState("");
-  const [eventStartTime, setEventStartTime] = useState("09:00");
-  const [eventEndDate, setEventEndDate] = useState("");
-  const [eventEndTime, setEventEndTime] = useState("17:00");
-  const [publicationDate, setPublicationDate] = useState("");
-  const [publicationTime, setPublicationTime] = useState("");
-  const [locationFeedback, setLocationFeedback] = useState<Record<string, string>>(overlay.locationFeedback ?? {});
+  const [comment, setComment] = useState(recoveredDraft?.comment ?? "");
+  const [publicationMode, setPublicationMode] = useState<"now" | "schedule">(recoveredDraft?.publicationMode ?? "now");
+  const [eventStartDate, setEventStartDate] = useState(recoveredDraft?.eventStartDate ?? "");
+  const [eventStartTime, setEventStartTime] = useState(recoveredDraft?.eventStartTime ?? "09:00");
+  const [eventEndDate, setEventEndDate] = useState(recoveredDraft?.eventEndDate ?? "");
+  const [eventEndTime, setEventEndTime] = useState(recoveredDraft?.eventEndTime ?? "17:00");
+  const [publicationDate, setPublicationDate] = useState(recoveredDraft?.publicationDate ?? "");
+  const [publicationTime, setPublicationTime] = useState(recoveredDraft?.publicationTime ?? "");
+  const [locationFeedback, setLocationFeedback] = useState<Record<string, string>>(recoveredDraft?.locationFeedback ?? overlay.locationFeedback ?? {});
   const [busy, setBusy] = useState(false);
   const [reviewError, setReviewError] = useState("");
-  const [scheduleTouched, setScheduleTouched] = useState(false);
+  const [scheduleTouched, setScheduleTouched] = useState(recoveredDraft?.scheduleTouched ?? false);
   const [discardReview, setDiscardReview] = useState(false);
   const reviewInFlight = useRef(false);
+  const hasReviewChanges = Boolean(comment.trim() || scheduleTouched || eventStartDate || eventEndDate || eventStartTime !== "09:00" || eventEndTime !== "17:00" || publicationMode !== "now" || publicationDate || publicationTime || JSON.stringify(locationFeedback) !== JSON.stringify(overlay.locationFeedback ?? {}));
+  // Persist committed review edits before a visible "saved" pin can be lost to a reload.
+  useLayoutEffect(() => {
+    if (draftFinished.current) return;
+    if (!hasReviewChanges) {
+      if (recovery.status === "restored" || draftWritten.current) {
+        clearEventReviewDraft(reviewerId, overlay.id);
+        draftWritten.current = false;
+      }
+      setDraftStorageState("empty");
+      return;
+    }
+    const saved = writeEventReviewDraft(reviewerId, overlay, { comment, locationFeedback, publicationMode, eventStartDate, eventStartTime, eventEndDate, eventEndTime, publicationDate, publicationTime, scheduleTouched });
+    if (saved) draftWritten.current = true;
+    setDraftStorageState(saved ? "saved" : "unavailable");
+  }, [reviewerId, overlay, recovery.status, hasReviewChanges, comment, locationFeedback, publicationMode, eventStartDate, eventStartTime, eventEndDate, eventEndTime, publicationDate, publicationTime, scheduleTouched]);
+  const draftNotice = draftStorageState === "saved"
+    ? "Review draft saved on this browser. Send it to the organization with Approve or Disapprove."
+    : draftStorageState === "unavailable"
+      ? "Your review draft could not be saved on this browser. Keep this review open until you submit it."
+      : undefined;
+  const discardLocalReview = () => {
+    if (!clearEventReviewDraft(reviewerId, overlay.id)) {
+      toast.error("Could not discard local draft", "Browser storage is unavailable. Try again before closing this review.");
+      return;
+    }
+    draftFinished.current = true;
+    onClose();
+  };
   const requestClose = () => {
     if (reviewInFlight.current) return;
-    if (comment.trim() || scheduleTouched || JSON.stringify(locationFeedback) !== JSON.stringify(overlay.locationFeedback ?? {})) setDiscardReview(true);
+    if (hasReviewChanges) setDiscardReview(true);
     else onClose();
   };
   const toast = useToast();
@@ -199,6 +240,8 @@ function ReviewModal({
           locationFeedback,
         }
       );
+      draftFinished.current = true;
+      clearEventReviewDraft(reviewerId, overlay.id);
       toast.success(
         decision === "approved" ? "Event layout approved" : "Event layout disapproved",
         decision === "disapproved" ? "The proposal was returned for revision with your feedback." : publicationMode === "schedule" ? "The proposal is approved. Student visibility begins at the scheduled publication time." : "The proposal is approved and available during its publication period."
@@ -247,6 +290,9 @@ function ReviewModal({
         </div>
 
         <div className="min-h-0 overflow-y-auto overscroll-contain flex-1 p-4 sm:p-6 space-y-4">
+          {draftNotice && <p role={draftStorageState === "unavailable" ? "alert" : "status"} className={cn("rounded-xl border p-3 text-xs", draftStorageState === "unavailable" ? "border-amber-500/30 bg-amber-500/10 text-foreground" : "border-primary/15 bg-primary/5 text-muted-foreground")}>{draftNotice}</p>}
+          {recovery.status === "stale" && <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs">The submission changed since the draft was saved. Previous draft pins were not applied to this submission. Review the current map.</p>}
+          {recovery.status === "invalid" && <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs">The previous local draft could not be recovered. Review the current map and add your feedback again.</p>}
           {reviewError && <div role="alert" className="rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive"><p>{reviewError}</p><button type="button" disabled={busy} onClick={onRefresh} className="mt-2 rounded-lg border border-destructive/25 px-3 py-2 text-xs font-bold">Close and refresh list</button></div>}
           {/* Event Info */}
           <div className="space-y-3">
@@ -264,9 +310,10 @@ function ReviewModal({
               <span>{locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}</span>
             </div>
             <p className="text-xs text-muted-foreground">Submitted to GSO: {formatEventSubmissionTime(overlay.submittedAt)}</p>
+            <p className="text-xs text-muted-foreground">Submitted by: <span className="font-semibold text-foreground">{submitterName || (overlay.createdByUserId ? "Student organization account" : "Not recorded on this legacy event")}</span></p>
             <details className="text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold">Creator account details</summary><p className="mt-2 break-all">{overlay.createdByUserId || "Not recorded on this legacy event"}</p></details>
             {!overlay.submittedAt && <p className="rounded-lg bg-amber-500/10 p-2 text-xs text-amber-700">Legacy pending record: no submission timestamp was recorded. Verify its origin before approval.</p>}
-            <button ref={previewTriggerRef} type="button" onClick={() => setPreviewOpen(true)} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 text-sm font-bold text-primary hover:bg-primary/10"><Eye className="h-4 w-4" />Preview requested maps</button>
+            <button ref={previewTriggerRef} type="button" disabled={busy} onClick={() => setPreviewOpen(true)} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 text-sm font-bold text-primary hover:bg-primary/10"><Eye className="h-4 w-4" />Preview requested maps</button>
             <EventRevisionHistory overlay={overlay} />
             <EventFeedbackChecklist overlay={overlay} />
 
@@ -274,7 +321,7 @@ function ReviewModal({
             <div className="p-3 rounded-xl bg-muted/30 border border-border text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Event Furniture</span>
-                <span className="font-bold">{furnitureCount} items</span>
+                <span className="font-bold">{furnitureCount} {furnitureCount === 1 ? "item" : "items"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Text Labels</span>
@@ -314,7 +361,7 @@ function ReviewModal({
             {conflictCheckFailed && <p role="alert" className="text-xs text-amber-600">Venue conflicts could not be checked. Verify the schedule before approving.</p>}
             {(scheduleForConflicts ? findEventConflicts(scheduleForConflicts, approvedEvents) : []).map(conflict => <p key={conflict.id} role="alert" className="text-xs text-amber-600">Location/time conflict: {conflict.title}. Check venue availability before approving.</p>)}
           </div>
-          <div className="space-y-3"><p className="text-xs font-bold">Feedback by location</p><p className="text-xs text-muted-foreground">Use Preview requested maps to place feedback pins. Comments and pins are saved with your review decision.</p>{locations.map(location => <div key={location.id} className="rounded-xl border border-border p-3"><label className="block text-xs font-semibold">{location.locationRef.label}<input value={readEventFeedback(locationFeedback[location.id]).text} onChange={e=>setLocationFeedback({...locationFeedback,[location.id]:writeEventFeedback(e.target.value, readEventFeedback(locationFeedback[location.id]).pins)})} placeholder="Specific feedback for this map" className="mt-2 block min-h-10 w-full rounded-lg border border-border bg-background p-2 font-normal" /></label>{readEventFeedback(locationFeedback[location.id]).pins.map((pin, index) => <div key={pin.id} className="mt-2 flex items-start justify-between gap-2 text-xs"><p className="min-w-0 break-words"><strong>Pin {index + 1}</strong> · {pin.comment}</p><button type="button" aria-label={`Remove feedback pin ${index + 1} from ${location.locationRef.label}`} onClick={() => { const feedback = readEventFeedback(locationFeedback[location.id]); setLocationFeedback({ ...locationFeedback, [location.id]: writeEventFeedback(feedback.text, feedback.pins.filter(candidate => candidate.id !== pin.id)) }); }} className="shrink-0 rounded-lg px-2 py-1 text-destructive hover:bg-destructive/10">Remove</button></div>)}</div>)}</div>
+          <div className="space-y-3"><p className="text-xs font-bold">Feedback by location</p><p className="text-xs text-muted-foreground">Use Preview requested maps to place feedback pins. Pins remain visible after approval until the student org marks them addressed; remove any pin that does not need follow-up.</p>{locations.map(location => <div key={location.id} className="rounded-xl border border-border p-3"><label className="block text-xs font-semibold">{location.locationRef.label}<input disabled={busy} value={readEventFeedback(locationFeedback[location.id]).text} onChange={e=>setLocationFeedback({...locationFeedback,[location.id]:writeEventFeedback(e.target.value, readEventFeedback(locationFeedback[location.id]).pins)})} placeholder="Specific feedback for this map" className="mt-2 block min-h-10 w-full rounded-lg border border-border bg-background p-2 font-normal" /></label><EventFeedbackPinList locationLabel={location.locationRef.label} pins={readEventFeedback(locationFeedback[location.id]).pins} disabled={busy} onRemove={pinId => setLocationFeedback(current => { const feedback = readEventFeedback(current[location.id]); return { ...current, [location.id]: writeEventFeedback(feedback.text, feedback.pins.filter(pin => pin.id !== pinId)) }; })} /></div>)}</div>
           {/* Admin Comment */}
           <div>
             <label
@@ -325,6 +372,7 @@ function ReviewModal({
             </label>
             <textarea
               id="review-comment"
+              disabled={busy}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}
@@ -369,18 +417,20 @@ function ReviewModal({
           </button>
         </div>
       </motion.div>
-      </Dialog.Content></Dialog.Portal>{previewOpen && <AdminEventMapPreviewDialog overlay={{ ...overlay, locationFeedback }} returnFocusRef={previewTriggerRef} onClose={() => setPreviewOpen(false)} onAddFeedbackPin={(locationId, pin) => setLocationFeedback(current => { const feedback = readEventFeedback(current[locationId]); if (feedback.pins.length >= 30) return current; return { ...current, [locationId]: writeEventFeedback(feedback.text, [...feedback.pins, pin]) }; })} />}<AlertDialog.Root open={discardReview} onOpenChange={setDiscardReview}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[130] bg-black/40" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[131] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-xl"><AlertDialog.Title className="font-bold">Discard review changes?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm text-muted-foreground">Your comments, pins and schedule have not been saved with a review decision.</AlertDialog.Description><div className="mt-5 flex flex-wrap justify-end gap-2"><AlertDialog.Cancel className="min-h-11 rounded-xl border border-border px-3 font-semibold">Keep reviewing</AlertDialog.Cancel><AlertDialog.Action onClick={onClose} className="min-h-11 rounded-xl bg-destructive px-3 font-semibold text-destructive-foreground">Discard review</AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root></Dialog.Root>
+      </Dialog.Content></Dialog.Portal>{previewOpen && <AdminEventMapPreviewDialog overlay={{ ...overlay, locationFeedback }} reviewDraftNotice={draftNotice} returnFocusRef={previewTriggerRef} onClose={() => setPreviewOpen(false)} onAddFeedbackPin={(locationId, pin) => setLocationFeedback(current => { const feedback = readEventFeedback(current[locationId]); if (feedback.pins.length >= 30) return current; return { ...current, [locationId]: writeEventFeedback(feedback.text, [...feedback.pins, pin]) }; })} />}<AlertDialog.Root open={discardReview} onOpenChange={setDiscardReview}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[130] bg-black/40" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[131] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-xl"><AlertDialog.Title className="font-bold">Discard review changes?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm text-muted-foreground">Your comments, pins and schedule have not been saved with a review decision.</AlertDialog.Description><div className="mt-5 flex flex-wrap justify-end gap-2"><AlertDialog.Cancel className="min-h-11 rounded-xl border border-border px-3 font-semibold">Keep reviewing</AlertDialog.Cancel><AlertDialog.Action onClick={discardLocalReview} className="min-h-11 rounded-xl bg-destructive px-3 font-semibold text-destructive-foreground">Discard review</AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root></Dialog.Root>
   );
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 
 export function AdminEventLayoutsPage() {
+  const { profile } = useAdminAuth();
   const [reviewPreviewFirst, setReviewPreviewFirst] = useState(false);
   const [previewTarget, setPreviewTarget] = useState<CampusEventOverlay | null>(null);
   const standalonePreviewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const reviewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [overlays, setOverlays] = useState<CampusEventOverlay[]>([]);
+  const [submitterNames, setSubmitterNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -394,9 +444,9 @@ export function AdminEventLayoutsPage() {
   const requestRef = useRef(0);
   const toast = useToast();
 
-  const loadOverlays = useCallback(async () => {
+  const loadOverlays = useCallback(async (background = false) => {
     const requestId = ++requestRef.current;
-    setLoading(true);
+    if (!background) setLoading(true);
     try {
       const data = await eventOverlayService.listEventOverlays({
         allCampuses: true,
@@ -405,21 +455,37 @@ export function AdminEventLayoutsPage() {
         strict: true,
       });
       if (requestId !== requestRef.current) return;
-      setOverlays(data.filter((item) => item.status !== "draft"));
+      const submitted = data.filter((item) => item.status !== "draft");
+      setOverlays(submitted);
+      const visibleIds = new Set(submitted.map(item => item.id));
+      setReviewTarget(current => current && !visibleIds.has(current.id) ? null : current);
+      setPreviewTarget(current => current && !visibleIds.has(current.id) ? null : current);
       setError(null);
+      const names = await eventOverlayService.listEventSubmitterNames(submitted.flatMap(item => item.createdByUserId ? [item.createdByUserId] : []));
+      if (requestId === requestRef.current) setSubmitterNames(names);
     } catch (err) {
       if (requestId !== requestRef.current) return;
       setError(
         err instanceof Error ? err.message : "Could not load event layouts."
       );
-      setOverlays([]);
+      if (!background) setOverlays([]);
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
   }, [statusFilter, search]);
 
   useEffect(() => {
-    loadOverlays();
+    void loadOverlays();
+    const refresh = () => { if (document.visibilityState === "visible") void loadOverlays(true); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 15000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(timer);
+      ++requestRef.current;
+    };
   }, [loadOverlays]);
 
   const handleReview = async (
@@ -429,6 +495,8 @@ export function AdminEventLayoutsPage() {
     publication?: { expectedUpdatedAt?: string; dateStart?: string; dateEnd?: string; publicationMode?: "now" | "schedule"; publicationAt?: string; locationFeedback?: Record<string, string> }
   ) => {
     await eventOverlayService.reviewEventOverlay(id, decision, comment, publication);
+    // The server decision is confirmed; cleanup must not wait for the queue refresh.
+    clearEventReviewDraft(profile?.id, id);
     await loadOverlays();
   };
 
@@ -471,7 +539,7 @@ export function AdminEventLayoutsPage() {
           description={error}
           action={
             <button
-              onClick={loadOverlays}
+              onClick={() => void loadOverlays()}
               className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all"
             >
               Try Again
@@ -601,6 +669,7 @@ export function AdminEventLayoutsPage() {
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="font-semibold text-foreground">Organizer:</span> {overlay.organizer || "Not recorded"}
                     </span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Submitted by:</span><span>{(overlay.createdByUserId && submitterNames[overlay.createdByUserId]) || (overlay.createdByUserId ? "Student organization account" : "Not recorded")}</span></span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                     {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}
@@ -679,7 +748,9 @@ export function AdminEventLayoutsPage() {
       {previewTarget && <AdminEventMapPreviewDialog overlay={previewTarget} returnFocusRef={standalonePreviewTriggerRef} onClose={() => setPreviewTarget(null)} />}
       {reviewTarget && (
         <ReviewModal
-          overlay={reviewTarget} initialPreview={reviewPreviewFirst}
+          key={`${profile?.id ?? "unknown"}:${reviewTarget.id}:${reviewTarget.updatedAt ?? ""}`}
+          reviewerId={profile?.id}
+          overlay={reviewTarget} submitterName={reviewTarget.createdByUserId ? submitterNames[reviewTarget.createdByUserId] : undefined} initialPreview={reviewPreviewFirst}
           returnFocusRef={reviewTriggerRef}
           onClose={() => setReviewTarget(null)}
           allOverlays={overlays}

@@ -1,0 +1,29 @@
+{
+  "checks": [
+    {
+      "name": "Saved Grounds and floor pins survive actual reload with exact comments/coordinates",
+      "status": "PASS"
+    },
+    {
+      "name": "Portrait reload preserves saved pins and reports the local-only draft status",
+      "status": "PASS"
+    },
+    {
+      "name": "Failed review keeps pins through reload; confirmed controlled review clears the local draft",
+      "status": "PASS"
+    },
+    {
+      "name": "Explicit discard clears a new draft and does not resurrect it after reload",
+      "status": "PASS"
+    },
+    {
+      "name": "Changed server revision refuses old coordinates with visible guidance",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteAttempts": 0,
+  "retainedFixtures": 0,
+  "controlledReviewCommands": 2,
+  "existingSampleUnchanged": true
+}

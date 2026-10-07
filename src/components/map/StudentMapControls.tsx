@@ -19,6 +19,7 @@ export interface StudentMapControlsProps {
   directionsMode: boolean;
   navigationActive?: boolean;
   profileOpen?: boolean;
+  eventMode?: boolean;
   pinning?: boolean;
   youAreHere?: boolean;
   hasSelectedRoom?: boolean;
@@ -43,6 +44,7 @@ export function StudentMapControls({
   directionsMode,
   navigationActive = false,
   profileOpen = false,
+  eventMode = false,
   pinning = false,
   youAreHere = false,
   hasSelectedRoom = false,
@@ -77,7 +79,7 @@ export function StudentMapControls({
 
   return (
     <div data-testid="student-map-controls" className="map-layer-controls absolute inset-0 pointer-events-none">
-      {!directionsMode && (
+      {!directionsMode && !eventMode && (
         <div
           data-testid="student-map-search-panel"
           data-no-drag
@@ -115,14 +117,17 @@ export function StudentMapControls({
         </div>
       )}
 
+      {isFloorMode && eventMode && onBackToCampus && <button type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md md:left-auto md:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
+
       {utilityControlsVisible && (
         <div
           data-testid="student-map-utility-controls"
           data-no-drag
           data-profile-open={profileOpen ? "true" : "false"}
+          data-event-mode={eventMode ? "true" : "false"}
           aria-hidden={profileOpen}
           inert={profileOpen ? ("" as never) : undefined}
-          className="student-map-utility-stack pointer-events-auto absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20"
+          className={cn("student-map-utility-stack pointer-events-auto absolute right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20", eventMode ? "top-3 bottom-auto" : "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]")}
         >
           {!navigationActive && (
             <button

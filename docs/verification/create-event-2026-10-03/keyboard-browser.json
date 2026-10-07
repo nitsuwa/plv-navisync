@@ -1,0 +1,17 @@
+{
+  "checks": [
+    {
+      "name": "Mobile creation Tab/Shift+Tab stays in active dialog",
+      "status": "PASS"
+    },
+    {
+      "name": "Mobile dark creation remains contained",
+      "status": "PASS"
+    },
+    {
+      "name": "Escape restores trigger focus and body scrolling",
+      "status": "PASS"
+    }
+  ],
+  "errors": []
+}

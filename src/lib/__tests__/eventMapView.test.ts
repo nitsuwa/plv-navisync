@@ -12,6 +12,12 @@ const campus = {
 } as unknown as Campus;
 
 describe("event map view model", () => {
+  it("centers the grounds venue at the visible central monument rather than an event marker or edge anchor", () => {
+    const grounds = { ...campus, decorAssets: [{ id: "monument", type: "monument", x: 430, y: 410, visible: true }] } as Campus;
+    const event = eventPreviewFixture({ markers: [{ x: 880, y: 20, color: "#fff", label: "Stage" }] });
+    expect(buildEventVenues(grounds, [event]).find(venue => venue.id === "campus")).toMatchObject({ x: 430, y: 410, label: "Campus Grounds" });
+  });
+
   it("keeps one event card with every requested venue and sorts ongoing first", () => {
     const now = Date.parse("2026-10-08T02:00:00Z");
     const multi = eventPreviewFixture({ locations: [

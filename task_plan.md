@@ -6,11 +6,11 @@ Design and later implement a polished student-organization event workflow in whi
 
 ## Next Step
 
-Execute `docs/superpowers/plans/2026-09-21-event-builder-input-motion-parity.md` inline, starting with the RED Snap click-through regression test.
+The October 3 completion plan is ready: `docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md`. When the user starts execution with their selected model, begin Task 0 and read `docs/2026-10-03-create-event-acceptance-matrix.md`. Preserve the current working tree; this planning turn did not execute implementation or tests.
 
 ## Current Phase
 
-Phase 16: Event Builder Input and Motion Polish
+Create Event completion and verification plan prepared (October 3, 2026). Earlier phases below are historical; the linked completion plan is the current execution checklist.
 
 ## Phases
 
@@ -239,3 +239,19 @@ No further implementation is included in this request. The remaining placeholder
 - Authenticated browser QA confirmed Snap count stability, progressive zoom animation, functional pan movement, full CABA floor layers, no mobile horizontal overflow at 390x844, and no fresh browser warning/error logs after reload.
 - The unrelated full-repository Vitest run was stopped because existing Admin Map Builder tests continuously emit `act(...)` warnings and did not finish in a reasonable time; no full-suite green claim is made.
 - No commit, push, Save Draft, or Submit to GSO action was performed.
+
+## Main Create Event completion plan — October 3 execution
+
+- **Status:** implementation and verification advanced; acceptance gate PARTIAL.
+- One active plan: `docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md`, Tasks 0–8. Optional future roadmap excluded.
+- [x] Preserve existing checkout; reproduce/fix parser, mutation race, preview/checklist, creation retry and history defects.
+- [x] Run unfiltered event/helper suites: 419 passing tests; production build and diff checks pass.
+- [x] Verify existing-role authenticated lifecycle with disposable API fixture; owner/mobile feedback/browser/admin-note cycle; clean fixtures.
+- [x] Actual two-location UI creation/design/save/reload/submission/admin-preview J1; cancel/confirm withdrawal L03, with strict persisted asset counts and fixture cleanup.
+- [x] Record exact PASS/BLOCKED/NOT RUN evidence in the acceptance matrix/results.
+- [x] User applied poster migration; existing Org upload, anonymous public read and cleanup verified live.
+- [x] Actual poster form/retry/remove, available storage permissions, two owner browser saves, later feedback retry/reopen, mobile rejected duplicate/resubmit and creation keyboard focus/scroll checks.
+- [x] Poster catalog assertions user-verified PASS via SQL Editor screenshot.
+- [ ] Missing-role cases, positive publication and remaining manual acceptance permutations as recorded in results.
+- [ ] Finish remaining full browser/keyboard/touch/publication journeys and unrelated Org/non-super admin checks as listed in results. Do not claim universal acceptance from segment coverage.
+- No commit/push/deployment. Existing migrations not reapplied; no new accounts created.
