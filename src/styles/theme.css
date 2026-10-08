@@ -451,7 +451,138 @@
   from { stroke-dashoffset: 1; opacity: 0.4; }
   to   { stroke-dashoffset: 0; opacity: 1; }
 }
+/* Student map landmarks are anchored in world coordinates but keep their
+   readable screen size while the camera group is scaled. Updated alongside
+   the imperative camera transform, so pan/zoom never schedules React work. */
+.student-map-screen-marker {
+  transform: scale(var(--student-map-inverse-zoom, 1));
+  /* Its parent translates to the authored point. Scale about that local
+     origin; a changing pulse or tooltip must not shift the map anchor. */
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
 
+.student-transition-marker-lod {
+  transform: scale(var(--student-map-transition-marker-scale, 1));
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+.student-overview-duplicate {
+  opacity: var(--student-map-overview-duplicate-opacity, 1);
+  pointer-events: var(--student-map-overview-duplicate-pointer-events, auto);
+  transition: opacity 120ms linear;
+}
+
+.student-route-start-reveal {
+  animation: student-route-start-reveal 780ms ease-out both;
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+@keyframes student-route-start-reveal {
+  from { opacity: 0.15; transform: scale(0.68); }
+  65% { opacity: 1; transform: scale(1.08); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .student-route-start-reveal { animation: none !important; }
+}
+
+.student-transition-normal-pulse {
+  opacity: var(--student-map-transition-pulse-opacity, 1);
+}
+
+.student-transition-active-pulse {
+  opacity: var(--student-map-transition-active-pulse-opacity, 1);
+}
+
+.student-doorway-micro-label {
+  opacity: var(--student-map-passive-label-opacity, 1);
+  transition: opacity 120ms ease;
+}
+.student-doorway-micro-label rect {
+  transition: width 150ms ease, fill 150ms ease, stroke 150ms ease;
+}
+.student-doorway-micro-label text {
+  paint-order: stroke fill;
+  stroke: #f8fbff;
+  stroke-width: 0.7px;
+  stroke-linejoin: round;
+}
+.student-doorway-micro-label[data-label-priority="active"],
+.student-doorway-micro-label[data-label-priority="emphasized"] {
+  opacity: 1;
+}
+.student-transition-passive-label {
+  opacity: var(--student-map-passive-label-opacity, 1);
+  transition: opacity 120ms ease;
+}
+
+/* Map actions stay anchored to authored doorways while pointer feedback is
+   applied to the centered icon only. Scaling the translated outer badge
+   around the SVG viewBox origin makes the indicator jump on hover. */
+.student-map-doorway-action [data-testid="student-direction-glyph"] {
+  transition: filter 140ms ease, scale 140ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.student-map-doorway-action:hover [data-testid="student-direction-glyph"],
+.student-map-doorway-action:focus-visible [data-testid="student-direction-glyph"] {
+  scale: 1.06;
+  filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.5));
+}
+.student-map-doorway-action:active [data-testid="student-direction-glyph"] {
+  scale: 0.94;
+  filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.68));
+}
+
+.student-route-transition-control [data-transition-control-glyph] {
+  transition: filter 150ms ease, scale 150ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.student-route-transition-control:hover [data-transition-control-glyph],
+.student-route-transition-control:focus-visible [data-transition-control-glyph] {
+  scale: 1.08;
+  filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.8));
+}
+.student-route-transition-control:active [data-transition-control-glyph] {
+  scale: 0.92;
+  filter: drop-shadow(0 0 5px rgba(147, 197, 253, 0.9));
+}
+.student-route-transition-halo {
+  animation: student-route-transition-halo 2.8s ease-in-out infinite;
+}
+@keyframes student-route-transition-halo {
+  0%, 100% { opacity: 0.16; }
+  50% { opacity: 0.46; }
+}
+
+.student-map-doorway-action:focus-visible,
+.student-route-transition-control:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.72));
+}
+@media (prefers-reduced-motion: reduce) {
+  .student-map-doorway-action [data-testid="student-direction-glyph"],
+  .student-route-transition-control [data-transition-control-glyph],
+  .student-doorway-micro-label,
+  .student-transition-passive-label {
+    transition: none;
+  }
+  .student-route-transition-halo { animation: none; }
+}
+
+.student-map-transition-callout {
+  opacity: var(--student-map-transition-callout-opacity, 1);
+  pointer-events: none;
+}
+
+.student-map-transition-callout[data-active="true"] {
+  opacity: 1;
+}
 /* Student landing hero: keep the brand atmosphere on an opaque navy surface,
    and animate only small compositor-friendly layers. */
 @keyframes landing-hero-ambient-drift {
@@ -605,6 +736,16 @@
 @keyframes student-floor-scene-enter {
   from { opacity: 0; transform: translateY(3px) scale(0.995); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Elevator / stairs floor changes: short directional vertical motion for the
+   new floor scene (~700ms). prefers-reduced-motion skips these entirely. */
+@keyframes student-floor-scene-enter-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes student-floor-scene-enter-down {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes student-selection-halo-in {
   from { opacity: 0.16; transform: scale(0.985); }
@@ -1113,6 +1254,7 @@
   @media (max-width: 767px) {
     .student-map-utility-control,
     .student-map-event-control { bottom: var(--student-map-utility-bottom, 1rem); }
+    .student-map-utility-control[data-dock="floor-control-top"] { bottom: auto; }
   }
 
   @media (prefers-reduced-motion: reduce) {

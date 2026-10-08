@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { outdoorWalkingDistance, walkingAnimationDuration } from "../walkingAnimation";
+import { guidedRouteProgressDuration, outdoorWalkingDistance, walkingAnimationDuration } from "../walkingAnimation";
 
 describe("shared indoor and outdoor walking pace", () => {
+  it("paces guided movement by meaningful route steps rather than map distance", () => {
+    expect(guidedRouteProgressDuration(1)).toBe(6650);
+    expect(guidedRouteProgressDuration(5)).toBeGreaterThan(guidedRouteProgressDuration(1));
+    expect(guidedRouteProgressDuration(100)).toBe(16000);
+  });
+
   it("uses equal milliseconds per meter for indoor and outdoor legs", () => {
     const total = 400;
     expect(walkingAnimationDuration(80, total) / 80)

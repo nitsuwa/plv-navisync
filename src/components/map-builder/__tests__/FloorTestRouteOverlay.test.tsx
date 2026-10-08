@@ -23,11 +23,11 @@ describe("FloorTestRouteOverlay", () => {
     expect(buildFloorTestRouteGeometry(route)).toEqual(geometry);
   });
 
-  it("renders a single native animated stroke and one arrow path regardless of arrow count", () => {
+  it("renders a clean route stroke without technical direction triangles inside Rooms", () => {
     const { getByTestId } = render(<svg><FloorTestRouteOverlay route={route} /></svg>);
 
-    expect(getByTestId("floor-test-route-active-overlay").querySelectorAll("path")).toHaveLength(3);
+    expect(getByTestId("floor-test-route-active-overlay").querySelectorAll("path")).toHaveLength(2);
     expect(getByTestId("floor-test-route-animated-stroke").querySelector("animate")).toBeTruthy();
-    expect(getByTestId("floor-test-route-direction-arrows").getAttribute("data-arrow-count")).toBe("4");
+    expect(document.querySelector("[data-testid='floor-test-route-direction-arrows']")).toBeNull();
   });
 });

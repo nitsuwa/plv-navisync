@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle2, XCircle, Navigation as NavigationIcon } from "lucide-react";
 import { MARKER_STYLES } from "../../data/mapData";
-import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge, BuildingTypeDescriptor } from "./types";
+import type { Campus, CampusBuilding, CampusMarker, SimpleTool, EditorLayer, CampusSelection, RubberBand, CampusDecorAsset, CampusPath, NavigationNode, NavigationEdge, BuildingTypeDescriptor, ExteriorEmergencyStair } from "./types";
 import { campusGateSize, isCampusGate } from "../../lib/campusGates";
 import { trimRouteFragmentAtMarkerBoundary, type TestRouteHighlight, type TestRouteTransitionMarker } from "./TestNavigationPanel";
 import { RouteContinuationMarker, RouteEndpointMarker, RouteTransitionMarker } from "./RouteTransitionMarker";
@@ -29,6 +29,8 @@ import { campusAreaGroundAppearance, campusGroundAppearance, campusObjectSafeBou
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
+import { isSpacePressed } from "./useCanvasControls";
+import { useStableCallbackProps } from "./useStableCallbackProps";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -80,7 +82,6 @@ interface CanvasProps {
   armedCampusGatePlacement?: boolean;
   pathPaintPreview?: { points: { x: number; y: number }[]; width: number; type: string; color: string; snapKind?: "endpoint" | "bend" | "segment" } | null;
   guides?: { type: "h" | "v"; pos: number }[];
-  cursorPos?: { x: number; y: number } | null;
   overlappingBuildings?: Set<string>;
   invalidBuildings?: Set<string>;
   onCanvasDown: (e: React.MouseEvent<SVGSVGElement>) => void;
@@ -221,6 +222,13 @@ interface CanvasProps {
 
 export interface CanvasGesturePreviewController {
   preview: (next: Campus, hint?: CanvasTransformPreviewHint) => boolean;
+  updateCursorPosition: (position: { x: number; y: number } | null) => void;
+  previewExteriorEmergencyStair: (
+    building: CampusBuilding,
+    stair: ExteriorEmergencyStair,
+    attachment: ExteriorEmergencyStair["attachment"],
+    valid: boolean,
+  ) => boolean;
   setGuides: (guides: { type: "h" | "v"; pos: number }[]) => void;
   clear: () => void;
 }
@@ -341,10 +349,123 @@ function routeDirectionMarkers(points: { x: number; y: number }[]): { x: number;
   return markers;
 }
 
-export function Canvas({
+interface CursorPlacementOverlayProps {
+  cw: number;
+  ch: number;
+  zoom: number;
+  pan: { x: number; y: number };
+  tool: SimpleTool;
+  buildingPlacementPreview?: BuildingTypeDescriptor | null;
+  armedDecorAssetType?: string | null;
+  armedCampusGatePlacement?: boolean;
+  updatePositionRef: React.MutableRefObject<(position: { x: number; y: number } | null) => void>;
+}
+
+/**
+ * Cursor-only feedback is kept below CanvasView's memo boundary. Moving the
+ * pointer updates this small preview/status surface without remapping the
+ * authored Campus artwork.
+ */
+const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
+  cw,
+  ch,
+  zoom,
+  pan,
+  tool,
+  buildingPlacementPreview,
+  armedDecorAssetType,
+  armedCampusGatePlacement = false,
+  updatePositionRef,
+}: CursorPlacementOverlayProps) {
+  const latestPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const placementActive = Boolean(
+    (tool === "decor" && armedDecorAssetType && DECOR_ASSET_MAP[armedDecorAssetType])
+    || (tool === "building" && buildingPlacementPreview)
+    || (tool === "gate" && armedCampusGatePlacement),
+  );
+  const placementActiveRef = useRef(placementActive);
+  placementActiveRef.current = placementActive;
+  const [placementPosition, setPlacementPosition] = useState<{ x: number; y: number } | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    updatePositionRef.current = (position) => {
+      latestPositionRef.current = position;
+      if (!position) {
+        if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+        setPlacementPosition(null);
+        return;
+      }
+      if (!placementActiveRef.current || frameRef.current !== null) return;
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        setPlacementPosition(latestPositionRef.current);
+      });
+    };
+    return () => {
+      updatePositionRef.current = () => {};
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    };
+  }, [updatePositionRef]);
+
+  useEffect(() => {
+    if (placementActive && latestPositionRef.current) setPlacementPosition(latestPositionRef.current);
+  }, [placementActive, armedDecorAssetType, armedCampusGatePlacement, buildingPlacementPreview]);
+
+  const cursorPosition = placementPosition ?? latestPositionRef.current;
+  const decorDescriptor = armedDecorAssetType ? DECOR_ASSET_MAP[armedDecorAssetType] : undefined;
+
+  return (
+    <>
+      {placementActive && cursorPosition && (
+        <svg
+          aria-hidden="true"
+          data-testid="campus-cursor-preview-overlay"
+          viewBox={`0 0 ${cw} ${ch}`}
+          className="pointer-events-none absolute inset-0 z-[6] h-full w-full"
+          style={{ overflow: "hidden" }}
+        >
+          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            {tool === "decor" && decorDescriptor && (
+              <g data-testid="decor-placement-preview" transform={`translate(${cursorPosition.x},${cursorPosition.y})`} opacity={0.42}>
+                <rect x={-decorDescriptor.defaultWidth / 2 - 4} y={-decorDescriptor.defaultHeight / 2 - 4} width={decorDescriptor.defaultWidth + 8} height={decorDescriptor.defaultHeight + 8} rx={4} fill="rgba(34,197,94,0.12)" stroke="#16a34a" strokeWidth={1.2} />
+                <g transform={`translate(${-decorDescriptor.defaultWidth / 2},${-decorDescriptor.defaultHeight / 2})`}>
+                  <DecorAssetArt descriptor={decorDescriptor} />
+                </g>
+              </g>
+            )}
+            {tool === "building" && buildingPlacementPreview && (() => {
+              const safe = campusObjectSafeBounds(cw, ch);
+              const width = Math.min(buildingPlacementPreview.defaultWidth, safe.maxX - safe.minX);
+              const height = Math.min(buildingPlacementPreview.defaultHeight, safe.maxY - safe.minY);
+              const x = Math.max(safe.minX, Math.min(safe.maxX - width, cursorPosition.x - width / 2));
+              const y = Math.max(safe.minY, Math.min(safe.maxY - height, cursorPosition.y - height / 2));
+              return (
+                <g data-testid="building-placement-preview" className="pointer-events-none" opacity={0.42}>
+                  <rect x={x} y={y} width={buildingPlacementPreview.defaultWidth} height={buildingPlacementPreview.defaultHeight} rx={6} fill={buildingPlacementPreview.color} fillOpacity={0.18} stroke={buildingPlacementPreview.color} strokeWidth={2} strokeDasharray="8 4" />
+                  <text x={x + buildingPlacementPreview.defaultWidth / 2} y={y + buildingPlacementPreview.defaultHeight / 2 + 3} textAnchor="middle" fill={buildingPlacementPreview.color} fontSize={10} fontWeight={700} className="select-none">{buildingPlacementPreview.label}</text>
+                </g>
+              );
+            })()}
+            {tool === "gate" && armedCampusGatePlacement && (
+              <g data-testid="campus-gate-placement-preview" transform={`translate(${cursorPosition.x},${cursorPosition.y})`} opacity={0.45}>
+                <rect x={-24} y={-19} width={48} height={38} rx={5} fill="rgba(37,99,235,0.1)" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4 3" />
+                <CampusGateVisual x={-22} y={-17} width={44} height={34} color="#2563eb" />
+              </g>
+            )}
+          </g>
+        </svg>
+      )}
+    </>
+  );
+});
+
+function CanvasView({
   campus, tool, layer, selected, multiSelected, selectedPathPoint = null, pathVertexSnapTarget = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
   zoom, pan, cameraTransformRef, svgRef, containerRef, cursor,
-  buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, cursorPos, overlappingBuildings,
+  buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
   onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, focusedExteriorEmergencyStairId, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onExteriorEmergencyStairFloorNavigate,
@@ -366,6 +487,8 @@ export function Canvas({
   const interactionWorldRef = useRef<SVGGElement | null>(null);
   const interactionItemsRef = useRef<SVGGElement | null>(null);
   const alignmentGuidesRef = useRef<SVGGElement | null>(null);
+  const cursorPositionUpdaterRef = useRef<(position: { x: number; y: number } | null) => void>(() => {});
+  const cursorPositionLabelRef = useRef<HTMLDivElement | null>(null);
   // `style` is reconciled by React on a parent rerender, which can reveal the
   // authored source while its transient clone is still moving. `visibility`
   // is deliberately an imperative-only attribute for the gesture lifetime.
@@ -459,6 +582,13 @@ export function Canvas({
     }
     group.replaceChildren(fragment);
   }, []);
+
+  // Alignment guides are painted into a dedicated imperative-only SVG group.
+  // Keeping React-rendered children out of this group prevents a gesture
+  // preview's replaceChildren() from removing nodes React later tries to own.
+  useLayoutEffect(() => {
+    renderGuidesImperatively(guides ?? []);
+  }, [guides, renderGuidesImperatively]);
 
   const clearImperativePreview = useCallback(() => {
     for (const [source, visibility] of hiddenPhysicalSourcesRef.current) {
@@ -713,6 +843,46 @@ export function Canvas({
     return reject();
   }, [campus, getPhysicalPreviewElement, layer, multiSelected.length, physicalPreviewBeforeRef, rememberAndSetTransform, routePreview, selected, showNavigationOverlay, tool, tryImperativeNavigationPreview]);
 
+  const previewExteriorEmergencyStair = useCallback((
+    building: CampusBuilding,
+    stair: ExteriorEmergencyStair,
+    attachment: ExteriorEmergencyStair["attachment"],
+    valid: boolean,
+  ) => {
+    const root = svgRootRef.current;
+    if (!root || tool !== "select" || routePreview) return false;
+    const position = exteriorEmergencyStairWorldPosition(building, { ...stair, attachment });
+    const preview = getPhysicalPreviewElement(
+      `stair:${stair.id}`,
+      `[data-campus-stair-id="${CSS.escape(stair.id)}"]`,
+    );
+    if (!preview) return false;
+    rememberAndSetTransform(preview, `translate(${position.x},${position.y}) rotate(${position.angle})`);
+
+    // This indicator belongs to the preview-owned clone. Its authored source
+    // remains React-owned and hidden until the gesture cleanup restores it.
+    let blocked = preview.querySelector<SVGRectElement>("[data-imperative-stair-blocked]");
+    if (!blocked) {
+      const size = exteriorEmergencyStairVisualDimensions(stair);
+      blocked = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      blocked.setAttribute("data-imperative-stair-blocked", "true");
+      blocked.setAttribute("x", String(-size.width / 2 - 7));
+      blocked.setAttribute("y", String(-size.height / 2 - 7));
+      blocked.setAttribute("width", String(size.width + 14));
+      blocked.setAttribute("height", String(size.height + 14));
+      blocked.setAttribute("rx", "6");
+      blocked.setAttribute("fill", "rgba(220,38,38,0.18)");
+      blocked.setAttribute("stroke", "#dc2626");
+      blocked.setAttribute("stroke-width", "2");
+      blocked.setAttribute("stroke-dasharray", "4 3");
+      blocked.setAttribute("pointer-events", "none");
+      preview.appendChild(blocked);
+    }
+    blocked.setAttribute("visibility", valid ? "hidden" : "visible");
+    imperativePreviewActiveRef.current = true;
+    return true;
+  }, [getPhysicalPreviewElement, rememberAndSetTransform, routePreview, tool]);
+
   useEffect(() => {
     if (!transientCampusPreviewRef) return;
     transientCampusPreviewRef.current = {
@@ -722,6 +892,20 @@ export function Canvas({
         setTransientCampusPreview(next);
         return false;
       },
+      updateCursorPosition: (position) => {
+        cursorPositionUpdaterRef.current(position);
+        const label = cursorPositionLabelRef.current;
+        if (label) {
+          if (position) {
+            label.textContent = `X:${position.x} Y:${position.y}`;
+            label.style.display = "flex";
+          } else {
+            label.textContent = "";
+            label.style.display = "none";
+          }
+        }
+      },
+      previewExteriorEmergencyStair,
       setGuides: renderGuidesImperatively,
       clear: clearImperativePreview,
     };
@@ -729,34 +913,40 @@ export function Canvas({
       if (transientCampusPreviewRef.current) transientCampusPreviewRef.current = null;
       clearImperativePreview();
     };
-  }, [transientCampusPreviewRef, tryImperativePreview, renderGuidesImperatively, clearImperativePreview]);
+  }, [transientCampusPreviewRef, tryImperativePreview, previewExteriorEmergencyStair, renderGuidesImperatively, clearImperativePreview]);
   const renderCampus = transientCampusPreview ?? campus;
   const buildings = renderCampus.buildings;
   const markers = renderCampus.markers;
   const paths = renderCampus.paths;
-  const highlightedRouteMarkerPoints = [
+  const highlightedRouteMarkerPoints = useMemo(() => [
     ...(highlightedRoute?.transitionMarkers ?? []),
     ...(highlightedRoute?.continuationMarkers ?? []),
   ].flatMap((marker) => marker.x !== undefined && marker.y !== undefined
     ? [{ x: marker.x, y: marker.y }]
-    : []);
-  const pathPointCounts = new Map<string, number>();
-  paths.forEach((path) => {
-    path.points.forEach((point) => {
-      const key = pathPointRenderKey(point);
-      if ((path.disconnectedJunctionKeys ?? []).includes(key)) return;
-      pathPointCounts.set(key, (pathPointCounts.get(key) ?? 0) + 1);
+    : []), [highlightedRoute?.transitionMarkers, highlightedRoute?.continuationMarkers]);
+  const pathPointCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    paths.forEach((path) => {
+      path.points.forEach((point) => {
+        const key = pathPointRenderKey(point);
+        if ((path.disconnectedJunctionKeys ?? []).includes(key)) return;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      });
     });
-  });
+    return counts;
+  }, [paths]);
   // Keep one visible handle for a shared physical junction while retaining
   // each underlying vertex hit target for explicit owner-aware editing.
-  const pathJunctionVisualOwner = new Map<string, string>();
-  paths.forEach((path) => path.points.forEach((point, index) => {
-    const key = pathPointRenderKey(point);
-    if ((pathPointCounts.get(key) ?? 0) > 1 && !pathJunctionVisualOwner.has(key)) {
-      pathJunctionVisualOwner.set(key, `${path.id}:${index}`);
-    }
-  }));
+  const pathJunctionVisualOwner = useMemo(() => {
+    const owners = new Map<string, string>();
+    paths.forEach((path) => path.points.forEach((point, index) => {
+      const key = pathPointRenderKey(point);
+      if ((pathPointCounts.get(key) ?? 0) > 1 && !owners.has(key)) {
+        owners.set(key, `${path.id}:${index}`);
+      }
+    }));
+    return owners;
+  }, [pathPointCounts, paths]);
   const decorAssets = renderCampus.decorAssets ?? [];
   // Ground/area assets remain in the dedicated background layer (below paths
   // and foreground objects), but they still honour the same optional z-order
@@ -765,8 +955,8 @@ export function Canvas({
   // visible effect for Lawn/Garden/Plaza/Parking records.  Keep the semantic
   // background layer while sorting within it; the original array index is the
   // deterministic legacy tie-break for records without an explicit order.
-  const groundAreas = sortOutdoorGroundAssets(decorAssets);
-  const foregroundDecorAssets = decorAssets.filter((asset) => !isDecorAreaType(asset.type));
+  const groundAreas = useMemo(() => sortOutdoorGroundAssets(decorAssets), [decorAssets]);
+  const foregroundDecorAssets = useMemo(() => decorAssets.filter((asset) => !isDecorAreaType(asset.type)), [decorAssets]);
   const [exteriorQuickNavKey, setExteriorQuickNavKey] = useState<string | null>(null);
   const exteriorQuickNavTimer = useRef<number | null>(null);
   const cancelExteriorQuickNavClose = () => {
@@ -810,6 +1000,14 @@ export function Canvas({
   // render as ONE stroke (no internal seams/caps, continuous road centerlines),
   // with style-transition junction covers for the remaining corner gaps.
   const pathGeometry = useMemo(() => buildPathNetworkGeometry(paths), [paths]);
+  // Connect preview and canvas resize may rerender CanvasView while authored
+  // Paths stay unchanged. Keep their SVG path strings tied to the memoized
+  // network geometry so pointer-only state does not rebuild O(path chains)
+  // strings on every preview frame.
+  const pathChainRenderData = useMemo(
+    () => pathGeometry.chains.map((chain) => ({ chain, d: buildChainPathD(chain) })),
+    [pathGeometry],
+  );
   const pathNetworkSize = useMemo(() => {
     const map = new Map<string, number>();
     paths.forEach((path) => {
@@ -1230,6 +1428,14 @@ export function Canvas({
         // Walking Point instead of a draft bend).  The normal canvas handler
         // remains unchanged for every other tool.
         onMouseDownCapture={(event) => {
+          // Space-pan must take ownership before child hit targets stop
+          // propagation (Pathways, handles, Building badges, and nav nodes).
+          if (isSpacePressed() && event.button === 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            onCanvasDown(event);
+            return;
+          }
           if (connectCanvasActive) {
             event.stopPropagation();
             onCanvasDown(event);
@@ -1462,18 +1668,6 @@ export function Canvas({
             );
           })}
 
-          {armedDecorAssetType && cursorPos && tool === "decor" && DECOR_ASSET_MAP[armedDecorAssetType] && (() => {
-            const descriptor = DECOR_ASSET_MAP[armedDecorAssetType];
-            return (
-              <g data-testid="decor-placement-preview" transform={`translate(${cursorPos.x},${cursorPos.y})`} opacity={0.42} className="pointer-events-none">
-                <rect x={-descriptor.defaultWidth / 2 - 4} y={-descriptor.defaultHeight / 2 - 4} width={descriptor.defaultWidth + 8} height={descriptor.defaultHeight + 8} rx={4} fill="rgba(34,197,94,0.12)" stroke="#16a34a" strokeWidth={1.2} />
-                <g transform={`translate(${-descriptor.defaultWidth / 2},${-descriptor.defaultHeight / 2})`}>
-                  <DecorAssetArt descriptor={descriptor} />
-                </g>
-              </g>
-            );
-          })()}
-
           {groundBrushPreview && layer !== "navigation" && (
             <g data-testid="ground-brush-preview" data-ground-type={groundPaintType} className="pointer-events-none">
               {(() => {
@@ -1554,10 +1748,9 @@ export function Canvas({
               This eliminates the "branch drawn on top" overlap look at T-junctions. */}
           <g data-testid="path-chain-layer" className="pointer-events-none">
             {/* Pass 1: edge strokes (all chains, rendered first = background) */}
-            {pathGeometry.chains.map((chain) => {
+            {pathChainRenderData.map(({ chain, d }) => {
               const kind = chain.style.kind;
               const baseWidth = chain.style.baseWidth;
-              const d = buildChainPathD(chain);
               const join = kind === "road" ? "bevel" : "round";
               const hoveredNetworkId = hoveredPathId ? paths.find((path) => path.id === hoveredPathId)?.pathNetworkId : undefined;
               const networkHoverActive = !!hoveredNetworkId && chain.pathIds.some((id) => paths.some((path) => path.id === id && path.pathNetworkId === hoveredNetworkId));
@@ -1568,10 +1761,9 @@ export function Canvas({
               );
             })}
             {/* Pass 2: surface strokes + centerlines + selection (all chains, rendered second = foreground) */}
-            {pathGeometry.chains.map((chain) => {
+            {pathChainRenderData.map(({ chain, d }) => {
               const kind = chain.style.kind;
               const baseWidth = chain.style.baseWidth;
-              const d = buildChainPathD(chain);
               const isSel = chain.pathIds.some((id) => selected?.type === "path" && selected.id === id);
               const isMultiSel = chain.pathIds.some((id) => multiSelected.includes(id));
               const isAnimating = !!animatingPathId && chain.pathIds.includes(animatingPathId);
@@ -2035,26 +2227,6 @@ export function Canvas({
               </g>
             );
           })()}
-          {buildingPlacementPreview && cursorPos && tool === "building" && !buildingDrag && (() => {
-            const safe = campusObjectSafeBounds(cw, ch);
-            const width = Math.min(buildingPlacementPreview.defaultWidth, safe.maxX - safe.minX);
-            const height = Math.min(buildingPlacementPreview.defaultHeight, safe.maxY - safe.minY);
-            const x = Math.max(safe.minX, Math.min(safe.maxX - width, cursorPos.x - width / 2));
-            const y = Math.max(safe.minY, Math.min(safe.maxY - height, cursorPos.y - height / 2));
-            return (
-              <g data-testid="building-placement-preview" className="pointer-events-none" opacity={0.42}>
-                <rect x={x} y={y} width={buildingPlacementPreview.defaultWidth} height={buildingPlacementPreview.defaultHeight} rx={6} fill={buildingPlacementPreview.color} fillOpacity={0.18} stroke={buildingPlacementPreview.color} strokeWidth={2} strokeDasharray="8 4" />
-                <text x={x + buildingPlacementPreview.defaultWidth / 2} y={y + buildingPlacementPreview.defaultHeight / 2 + 3} textAnchor="middle" fill={buildingPlacementPreview.color} fontSize={10} fontWeight="700" className="select-none">{buildingPlacementPreview.label}</text>
-              </g>
-            );
-          })()}
-          {armedCampusGatePlacement && cursorPos && tool === "gate" && (
-            <g data-testid="campus-gate-placement-preview" transform={`translate(${cursorPos.x},${cursorPos.y})`} opacity={0.45} className="pointer-events-none">
-              <rect x={-24} y={-19} width={48} height={38} rx={5} fill="rgba(37,99,235,0.1)" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4 3" />
-              <CampusGateVisual x={-22} y={-17} width={44} height={34} color="#2563eb" />
-            </g>
-          )}
-
           {/* Drawing path */}
           {drawingPath.length > 0 && (
             <g>
@@ -3194,15 +3366,21 @@ export function Canvas({
       >
         <g ref={interactionWorldRef} transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           <g ref={interactionItemsRef} data-testid="campus-interaction-items" />
-          <g ref={alignmentGuidesRef} data-testid="alignment-guides-layer">
-            {guides?.map((guide, index) => (
-              <g key={index} className="pointer-events-none">
-                <line data-testid="alignment-guide" x1={guide.type === "v" ? guide.pos : 0} y1={guide.type === "h" ? guide.pos : 0} x2={guide.type === "v" ? guide.pos : cw} y2={guide.type === "h" ? guide.pos : ch} stroke="var(--accent)" strokeWidth={1.25} strokeDasharray="5 3" opacity={0.78} />
-              </g>
-            ))}
-          </g>
+          <g ref={alignmentGuidesRef} data-testid="alignment-guides-layer" />
         </g>
       </svg>
+
+      <CursorPlacementOverlay
+        cw={cw}
+        ch={ch}
+        zoom={zoom}
+        pan={pan}
+        tool={tool}
+        buildingPlacementPreview={buildingPlacementPreview}
+        armedDecorAssetType={armedDecorAssetType}
+        armedCampusGatePlacement={armedCampusGatePlacement}
+        updatePositionRef={cursorPositionUpdaterRef}
+      />
 
       {(() => {
         const stair = buildings.flatMap((building) => canonicalExteriorEmergencyStairsForBuilding(building).map((item) => ({ building, item })))
@@ -3295,13 +3473,29 @@ export function Canvas({
             <span className="opacity-50">·</span>
             <span>P:{paths.length}</span>
           </div>
-          {cursorPos && (
-            <div className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-border/60 text-[10px] font-mono" style={{ background: "color-mix(in srgb,var(--card) 85%,transparent)", backdropFilter: "blur(8px)", color: "var(--muted-foreground)" }}>
-              X:{cursorPos.x} Y:{cursorPos.y}
-            </div>
-          )}
+          <div
+            ref={cursorPositionLabelRef}
+            data-testid="campus-canvas-cursor-position"
+            className="hidden items-center gap-1 px-2.5 py-1 rounded-full border border-border/60 text-[10px] font-mono"
+            style={{ background: "color-mix(in srgb,var(--card) 85%,transparent)", backdropFilter: "blur(8px)", color: "var(--muted-foreground)" }}
+          />
         </div>
       </motion.div>
     </div>
   );
+}
+
+const MemoCanvasView = memo(CanvasView);
+
+/**
+ * CampusEditor also owns inspector and hierarchy state. Those controls often
+ * create fresh inline callbacks when they open or close, even though the map
+ * inputs did not change. Keep event callbacks current through stable
+ * trampolines so the large authored SVG can bail out on sidebar-only parent
+ * renders. Real canvas inputs (selection, geometry, camera, tool, previews)
+ * still flow through and render normally when they change.
+ */
+export function Canvas(props: CanvasProps) {
+  const stableProps = useStableCallbackProps(props);
+  return <MemoCanvasView {...stableProps} />;
 }

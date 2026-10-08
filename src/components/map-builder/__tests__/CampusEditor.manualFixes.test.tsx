@@ -345,6 +345,38 @@ describe("properties panel cleanup", () => {
     expect(onCampusChange.mock.calls[0][0].buildings[0].buildingType).toBe("academic");
   });
 
+  it("flushes a pasted Building description when selection changes and restores it on reselection", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness campus={makeCampus()} onCampusChange={onCampusChange} />);
+    stubSvgRect(container);
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+    const description = screen.getByLabelText("About this building") as HTMLTextAreaElement;
+    fireEvent.change(description, { target: { value: "Pasted description survives selection." } });
+
+    // The controlled field unmounts as the next Building is selected. Its
+    // latest input ref must commit even if the browser did not dispatch blur.
+    selectItem(buildingG(container, "#7c3aed"), 260, 100);
+    expect(onCampusChange.mock.calls.at(-1)?.[0].buildings[0].description).toBe("Pasted description survives selection.");
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+    expect(screen.getByLabelText("About this building")).toHaveValue("Pasted description survives selection.");
+  });
+
+  it("keeps the facilities scroll position and persists facility toggles across selection changes", () => {
+    const onCampusChange = vi.fn();
+    const { container } = render(<Harness campus={makeCampus()} onCampusChange={onCampusChange} />);
+    stubSvgRect(container);
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+    const content = container.querySelector('[data-testid="properties-panel-content"]') as HTMLDivElement;
+    content.scrollTop = 120;
+    fireEvent.click(screen.getByLabelText("Restroom"));
+    expect(content.scrollTop).toBe(120);
+    expect(onCampusChange.mock.calls.at(-1)?.[0].buildings[0].facilities).toContain("Restroom");
+
+    selectItem(buildingG(container, "#7c3aed"), 260, 100);
+    selectItem(buildingG(container, "#1e40af"), 100, 100);
+    expect(screen.getByLabelText("Restroom")).toBeChecked();
+  });
+
   it("keeps decorative asset type immutable and does not expose the area type picker", () => {
     const { container } = render(<Harness />);
     stubSvgRect(container);

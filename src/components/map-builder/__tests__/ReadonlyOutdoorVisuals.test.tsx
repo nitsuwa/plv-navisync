@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { Campus } from "../types";
 import { projectReadonlyOutdoorCampus } from "../../../lib/readonlyOutdoorCampus";
-import { OutdoorGroundAreaArtwork, ReadonlyOutdoorCampusScene, exteriorEmergencyStairVisualDimensions } from "../ReadonlyOutdoorVisuals";
+import * as studentRouteFlow from "../../../lib/studentRouteFlow";
+import { OutdoorGroundAreaArtwork, ReadonlyOutdoorArtworkLayer, ReadonlyOutdoorCampusScene, exteriorEmergencyStairVisualDimensions } from "../ReadonlyOutdoorVisuals";
+import { entranceDirectionBadgePlacement } from "../EntranceDirectionBadge";
+import { RouteMapOverlay } from "../../map/RouteMapOverlay";
 
 const campus = {
   id: "c1",
@@ -107,6 +110,346 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(onClickEntrance).toHaveBeenCalledWith("b1");
   });
 
+  it("highlights student map-pick buildings and places without Admin editing controls", () => {
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      mapPickActive
+      onSelectBuilding={vi.fn()}
+      onSelectCampusPlace={vi.fn()}
+    /></svg>);
+    expect(screen.getByTestId("student-map-pick-building-target")).toBeInTheDocument();
+    expect(screen.getAllByTestId("student-map-pick-place-target")).toHaveLength(2);
+    expect(screen.queryByTestId("nav-graph-layer")).not.toBeInTheDocument();
+  });
+
+  it("shows all authored Campus arrows and emphasizes only the valid Enter direction", () => {
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+    /></svg>);
+    const entrance = screen.getByTestId("readonly-entrance");
+    expect(entrance).toHaveAttribute("aria-label", "Enter Library");
+    const badge = screen.getByTestId("entrance-direction-badge");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-screen-space", "true");
+    expect(badge.querySelector('[data-testid="entrance-direction-disc"]')).toHaveAttribute("r", "7.5");
+    expect(badge.querySelector('.student-transition-marker-lod')).toBeInTheDocument();
+    expect(badge.querySelectorAll("[data-transition-arrow]")).toHaveLength(2);
+    expect(badge.querySelector('[data-transition-arrow="entrance"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(badge.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(screen.queryByTestId("student-enter-building-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-enter-building-pill")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-exit-campus-marker")).not.toBeInTheDocument();
+    fireEvent.focus(entrance);
+    expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+    expect(badge.querySelector('[data-transition-arrow="entrance"]')).toHaveAttribute("data-transition-emphasis", "pressable");
+    expect(screen.queryByTestId("student-enter-building-label")).not.toBeInTheDocument();
+    fireEvent.blur(entrance);
+    expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+  });
+
+  it("keeps an authored exit-only Campus arrow visible but calm", () => {
+    const exitOnlyCampus = {
+      ...campus,
+      buildings: [{ ...campus.buildings[0], entrances: [{ ...campus.buildings[0]!.entrances![0], direction: "exit_only" as const }] }],
+    } as unknown as Campus;
+    render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(exitOnlyCampus)} onClickEntrance={vi.fn()} compactEntryActions /></svg>);
+
+    const badge = screen.getByTestId("entrance-direction-badge");
+    expect(badge.querySelectorAll("[data-transition-arrow]")).toHaveLength(1);
+    expect(badge.querySelector('[data-transition-arrow="exit"]')).toBeInTheDocument();
+    expect(badge.querySelector('[data-testid$="-emphasis"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter Library" })).not.toBeInTheDocument();
+  });
+
+  it("lets the active route direction override Campus context while retaining the opposite arrow", () => {
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+      activeEntranceId="e1"
+    /></svg>);
+    const badge = screen.getByTestId("entrance-direction-badge");
+    expect(badge.querySelector('[data-transition-arrow="entrance"]')).toHaveAttribute("data-transition-emphasis", "active");
+    expect(badge.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(badge.querySelector('[data-testid="entrance-direction-exit-emphasis"]')).toBeNull();
+    expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+  });
+
+  it("adds hover emphasis without moving the Campus doorway action anchor", () => {
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+    /></svg>);
+    const entrance = screen.getByTestId("readonly-entrance");
+    const badge = screen.getByTestId("entrance-direction-badge");
+    const anchorTransform = badge.getAttribute("transform");
+    const anchorX = badge.getAttribute("data-world-anchor-x");
+    const anchorY = badge.getAttribute("data-world-anchor-y");
+    expect(entrance.querySelector("title")).toHaveTextContent("Enter LIB building");
+    expect(badge.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveTextContent("Enter");
+    expect(badge.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveAttribute("font-size", "11.5");
+    expect(badge.querySelector('[data-testid="student-doorway-micro-label"]')).toHaveAttribute("data-label-side", "bottom");
+
+    fireEvent.mouseEnter(entrance);
+
+    expect(badge).toHaveAttribute("transform", anchorTransform);
+    expect(badge).toHaveAttribute("data-world-anchor-x", anchorX);
+    expect(badge).toHaveAttribute("data-world-anchor-y", anchorY);
+    expect(screen.getByTestId("student-direction-glyph")).not.toHaveAttribute("transform");
+    expect(badge).toHaveAttribute("data-emphasized-direction", "entrance");
+    expect(badge.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveTextContent("Enter LIB");
+  });
+
+  it("quietly removes the passive doorway arrow while its active route control owns the transition", () => {
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+      activeEntranceId="e1"
+      suppressActiveEntranceId="e1"
+    /></svg>);
+
+    expect(screen.queryByTestId("entrance-direction-badge")).not.toBeInTheDocument();
+    expect(screen.getByTestId("readonly-enter-building-door-hit-target")).toBeInTheDocument();
+  });
+
+  it("keeps Campus arrows at low and high zoom and uses static emphasis for reduced motion", () => {
+    const props = {
+      campus: projectReadonlyOutdoorCampus(campus),
+      onClickEntrance: vi.fn(),
+      compactEntryActions: true,
+      reducedMotion: true,
+    } as const;
+    const { rerender } = render(<svg><ReadonlyOutdoorCampusScene {...props} zoom={0.25} /></svg>);
+    const badge = screen.getByTestId("entrance-direction-badge");
+    expect(badge.querySelectorAll("[data-transition-arrow]")).toHaveLength(2);
+    expect(badge.querySelector('[data-testid="entrance-direction-disc"]')).toHaveAttribute("vector-effect", "non-scaling-stroke");
+    expect(badge.querySelector('[data-direction="entrance"]')).toHaveAttribute("vector-effect", "non-scaling-stroke");
+    expect(badge.querySelector('[data-testid="entrance-direction-entrance-emphasis"] animate')).toBeNull();
+    rerender(<svg><ReadonlyOutdoorCampusScene {...props} zoom={4} /></svg>);
+    expect(screen.getByTestId("entrance-direction-badge")).toBe(badge);
+    expect(badge.querySelectorAll("[data-transition-arrow]")).toHaveLength(2);
+  });
+
+  it("keeps the active Campus arrow and pulse on one authored doorway when zoom changes", () => {
+    const projected = projectReadonlyOutdoorCampus(campus);
+    const props = { campus: projected, compactEntryActions: true, onClickEntrance: vi.fn(), activeEntranceId: "e1" };
+    const deriveDuplicates = vi.spyOn(studentRouteFlow, "studentOverviewDuplicateIds");
+    const { rerender } = render(<svg><ReadonlyOutdoorCampusScene {...props} zoom={0.18} /></svg>);
+    const initialDerivations = deriveDuplicates.mock.calls.length;
+    const badge = screen.getByTestId("entrance-direction-badge");
+    const x = Number(badge.getAttribute("data-world-anchor-x"));
+    const y = Number(badge.getAttribute("data-world-anchor-y"));
+    const placement = entranceDirectionBadgePlacement(x, y, "bottom", 12);
+    expect(badge.getAttribute("transform")).toBe(`translate(${placement.x},${placement.y}) rotate(${placement.angle})`);
+    expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+    expect(badge.querySelector('[data-testid="entrance-direction-pressable-pulse"]')).toBeNull();
+    for (const zoom of [0.4, 1, 3.5]) {
+      rerender(<svg><ReadonlyOutdoorCampusScene {...props} zoom={zoom} /></svg>);
+      expect(screen.getByTestId("entrance-direction-badge")).toBe(badge);
+      expect(badge.getAttribute("transform")).toBe(`translate(${placement.x},${placement.y}) rotate(${placement.angle})`);
+      expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+    }
+    expect(deriveDuplicates).toHaveBeenCalledTimes(initialDerivations);
+    deriveDuplicates.mockRestore();
+  });
+
+  it("keeps the pulse browser-native and hover local to the entrance layer", () => {
+    const component = ReadonlyOutdoorArtworkLayer as unknown as { type: (...args: unknown[]) => unknown };
+    const artworkRender = vi.spyOn(component, "type");
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(campus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+    /></svg>);
+    const initialArtRenders = artworkRender.mock.calls.length;
+    expect(screen.queryByTestId("entrance-direction-entrance-emphasis")).not.toBeInTheDocument();
+    fireEvent.focus(screen.getByTestId("readonly-entrance"));
+    expect(screen.queryByTestId("student-transition-tooltip")).not.toBeInTheDocument();
+    expect(screen.getByTestId("entrance-direction-entrance-emphasis")).toBeInTheDocument();
+    expect(artworkRender).toHaveBeenCalledTimes(initialArtRenders);
+    artworkRender.mockRestore();
+  });
+
+  it("keeps the legacy non-student entrance presentation when compact actions are not enabled", () => {
+    render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(campus)} onClickEntrance={vi.fn()} /></svg>);
+    expect(screen.getByTestId("student-enter-building-pill")).toBeInTheDocument();
+    expect(screen.queryByTestId("student-enter-building-marker")).not.toBeInTheDocument();
+    expect(screen.getByTestId("entrance-direction-badge")).toBeInTheDocument();
+  });
+
+  it("emphasizes the active route entrance more strongly than other pressable entrances", () => {
+    const twoEntrances = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        entrances: [
+          ...(campus.buildings[0]!.entrances ?? []),
+          { id: "e2", buildingId: "b1", edge: "left" as const, offset: 0.3 },
+        ],
+      }],
+      entrances: [
+        { id: "e1", buildingId: "b1", edge: "bottom" as const, offset: 0.5, accessible: true },
+        { id: "e2", buildingId: "b1", edge: "left" as const, offset: 0.3 },
+      ],
+    } as unknown as Campus;
+    const { container, rerender } = render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(twoEntrances)} compactEntryActions onClickEntrance={vi.fn()}
+      routeRelevantEntranceIds={new Set(["e1", "e2"])} activeEntranceId="e1"
+    /></svg>);
+    const badges = container.querySelectorAll('[data-testid="entrance-direction-badge"]');
+    expect(badges).toHaveLength(2);
+    const activeBadge = [...badges].find((badge) => badge.getAttribute("data-active-transition") === "true");
+    const ordinaryBadge = [...badges].find((badge) => badge !== activeBadge);
+    expect(activeBadge).toBeInTheDocument();
+    expect(activeBadge?.querySelector('[data-transition-arrow="entrance"]')).toHaveAttribute("data-transition-emphasis", "active");
+    expect(activeBadge?.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(activeBadge?.querySelector('[data-testid="entrance-direction-entrance-emphasis"] animate')).toBeInTheDocument();
+    expect(ordinaryBadge).toHaveAttribute("data-route-relevant", "true");
+    expect(ordinaryBadge?.querySelector('[data-transition-arrow="entrance"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(ordinaryBadge?.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(ordinaryBadge?.querySelector('[data-testid="entrance-direction-route-halo"]')).toBeInTheDocument();
+    expect(ordinaryBadge?.querySelector('[data-testid="entrance-direction-active-ring"]')).not.toBeInTheDocument();
+
+    rerender(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(twoEntrances)} compactEntryActions onClickEntrance={vi.fn()}
+      routeRelevantEntranceIds={new Set(["e1", "e2"])} activeEntranceId="e1" reducedMotion
+    /></svg>);
+    expect(container.querySelector('[data-testid="entrance-direction-entrance-emphasis"] animate')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-testid="entrance-direction-entrance-emphasis"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="entrance-direction-active-ring"]')).toBeInTheDocument();
+  });
+
+  it("keeps close entrance icons while giving a colliding label to the hovered entrance", () => {
+    const closeEntrances = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        entrances: [
+          { id: "primary", buildingId: "b1", edge: "bottom" as const, offset: 0.5, isPrimary: true },
+          { id: "secondary", buildingId: "b1", edge: "bottom" as const, offset: 0.54 },
+        ],
+      }],
+      entrances: [
+        { id: "primary", buildingId: "b1", edge: "bottom" as const, offset: 0.5, isPrimary: true },
+        { id: "secondary", buildingId: "b1", edge: "bottom" as const, offset: 0.54 },
+      ],
+    } as unknown as Campus;
+    const { container } = render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(closeEntrances)} compactEntryActions onClickEntrance={vi.fn()}
+    /></svg>);
+    const doors = [...container.querySelectorAll('[data-testid="readonly-entrance"]')];
+    expect(container.querySelectorAll('[data-testid="entrance-direction-badge"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="student-doorway-micro-label"]')).toHaveLength(1);
+    fireEvent.mouseEnter(doors[1]!);
+    expect(container.querySelectorAll('[data-testid="entrance-direction-badge"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="student-doorway-micro-label"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveTextContent("Enter LIB");
+  });
+
+  it("keeps authored Campus artwork out of per-frame route progress updates", () => {
+    const projected = projectReadonlyOutdoorCampus(campus);
+    const component = ReadonlyOutdoorArtworkLayer as unknown as { type: (...args: unknown[]) => unknown };
+    const artworkRender = vi.spyOn(component, "type");
+    const routePoints = [{ x: 10, y: 12 }, { x: 150, y: 96 }, { x: 320, y: 180 }];
+    const view = (progress: number) => <svg>
+      <ReadonlyOutdoorArtworkLayer campus={projected} showBuildings showLabels zoom={1} />
+      <RouteMapOverlay points={routePoints} mode="standard" walkProgress={progress} layer="line" />
+    </svg>;
+    const { rerender } = render(view(0.2));
+    expect(artworkRender).toHaveBeenCalledTimes(1);
+
+    rerender(view(0.65));
+    expect(artworkRender).toHaveBeenCalledTimes(1);
+    artworkRender.mockRestore();
+  });
+
+  it("changes mobile marker detail without rerendering heavy Campus artwork or route geometry", () => {
+    const projected = projectReadonlyOutdoorCampus(campus);
+    const component = ReadonlyOutdoorArtworkLayer as unknown as { type: (...args: unknown[]) => unknown };
+    const artworkRender = vi.spyOn(component, "type");
+    const routePoints = [{ x: 10, y: 12 }, { x: 150, y: 96 }, { x: 320, y: 180 }];
+    const view = (studentZoom: number) => <svg><ReadonlyOutdoorCampusScene campus={projected} compactEntryActions
+      zoom={1} studentZoom={studentZoom} studentPixelScale={0.28}
+      routeOverlay={<RouteMapOverlay points={routePoints} mode="standard" animated={false} layer="line" />} /></svg>;
+    const { rerender } = render(view(1));
+    const artworkCount = artworkRender.mock.calls.length;
+    const routeStroke = screen.getByTestId("route-outer-casing");
+    rerender(view(0.4));
+    expect(artworkRender).toHaveBeenCalledTimes(artworkCount);
+    expect(screen.getByTestId("route-outer-casing")).toBe(routeStroke);
+    expect(screen.getByTestId("entrance-direction-badge")).toBeInTheDocument();
+    artworkRender.mockRestore();
+  });
+
+  it("keeps a direct-tap target and places the direction arrow above route artwork", () => {
+    const onClickEntrance = vi.fn();
+    render(<svg>
+      <path data-testid="student-route-stroke" d="M0 0L300 200" />
+      <ReadonlyOutdoorCampusScene
+        campus={projectReadonlyOutdoorCampus(campus)}
+        compactEntryActions
+        onClickEntrance={onClickEntrance}
+      />
+    </svg>);
+    const entrance = screen.getByTestId("readonly-entrance");
+    const marker = screen.getByTestId("entrance-direction-badge");
+    const route = screen.getByTestId("student-route-stroke");
+    expect(screen.getByTestId("readonly-enter-building-door-hit-target")).toHaveAttribute("width", "48");
+    expect(Boolean(route.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    fireEvent.click(entrance);
+    expect(onClickEntrance).toHaveBeenCalledWith("b1");
+  });
+
+  it("places the route stroke above Campus artwork and below entrance markers", () => {
+    const routePoints = [{ x: 30, y: 40 }, { x: 80, y: 40 }, { x: 100, y: 80 }];
+    render(<svg>
+      <ReadonlyOutdoorCampusScene
+        campus={projectReadonlyOutdoorCampus(campus)}
+        compactEntryActions
+        onClickEntrance={vi.fn()}
+        routeOverlay={<RouteMapOverlay points={routePoints} mode="standard" animated={false} layer="line" />}
+      />
+    </svg>);
+
+    const artwork = screen.getByTestId("readonly-building");
+    const routeGroup = document.querySelector('[data-route-group][data-route-layer="line"]')!;
+    const routeStroke = routeGroup.querySelector("polyline[stroke=\"#1e40af\"]");
+    const entranceMarker = screen.getByTestId("entrance-direction-badge");
+    expect(routeStroke).toHaveAttribute("points", "30,40 80,40 100,80");
+    expect(Boolean(artwork.compareDocumentPosition(routeGroup) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(routeGroup.compareDocumentPosition(entranceMarker) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("shows only the hovered entrance's detached tooltip among nearby arrows", () => {
+    const nearbyCampus = {
+      ...campus,
+      buildings: [{
+        ...campus.buildings[0],
+        entrances: [
+          ...(campus.buildings[0]!.entrances ?? []),
+          { id: "e2", buildingId: "b1", edge: "bottom" as const, offset: 0.58 },
+        ],
+      }],
+    } as unknown as Campus;
+    render(<svg><ReadonlyOutdoorCampusScene
+      campus={projectReadonlyOutdoorCampus(nearbyCampus)}
+      onClickEntrance={vi.fn()}
+      compactEntryActions
+    /></svg>);
+    const entrances = screen.getAllByTestId("readonly-entrance");
+    expect(screen.queryAllByTestId("student-transition-tooltip")).toHaveLength(0);
+    fireEvent.mouseEnter(entrances[0]!);
+    expect(screen.queryAllByTestId("student-transition-tooltip")).toHaveLength(0);
+    expect(screen.queryByTestId("student-enter-building-label")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("entrance-direction-badge")).toHaveLength(2);
+    fireEvent.mouseLeave(entrances[0]!);
+    expect(screen.queryAllByTestId("student-transition-tooltip")).toHaveLength(0);
+  });
+
   it("selects a Campus Gate from the map and renders its selected halo", () => {
     const onSelectCampusPlace = vi.fn();
     const withGate = {
@@ -126,6 +469,17 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(gate.querySelector(".campus-place-selection-ring")).toBeInTheDocument();
     fireEvent.click(gate);
     expect(onSelectCampusPlace).toHaveBeenCalledWith("gate-main");
+  });
+
+  it("keeps the authored Campus Gate artwork visible in Student overview and map pick", () => {
+    const withGate = { ...campus, markers: [{ id: "gate-main", name: "Campus Gate", type: "gate", purpose: "general", x: 240, y: 180, color: "#2563eb" }] } as unknown as Campus;
+    const { rerender } = render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(withGate)} compactEntryActions studentZoom={0.16} studentPixelScale={1} /></svg>);
+    const gate = screen.getByTestId("readonly-campus-gate");
+    expect(gate).toHaveAttribute("data-student-gate-screen-space", "true");
+    expect(gate.querySelector(".student-map-screen-marker")).toBeInTheDocument();
+    expect(gate.querySelector(".student-map-screen-marker svg[viewBox='0 0 36 30']")).toBeInTheDocument();
+    rerender(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(withGate)} compactEntryActions studentZoom={0.16} studentPixelScale={1} mapPickActive onSelectCampusPlace={vi.fn()} /></svg>);
+    expect(screen.getByTestId("student-map-pick-gate-target")).toBeInTheDocument();
   });
 
   it("uses Admin building label/body styling and the shared entrance glyph", () => {

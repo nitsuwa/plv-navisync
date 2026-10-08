@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { X, Trash2, Link2, Waypoints, MapPin, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
 import type { NavigationNode, NavigationEdge } from "./types";
 import { linkedObjectRef } from "../../lib/indoorNavigationGraph";
+import { useStableCallbackProps } from "./useStableCallbackProps";
 
 const INACCESSIBLE_REASONS: { value: NonNullable<NavigationEdge["inaccessibleReason"]>; label: string }[] = [
   { value: "stairs", label: "Stairs" },
@@ -150,7 +151,7 @@ interface FloorNavPropertiesPanelProps {
   elevatorServedFloors?: Array<{ id: string; label: string; linked: boolean; isLocal: boolean }>;
 }
 
-export function FloorNavPropertiesPanel({
+function FloorNavPropertiesPanelView({
   selected, nodes, edges,
   onUpdateNode, onUpdateEdge, onDelete, onClose,
   onAddBend, onRemoveBend, onStraighten, straightenBlocked, edgeBlocked, edgeBlockedReason,
@@ -461,4 +462,10 @@ export function FloorNavPropertiesPanel({
       </div>
     </div>
   );
+}
+
+const MemoFloorNavPropertiesPanel = memo(FloorNavPropertiesPanelView);
+
+export function FloorNavPropertiesPanel(props: FloorNavPropertiesPanelProps) {
+  return <MemoFloorNavPropertiesPanel {...useStableCallbackProps(props)} />;
 }

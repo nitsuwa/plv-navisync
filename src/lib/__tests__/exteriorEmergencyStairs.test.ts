@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalExteriorEmergencyStairsForBuilding, defaultExteriorEmergencyStairAttachment, exteriorEmergencyStairAttachmentIsAvailable, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes, removeExteriorEmergencyStairConnectionSnapshots } from "../exteriorEmergencyStairs";
+import { canonicalExteriorEmergencyStairsForBuilding, createExteriorEmergencyStairAvailabilitySnapshot, defaultExteriorEmergencyStairAttachment, exteriorEmergencyStairAttachmentIsAvailable, exteriorEmergencyStairAttachmentIsAvailableFromSnapshot, syncExteriorEmergencyStairGraph, syncExteriorEmergencyStairOccurrences, exteriorEmergencyStairWorldPosition, exteriorEmergencyStairEdgeForPointer, exteriorEmergencyStairOffsetForPointer, exteriorEmergencyStairWallSpansOverlap, exteriorEmergencyStairRouteReadiness, pruneOrphanedExteriorEmergencyStairNodes, removeExteriorEmergencyStairConnectionSnapshots } from "../exteriorEmergencyStairs";
 import { findNavigationRoute } from "../pathfinding";
 import type { Campus, CampusBuilding, FloorPlan, ExteriorEmergencyStair } from "../../components/map-builder/types";
 
@@ -217,6 +217,23 @@ describe("Exterior Emergency Stair authoring", () => {
     const occupied = { ...withDoor, exteriorEmergencyStairs: [stair("left", ["f1"])] };
     expect(exteriorEmergencyStairAttachmentIsAvailable(occupied, { edge: "right", offset: 0.5 })).toBe(false);
     expect(exteriorEmergencyStairAttachmentIsAvailable(occupied, { edge: "right", offset: 0.5 }, {}, "left")).toBe(true);
+  });
+
+  it("keeps the gesture-start obstacle snapshot equivalent to authored availability rules", () => {
+    const withDoor = building([stair("existing", ["f1"])], [
+      { ...floor("f1", 1), doors: [{ id: "perimeter-door", x: 10, y: 340, width: 20, height: 12, wallId: "wall-1" } as any] },
+      floor("f2", 2),
+      floor("f3", 3),
+    ]);
+    withDoor.floors[0].walls = [{ id: "wall-1", x1: 0, y1: 0, x2: 0, y2: 680 } as any];
+    const snapshot = createExteriorEmergencyStairAvailabilitySnapshot(withDoor, "existing");
+
+    for (const edge of ["top", "right", "bottom", "left"] as const) {
+      for (const offset of [0.15, 0.3, 0.5, 0.7, 0.9]) {
+        expect(exteriorEmergencyStairAttachmentIsAvailableFromSnapshot(snapshot, { edge, offset }))
+          .toBe(exteriorEmergencyStairAttachmentIsAvailable(withDoor, { edge, offset }, {}, "existing"));
+      }
+    }
   });
 
   it("removes derived landings and nodes when the authored stair is removed", () => {

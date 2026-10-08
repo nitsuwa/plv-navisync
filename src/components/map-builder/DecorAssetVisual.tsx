@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import type { DecorAssetDescriptor } from "./constants";
 import { DECOR_ASSET_MAP } from "./constants";
 import { getDecorParts } from "../../lib/decorVisual";
@@ -10,7 +10,7 @@ import { getDecorParts } from "../../lib/decorVisual";
  * the property-panel preview and the hierarchy palette always show the exact
  * same artwork.
  */
-export function DecorAssetArt({ descriptor, primaryFillOverride }: { descriptor: DecorAssetDescriptor; primaryFillOverride?: string }) {
+function DecorAssetArtView({ descriptor, primaryFillOverride }: { descriptor: DecorAssetDescriptor; primaryFillOverride?: string }) {
   return (
     <>
       {getDecorParts(descriptor).map((p, i) => (
@@ -29,8 +29,10 @@ export function DecorAssetArt({ descriptor, primaryFillOverride }: { descriptor:
   );
 }
 
+export const DecorAssetArt = memo(DecorAssetArtView);
+
 /** Convenience <svg> wrapper sized to the asset's native aspect ratio. */
-export function DecorAssetVisual({
+function DecorAssetVisualView({
   type,
   className,
   style,
@@ -52,3 +54,5 @@ export function DecorAssetVisual({
     </svg>
   );
 }
+
+export const DecorAssetVisual = memo(DecorAssetVisualView);

@@ -9,6 +9,15 @@ export function walkingAnimationDuration(distanceM: number, journeyDistanceM = d
   return Math.max(1, journeyDuration * 1.2 * distanceM / journeyDistance);
 }
 
+/** Route playback is a presentation pace derived from human instructions,
+ * never from uncalibrated map units or estimated real-world walking speed. */
+export function guidedRouteProgressDuration(meaningfulStepCount: number): number {
+  const count = Number.isFinite(meaningfulStepCount)
+    ? Math.max(1, Math.min(14, Math.round(meaningfulStepCount)))
+    : 1;
+  return Math.max(6500, Math.min(16000, 5800 + count * 850));
+}
+
 export function outdoorWalkingDistance(route: {
   dist: number;
   indoorSegments?: ReadonlyArray<{ distanceM: number }>;

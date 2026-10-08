@@ -1,7 +1,7 @@
-import type { SVGAttributes } from "react";
+import { memo, type SVGAttributes } from "react";
 
 /** Small, reusable front-facing campus gate mark for the palette and canvas. */
-export function CampusGateVisual({
+function CampusGateVisualView({
   color = "#2563eb",
   x,
   y,
@@ -31,3 +31,5 @@ export function CampusGateVisual({
     </svg>
   );
 }
+
+export const CampusGateVisual = memo(CampusGateVisualView);

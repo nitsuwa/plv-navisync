@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup, waitFor, screen, act } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, fireEvent, cleanup, waitFor, screen, act, within } from "@testing-library/react";
 import { useState } from "react";
 import { CampusEditor } from "../CampusEditor";
+import * as canvasComponents from "../Canvas";
+import { isSpacePressed } from "../useCanvasControls";
+import * as decorVisuals from "../DecorAssetVisual";
+import * as outdoorVisuals from "../ReadonlyOutdoorVisuals";
+import * as pathNetworkVisuals from "../OutdoorPathNetworkVisuals";
 import type { Campus } from "../types";
 
 /**
@@ -261,6 +266,94 @@ describe("CampusEditor multi-object movement", () => {
     expect(buildingPos(updates[0], "b1").y).toBeGreaterThan(100);
   });
 
+  it("does not move the Campus camera when Space is pressed without a fresh pointer drag", async () => {
+    const { container } = render(<Harness onCampusChange={() => {}} />);
+    const svg = stubSvgRect(container);
+    fireEvent.mouseMove(svg, { clientX: 310, clientY: 260, bubbles: true });
+    const cameraGroups = Array.from(svg.querySelectorAll<SVGGElement>('g[transform*="scale("]'));
+    const before = cameraGroups.map((group) => group.getAttribute("transform"));
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.mouseMove(svg, { clientX: 510, clientY: 420, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    expect(cameraGroups.map((group) => group.getAttribute("transform"))).toEqual(before);
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+    expect(cameraGroups.map((group) => group.getAttribute("transform"))).toEqual(before);
+  });
+
+  it.each([2, 6, 20])("keeps a %i-object selection compact and scrollable", (count) => {
+    const campus = makeCampus();
+    campus.buildings = Array.from({ length: count }, (_, index) => ({
+      id: `multi-${index}`, name: `Building ${index + 1}`, code: `B${index + 1}`, category: "Academic", description: "",
+      x: 18 + index * 42, y: 40, width: 30, height: 24, color: "#1e40af", expanded: false,
+      floors: [{ id: `floor-${index}`, buildingId: `multi-${index}`, number: 1, label: "Ground Floor", rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }],
+    }));
+    const { container } = render(<Harness campus={campus} />);
+    stubSvgRect(container);
+    for (let index = 0; index < count; index += 1) {
+      const building = container.querySelector(`[data-campus-building-id="multi-${index}"]`)!;
+      shiftClick(building as SVGGElement, 33 + index * 42, 52);
+    }
+
+    const panel = container.querySelector('[data-testid="properties-panel"]')!;
+    const list = container.querySelector('[data-testid="multi-select-object-list"]')!;
+    expect(panel.className).toContain("h-fit");
+    expect(panel.className).toContain("max-h-[calc(100%-24px)]");
+    expect(panel.className).toContain("w-[min(340px,34vw)]");
+    expect(list.className).toContain("max-h-[120px]");
+    expect(list.className).toContain("overflow-y-auto");
+    expect(container.querySelectorAll("[data-multi-select-object-row]")).toHaveLength(count);
+    expect(container.querySelector('button[aria-label="Bring to Front"]')).toBeTruthy();
+    expect(screen.getByRole("button", { name: `Delete All (${count})` })).toBeVisible();
+  });
+
+  it("gives Space-pan priority over a selected Pathway without changing its geometry", async () => {
+    const campus = makeCampus();
+    campus.paths = [{ id: "selected-path", points: [{ x: 440, y: 420 }, { x: 560, y: 420 }], type: "walkway", color: "#94a3b8", width: 10 }];
+    const updates: Campus[] = [];
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    const path = container.querySelector('[data-testid="campus-path"][data-path-id="selected-path"]') as SVGGElement;
+    expect(path).toBeTruthy();
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(isSpacePressed()).toBe(true);
+    fireEvent.mouseDown(path, { button: 0, clientX: 440, clientY: 420, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 480, clientY: 455, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 520, clientY: 490, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+    expect(svg.style.cursor).toBe("grabbing");
+    expect(updates).toHaveLength(0);
+    expect(campus.paths[0].points).toEqual([{ x: 440, y: 420 }, { x: 560, y: 420 }]);
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+    expect(updates).toHaveLength(0);
+  });
+
+  it("finishes an active Pathway gesture once when Space takes over, then pans only", async () => {
+    const campus = makeCampus();
+    campus.paths = [{ id: "dragged-path", points: [{ x: 440, y: 420 }, { x: 560, y: 420 }], type: "walkway", color: "#94a3b8", width: 10 }];
+    const updates: Campus[] = [];
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    const path = container.querySelector('[data-testid="campus-path"][data-path-id="dragged-path"]') as SVGGElement;
+
+    fireEvent.mouseDown(path, { button: 0, clientX: 440, clientY: 420, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 460, clientY: 440, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    expect(updates).toHaveLength(0);
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(updates).toHaveLength(1);
+    const committedWhileTakingPan = structuredClone(updates[0].paths[0].points);
+    fireEvent.mouseMove(svg, { clientX: 520, clientY: 500, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0].paths[0].points).toEqual(committedWhileTakingPan);
+  });
+
   it("keeps a Building visibly under the pointer with Navigation Mode enabled, then commits once", async () => {
     const campus = makeCampus();
     campus.buildings[0].entrances = [{ id: "entrance-1", edge: "left", offset: 0.5, type: "main" } as never];
@@ -290,6 +383,79 @@ describe("CampusEditor multi-object movement", () => {
     fireEvent.mouseUp(svg);
     expect(updates).toHaveLength(1);
     expect(buildingPos(updates[0], "b1")).toEqual({ x: 140, y: 120 });
+  });
+
+  it("keeps a newly duplicated Building visibly following the pointer before release", async () => {
+    const updates: Campus[] = [];
+    const { container } = render(<Harness onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    const originalIds = new Set(["b1", "b2", "b3"]);
+    const original = buildingG(container, "#1e40af");
+    fireEvent.mouseDown(original, { button: 0, clientX: 160, clientY: 140, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyDown(window, { key: "d", ctrlKey: true });
+    const copy = updates[updates.length - 1].buildings.find((building) => !originalIds.has(building.id))!;
+    const copyElement = container.querySelector(`[data-campus-building-id="${copy.id}"]`) as SVGGElement;
+    expect(copyElement).toBeTruthy();
+    updates.length = 0;
+
+    fireEvent.mouseDown(copyElement, { button: 0, clientX: copy.x + copy.width / 2, clientY: copy.y + copy.height / 2, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: copy.x + copy.width / 2 + 35, clientY: copy.y + copy.height / 2 + 25, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+    const source = container.querySelector(`[data-campus-building-transform="${copy.id}"]`) as SVGGElement;
+    const preview = container.querySelector(`[data-testid="campus-interaction-items"] [data-campus-building-transform="${copy.id}"]`) as SVGGElement;
+    expect(source.getAttribute("visibility")).toBe("hidden");
+    expect(preview).toBeTruthy();
+    const previewTransform = preview.getAttribute("transform") ?? "";
+    expect(previewTransform).not.toContain(`translate(${copy.x + copy.width / 2} ${copy.y + copy.height / 2})`);
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    const committed = updates[0].buildings.find((building) => building.id === copy.id)!;
+    expect(previewTransform).toContain(`translate(${committed.x + copy.width / 2} ${committed.y + copy.height / 2})`);
+    expect(container.querySelector(`[data-testid="campus-interaction-items"] [data-campus-building-transform="${copy.id}"]`)).toBeNull();
+  });
+
+  it("previews Exterior Emergency Stair movement on the imperative layer and commits once with undo/redo", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].exteriorEmergencyStairs = [{
+      id: "exterior-stair-1", buildingId: "b1", label: "Emergency Stair", state: "open",
+      width: 28, height: 42, attachment: { edge: "right", offset: 0.5 }, servedFloorIds: ["f1"], sharedId: "shared-stair",
+    } as never];
+    const updates: Campus[] = [];
+    const visualRender = vi.spyOn(outdoorVisuals.OutdoorEmergencyStairVisual, "type");
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => { updates.push(next); latestCampus = next; }} />);
+    const svg = stubSvgRect(container);
+    // The initial mount may repair the fixture's derived stair graph once.
+    // This assertion window measures only the user gesture transaction.
+    updates.length = 0;
+    const source = container.querySelector('[data-campus-stair-id="exterior-stair-1"]') as SVGGElement;
+    expect(source).toBeTruthy();
+
+    fireEvent.mouseDown(source, { button: 0, clientX: 244, clientY: 140, bubbles: true });
+    const afterPointerDownRenders = visualRender.mock.calls.length;
+    fireEvent.mouseMove(svg, { clientX: 160, clientY: 218, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 160, clientY: 218, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+    const preview = container.querySelector('[data-testid="campus-interaction-items"] [data-campus-stair-id="exterior-stair-1"]') as SVGGElement;
+    expect(source.getAttribute("visibility")).toBe("hidden");
+    expect(preview?.getAttribute("transform")).toContain("translate(160,211)");
+    expect(visualRender).toHaveBeenCalledTimes(afterPointerDownRenders);
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].exteriorEmergencyStairs?.[0].attachment).toEqual({ edge: "bottom", offset: 0.5 });
+    expect(container.querySelector('[data-testid="campus-interaction-items"] [data-campus-stair-id="exterior-stair-1"]')).toBeNull();
+
+    fireEvent.click(undoButton(container)!);
+    expect(latestCampus?.buildings[0].exteriorEmergencyStairs?.[0].attachment).toEqual({ edge: "right", offset: 0.5 });
+    fireEvent.click(redoButton(container)!);
+    expect(latestCampus?.buildings[0].exteriorEmergencyStairs?.[0].attachment).toEqual({ edge: "bottom", offset: 0.5 });
+    visualRender.mockRestore();
   });
 
   it("moves Navigation waypoint and issue visuals together before one release commit", async () => {
@@ -454,8 +620,9 @@ describe("CampusEditor multi-object movement", () => {
     const panelDelete = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Delete All (2)");
     expect(panelDelete).toBeTruthy();
     fireEvent.click(panelDelete!);
-    expect(container.textContent).toContain("2 objects");
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Delete All")!);
+    const dialog = screen.getByRole("dialog", { name: "Delete Selected Objects?" });
+    expect(within(dialog).getByText(/2 objects/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete All" }));
 
     expect(latestCampus).toBeTruthy();
     expect(latestCampus!.buildings.some((b) => b.id === "b1")).toBe(false);
@@ -468,6 +635,128 @@ describe("CampusEditor multi-object movement", () => {
     stubSvgRect(container);
     fireEvent.mouseDown(decorG(container), { clientX: 450, clientY: 120 });
     expect(container.querySelector('[data-compact-decor-inspector="true"]')).toBeTruthy();
+  });
+
+  it("keeps unrelated authored Campus artwork stable while Building Properties updates", () => {
+    const memoInner = (component: unknown) => vi.spyOn(component as { type: (...args: any[]) => unknown }, "type");
+    const buildingArtwork = memoInner(outdoorVisuals.OutdoorBuildingVisual);
+    const decorArtwork = memoInner(decorVisuals.DecorAssetArt);
+    const { container } = render(<Harness />);
+    stubSvgRect(container);
+    const initialBuildingRenders = buildingArtwork.mock.calls.length;
+    const initialDecorRenders = decorArtwork.mock.calls.length;
+
+    fireEvent.mouseDown(buildingG(container, "#1e40af"), { button: 0, clientX: 150, clientY: 140 });
+    expect(container.querySelector('[data-testid="properties-panel"]')).toBeTruthy();
+    expect(buildingArtwork).toHaveBeenCalledTimes(initialBuildingRenders);
+    expect(decorArtwork).toHaveBeenCalledTimes(initialDecorRenders);
+
+    fireEvent.click(screen.getByRole("button", { name: /Style/ }));
+    expect(buildingArtwork).toHaveBeenCalledTimes(initialBuildingRenders);
+    expect(decorArtwork).toHaveBeenCalledTimes(initialDecorRenders);
+
+    buildingArtwork.mockRestore();
+    decorArtwork.mockRestore();
+  });
+
+  it("keeps cursor-only coordinate updates below the Campus scene render boundary", async () => {
+    const canvasRender = vi.spyOn(canvasComponents, "Canvas");
+    const { container } = render(<Harness />);
+    const svg = stubSvgRect(container);
+    const initialCanvasRenders = canvasRender.mock.calls.length;
+
+    for (let sample = 0; sample < 20; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: 300 + sample, clientY: 250 + sample, bubbles: true });
+    }
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+
+    expect(canvasRender).toHaveBeenCalledTimes(initialCanvasRenders);
+    expect(container.querySelector('[data-testid="campus-canvas-cursor-position"]')?.textContent).toBe("X:319 Y:269");
+    expect(container.querySelector('[data-testid="campus-cursor-preview-overlay"]')).toBeNull();
+    canvasRender.mockRestore();
+  });
+
+  it("keeps authored Campus artwork stable across Connect preview frames", async () => {
+    const campus = makeCampus();
+    campus.paths = [{ id: "connect-preview-path", points: [{ x: 420, y: 390 }, { x: 560, y: 390 }], type: "walkway", color: "#94a3b8", width: 10 }];
+    campus.navNodes = [
+      { id: "connect-start", type: "outdoor", x: 500, y: 430 } as never,
+      { id: "connect-target", type: "outdoor", x: 620, y: 500 } as never,
+    ];
+    const updates: Campus[] = [];
+    const canvasRender = vi.spyOn(canvasComponents, "Canvas");
+    const buildingArtwork = vi.spyOn(outdoorVisuals.OutdoorBuildingVisual, "type");
+    const decorArtwork = vi.spyOn(decorVisuals.DecorAssetArt, "type");
+    const pathGeometry = vi.spyOn(pathNetworkVisuals, "buildPathNetworkGeometry");
+    const chainPath = vi.spyOn(pathNetworkVisuals, "buildChainPathD");
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.mouseDown(svg, { clientX: 500, clientY: 430, bubbles: true });
+    const canvasAfterArming = canvasRender.mock.calls.length;
+    const buildingAfterArming = buildingArtwork.mock.calls.length;
+    const decorAfterArming = decorArtwork.mock.calls.length;
+    const geometryAfterArming = pathGeometry.mock.calls.length;
+    const chainAfterArming = chainPath.mock.calls.length;
+
+    for (let sample = 0; sample < 8; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: 660 + sample * 4, clientY: 520 + sample * 3, bubbles: true });
+      await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    }
+
+    expect(canvasRender.mock.calls.length).toBeGreaterThan(canvasAfterArming);
+    expect(buildingArtwork).toHaveBeenCalledTimes(buildingAfterArming);
+    expect(decorArtwork).toHaveBeenCalledTimes(decorAfterArming);
+    expect(pathGeometry).toHaveBeenCalledTimes(geometryAfterArming);
+    expect(chainPath).toHaveBeenCalledTimes(chainAfterArming);
+    expect(container.querySelector('[data-testid="nav-path-preview"] polyline')).toBeTruthy();
+    expect(updates).toHaveLength(0);
+
+    canvasRender.mockRestore();
+    buildingArtwork.mockRestore();
+    decorArtwork.mockRestore();
+    pathGeometry.mockRestore();
+    chainPath.mockRestore();
+  });
+
+  it("keeps authored Campus artwork stable through canvas resize preview frames", async () => {
+    const campus = makeCampus();
+    campus.paths = [{ id: "resize-preview-path", points: [{ x: 420, y: 390 }, { x: 560, y: 390 }], type: "walkway", color: "#94a3b8", width: 10 }];
+    const updates: Campus[] = [];
+    const canvasRender = vi.spyOn(canvasComponents, "Canvas");
+    const buildingArtwork = vi.spyOn(outdoorVisuals.OutdoorBuildingVisual, "type");
+    const decorArtwork = vi.spyOn(decorVisuals.DecorAssetArt, "type");
+    const pathGeometry = vi.spyOn(pathNetworkVisuals, "buildPathNetworkGeometry");
+    const chainPath = vi.spyOn(pathNetworkVisuals, "buildChainPathD");
+    const { container } = render(<Harness campus={campus} onCampusChange={(next) => updates.push(next)} />);
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByTestId("canvas-settings-trigger"));
+    fireEvent.click(screen.getByRole("button", { name: "Resize on canvas" }));
+    const canvasAfterMode = canvasRender.mock.calls.length;
+    const buildingAfterMode = buildingArtwork.mock.calls.length;
+    const decorAfterMode = decorArtwork.mock.calls.length;
+    const geometryAfterMode = pathGeometry.mock.calls.length;
+    const chainAfterMode = chainPath.mock.calls.length;
+    fireEvent.mouseDown(screen.getByTestId("canvas-resize-handle-e"), { clientX: 900, clientY: 340, bubbles: true });
+
+    for (let sample = 0; sample < 8; sample += 1) {
+      fireEvent.mouseMove(svg, { clientX: 910 + sample * 5, clientY: 340, bubbles: true });
+      await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    }
+
+    expect(canvasRender.mock.calls.length).toBeGreaterThan(canvasAfterMode);
+    expect(buildingArtwork).toHaveBeenCalledTimes(buildingAfterMode);
+    expect(decorArtwork).toHaveBeenCalledTimes(decorAfterMode);
+    expect(pathGeometry).toHaveBeenCalledTimes(geometryAfterMode);
+    expect(chainPath).toHaveBeenCalledTimes(chainAfterMode);
+    expect(updates).toHaveLength(0);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    canvasRender.mockRestore();
+    buildingArtwork.mockRestore();
+    decorArtwork.mockRestore();
+    pathGeometry.mockRestore();
+    chainPath.mockRestore();
   });
 
   it("rubber-band selection captures buildings AND decor assets and drags them together", () => {

@@ -68,6 +68,8 @@ export interface TransitionLabelOptions {
   compact?: boolean;
   /** Keep shared tooltip styling while allowing each editor context its own density. */
   context?: "floor" | "outdoor";
+  /** Optional screen-space typography override for Student route cues. */
+  fontSize?: number;
 }
 
 export interface TransitionMarkerViewport {
@@ -118,8 +120,8 @@ export function transitionLabelLayout(instruction: string, options: TransitionLa
   // giving Outdoor handoff labels a larger readable minimum. Both contexts
   // still use this same renderer, icon, padding, and dark-pill treatment.
   const compact = Boolean(options.compact || options.context === "floor");
-  const fontSize = compact ? 9.5 : 10.5;
-  const lineHeight = compact ? 11.5 : 12.5;
+  const fontSize = options.fontSize ?? (compact ? 9.5 : 10.5);
+  const lineHeight = options.fontSize ? options.fontSize * 1.25 : compact ? 11.5 : 12.5;
   const width = Math.max(compact ? 90 : 140, Math.min(compact ? 220 : 240, longestLine * (fontSize * 0.53) + (compact ? 34 : 36)));
   const height = Math.max(compact ? 20 : 22, lines.length * lineHeight + (compact ? 8 : 9));
   // Normal transition labels sit centered over the cue.  The previous
@@ -224,15 +226,16 @@ export function RouteContinuationMarker({ marker, x, y, entranceRotation = 0, on
   );
 }
 
-export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: { marker: TestRouteTransitionMarker; onClick?: (marker: TestRouteTransitionMarker) => void; zoom?: number; viewport?: TransitionMarkerViewport }) {
+export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport, reducedMotion = false, showLabel = false, screenSpaceHitTarget = false, studentInteractionFeedback = false, studentRouteCue = false, displayInstruction, studentPassiveLabel }: { marker: TestRouteTransitionMarker; onClick?: (marker: TestRouteTransitionMarker) => void; zoom?: number; viewport?: TransitionMarkerViewport; reducedMotion?: boolean; showLabel?: boolean; screenSpaceHitTarget?: boolean; studentInteractionFeedback?: boolean; studentRouteCue?: boolean; displayInstruction?: string; studentPassiveLabel?: string }) {
   const destination = marker.targetLabel ?? "the next map context";
   const directionLabel = marker.direction === "up" ? "Going up to" : marker.direction === "down" ? "Going down to" : "Continue to";
   const instruction = marker.instruction ?? `${directionLabel} ${destination}`;
   const startStairTransition = marker.kind === "stair" && marker.endpointRole === "start";
+  const visibleInstruction = displayInstruction ?? instruction;
   const labelLayout = marker.kind === "ramp" || marker.kind === "stair" || marker.kind === "elevator" || marker.kind === "entrance"
-    ? transitionLabelLayout(instruction, startStairTransition
-      ? { align: "right", compact: true, context: marker.context.kind }
-      : { anchor: "center", context: marker.context.kind })
+    ? transitionLabelLayout(visibleInstruction, startStairTransition
+      ? { align: "right", compact: true, context: marker.context.kind, ...(studentRouteCue ? { fontSize: 12 } : {}) }
+      : { anchor: "center", context: marker.context.kind, ...(studentRouteCue ? { fontSize: 12 } : {}) })
     : null;
   const cueX = startStairTransition ? 16 : 12;
   const cueY = startStairTransition ? -17 : -14;
@@ -248,6 +251,7 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
   // stable screen-space gap so Outdoor labels do not float far above the cue.
   const labelOffsetY = startStairTransition ? 0 : labelLayout ? -(labelLayout.height + 12) : 0;
   const labelZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const hitTargetRadius = screenSpaceHitTarget ? 22 : 20;
   let labelX = labelLayout?.x ?? 0;
   let resolvedLabelOffsetY = labelOffsetY;
   if (labelLayout && viewport) {
@@ -279,36 +283,41 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
       data-transition-kind={marker.kind}
       data-transition-endpoint-role={marker.endpointRole ?? undefined}
       data-transition-start-conflict={startStairTransition ? "true" : "false"}
-      data-transition-label-mode={onDemandLabel ? "hover-focus" : "always"}
+      data-transition-label-mode={onDemandLabel ? (showLabel ? "current-step" : "hover-focus") : "always"}
       transform={`translate(${marker.x} ${marker.y})`}
-      className="group"
-      role="button"
-      tabIndex={0}
+      pointerEvents={onClick ? "all" : undefined}
+      className={studentInteractionFeedback ? "group student-route-transition-control" : "group"}
+      role={onClick ? "button" : "img"}
+      tabIndex={onClick ? 0 : undefined}
       aria-label={marker.kind === "elevator" ? `Elevator ${instruction}` : marker.kind === "stair" ? `Stair ${instruction}` : instruction}
       style={{ cursor: onClick ? "pointer" : "default" }}
-      onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
-      onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick?.(marker); }}
-      onKeyDown={handleKeyDown}
+      onMouseDown={onClick ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
+      onClick={onClick ? (event) => { event.preventDefault(); event.stopPropagation(); onClick(marker); } : undefined}
+      onKeyDown={onClick ? handleKeyDown : undefined}
     >
-      <circle r={20} fill="transparent" />
-      {(marker.kind === "stair" || marker.kind === "elevator") && (
-        <circle r={pulseRadius} fill="none" stroke="#8b5cf6" strokeWidth={startStairTransition ? 1.2 : 1.5} opacity={startStairTransition ? 0.32 : 0.45} className="animate-pulse motion-reduce:animate-none" pointerEvents="none" />
-      )}
-      <line x1={0} y1={0} x2={cueX} y2={cueY} stroke="white" strokeWidth={startStairTransition ? 2 : 2.5} opacity={0.9} pointerEvents="none" />
-      <line x1={0} y1={0} x2={cueX} y2={cueY} stroke="#8b5cf6" strokeWidth={startStairTransition ? 0.9 : 1} opacity={0.8} pointerEvents="none" />
-      <g transform={`translate(${cueX} ${cueY})`} pointerEvents="none">
-        <circle r={glyphRadius} fill="#111827" fillOpacity={0.88} stroke="white" strokeWidth={startStairTransition ? 1.7 : 2} />
-        <circle r={glyphRingRadius} fill="none" stroke="#8b5cf6" strokeWidth={startStairTransition ? 1.1 : 1.3} strokeDasharray="3 2" opacity={0.9} />
-        <MarkerGlyph kind={marker.kind} />
+      {/* Keep the world anchor at the authored transition but render the
+          control itself in stable screen-space units. The 44px hit circle is
+          independent of the smaller visual glyph and remains centered on it. */}
+      <g className={studentRouteCue ? "student-map-screen-marker" : undefined}>
+        <circle data-testid="test-route-transition-hit-target" cx={cueX} cy={cueY} r={hitTargetRadius} fill="transparent" pointerEvents={onClick ? "all" : "none"} />
+        <g className={studentRouteCue ? "student-transition-marker-lod" : undefined}>
+          {studentInteractionFeedback && <circle data-testid="student-active-transition-halo" cx={cueX} cy={cueY} r={15} fill="none" stroke="#93c5fd" strokeWidth={1.6} opacity={0.34} className={reducedMotion ? undefined : "student-route-transition-halo"} pointerEvents="none" />}
+          {(marker.kind === "stair" || marker.kind === "elevator") && !studentRouteCue && (
+            <circle r={pulseRadius} fill="none" stroke="#8b5cf6" strokeWidth={startStairTransition ? 1.2 : 1.5} opacity={startStairTransition ? 0.32 : 0.45} className={reducedMotion ? undefined : "animate-pulse motion-reduce:animate-none"} pointerEvents="none" />
+          )}
+          <line x1={0} y1={0} x2={cueX} y2={cueY} stroke="white" strokeWidth={startStairTransition ? 2 : 2.5} opacity={0.9} pointerEvents="none" />
+          <line x1={0} y1={0} x2={cueX} y2={cueY} stroke="#8b5cf6" strokeWidth={startStairTransition ? 0.9 : 1} opacity={0.8} pointerEvents="none" />
+          <g data-transition-control-glyph="true" transform={`translate(${cueX} ${cueY})`} pointerEvents="none">
+            <circle r={glyphRadius} fill="#111827" fillOpacity={0.88} stroke="white" strokeWidth={startStairTransition ? 1.7 : 2} />
+            <circle r={glyphRingRadius} fill="none" stroke={studentRouteCue ? "#3b82f6" : "#8b5cf6"} strokeWidth={startStairTransition ? 1.1 : 1.3} strokeDasharray={studentRouteCue ? undefined : "3 2"} opacity={0.9} />
+            <MarkerGlyph kind={marker.kind} />
+          </g>
+        </g>
         {labelLayout && (
           <g
-            // Labels are kept in screen-sized units while the surrounding map
-            // is zoomed.  The offset is applied in the same inverse scale so
-            // the cue-to-pill gap remains stable instead of drifting into the
-            // Entrance/route geometry at different zoom levels.
-            transform={`translate(${labelShiftX / labelZoom} ${resolvedLabelOffsetY / labelZoom}) scale(${1 / labelZoom})`}
+            transform={`translate(${labelShiftX} ${resolvedLabelOffsetY})`}
             opacity={onDemandLabel ? undefined : (startStairTransition ? 0.92 : 0.95)}
-            className={onDemandLabel ? "opacity-0 transition-all duration-200 ease-out translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-focus:opacity-100 group-focus:translate-x-0 motion-reduce:transition-none" : undefined}
+            className={onDemandLabel && !showLabel ? "opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none" : undefined}
             data-testid="transition-label-pill"
           >
             <rect x={labelLayout.x} y={1} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.9} stroke="#8b5cf6" strokeWidth={0.6} />
@@ -318,6 +327,13 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport }: {
                 <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : labelLayout.lineHeight}>{line}</tspan>
               ))}
             </text>
+          </g>
+        )}
+        {studentPassiveLabel && !showLabel && (
+          <g className="student-transition-passive-label" data-testid="student-transition-micro-label"
+            transform={`translate(${cueX + 12} ${cueY - 5})`} pointerEvents="none">
+            <rect width={studentPassiveLabel.length * 4.1 + 8} height={10} rx={5} fill="#f8fbff" stroke="#94a3b8" strokeWidth={0.7} />
+            <text x={(studentPassiveLabel.length * 4.1 + 8) / 2} y={6.9} textAnchor="middle" fill="#173b70" fontSize={6.1} fontWeight={700} fontFamily="inherit">{studentPassiveLabel}</text>
           </g>
         )}
       </g>

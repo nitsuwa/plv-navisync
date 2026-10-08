@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   STUDENT_MAP_MAX_ZOOM,
+  STUDENT_FLOOR_MAP_MAX_ZOOM,
   STUDENT_MAP_MIN_ZOOM,
   clampStudentMapZoom,
   clampViewportPan,
@@ -22,6 +23,8 @@ describe("student map viewport", () => {
 
   it("keeps zoom-in bounded and normalizes invalid values", () => {
     expect(clampStudentMapZoom(9)).toBe(STUDENT_MAP_MAX_ZOOM);
+    expect(clampStudentMapZoom(9, STUDENT_FLOOR_MAP_MAX_ZOOM)).toBe(STUDENT_FLOOR_MAP_MAX_ZOOM);
+    expect(clampStudentMapZoom(4.5, STUDENT_FLOOR_MAP_MAX_ZOOM)).toBe(4.5);
     expect(clampStudentMapZoom(Number.NaN)).toBe(1);
   });
 

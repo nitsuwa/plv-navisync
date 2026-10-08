@@ -1,9 +1,10 @@
+import { memo } from "react";
 import type { FloorExteriorZone, BuildingEntranceEdge } from "./types";
 import { exteriorZoneTypeLabel } from "../../lib/exteriorFloorZones";
 
 export type ExteriorVisualBounds = { x: number; y: number; width: number; height: number };
 
-export function FloorExteriorZoneArtwork({
+export function FloorExteriorZoneArtworkView({
   zone,
   bounds,
   selected = false,
@@ -59,7 +60,15 @@ export function FloorExteriorZoneArtwork({
   );
 }
 
-export function FloorEntranceStepsArtwork({
+function sameBounds(a: ExteriorVisualBounds, b: ExteriorVisualBounds) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+export const FloorExteriorZoneArtwork = memo(FloorExteriorZoneArtworkView, (previous, next) =>
+  previous.zone === next.zone && previous.selected === next.selected && sameBounds(previous.bounds, next.bounds),
+);
+
+function FloorEntranceStepsArtworkView({
   bounds,
   side,
   selected = false,
@@ -117,7 +126,19 @@ export function FloorEntranceStepsArtwork({
   );
 }
 
-export function FloorAccessibleRampArtwork({
+export const FloorEntranceStepsArtwork = memo(FloorEntranceStepsArtworkView, (previous, next) =>
+  sameBounds(previous.bounds, next.bounds)
+  && previous.side === next.side
+  && previous.selected === next.selected
+  && previous.routeActive === next.routeActive
+  && previous.routeColor === next.routeColor
+  && previous.direction === next.direction
+  && previous.flipHorizontal === next.flipHorizontal
+  && previous.flipVertical === next.flipVertical
+  && previous.testId === next.testId,
+);
+
+function FloorAccessibleRampArtworkView({
   bounds,
   side,
   selected = false,
@@ -206,3 +227,17 @@ export function FloorAccessibleRampArtwork({
     </g>
   );
 }
+
+export const FloorAccessibleRampArtwork = memo(FloorAccessibleRampArtworkView, (previous, next) =>
+  sameBounds(previous.bounds, next.bounds)
+  && previous.side === next.side
+  && previous.selected === next.selected
+  && previous.routeActive === next.routeActive
+  && previous.routeColor === next.routeColor
+  && previous.direction === next.direction
+  && previous.layout === next.layout
+  && previous.flipHorizontal === next.flipHorizontal
+  && previous.flipVertical === next.flipVertical
+  && previous.rotation === next.rotation
+  && previous.testId === next.testId,
+);

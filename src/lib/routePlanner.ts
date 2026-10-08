@@ -204,6 +204,9 @@ export interface RouteTransitionDetail {
   label: string;
   fromFloorId?: string;
   toFloorId?: string;
+  /** Authored shared shaft identity, when multiple per-Floor nodes represent one elevator. */
+  transitionSharedId?: string;
+  buildingId?: string;
 }
 
 export interface PlannedRoute {
@@ -969,6 +972,8 @@ function authoredRouteContexts(
           label: transitionNode.name || transitionNode.id,
           fromFloorId: fromNode.floorId,
           toFloorId: toNode.floorId,
+          ...(transitionNode.transitionSharedId ? { transitionSharedId: transitionNode.transitionSharedId } : {}),
+          ...(transitionNode.buildingId ? { buildingId: transitionNode.buildingId } : {}),
         });
       }
       current = startContext(toNode);

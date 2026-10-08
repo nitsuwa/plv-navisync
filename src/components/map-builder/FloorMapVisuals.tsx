@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Accessibility as AccessibilityIcon } from "lucide-react";
 import type { FloorDoor, FloorElevatorItem, FloorLabel, FloorPath, FloorRamp, FloorRoom, FloorStairs, FloorWall, FloorWindow } from "./types";
 import { ROOM_MAP } from "./constants";
@@ -12,7 +13,7 @@ export function wallMaterialStyle(material?: string) {
   return { coreOpacity: 1, casingOpacity: 0.85, dash: undefined, casing: "#2f3a46" };
 }
 
-export function WallOpeningSymbol({
+function WallOpeningSymbolView({
   kind,
   width,
   wallThickness,
@@ -183,7 +184,9 @@ function stairArrowHeadPath(direction: "up" | "down", size: number) {
   return `M 0 ${tipY} L ${-halfWidth} ${baseY} L ${halfWidth} ${baseY} Z`;
 }
 
-export function StairsSymbol({
+export const WallOpeningSymbol = memo(WallOpeningSymbolView);
+
+function StairsSymbolView({
   item,
   selected,
   floorIndex,
@@ -350,7 +353,9 @@ export function StairsSymbol({
   );
 }
 
-export function RampSymbol({ item, selected = false }: { item: FloorRamp; selected?: boolean }) {
+export const StairsSymbol = memo(StairsSymbolView);
+
+function RampSymbolView({ item, selected = false }: { item: FloorRamp; selected?: boolean }) {
   const cx = item.x + item.width / 2;
   const cy = item.y + item.height / 2;
   // B5 Phase 2.6: accessibility-sign style — a deep-blue footprint with a LARGE
@@ -388,7 +393,9 @@ export function RampSymbol({ item, selected = false }: { item: FloorRamp; select
   );
 }
 
-export function ElevatorSymbol({ item, selected = false }: { item: FloorElevatorItem; selected?: boolean }) {
+export const RampSymbol = memo(RampSymbolView);
+
+function ElevatorSymbolView({ item, selected = false }: { item: FloorElevatorItem; selected?: boolean }) {
   const stroke = selected ? "var(--accent)" : "#15803d";
   const cx = item.x + item.width / 2;
   const cy = item.y + item.height / 2;
@@ -419,8 +426,10 @@ export function ElevatorSymbol({ item, selected = false }: { item: FloorElevator
   );
 }
 
+export const ElevatorSymbol = memo(ElevatorSymbolView);
+
 /** The authored Floor wall appearance shared by editor and published viewer. */
-export function FloorWallArtwork({ wall, suppressPerimeter = false }: { wall: FloorWall; suppressPerimeter?: boolean }) {
+function FloorWallArtworkView({ wall, suppressPerimeter = false }: { wall: FloorWall; suppressPerimeter?: boolean }) {
   const material = wallMaterialStyle(wall.material);
   const hidden = suppressPerimeter && wall.managedKind === "perimeter";
   return (
@@ -435,8 +444,10 @@ export function FloorWallArtwork({ wall, suppressPerimeter = false }: { wall: Fl
   );
 }
 
+export const FloorWallArtwork = memo(FloorWallArtworkView);
+
 /** Physical room fill shared by the editor and read-only published map. */
-export function FloorRoomArtwork({
+function FloorRoomArtworkView({
   room,
   selected = false,
   overlap = false,
@@ -474,8 +485,10 @@ export function FloorRoomArtwork({
   );
 }
 
+export const FloorRoomArtwork = memo(FloorRoomArtworkView);
+
 /** Room name plaque from the shared authored geometry and wrapping rules. */
-export function FloorRoomLabelArtwork({ room, emphasized = false, studentSelected = false, opacity = 0.78 }: { room: FloorRoom; emphasized?: boolean; studentSelected?: boolean; opacity?: number }) {
+function FloorRoomLabelArtworkView({ room, emphasized = false, studentSelected = false, opacity = 0.78 }: { room: FloorRoom; emphasized?: boolean; studentSelected?: boolean; opacity?: number }) {
   const palette = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
   const points = roomOutlinePoints(room);
   const custom = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3;
@@ -509,24 +522,30 @@ export function FloorRoomLabelArtwork({ room, emphasized = false, studentSelecte
   );
 }
 
+export const FloorRoomLabelArtwork = memo(FloorRoomLabelArtworkView);
+
 /** Authored Floor label text; editor hit/selection controls remain external. */
-export function FloorLabelArtwork({ label }: { label: FloorLabel }) {
+function FloorLabelArtworkView({ label }: { label: FloorLabel }) {
   const anchor = label.align === "center" ? "middle" : label.align === "right" ? "end" : "start";
   return <text data-testid="floor-label-artwork" x={label.x} y={label.y} textAnchor={anchor}
     fill={label.color || "#475569"} fontSize={label.fontSize || 8} fontWeight="600"
     className="pointer-events-none select-none">{label.text}</text>;
 }
 
+export const FloorLabelArtwork = memo(FloorLabelArtworkView);
+
 /** Authored decorative path beneath the navigation graph, shared in both modes. */
-export function FloorPathArtwork({ path }: { path: FloorPath }) {
+function FloorPathArtworkView({ path }: { path: FloorPath }) {
   if (!path.points || path.points.length < 2) return null;
   const points = path.points.map((point) => `${point.x},${point.y}`).join(" ");
   return <polyline points={points} fill="none" stroke={path.color} strokeWidth={path.width}
     strokeLinecap="round" strokeLinejoin="round" opacity={0.8} />;
 }
 
+export const FloorPathArtwork = memo(FloorPathArtworkView);
 
-export function ExteriorEmergencyFloorStairSymbol({ item, selected }: { item: FloorStairs; selected: boolean }) {
+
+function ExteriorEmergencyFloorStairSymbolView({ item, selected }: { item: FloorStairs; selected: boolean }) {
   const edge = item.attachment?.edge ?? "right";
   const stroke = selected ? "var(--accent)" : "#b91c1c";
   const fill = selected ? "rgba(239,246,255,0.94)" : "rgba(255,247,237,0.96)";
@@ -567,6 +586,8 @@ export function ExteriorEmergencyFloorStairSymbol({ item, selected }: { item: Fl
     </g>
   );
 }
+
+export const ExteriorEmergencyFloorStairSymbol = memo(ExteriorEmergencyFloorStairSymbolView);
 
 type ExteriorStairPresentationBounds = { x: number; y: number; width: number; height: number };
 

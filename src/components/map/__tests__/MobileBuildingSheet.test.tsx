@@ -17,15 +17,16 @@ describe("mobile building details sheet", () => {
     expect(heights.peek).toBeLessThan(heights.default);
     expect(heights.default).toBeLessThan(heights.expanded);
     const shortViewport = mobileBuildingSheetSnapHeights(480, 276);
+    expect(shortViewport.peek).toBeGreaterThanOrEqual(164);
     expect(shortViewport.expanded).toBeLessThanOrEqual(276);
     expect(shortViewport.default).toBeLessThanOrEqual(276);
     expect(resolveMobileBuildingSheetSnap("default", -100, 0, heights)).toBe("expanded");
-    expect(resolveMobileBuildingSheetSnap("default", 80, 0, heights)).toBe("peek");
+    expect(resolveMobileBuildingSheetSnap("default", 170, 0, heights)).toBe("peek");
     expect(resolveMobileBuildingSheetSnap("peek", -300, -700, heights)).toBe("default");
     expect(resolveMobileBuildingSheetSnap("default", -300, -700, heights)).toBe("expanded");
   });
 
-  it("opens in the compact default state with image, primary actions, and visible secondary actions", () => {
+  it("opens in a useful medium state with primary actions and reveals full details on expansion", () => {
     render(<MobileBuildingSheet
       selected={building} campusId="campus-1" onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}
       onSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
@@ -91,6 +92,7 @@ describe("mobile building details sheet", () => {
       hasFloorPlans floorPlanCount={6} facilities={[]} accessibility={[]} showQR={false} onToggleQR={vi.fn()}
     />);
     const sheet = screen.getByTestId("mobile-building-sheet");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
     const cover = within(sheet).getByTestId("building-sheet-image");
     const image = within(cover).getByAltText(`${building.name} building`);
     expect(sheet).toHaveAttribute("data-sheet-state", "default");
@@ -123,7 +125,7 @@ describe("mobile building details sheet", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Back to route planner" }));
     expect(onBackToRoutePlanner).toHaveBeenCalledOnce();
-    expect(screen.getByTestId("mobile-building-sheet")).toHaveAttribute("data-sheet-state", "default");
+    expect(screen.getByTestId("mobile-building-sheet")).toHaveAttribute("data-sheet-state", "peek");
   });
 
   it("settles a captured drag after the pointer moves outside the handle", () => {

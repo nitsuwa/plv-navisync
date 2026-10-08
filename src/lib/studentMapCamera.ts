@@ -1,4 +1,4 @@
-import { clampStudentMapZoom, type MapPoint, type MapViewportInsets } from "./mapViewport";
+import { clampStudentMapZoom, STUDENT_MAP_MAX_ZOOM, type MapPoint, type MapViewportInsets } from "./mapViewport";
 
 export interface StudentCameraBounds {
   x: number;
@@ -18,6 +18,8 @@ export interface StudentOverviewCameraOptions {
   contentOffset?: MapPoint;
   /** Fraction of the usable viewport filled by the structural content. */
   fillRatio?: number;
+  /** Context-specific inspection cap. Campus uses the default; Floors may allow more detail. */
+  maxZoom?: number;
 }
 
 export interface StudentOverviewCamera {
@@ -40,6 +42,8 @@ export interface StudentRoomFocusCameraOptions {
   visibleThreshold?: number;
   /** Extra breathing room around the room center in map/viewBox units. */
   comfortMargin?: number;
+  /** Context-specific inspection cap. */
+  maxZoom?: number;
 }
 
 export interface StudentRoomFocusCamera {
@@ -49,10 +53,10 @@ export interface StudentRoomFocusCamera {
   visibleRatio: number;
 }
 
-/** Ease-out used by the short scripted pan when a room needs revealing. */
-export function getStudentRoomFocusProgress(elapsedMs: number, durationMs = 330): number {
+/** Smooth, deliberate ease-in-out used when following a meaningful route step. */
+export function getStudentRoomFocusProgress(elapsedMs: number, durationMs = 800): number {
   const progress = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
-  return 1 - Math.pow(1 - progress, 3);
+  return progress * progress * (3 - 2 * progress);
 }
 
 /**
@@ -69,6 +73,7 @@ export function getStudentOverviewCamera({
   insets,
   contentOffset = { x: 0, y: 0 },
   fillRatio = 0.82,
+  maxZoom = STUDENT_MAP_MAX_ZOOM,
 }: StudentOverviewCameraOptions): StudentOverviewCamera {
   const safeMapWidth = Math.max(1, mapWidth);
   const safeMapHeight = Math.max(1, mapHeight);
@@ -89,7 +94,7 @@ export function getStudentOverviewCamera({
   const zoom = clampStudentMapZoom(Math.min(
     (usableWidth * safeFillRatio) / (baseScale * safeContentWidth),
     (usableHeight * safeFillRatio) / (baseScale * safeContentHeight),
-  ));
+  ), maxZoom);
   const contentCenterX = content.x + safeContentWidth / 2 + contentOffset.x;
   const contentCenterY = content.y + safeContentHeight / 2 + contentOffset.y;
   const targetScreenX = left + usableWidth / 2;
@@ -132,10 +137,11 @@ export function getStudentRoomFocusCamera({
   contentOffset = { x: 0, y: 0 },
   visibleThreshold = 0.9,
   comfortMargin = 14,
+  maxZoom = STUDENT_MAP_MAX_ZOOM,
 }: StudentRoomFocusCameraOptions): StudentRoomFocusCamera {
   const safeMapWidth = Math.max(1, mapWidth);
   const safeMapHeight = Math.max(1, mapHeight);
-  const safeZoom = clampStudentMapZoom(zoom);
+  const safeZoom = clampStudentMapZoom(zoom, maxZoom);
   const left = Math.max(0, insets?.left ?? 0);
   const right = Math.max(0, insets?.right ?? 0);
   const top = Math.max(0, insets?.top ?? 0);

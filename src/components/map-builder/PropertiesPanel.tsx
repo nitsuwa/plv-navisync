@@ -266,7 +266,32 @@ const BuildingDescriptionField = memo(function BuildingDescriptionField({
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+  const draftRef = useRef(value);
+  const persistedValueRef = useRef(value);
+  const committedValueRef = useRef(value);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  useEffect(() => {
+    draftRef.current = value;
+    persistedValueRef.current = value;
+    committedValueRef.current = value;
+    setDraft(value);
+  }, [value]);
+  useEffect(() => () => {
+    // A selection change can unmount the field before a queued React state
+    // update is reflected in `draft`; the ref preserves the last paste/input.
+    if (draftRef.current !== committedValueRef.current) {
+      committedValueRef.current = draftRef.current;
+      onCommitRef.current(draftRef.current);
+    }
+  }, []);
+  const flushDraft = () => {
+    const next = draftRef.current;
+    if (next !== persistedValueRef.current && next !== committedValueRef.current) {
+      committedValueRef.current = next;
+      onCommit(next);
+    }
+  };
 
   return (
     <div>
@@ -278,8 +303,8 @@ const BuildingDescriptionField = memo(function BuildingDescriptionField({
         value={draft}
         rows={3}
         disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => { if (draft !== value) onCommit(draft); }}
+        onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value); }}
+        onBlur={flushDraft}
         placeholder="A short description for students (1–3 sentences)."
         className="w-full resize-none rounded-xl border border-border bg-input-background px-3 py-2 text-xs leading-5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
       />
@@ -995,18 +1020,21 @@ export function PropertiesPanel({
       data-compact-decor-inspector={isCompactDecorInspector || undefined}
       className={cn(
         "absolute top-0 right-0 bottom-0 z-30 flex min-h-0 flex-col border-l border-border shadow-2xl overflow-hidden",
-        isCompactDecorInspector
+        isMultiMode
+          ? "top-3 bottom-auto h-fit max-h-[calc(100%-24px)] w-[min(340px,34vw)] max-[1023px]:w-[min(340px,calc(100vw-24px))]"
+          : isCompactDecorInspector
           ? "w-[320px] max-[1023px]:w-[min(320px,calc(100vw-24px))]"
           : "w-[min(400px,34vw)] max-[1023px]:w-[min(380px,calc(100vw-24px))]",
       )}
       style={{
         background: "var(--card)",
+        height: isMultiMode ? "fit-content" : undefined,
         transform: visible ? "translateX(0)" : "translateX(100%)",
         transition: "transform 0.22s cubic-bezier(0.16,1,0.3,1)",
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+      <div className={cn("flex items-center justify-between border-b border-border shrink-0", isMultiMode ? "px-3 py-2" : "px-4 py-3")}>
         <span className="text-xs font-extrabold uppercase tracking-wide text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
           {isNavMultiMode
             ? `Graph Multi-Select (${multiNavNodeIds.length + multiNavEdgeIds.length})`
@@ -1028,7 +1056,10 @@ export function PropertiesPanel({
       {selBldg && !isMultiMode && <TabBar active={tab} onChange={setTab} />}
 
       {/* Content */}
-      <div data-testid="properties-panel-content" className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-show-on-hover space-y-4", isCompactDecorInspector ? "p-3 space-y-3" : "p-4")}>
+      <div data-testid="properties-panel-content" className={cn(
+        "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-show-on-hover",
+        isMultiMode ? "p-3 space-y-3" : isCompactDecorInspector ? "p-3 space-y-3" : "space-y-4 p-4",
+      )}>
         {/* ── B7 Phase 2: contextual issue guidance for the selected object ── */}
         <ObjectIssueSection items={issueItems} scrollable={false} />
 
@@ -1139,7 +1170,7 @@ export function PropertiesPanel({
               <Layers className="h-3 w-3 text-primary" />
               <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Layer Order</span>
             </div>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-4 gap-1">
               {[
                 { action: "front" as const, label: "Bring to Front", icon: ChevronsUp },
                 { action: "forward" as const, label: "Bring Forward", icon: ChevronUp },
@@ -1151,7 +1182,7 @@ export function PropertiesPanel({
                   title={label}
                   aria-label={label}
                   onClick={() => onLayerOrder?.(action)}
-                  className="flex items-center justify-center h-9 rounded-xl border border-border text-muted-foreground hover:border-muted-foreground/30 hover:bg-muted/30 hover:text-foreground transition-all"
+                  className="flex items-center justify-center h-8 rounded-lg border border-border text-muted-foreground hover:border-muted-foreground/30 hover:bg-muted/30 hover:text-foreground transition-all"
                 >
                   <Icon className="h-3.5 w-3.5" />
                 </button>
@@ -1173,9 +1204,9 @@ export function PropertiesPanel({
               <Info className="h-3 w-3 text-primary" />
               <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Selected Objects</span>
             </div>
-            <div className="space-y-1 max-h-[120px] overflow-y-auto scrollbar-show-on-hover">
+            <div data-testid="multi-select-object-list" className="space-y-1 max-h-[120px] overflow-y-auto overscroll-y-contain scrollbar-show-on-hover">
               {multiSelectedBuildings.map((b) => (
-                <div key={b.id} className="flex items-center gap-2 px-2 py-1 rounded-lg border border-border/50 bg-muted/20">
+                <div key={b.id} data-multi-select-object-row="true" className="flex min-h-7 items-center gap-2 px-2 py-0.5 rounded-lg border border-border/50 bg-muted/20">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.color }} />
                   <span className="text-[10px] font-semibold truncate text-foreground">{b.code} — {b.name}</span>
                 </div>
@@ -1183,7 +1214,7 @@ export function PropertiesPanel({
               {multiSelectedDecorAssets.map((asset) => {
               const template = DECOR_ASSET_MAP[asset.type];
               return (
-                <div key={asset.id} className="flex items-center gap-2 px-2 py-1 rounded-lg border border-border/50 bg-muted/20">
+                <div key={asset.id} data-multi-select-object-row="true" className="flex min-h-7 items-center gap-2 px-2 py-0.5 rounded-lg border border-border/50 bg-muted/20">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500" />
                   <span className="text-[10px] font-semibold truncate text-foreground">{asset.name || template.label}</span>
                 </div>
@@ -1194,6 +1225,7 @@ export function PropertiesPanel({
                   key={path.id}
                   type="button"
                   data-testid="selected-path-member"
+                  data-multi-select-object-row="true"
                   data-path-id={path.id}
                   data-hovered={hoveredPathId === path.id ? "true" : undefined}
                   onMouseEnter={() => onPathHover?.(path.id)}
@@ -1398,7 +1430,7 @@ export function PropertiesPanel({
             )}
 
             {/* Batch Delete */}
-            <div className="pt-3 border-t border-border">
+            <div className={cn("border-t border-border", isMultiMode ? "pt-2" : "pt-3")}>
               <button
                 onClick={() => isPathOnlyMultiMode
                   ? onBatchDeletePaths?.(multiSelectedPaths.map((path) => path.id))
@@ -1407,7 +1439,7 @@ export function PropertiesPanel({
                       id: "batch",
                       label: `${selectedOutdoorCount} objects`,
                     })}
-                className="w-full h-10 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200"
+                className={cn("w-full rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 hover:border-destructive/50 transition-colors duration-200", isMultiMode ? "h-9" : "h-10")}
               >
                 <span className="flex items-center justify-center gap-1.5"><Trash2 className="h-3 w-3" /> Delete All ({selectedOutdoorCount})</span>
               </button>
@@ -1525,12 +1557,12 @@ export function PropertiesPanel({
                       const derived = facilityIsOnAuthoredMap(selBldg, value);
                       const checked = derived || (selBldg.facilities ?? []).includes(value);
                       return (
-                        <label key={value} className={cn("flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] font-semibold leading-snug transition-colors", checked ? "border-primary/25 bg-primary/5 text-foreground" : "border-border/70 bg-card/60 text-muted-foreground hover:border-primary/25", (selBldg.locked || derived) && "cursor-default")} title={derived ? "Detected from authored floor-map data" : undefined}>
+                        <label key={value} className={cn("relative flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] font-semibold leading-snug transition-colors focus-within:ring-2 focus-within:ring-primary/40", checked ? "border-primary/25 bg-primary/5 text-foreground" : "border-border/70 bg-card/60 text-muted-foreground hover:border-primary/25", (selBldg.locked || derived) && "cursor-default")} title={derived ? "Detected from authored floor-map data" : undefined}>
                           <input type="checkbox" checked={checked} disabled={selBldg.locked || derived} onChange={(event) => {
                             const next = new Set(selBldg.facilities ?? []);
                             if (event.target.checked) next.add(value); else next.delete(value);
                             onUpdateBuilding(selBldg.id, { facilities: [...next] });
-                          }} className="sr-only" />
+                          }} className="absolute left-2.5 top-2.5 h-4 w-4 opacity-0" />
                           <CheckCircle2 className={cn("mt-0.5 h-4 w-4 shrink-0", checked ? "text-primary" : "text-muted-foreground/45")} />
                           <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}{derived && <span className="mt-0.5 block text-[9px] font-medium text-muted-foreground">Detected from floor maps</span>}</span>
                         </label>

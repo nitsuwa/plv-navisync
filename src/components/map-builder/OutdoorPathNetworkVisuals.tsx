@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { CampusPath } from "./types";
 import { pathRenderStyle, type OutdoorPathRenderStyle } from "../../lib/outdoorPathVisual";
 export type PathJunctionBranch = PathRenderStyle & {
@@ -344,7 +345,7 @@ export function buildPathNetworkGeometry(paths: CampusPath[]): PathNetworkGeomet
 
 
 /** Shared static physical path network renderer used by Admin and viewer. */
-export function OutdoorPathJunctionArtwork({ junctions }: { junctions: Map<string, PathJunctionInfo> }) {
+export const OutdoorPathJunctionArtwork = memo(function OutdoorPathJunctionArtwork({ junctions }: { junctions: Map<string, PathJunctionInfo> }) {
   return (
     <g data-testid="path-junction-layer" className="pointer-events-none">
       {Array.from(junctions.entries()).map(([key, junction]) => {
@@ -363,7 +364,7 @@ export function OutdoorPathJunctionArtwork({ junctions }: { junctions: Map<strin
       })}
     </g>
   );
-}
+});
 
 export function OutdoorPathNetworkArtwork({ paths }: { paths: readonly CampusPath[] }) {
   const geometry = buildPathNetworkGeometry([...paths]);
