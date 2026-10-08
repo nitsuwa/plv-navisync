@@ -60,7 +60,6 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/locations":      "Campus Locations",
   "/admin-dashboard/accessibility":  "Accessibility",
   "/admin-dashboard/events":         "Event Maps",
-  "/admin-dashboard/event-layouts":  "Event Layouts",
 };
 
 export function AdminLayout() {
