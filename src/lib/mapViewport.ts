@@ -2,12 +2,15 @@
 // wheel/trackpad users can inspect the whole scene with surrounding context.
 export const STUDENT_MAP_MIN_ZOOM = 0.5;
 export const STUDENT_MAP_MAX_ZOOM = 3.5;
+/** Floor plans need additional inspection range while Campus retains its overview-focused cap. */
+export const STUDENT_FLOOR_MAP_MAX_ZOOM = 5;
 export const STUDENT_MAP_ZOOM_STEP = 0.2;
 
 /** Keep every student-map zoom input inside one predictable, readable range. */
-export function clampStudentMapZoom(value: number): number {
+export function clampStudentMapZoom(value: number, maximum = STUDENT_MAP_MAX_ZOOM): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.max(STUDENT_MAP_MIN_ZOOM, Math.min(STUDENT_MAP_MAX_ZOOM, value));
+  const safeMaximum = Math.max(STUDENT_MAP_MIN_ZOOM, Number.isFinite(maximum) ? maximum : STUDENT_MAP_MAX_ZOOM);
+  return Math.max(STUDENT_MAP_MIN_ZOOM, Math.min(safeMaximum, value));
 }
 
 /** Time-based exponential camera damping, independent of display refresh rate. */

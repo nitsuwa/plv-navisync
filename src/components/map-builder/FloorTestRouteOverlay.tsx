@@ -101,17 +101,6 @@ export const FloorTestRouteOverlay = memo(function FloorTestRouteOverlay({
       >
         <animate attributeName="stroke-dashoffset" from="0" to="-40" dur="1.2s" repeatCount="indefinite" />
       </path>
-      {geometry.arrowPath && (
-        <path
-          d={geometry.arrowPath}
-          fill={route.color}
-          stroke="white"
-          strokeWidth={1}
-          strokeLinejoin="round"
-          data-testid="floor-test-route-direction-arrows"
-          data-arrow-count={geometry.arrowCount}
-        />
-      )}
     </g>
   );
 });

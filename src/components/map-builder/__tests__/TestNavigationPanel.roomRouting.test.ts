@@ -1529,6 +1529,14 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     expect(screen.getByTestId("test-route-continuation-indicator")).toHaveAttribute("aria-label", "Continue inside via entrance");
     const inboundTransitions = routeTransitionMarkers(inbound, campus, { kind: "outdoor" });
     expect(presentationRouteTransitionMarkers(inboundTransitions, campus, { kind: "outdoor" }, [inboundMarker])).toEqual([]);
+
+    const floorContext = { kind: "floor" as const, buildingId: "b1", floorId: "f1" };
+    const outboundTransitions = routeTransitionMarkers(outbound, campus, floorContext, undefined, "standard");
+    expect(outboundTransitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "entrance", instruction: "Exit Building", targetContext: expect.objectContaining({ kind: "outdoor" }) }),
+    ]));
+    expect(presentationRouteTransitionMarkers(outboundTransitions, campus, floorContext, [], undefined))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ kind: "entrance", instruction: "Exit Building" })]));
     expect(campus.navNodes).toEqual(originalNodes);
     expect(campus.navEdges).toEqual(originalEdges);
   });

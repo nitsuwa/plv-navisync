@@ -8,12 +8,32 @@ import {
   normalizeFloor,
   normalizeFloors,
   normalizeRoomAccessDoors,
+  reuseUnchangedFloorObjectReferences,
 } from "../floorPlanNormalization";
 import type { FloorPlan } from "../../components/map-builder/types";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe("floorPlanNormalization", () => {
+  it("preserves unchanged object identities after normalizing an edited Floor", () => {
+    const firstRoom = { id: "room-a", name: "A", type: "classroom" as const, x: 10, y: 20, w: 30, h: 25, buildingId: "b1", floorId: "f1" };
+    const secondRoom = { ...firstRoom, id: "room-b", x: 80 };
+    const previous = normalizeFloor({
+      ...createDefaultFloor({ id: "f1", buildingId: "b1", number: 1 }),
+      rooms: [firstRoom, secondRoom],
+    }, { buildingId: "b1" });
+    const normalized = normalizeFloor({
+      ...previous,
+      rooms: [{ ...previous.rooms[0], x: 11 }, previous.rooms[1]],
+    }, { buildingId: "b1" });
+    const stable = reuseUnchangedFloorObjectReferences(previous, normalized);
+
+    expect(stable.rooms[0]).not.toBe(previous.rooms[0]);
+    expect(stable.rooms[1]).toBe(previous.rooms[1]);
+    expect(stable.walls).toBe(previous.walls);
+    expect(stable.doors).toBe(previous.doors);
+  });
+
   it("drops stale Room Door IDs and canonicalizes the surviving same-Floor link", () => {
     const sourceRoom = {
       id: "r-lab", name: "Fluid Mechanics Laboratory", type: "laboratory", x: 0, y: 0, w: 100, h: 80,

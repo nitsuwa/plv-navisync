@@ -7,7 +7,7 @@
  * simplified legacy room-only format.
  */
 
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import type {
   FloorPlan,
   FloorRoom,
@@ -32,7 +32,9 @@ import { getFloorShapeBounds, getFloorShapeRegions } from "../../lib/floorShape"
 import { FloorFurnitureSymbol } from "./FloorFurnitureSymbol";
 import { ElevatorSymbol, FloorLabelArtwork, FloorPathArtwork, FloorRoomArtwork, FloorRoomLabelArtwork, FloorWallArtwork, RampSymbol, StairsSymbol, WallOpeningSymbol } from "./FloorMapVisuals";
 import { resolveWallOpeningGeometry } from "../../lib/floorGeometry";
-import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
+import { EntranceDirectionBadge, entranceDirectionBadgePlacement, studentDoorwayActionLabelPlacement, studentDoorwayActionLabelSize } from "./EntranceDirectionBadge";
+import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
+import { normalizeEntranceDirection, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { ExteriorEmergencyFloorModule, exteriorStairPresentationBounds } from "./ExteriorEmergencyFloorModule";
 import {
   exteriorZoneAccessFeatureGeometry,
@@ -231,6 +233,19 @@ function RoomSelectionOverlay({ room }: { room: FloorRoom }) {
   );
 }
 
+function RoomPickTargetOverlay({ room }: { room: FloorRoom }) {
+  const points = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3 ? roomOutlinePoints(room) : null;
+  const rotation = room.rotation ?? 0;
+  const transform = points ? undefined : `rotate(${rotation}, ${room.x + room.w / 2}, ${room.y + room.h / 2})`;
+  return (
+    <g data-testid="student-map-pick-room-target" data-room-id={room.id} pointerEvents="none" aria-hidden="true" transform={transform}>
+      {points
+        ? <path d={roomShapePath(points)} fill="rgba(37,99,235,0.035)" stroke="#60a5fa" strokeWidth={2} strokeDasharray="6 4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        : <rect x={room.x} y={room.y} width={room.w} height={room.h} rx={1} fill="rgba(37,99,235,0.035)" stroke="#60a5fa" strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />}
+    </g>
+  );
+}
+
 // ── Wall rendering ──────────────────────────────────────────────────────────
 
 const WallVisual = memo(function WallVisual({ wall }: { wall: FloorWall }) {
@@ -253,7 +268,7 @@ function openingTransform(opening: FloorDoor | FloorWindow, wall?: FloorWall) {
   return { geometry, transform: `translate(${geometry.x},${geometry.y}) rotate(${geometry.angle})${side}` };
 }
 
-const DoorVisual = memo(function DoorVisual({ door, wall, entrances, onClick, background, interactiveExit }: { door: FloorDoor; wall?: FloorWall; entrances: ReadonlyMap<string, CampusEntrance>; onClick?: (doorId: string) => void; background: string; interactiveExit?: boolean }) {
+const DoorVisual = memo(function DoorVisual({ door, wall, entrances, onClick, onEmphasisChange, background, interactiveExit, compactExitAction = false, routeRelevant = false, active = false, suppressActiveAction = false, reducedMotion = false, overviewDuplicate = false, showActionLabel = true }: { door: FloorDoor; wall?: FloorWall; entrances: ReadonlyMap<string, CampusEntrance>; onClick?: (doorId: string) => void; onEmphasisChange?: (doorId: string | null) => void; background: string; interactiveExit?: boolean; compactExitAction?: boolean; routeRelevant?: boolean; active?: boolean; suppressActiveAction?: boolean; reducedMotion?: boolean; overviewDuplicate?: boolean; showActionLabel?: boolean }) {
   const [emphasized, setEmphasized] = useState(false);
   if (door.visible === false) return null;
   const { geometry, transform } = openingTransform(door, wall);
@@ -270,40 +285,69 @@ const DoorVisual = memo(function DoorVisual({ door, wall, entrances, onClick, ba
     : `translate(${-door.x},${-door.y})`;
   return (
     <g data-testid="readonly-door" data-opening-type={door.openingType ?? "door"} data-door-id={door.id}
+      className={compactExitAction && exitCanBeActivated ? "student-map-doorway-action" : undefined}
       role={exitCanBeActivated ? "button" : undefined}
       tabIndex={exitCanBeActivated ? 0 : undefined}
-      aria-label={exitCanBeActivated ? "Exit to campus view" : undefined}
+      aria-label={exitCanBeActivated ? "Exit to Campus" : undefined}
       onKeyDown={exitCanBeActivated ? (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         event.stopPropagation();
         onClick?.(door.id);
       } : undefined}
-      onFocus={exitCanBeActivated ? () => setEmphasized(true) : undefined}
-      onBlur={exitCanBeActivated ? () => setEmphasized(false) : undefined}
-      onMouseEnter={exitCanBeActivated ? () => setEmphasized(true) : undefined}
-      onMouseLeave={exitCanBeActivated ? () => setEmphasized(false) : undefined}
+      onFocus={exitCanBeActivated ? () => { setEmphasized(true); onEmphasisChange?.(door.id); } : undefined}
+      onBlur={exitCanBeActivated ? () => { setEmphasized(false); onEmphasisChange?.(null); } : undefined}
+      onMouseEnter={exitCanBeActivated ? () => { setEmphasized(true); onEmphasisChange?.(door.id); } : undefined}
+      onMouseLeave={exitCanBeActivated ? () => { setEmphasized(false); onEmphasisChange?.(null); } : undefined}
       transform={transform} style={{ cursor: onClick ? "pointer" : undefined }}
       onClick={onClick ? (event) => { event.stopPropagation(); onClick(door.id); } : undefined}>
       {exitCanBeActivated && (
-        <rect data-testid="readonly-exit-door-hit-target" x={-Math.max(width, 40) / 2} y={-18}
-          width={Math.max(width, 40)} height={36} fill="transparent" pointerEvents="all" />
+      <rect data-testid="readonly-exit-door-hit-target" x={-Math.max(width, 48) / 2} y={-24}
+          width={Math.max(width, 48)} height={48} fill="transparent" pointerEvents="all" />
       )}
       <WallOpeningSymbol kind={door.openingType === "open_passage" ? "open_passage" : "door"}
         width={width} wallThickness={wallThickness} color={door.color} background={background}
         direction={door.direction} doorType={door.doorType} hinge={door.hinge} swingSide={swingSide} testIdPrefix="readonly-" />
-      {entrance && <g transform={badgeInverseTransform}><EntranceDirectionBadge x={geometry?.x ?? door.x} y={geometry?.y ?? door.y}
-        edge={entrance.edge} direction={entrance.direction} type={entrance.type} /></g>}
-      {exitCanBeActivated && entranceBadgePoint && (
+      {entrance && <g data-testid={compactExitAction ? "student-exit-campus-indicator" : undefined} transform={badgeInverseTransform}>
+        {!suppressActiveAction && <EntranceDirectionBadge x={geometry?.x ?? door.x} y={geometry?.y ?? door.y}
+          edge={entrance.edge} direction={entrance.direction} type={entrance.type}
+          routeRelevant={compactExitAction && routeRelevant}
+          active={compactExitAction && active}
+          emphasized={emphasized}
+          pressableDirection={compactExitAction && exitCanBeActivated
+            && normalizeEntranceType(entrance.type) !== "emergency_exit"
+            && normalizeEntranceDirection(entrance) !== "entrance_only" ? "exit" : undefined}
+          activeDirection={compactExitAction && active ? "exit" : undefined}
+          screenConsistent={compactExitAction}
+          interactiveHitTarget={compactExitAction && exitCanBeActivated}
+          overviewDuplicate={compactExitAction && overviewDuplicate}
+          actionLabel={compactExitAction && exitCanBeActivated ? "Exit" : undefined}
+          expandedActionLabel={compactExitAction && exitCanBeActivated ? "Exit to Campus" : undefined}
+          showActionLabel={showActionLabel}
+          reducedMotion={reducedMotion}
+          testId={compactExitAction ? "student-exit-campus-arrow" : undefined}
+        />}
+        {compactExitAction && <title>Exit to Campus</title>}
+      </g>}
+      {exitCanBeActivated && entranceBadgePoint && !compactExitAction && (
         <g data-testid="student-exit-campus-indicator" transform={badgeInverseTransform} pointerEvents="all">
           {emphasized && <circle cx={entranceBadgePoint.x} cy={entranceBadgePoint.y} r={10.5} fill="#60a5fa" opacity={0.32} />}
           <g transform={`translate(${entranceBadgePoint.x + 9},${entranceBadgePoint.y - 9})`}>
-            <rect data-testid="readonly-exit-indicator-hit-target" x={-3} y={-13} width={82} height={44}
+            <rect data-testid="readonly-exit-indicator-hit-target" x={-8} y={-13} width={compactExitAction ? (emphasized ? 88 : 28) : 82} height={44}
               rx={12} fill="transparent" pointerEvents="all" />
-            <rect data-testid="student-exit-campus-pill" width={76} height={18} rx={9} fill={emphasized ? "#dbeafe" : "#eff6ff"}
-              stroke={emphasized ? "#1d4ed8" : "#3b82f6"} strokeWidth={emphasized ? 1.4 : 1} />
-            <path d="M5.5 12.5 12 6m-5.5 0H12v5.5" fill="none" stroke="#1e40af" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
-            <text x={16} y={11.8} fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">Exit to Campus</text>
+            {compactExitAction && !emphasized ? (
+              <g data-testid="student-exit-campus-icon">
+                <circle cx={2} cy={0} r={8} fill="#eff6ff" stroke="#3b82f6" strokeWidth={1} />
+                <path d="M-1 3 4 -2m-4 0h4v4" fill="none" stroke="#1e40af" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+            ) : (
+              <g data-testid="student-exit-campus-pill-group">
+                <rect data-testid="student-exit-campus-pill" width={76} height={18} rx={9} fill={emphasized ? "#dbeafe" : "#eff6ff"}
+                  stroke={emphasized ? "#1d4ed8" : "#3b82f6"} strokeWidth={emphasized ? 1.4 : 1} />
+                <path d="M5.5 12.5 12 6m-5.5 0H12v5.5" fill="none" stroke="#1e40af" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+                <text x={16} y={11.8} fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">Exit to Campus</text>
+              </g>
+            )}
           </g>
           <title>Exit to Campus — return to the outdoor map</title>
         </g>
@@ -342,7 +386,7 @@ const StairsVisual = memo(function StairsVisual({ stairs, floorIndex, floorCount
       transform={generatedExteriorStair ? undefined : `rotate(${stairs.rotation ?? 0},${cx},${cy})`}>
       {generatedExteriorStair
         ? <ExteriorEmergencyFloorModule item={stairs} canvasW={canvasW} canvasH={canvasH} visualSize={owner?.visualSize} selected={false} interactive={false} />
-        : <StairsSymbol item={stairs} floorIndex={floorIndex} floorCount={floorCount} />}
+        : <StairsSymbol item={stairs} selected={false} floorIndex={floorIndex} floorCount={floorCount} />}
     </g>
   );
 });
@@ -407,6 +451,8 @@ const RoomLabelVisual = memo(function RoomLabelVisual({ room, hovered, highlight
 });
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;
+  /** Student route stroke sits above authored floor artwork and below opening/transition markers. */
+  routeOverlay?: ReactNode;
   exteriorEmergencyStairs?: readonly ExteriorEmergencyStair[];
   floorIndex?: number;
   floorCount?: number;
@@ -415,6 +461,15 @@ export interface ReadonlyFloorPlanSceneProps {
   entrances?: readonly CampusEntrance[];
   /** Door IDs that have a working indoor-to-campus transition in the published graph. */
   interactiveExitDoorIds?: ReadonlySet<string>;
+  /** Student maps keep exit actions icon-only until hover/focus, matching outdoor entrances. */
+  compactExitActions?: boolean;
+  routeRelevantExitDoorIds?: ReadonlySet<string>;
+  activeExitDoorId?: string | null;
+  /** Hide the passive arrow while an active route exit control owns the door. */
+  suppressActiveExitDoorId?: string | null;
+  reducedMotion?: boolean;
+  /** Outline only authored-navigation rooms while Student map-pick is active. */
+  mapPickActive?: boolean;
   mapMode?: "standard" | "accessible" | "emergency";
   showLabels?: boolean;
   highlightedRoomId?: string | null;
@@ -435,11 +490,18 @@ export interface ReadonlyFloorPlanSceneProps {
  */
 export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
   floor,
+  routeOverlay,
   exteriorEmergencyStairs = [],
   floorIndex = 0,
   floorCount = 1,
   entrances = [],
   interactiveExitDoorIds,
+  compactExitActions = false,
+  routeRelevantExitDoorIds,
+  activeExitDoorId,
+  suppressActiveExitDoorId,
+  reducedMotion = false,
+  mapPickActive = false,
   mapMode = "standard",
   showLabels = true,
   highlightedRoomId,
@@ -450,6 +512,7 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
   onRoomHoverEnd,
   onDoorClick,
 }: ReadonlyFloorPlanSceneProps) {
+  const [hoveredExitDoorId, setHoveredExitDoorId] = useState<string | null>(null);
   const canvasW = floor.canvasW || 440;
   const canvasH = floor.canvasH || 290;
   const floorShapeRegions = useMemo(() => getFloorShapeRegions(floor), [floor]);
@@ -485,6 +548,49 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
   const exteriorZoneById = useMemo(() => new Map(exteriorZones.map((zone) => [zone.id, zone])), [exteriorZones]);
   const entranceById = useMemo(() => new Map(entrances.map((entrance) => [entrance.id, entrance])), [entrances]);
   const wallById = useMemo(() => new Map((floor.walls || []).map((wall) => [wall.id, wall])), [floor.walls]);
+  const overviewDuplicateDoorIds = useMemo(() => !compactExitActions ? new Set<string>() : studentOverviewDuplicateIds(visibleDoors.flatMap((door) => {
+    const entrance = door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined;
+    if (!entrance) return [];
+    const { geometry } = openingTransform(door, door.wallId ? wallById.get(door.wallId) : undefined);
+    return [{ id: door.id, x: geometry?.x ?? door.x, y: geometry?.y ?? door.y, direction: normalizeEntranceDirection(entrance) }];
+  }), activeExitDoorId), [activeExitDoorId, compactExitActions, entranceById, visibleDoors, wallById]);
+  const visibleExitActionLabelDoorIds = useMemo(() => {
+    if (!compactExitActions) return new Set<string>();
+    const candidates = visibleDoors.flatMap((door) => {
+      if (!interactiveExitDoorIds?.has(door.id) || door.id === suppressActiveExitDoorId) return [];
+      const entrance = door.buildingEntranceId ? entranceById.get(door.buildingEntranceId) : undefined;
+      if (!entrance || normalizeEntranceType(entrance.type) === "emergency_exit"
+        || normalizeEntranceDirection(entrance) === "entrance_only") return [];
+      const { geometry } = openingTransform(door, door.wallId ? wallById.get(door.wallId) : undefined);
+      const badge = entranceDirectionBadgePlacement(geometry?.x ?? door.x, geometry?.y ?? door.y, entrance.edge);
+      const expanded = door.id === activeExitDoorId || door.id === hoveredExitDoorId;
+      const { width, height } = studentDoorwayActionLabelSize(expanded ? "Exit to Campus" : "Exit");
+      const label = studentDoorwayActionLabelPlacement(badge.angle, width, height);
+      const centerX = badge.x + label.screenX;
+      const centerY = badge.y + label.screenY;
+      return [{
+        id: door.id,
+        primary: Boolean(entrance.isPrimary),
+        bounds: { left: centerX - width / 2, right: centerX + width / 2, top: centerY - height / 2, bottom: centerY + height / 2 },
+        icon: { left: badge.x - 11, right: badge.x + 11, top: badge.y - 11, bottom: badge.y + 11 },
+      }];
+    }).sort((a, b) => Number(b.id === activeExitDoorId) - Number(a.id === activeExitDoorId)
+      || Number(b.id === hoveredExitDoorId) - Number(a.id === hoveredExitDoorId)
+      || Number(b.primary) - Number(a.primary));
+    const visible = new Set<string>();
+    const placed: Array<(typeof candidates)[number]["bounds"]> = [];
+    for (const candidate of candidates) {
+      const coversOtherIcon = candidates.some((other) => other.id !== candidate.id
+        && candidate.bounds.left < other.icon.right && candidate.bounds.right > other.icon.left
+        && candidate.bounds.top < other.icon.bottom && candidate.bounds.bottom > other.icon.top);
+      if (coversOtherIcon) continue;
+      if (placed.some((bounds) => candidate.bounds.left < bounds.right && candidate.bounds.right > bounds.left
+        && candidate.bounds.top < bounds.bottom && candidate.bounds.bottom > bounds.top)) continue;
+      visible.add(candidate.id);
+      placed.push(candidate.bounds);
+    }
+    return visible;
+  }, [activeExitDoorId, compactExitActions, entranceById, hoveredExitDoorId, interactiveExitDoorIds, suppressActiveExitDoorId, visibleDoors, wallById]);
 
   return (
     <g data-testid="readonly-floor-plan-scene">
@@ -604,6 +710,9 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
       {sortedRooms.filter((room) => room.id === selectableHighlightedRoomId).map((room) => (
         <RoomSelectionOverlay key={`readonly-room-selection-${room.id}`} room={room} />
       ))}
+      {mapPickActive && interactiveRoomIds && sortedRooms.filter((room) => interactiveRoomIds.has(room.id) && room.id !== selectableHighlightedRoomId).map((room) => (
+        <RoomPickTargetOverlay key={`readonly-room-pick-target-${room.id}`} room={room} />
+      ))}
 
       {/* Furniture remains in its own local ordering band below architecture. */}
       <g data-semantic-layer="furniture">
@@ -619,7 +728,9 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
         ))}
       </g>
 
-      <g data-semantic-layer="openings">
+      {routeOverlay}
+
+      <g data-semantic-layer="openings" data-student-marker-layer={compactExitActions ? "floor-exits" : undefined}>
         {visibleWindows.map((win) => (
           <WindowVisual key={win.id} window={win} wall={win.wallId ? wallById.get(win.wallId) : undefined} background={floor.backgroundColor ?? "#e8e1d7"} />
         ))}
@@ -631,7 +742,15 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
             entrances={entranceById}
             background={floor.backgroundColor ?? "#e8e1d7"}
             onClick={onDoorClick}
+            onEmphasisChange={setHoveredExitDoorId}
             interactiveExit={interactiveExitDoorIds?.has(door.id)}
+            compactExitAction={compactExitActions}
+            routeRelevant={routeRelevantExitDoorIds?.has(door.id)}
+            active={activeExitDoorId === door.id}
+            suppressActiveAction={suppressActiveExitDoorId === door.id}
+            overviewDuplicate={overviewDuplicateDoorIds.has(door.id)}
+            showActionLabel={visibleExitActionLabelDoorIds.has(door.id) && !overviewDuplicateDoorIds.has(door.id)}
+            reducedMotion={reducedMotion}
           />
         ))}
       </g>

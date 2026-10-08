@@ -36,8 +36,8 @@ interface MobileBuildingSheetProps {
 }
 
 const HEIGHTS: Record<MobileBuildingSheetState, string> = {
-  peek: "clamp(220px, 35dvh, 270px)",
-  default: "clamp(330px, 56dvh, 410px)",
+  peek: "clamp(164px, 21dvh, 176px)",
+  default: "clamp(290px, 46dvh, 370px)",
   expanded: "min(66dvh, 620px)",
 };
 const STATES: MobileBuildingSheetState[] = ["peek", "default", "expanded"];
@@ -47,8 +47,8 @@ export function mobileBuildingSheetSnapHeights(
   availableHeight = viewportHeight - 84,
 ): Record<MobileBuildingSheetState, number> {
   availableHeight = Math.max(0, Math.min(viewportHeight, availableHeight));
-  const peek = Math.min(availableHeight, Math.max(220, Math.min(viewportHeight * 0.35, 270)));
-  const defaultHeight = Math.min(availableHeight, Math.max(peek + 48, Math.max(330, Math.min(viewportHeight * 0.56, 410))));
+  const peek = Math.min(availableHeight, Math.max(164, Math.min(viewportHeight * 0.21, 176)));
+  const defaultHeight = Math.min(availableHeight, Math.max(peek + 48, Math.max(290, Math.min(viewportHeight * 0.46, 370))));
   const expanded = Math.min(availableHeight, 620, Math.max(defaultHeight, viewportHeight * 0.66));
   return { peek, default: defaultHeight, expanded };
 }
@@ -93,6 +93,7 @@ export function MobileBuildingSheet({
   const handleMovedRef = useRef(false);
   const reducedMotion = useReducedMotion();
   const [sheetState, setSheetState] = useState<MobileBuildingSheetState>("default");
+  const sheetStateRef = useRef<MobileBuildingSheetState>("default");
   const [isDragging, setIsDragging] = useState(false);
   const dragY = useMotionValue(0);
   const sheetOpacity = useTransform(dragY, [-100, 0, 100], [0.985, 1, 0.985]);
@@ -111,6 +112,8 @@ export function MobileBuildingSheet({
   }, []);
 
   const setState = useCallback((value: MobileBuildingSheetState) => {
+    if (sheetStateRef.current === value) return;
+    sheetStateRef.current = value;
     setSheetState(value);
     onStateChange?.(value);
   }, [onStateChange]);
@@ -224,11 +227,11 @@ export function MobileBuildingSheet({
       data-sheet-state={sheetState}
       data-dragging={isDragging}
       data-interaction-paused={interactionPaused}
-      className="map-layer-building-sheet md:hidden fixed inset-x-3 will-change-transform transition-[height] duration-[200ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none landscape-minimized"
+      className="map-layer-building-sheet md:hidden fixed inset-x-3 flex flex-col overflow-hidden rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl will-change-transform transition-[height] duration-[200ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none landscape-minimized"
       style={{
         bottom: "calc(4.75rem + env(safe-area-inset-bottom, 0px))",
         height: HEIGHTS[sheetState],
-        maxHeight: "min(calc(100dvh - 5.25rem - env(safe-area-inset-bottom, 0px)), calc(100dvh - var(--student-map-controls-safe-top, 4.25rem) - 8.5rem - env(safe-area-inset-bottom, 0px)))",
+        maxHeight: "var(--student-map-mobile-panel-max-height, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px)))",
         y: dragY,
         opacity: sheetOpacity,
       }}
@@ -237,21 +240,14 @@ export function MobileBuildingSheet({
       exit={reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 }}
       transition={reducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
     >
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close building details"
-        className="absolute right-3 top-3 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full bg-card/90 text-muted-foreground shadow-sm transition hover:bg-muted hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <X className="h-4 w-4" />
-      </button>
-      <div className="flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl scrollbar-show-on-hover" style={{ WebkitOverflowScrolling: "touch" }}>
+      <div className="grid h-11 shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b border-border/50 bg-card/95 px-2 backdrop-blur-xl">
+        <span aria-hidden="true" />
         <button
           type="button"
           aria-expanded={sheetState === "expanded"}
           aria-disabled={interactionPaused}
           aria-label={sheetState === "expanded" ? "Collapse building details" : sheetState === "peek" ? "Show building details" : "Expand building details"}
-          className="flex h-7 shrink-0 touch-none cursor-grab items-center justify-center active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          className="flex h-11 min-w-0 touch-none cursor-grab items-center justify-center active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={(event) => finishGesture(false, event.pointerId, event.clientY)}
@@ -268,12 +264,14 @@ export function MobileBuildingSheet({
         >
           <span className="h-1 w-9 rounded-full bg-muted-foreground/25" />
         </button>
+        <button type="button" onClick={onClose} aria-label="Close building details" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"><X className="h-4 w-4" /></button>
+      </div>
 
         {onBackToRoutePlanner && (
           <div className="shrink-0 px-3 pb-1">
             <button
               type="button"
-              onClick={onBackToRoutePlanner}
+              onClick={() => { setState("peek"); onBackToRoutePlanner(); }}
               aria-label="Back to route planner"
               className="inline-flex min-h-7 items-center gap-1 rounded-lg px-2 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
@@ -283,6 +281,7 @@ export function MobileBuildingSheet({
           </div>
         )}
 
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover" style={{ WebkitOverflowScrolling: "touch" }}>
         {sheetState !== "peek" && (
           <div data-testid="building-sheet-image" data-building-sheet-image className={`mx-3 shrink-0 overflow-hidden rounded-2xl transition-[height] duration-200 motion-reduce:transition-none ${sheetState === "expanded" ? "h-[160px]" : "h-[96px]"}`}>
             <BuildingCover imageUrl={selected.image_url} code={selected.code} name={selected.name} className="h-full aspect-auto rounded-2xl" />
@@ -327,7 +326,7 @@ export function MobileBuildingSheet({
         )}
 
         {sheetState === "expanded" && (
-          <div className="shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="px-4 pb-4 pt-2">
             <BuildingDetailsSections
               building={selected}
               facilities={facilities}
@@ -338,6 +337,23 @@ export function MobileBuildingSheet({
             />
           </div>
         )}
+      </div>
+      <div className={`z-10 shrink-0 border-t border-border/50 bg-card/95 px-3 pt-2 backdrop-blur-xl ${sheetState === "peek" ? "pb-3" : "pb-[max(.5rem,env(safe-area-inset-bottom,0px))]"}`}>
+        <BuildingDetailsActions
+          building={selected}
+          campusId={campusId}
+          hasFloorPlans={hasFloorPlans}
+          saved={saved}
+          studentAuth={studentAuth}
+          showQR={showQR}
+          showSecondaryActions={sheetState !== "peek"}
+          onDirections={onDirections}
+          onEnterBuilding={onEnterBuilding}
+          onSave={onSave}
+          onReport={onReport}
+          onSignInPrompt={onSignInPrompt}
+          onToggleQR={onToggleQR}
+        />
       </div>
     </motion.div>
   );

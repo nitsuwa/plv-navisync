@@ -375,6 +375,76 @@ type OptionEntry = {
   kindLabel?: string;
 };
 
+type SharedTestRouteGraph = {
+  routeCampus: Campus;
+  nodes: NavigationNode[];
+  edges: NavigationEdge[];
+  routineGraph: ReturnType<typeof routineRouteGraph>;
+  preparedRoutineGraph: PreparedNavigationGraph;
+  graphRevision: string;
+  startOptions: OptionEntry[];
+  destOptions: OptionEntry[];
+};
+
+type SharedTestRouteCampusData = {
+  routeCampus: Campus;
+  nodes: NavigationNode[];
+  edges: NavigationEdge[];
+  graphRevision: string;
+  startOptions: OptionEntry[];
+  destOptions: OptionEntry[];
+  byMode: Map<RouteMode, SharedTestRouteGraph>;
+};
+
+// Desktop and mobile Test Route cards intentionally coexist for responsive
+// layout. They receive the same immutable Campus, so share the expensive
+// Campus-scoped graph, route options, and prepared search indexes across both
+// instances instead of rebuilding the same data twice.
+const testRouteCampusDataCache = new WeakMap<Campus, SharedTestRouteCampusData>();
+
+function sharedTestRouteGraph(campus: Campus, routeMode: RouteMode): SharedTestRouteGraph {
+  let campusData = testRouteCampusDataCache.get(campus);
+  if (!campusData) {
+    const routeCampus = reconcileExteriorApproachNavigation(campus);
+    const nodes = routeCampus.navNodes ?? [];
+    const edges = buildTestRouteEdges(routeCampus, { exteriorApproachReconciled: true });
+    const buildings = campus.buildings ?? [];
+    const graphRevision = JSON.stringify({
+      nodes: nodes.map((node) => [node.id, node.x, node.y, node.floorId, node.buildingId, node.doorId, node.roomId]),
+      edges: edges.map((edge) => [edge.id, edge.startNodeId, edge.endNodeId, edge.bidirectional, edge.closed, edge.accessible, edge.emergencySafe, edge.bendPoints ?? []]),
+      rooms: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.rooms ?? []).map((room) => [room.id, room.accessDoorId, room.accessDoorIds ?? []]))),
+      doors: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.doors ?? []).map((door) => [door.id, door.x, door.y, door.offset, door.width, door.wallId]))),
+      walls: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.walls ?? []).map((wall) => [wall.id, wall.x1, wall.y1, wall.x2, wall.y2, wall.thickness]))),
+      // Outdoor Building footprints are authoritative route obstacles. Include
+      // their geometry in the live revision so moving a Building revalidates an
+      // active route just like moving an indoor Wall or Walking Point does.
+      buildingObstacles: buildings.map((building) => [building.id, building.x, building.y, building.width, building.height, building.rotation ?? 0]),
+    });
+    campusData = {
+      routeCampus,
+      nodes,
+      edges,
+      graphRevision,
+      startOptions: buildStartOptions(campus, edges),
+      destOptions: buildDestinationOptions(campus, edges),
+      byMode: new Map(),
+    };
+    testRouteCampusDataCache.set(campus, campusData);
+  }
+
+  let graph = campusData.byMode.get(routeMode);
+  if (!graph) {
+    const routineGraph = routineRouteGraph(campusData.routeCampus, campusData.nodes, campusData.edges, routeMode, true);
+    graph = {
+      ...campusData,
+      routineGraph,
+      preparedRoutineGraph: prepareNavigationGraph(routineGraph.nodes, routineGraph.edges),
+    };
+    campusData.byMode.set(routeMode, graph);
+  }
+  return graph;
+}
+
 /** Presentation-only labels for the small active-route HUD. Stored names and
  * the full picker remain unchanged; the compact endpoint spans use CSS
  * ellipsis while the Tooltip keeps the complete semantic label available. */
@@ -3133,12 +3203,15 @@ export function presentationRouteTransitionMarkers(
   continuationMarkers: TestRouteContinuationMarker[],
   destinationValue?: string,
 ): TestRouteTransitionMarker[] {
-  const buildingDestination = destinationValue?.startsWith("building:");
-  // Keep cross-floor circulation cues available if an upper-floor route still
-  // has to descend, but never show an entrance continuation for a Building
-  // destination whose semantic endpoint is already that Entrance.
-  const withoutBuildingEntranceCue = buildingDestination
-    ? markers.filter((marker) => marker.kind !== "entrance")
+  const buildingDestinationId = destinationValue?.startsWith("building:") ? destinationValue.slice("building:".length) : undefined;
+  // Suppress only the entrance marker that is the terminal Building endpoint.
+  // An earlier Floor -> Campus handoff remains a real instruction on routes
+  // that start indoors and continue to a different Building.
+  const withoutBuildingEntranceCue = buildingDestinationId
+    ? markers.filter((marker) => !(marker.kind === "entrance"
+      && marker.context.kind === "outdoor"
+      && marker.targetContext.kind === "floor"
+      && marker.targetContext.buildingId === buildingDestinationId))
     : markers;
   if (!currentContext) return withoutBuildingEntranceCue;
   if (currentContext.kind === "outdoor"
@@ -3163,7 +3236,9 @@ export function presentationRouteTransitionMarkers(
   const continuationNodeIds = new Set(continuationMarkers.map((marker) => marker.nodeId));
   if (continuationPoints.length === 0) return withoutBuildingEntranceCue;
   return withoutBuildingEntranceCue.filter((marker) => {
-    if (currentContext.kind === "floor" && marker.kind === "entrance") return false;
+    if (currentContext.kind === "floor" && marker.kind === "entrance"
+      && continuationMarkers.some((continuation) => (continuation.kind === "ramp" || continuation.kind === "steps")
+        && continuationPoints.some((point) => samePoint(point, marker)))) return false;
     if (marker.kind !== "ramp" && marker.kind !== "stair") return true;
     if (marker.targetNodeId && continuationNodeIds.has(marker.targetNodeId)) return false;
     return !continuationPoints.some((point) => samePoint(point, marker));
@@ -3422,10 +3497,10 @@ function LocationPicker({
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const selected = options.find((option) => option.value === value);
   const normalized = query.trim().toLowerCase();
-  const filtered = normalized
+  const filtered = useMemo(() => normalized
     ? options.filter((option) => `${option.label} ${option.subtitle ?? ""} ${option.group} ${option.buildingLabel ?? ""} ${option.floorLabel ?? ""} ${option.kindLabel ?? ""}`.toLowerCase().includes(normalized))
-    : options;
-  const pickerBuildings = filtered.reduce<{ label: string; floors: { label: string; kinds: { label: string; items: OptionEntry[] }[] }[] }[]>((acc, option) => {
+    : options, [normalized, options]);
+  const pickerBuildings = useMemo(() => filtered.reduce<{ label: string; floors: { label: string; kinds: { label: string; items: OptionEntry[] }[] }[] }[]>((acc, option) => {
     const buildingLabel = option.buildingLabel ?? option.group;
     const floorLabel = option.floorLabel ?? "General";
     const kindLabel = option.kindLabel ?? option.group;
@@ -3437,7 +3512,7 @@ function LocationPicker({
     if (!kind) { kind = { label: kindLabel, items: [] }; floor.kinds.push(kind); }
     kind.items.push(option);
     return acc;
-  }, []);
+  }, []), [filtered]);
 
   const scrollPickerTarget = useCallback((target: HTMLElement | null) => {
     const container = pickerScrollRef.current;
@@ -3786,7 +3861,11 @@ export function TestNavigationPanel({
   onClose,
   currentContext,
 }: TestNavigationPanelProps) {
-  const { session: persistedSession, setSession: setRouteSession } = useTestRouteSession();
+  // The responsive Test Route cards need the session data, but panel-open and
+  // Navigation Mode visibility are separate store fields. Select only session
+  // so toggling those editor controls does not repaint both route forms.
+  const persistedSession = useTestRouteSessionSelector(({ session }) => session);
+  const { setSession: setRouteSession } = useTestRouteSessionActions();
   const [startValue, setStartValue] = useState(persistedSession?.startValue ?? "");
   const [destValue, setDestValue] = useState(persistedSession?.destValue ?? "");
   const [emergencyDestinationValue, setEmergencyDestinationValue] = useState(persistedSession?.emergencyDestinationValue ?? "");
@@ -3866,28 +3945,8 @@ export function TestNavigationPanel({
   const calculateRouteRef = useRef<((isLiveRecalculation?: boolean) => void) | null>(null);
 
   const buildings = campus.buildings ?? [];
-  const routeCampus = useMemo(() => reconcileExteriorApproachNavigation(campus), [campus]);
-  const nodes = routeCampus.navNodes ?? [];
-  const edges = useMemo(() => buildTestRouteEdges(routeCampus, { exteriorApproachReconciled: true }), [routeCampus]);
-  const routineGraph = useMemo(() => routineRouteGraph(routeCampus, nodes, edges, routeMode, true), [routeCampus, edges, nodes, routeMode]);
-  // Route queries for different endpoints/modes reuse the same prepared graph
-  // until the routine graph itself changes. The A* implementation remains
-  // unchanged; only its immutable adjacency/index preparation is cached.
-  const preparedRoutineGraph = useMemo(
-    () => prepareNavigationGraph(routineGraph.nodes, routineGraph.edges),
-    [routineGraph],
-  );
-  const graphRevision = useMemo(() => JSON.stringify({
-    nodes: nodes.map((node) => [node.id, node.x, node.y, node.floorId, node.buildingId, node.doorId, node.roomId]),
-    edges: edges.map((edge) => [edge.id, edge.startNodeId, edge.endNodeId, edge.bidirectional, edge.closed, edge.accessible, edge.emergencySafe, edge.bendPoints ?? []]),
-    rooms: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.rooms ?? []).map((room) => [room.id, room.accessDoorId, room.accessDoorIds ?? []]))),
-    doors: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.doors ?? []).map((door) => [door.id, door.x, door.y, door.offset, door.width, door.wallId]))),
-    walls: buildings.flatMap((building) => (building.floors ?? []).flatMap((floor) => (floor.walls ?? []).map((wall) => [wall.id, wall.x1, wall.y1, wall.x2, wall.y2, wall.thickness]))),
-    // Outdoor Building footprints are authoritative route obstacles. Include
-    // their geometry in the live revision so moving a Building revalidates an
-    // active route just like moving an indoor Wall or Walking Point does.
-    buildingObstacles: buildings.map((building) => [building.id, building.x, building.y, building.width, building.height, building.rotation ?? 0]),
-  }), [buildings, edges, nodes]);
+  const routeGraph = useMemo(() => sharedTestRouteGraph(campus, routeMode), [campus, routeMode]);
+  const { routeCampus, nodes, edges, routineGraph, preparedRoutineGraph, graphRevision } = routeGraph;
 
   const prioritizeContext = useCallback((options: OptionEntry[]) => {
     if (!currentBuildingId && !currentFloorId) return options;
@@ -3898,8 +3957,8 @@ export function TestNavigationPanel({
     const score = (option: OptionEntry) => option.nodeHint && contextNodeIds.has(option.nodeHint) ? 0 : 1;
     return [...options].sort((a, b) => score(a) - score(b));
   }, [currentBuildingId, currentFloorId, nodes]);
-  const startOptions = useMemo(() => prioritizeContext(buildStartOptions(campus, edges)), [campus, edges, prioritizeContext]);
-  const destOptions = useMemo(() => prioritizeContext(buildDestinationOptions(campus, edges)), [campus, edges, prioritizeContext]);
+  const startOptions = useMemo(() => prioritizeContext(routeGraph.startOptions), [prioritizeContext, routeGraph.startOptions]);
+  const destOptions = useMemo(() => prioritizeContext(routeGraph.destOptions), [prioritizeContext, routeGraph.destOptions]);
   useEffect(() => {
     if (!destValue || destValue === startValue) return;
     if (destOptions.some((option) => option.value === destValue)) {

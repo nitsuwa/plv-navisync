@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { FloorAppearance } from "./types";
 import { floorPatternId, floorPatternSpec, normalizeFloorAppearance } from "../../lib/floorAppearance";
 
@@ -19,7 +20,7 @@ export interface FloorGroundSurfaceProps {
  * the same SVG pattern definitions are used by the editor, settings preview,
  * and the read-only student floor renderer.
  */
-export function FloorGroundSurface({
+function FloorGroundSurfaceView({
   x = 0,
   y = 0,
   width,
@@ -48,6 +49,8 @@ export function FloorGroundSurface({
     </g>
   );
 }
+
+export const FloorGroundSurface = memo(FloorGroundSurfaceView);
 
 function FloorPattern({ kind, size, color, opacity }: { kind: FloorPatternKind; size: number; color: string; opacity: number }) {
   const light = "#ffffff";

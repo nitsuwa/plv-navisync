@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { toast } from "sonner";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
@@ -100,7 +100,7 @@ function canvasSvg(container: HTMLElement, w = 220, h = 160): SVGSVGElement {
 }
 
 function enterNavigationMode() {
-  fireEvent.click(screen.getByRole("tab", { name: "Navigation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
 }
 
 function navNodes(container: HTMLElement): SVGGElement[] {
@@ -113,6 +113,10 @@ function roomGroup(container: HTMLElement, room: FloorRoom): SVGGElement {
   ) as SVGGElement | undefined;
   expect(g).toBeTruthy();
   return g;
+}
+
+async function flushArrowNudgeFrame() {
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
 }
 
 let warningSpy: ReturnType<typeof vi.spyOn>;
@@ -129,21 +133,29 @@ afterEach(() => {
 });
 
 describe("FloorEditor arrow-key nudge", () => {
-  it("ArrowRight nudges a selected room by 1 in Design mode", () => {
+  it("ArrowRight nudges a selected room by 1 in Design mode", async () => {
     let latest: Campus | undefined;
+    const updates: Campus[] = [];
     const campus = withRoomAndGraph();
-    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const siblingFloor = { ...campus.buildings[0].floors[0], id: "f2", number: 2, label: "Second Floor", rooms: [] };
+    campus.buildings[0].floors.push(siblingFloor);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; updates.push(c); }} />);
     const svg = canvasSvg(container);
     const room = campus.buildings[0].floors[0].rooms[0];
     fireEvent.mouseDown(roomGroup(container, room), { clientX: 40, clientY: 40, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
+    // Ignore any mount-time compatibility repair; measure only the key nudge.
+    updates.length = 0;
     fireEvent.keyDown(window, { key: "ArrowRight" });
+    await flushArrowNudgeFrame();
     const moved = latest!.buildings[0].floors[0].rooms[0];
     expect(moved.x).toBe(21);
     expect(moved.y).toBe(20);
+    expect(updates).toHaveLength(1);
+    expect(latest!.buildings[0].floors[1]).toBe(siblingFloor);
   });
 
-  it("Shift+ArrowRight nudges a room by 10", () => {
+  it("Shift+ArrowRight nudges a room by 10", async () => {
     let latest: Campus | undefined;
     const campus = withRoomAndGraph();
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
@@ -152,10 +164,11 @@ describe("FloorEditor arrow-key nudge", () => {
     fireEvent.mouseDown(roomGroup(container, room), { clientX: 40, clientY: 40, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    await flushArrowNudgeFrame();
     expect(latest!.buildings[0].floors[0].rooms[0].x).toBe(30);
   });
 
-  it("nudges a free nav waypoint in Navigation mode", () => {
+  it("nudges a free nav waypoint in Navigation mode", async () => {
     let latest: Campus | undefined;
     const campus = withRoomAndGraph();
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
@@ -167,14 +180,16 @@ describe("FloorEditor arrow-key nudge", () => {
     expect(freeNode).toBeTruthy();
     fireEvent.mouseDown(freeNode!, { clientX: 120, clientY: 100, bubbles: true });
     fireEvent.keyDown(window, { key: "ArrowDown" });
+    await flushArrowNudgeFrame();
     const moved = latest!.navNodes!.find((n) => n.id === "n-free")!;
     expect(moved.y).toBe(101);
   });
 
-  it("does not nudge a linked node (stays attached to its physical owner)", () => {
+  it("keeps a linked Door node attached when the overlapping Door is nudged", async () => {
     let latest: Campus | undefined;
+    const updates: Campus[] = [];
     const campus = withRoomAndGraph();
-    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; updates.push(c); }} />);
     canvasSvg(container);
     enterNavigationMode();
     // Linked nodes render with their own testid.
@@ -182,9 +197,37 @@ describe("FloorEditor arrow-key nudge", () => {
     const linkedNode = nodes.find((g) => g.querySelector("circle")?.getAttribute("cx") === "100");
     expect(linkedNode).toBeTruthy();
     fireEvent.mouseDown(linkedNode!, { clientX: 100, clientY: 30, bubbles: true });
+    // Ignore any mount-time compatibility repair; measure only the selected
+    // physical Door nudge beneath its overlapping linked node affordance.
+    updates.length = 0;
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    // The linked node must not move — the nudge is rejected outright, so no
-    // campus update is produced at all.
-    expect(latest).toBeUndefined();
+    await flushArrowNudgeFrame();
+    expect(updates).toHaveLength(1);
+    expect(latest!.buildings[0].floors[0].doors[0].x).toBe(101);
+    expect(latest!.navNodes!.find((node) => node.id === "n-linked")?.x).toBe(101);
+  });
+
+  it.each([
+    ["ArrowUp", "ArrowRight", 1, -1],
+    ["ArrowUp", "ArrowLeft", -1, -1],
+    ["ArrowDown", "ArrowRight", 1, 1],
+    ["ArrowDown", "ArrowLeft", -1, 1],
+  ] as const)("coalesces %s + %s into one Floor update without changing either nudge", async (vertical, horizontal, dx, dy) => {
+    let latest: Campus | undefined;
+    const updates: Campus[] = [];
+    const campus = withRoomAndGraph();
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latest = next; updates.push(next); }} />);
+    const svg = canvasSvg(container);
+    const room = campus.buildings[0].floors[0].rooms[0];
+    fireEvent.mouseDown(roomGroup(container, room), { clientX: 40, clientY: 40, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    updates.length = 0;
+
+    fireEvent.keyDown(window, { key: vertical });
+    fireEvent.keyDown(window, { key: horizontal });
+    await flushArrowNudgeFrame();
+
+    expect(updates).toHaveLength(1);
+    expect(latest!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 20 + dx, y: 20 + dy });
   });
 });

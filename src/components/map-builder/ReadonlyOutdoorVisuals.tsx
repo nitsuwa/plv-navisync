@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import type {
   CampusBuilding,
   CampusDecorAsset,
@@ -21,14 +21,17 @@ import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../../lib/r
 import { surfaceCellRuns } from "../../lib/campusSurface";
 import { campusAreaGroundAppearance, campusGroundAppearance } from "../../lib/campusCanvas";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
-import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
+import { EntranceDirectionBadge, entranceDirectionBadgePlacement, studentDoorwayActionLabelPlacement, studentDoorwayActionLabelSize } from "./EntranceDirectionBadge";
 import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
+import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
   selected?: boolean;
+  /** Student map-pick affordance; never used by Admin Canvas. */
+  pickTarget?: boolean;
   onSelect?: (buildingId: string) => void;
   onDoubleClick?: (buildingId: string) => void;
   /** Admin wrappers provide their own hit surface; Student may opt in. */
@@ -179,9 +182,10 @@ export function exteriorEmergencyStairSafeOffsetRange(
 }
 
 /** Presentation-only authored Building visual. No editor handles or graph UI. */
-export function OutdoorBuildingVisual({
+function OutdoorBuildingVisualView({
   building,
   selected = false,
+  pickTarget = false,
   onSelect,
   onDoubleClick,
   interactive = Boolean(onSelect || onDoubleClick),
@@ -242,6 +246,7 @@ export function OutdoorBuildingVisual({
       } : undefined}
     >
       {selected && <rect className="student-map-building__selection-halo" x={building.x - 7} y={building.y - 7} width={building.width + 14} height={building.height + 14} rx={11} fill="rgba(37,99,235,0.045)" stroke="rgba(37,99,235,0.38)" strokeWidth={7} pointerEvents="none" />}
+      {pickTarget && !selected && <rect data-testid="student-map-pick-building-target" x={building.x - 3} y={building.y - 3} width={building.width + 6} height={building.height + 6} rx={9} fill="rgba(37,99,235,0.035)" stroke="#60a5fa" strokeWidth={2.2} strokeDasharray="7 4" pointerEvents="none" />}
       {selected && <rect className="student-map-building__selection-outline" x={building.x - 3} y={building.y - 3} width={building.width + 6} height={building.height + 6} rx={9} fill="none" stroke="#2563eb" strokeWidth={2.5} pointerEvents={interactive ? undefined : "none"} />}
       <rect className="student-map-building__body" x={building.x} y={building.y} width={building.width} height={building.height} rx={8} fill={building.color || "#64748b"} stroke={selected ? "#2563eb" : "rgba(255,255,255,0.68)"} strokeWidth={selected ? 2.5 : 1.5} opacity={bodyOpacity} pointerEvents={interactive ? undefined : "none"} />
       {/* A restrained architectural treatment keeps the authored footprint and
@@ -293,6 +298,8 @@ export function OutdoorBuildingVisual({
   );
 }
 
+export const OutdoorBuildingVisual = memo(OutdoorBuildingVisualView);
+
 export function OutdoorPathVisual({ path }: { path: CampusPath }) {
   if (!path.points || path.points.length < 2) return null;
   return <OutdoorPathNetworkArtwork paths={[path]} />;
@@ -307,7 +314,7 @@ const groundAreaAccent = {
 } as const;
 
 /** Shared physical Ground Area artwork used by both Admin Canvas and viewer. */
-export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, width, height, gridSize = 20, selected = false }: {
+function OutdoorGroundAreaArtworkView({ asset, x = asset.x, y = asset.y, width, height, gridSize = 20, selected = false }: {
   asset: CampusDecorAsset;
   x?: number;
   y?: number;
@@ -402,6 +409,8 @@ export function OutdoorGroundAreaArtwork({ asset, x = asset.x, y = asset.y, widt
   );
 }
 
+export const OutdoorGroundAreaArtwork = memo(OutdoorGroundAreaArtworkView);
+
 /** Read-only wrapper; physical artwork is the same component used in Canvas. */
 export function OutdoorGroundAreaVisual({ asset, gridSize = 20 }: { asset: CampusDecorAsset; gridSize?: number }) {
   if (isDecorAreaType(asset.type)) {
@@ -422,7 +431,8 @@ function outdoorEntrancePosition(building: CampusBuilding, entrance: ReadonlyOut
     : entranceWorldPosition(building, entrance);
 }
 
-function canEnterOutdoorBuilding(entrance: ReadonlyOutdoorEntrance) {
+/** Shared Student eligibility rule for authored outdoor Enter actions. */
+export function canEnterOutdoorBuilding(entrance: ReadonlyOutdoorEntrance) {
   return normalizeEntranceType(entrance.type) !== "emergency_exit"
     && normalizeEntranceDirection(entrance) !== "exit_only";
 }
@@ -447,7 +457,7 @@ function outdoorEntryLabelOrigin(badgePoint: { x: number; y: number; angle: numb
   };
 }
 
-function outdoorEntryLabelBounds(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {
+function outdoorEntryLabelBounds(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance, expanded = false) {
   const position = outdoorEntrancePosition(building, entrance);
   const badgePoint = entranceDirectionBadgePlacement(
     position.x,
@@ -455,32 +465,45 @@ function outdoorEntryLabelBounds(building: CampusBuilding, entrance: ReadonlyOut
     entrance.edge,
     entrance.legacyPosition ? 0 : building.rotation ?? 0,
   );
-  const origin = outdoorEntryLabelOrigin(badgePoint);
-  // A little breathing room keeps adjacent pills from appearing to touch.
-  return { left: origin.x - 4, right: origin.x + 86 + 4, top: origin.y - 4, bottom: origin.y + 18 + 4 };
+  const labelText = expanded ? `Enter ${building.code || building.name}` : "Enter";
+  const { width, height } = studentDoorwayActionLabelSize(labelText);
+  const label = studentDoorwayActionLabelPlacement(badgePoint.angle, width, height);
+  const centerX = badgePoint.x + label.screenX;
+  const centerY = badgePoint.y + label.screenY;
+  return { left: centerX - width / 2, right: centerX + width / 2, top: centerY - height / 2, bottom: centerY + height / 2 };
 }
 
-function defaultOutdoorEntryLabelIds(campus: ReadonlyOutdoorCampus) {
+function defaultOutdoorEntryLabelIds(campus: ReadonlyOutdoorCampus, activeId?: string | null, hoveredId?: string | null, suppressedId?: string | null) {
   const visibleIds = new Set<string>();
+  const buildings = new Map(campus.buildings.map((building) => [building.id, building]));
+  const candidates = campus.entrances
+    .filter((entrance) => entrance.id !== suppressedId && canEnterOutdoorBuilding(entrance) && buildings.has(entrance.buildingId))
+    .sort((a, b) => Number(b.id === activeId) - Number(a.id === activeId)
+      || Number(b.id === hoveredId) - Number(a.id === hoveredId)
+      || Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)))
+    .map((entrance) => {
+      const building = buildings.get(entrance.buildingId)!;
+      const position = outdoorEntrancePosition(building, entrance);
+      const badge = entranceDirectionBadgePlacement(position.x, position.y, entrance.edge, entrance.legacyPosition ? 0 : building.rotation ?? 0);
+      const expanded = entrance.id === activeId || entrance.id === hoveredId;
+      return {
+        entrance,
+        bounds: outdoorEntryLabelBounds(building, entrance, expanded),
+        icon: { left: badge.x - 11, right: badge.x + 11, top: badge.y - 11, bottom: badge.y + 11 },
+      };
+    });
   const placedLabels: ReturnType<typeof outdoorEntryLabelBounds>[] = [];
 
-  for (const building of campus.buildings) {
-    const candidates = campus.entrances
-      .filter((entrance) => entrance.buildingId === building.id && canEnterOutdoorBuilding(entrance))
-      .sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)));
-    const entrance = candidates.find((candidate) => {
-      const bounds = outdoorEntryLabelBounds(building, candidate);
-      return !placedLabels.some((placed) =>
-        bounds.left < placed.right
-        && bounds.right > placed.left
-        && bounds.top < placed.bottom
-        && bounds.bottom > placed.top,
-      );
-    });
-    if (!entrance) continue;
-
+  for (const candidate of candidates) {
+    const { entrance, bounds } = candidate;
+    const coversOtherIcon = candidates.some((other) => other.entrance.id !== entrance.id
+      && bounds.left < other.icon.right && bounds.right > other.icon.left
+      && bounds.top < other.icon.bottom && bounds.bottom > other.icon.top);
+    if (coversOtherIcon) continue;
+    if (placedLabels.some((placed) => bounds.left < placed.right && bounds.right > placed.left
+      && bounds.top < placed.bottom && bounds.bottom > placed.top)) continue;
     visibleIds.add(entrance.id);
-    placedLabels.push(outdoorEntryLabelBounds(building, entrance));
+    placedLabels.push(bounds);
   }
 
   return visibleIds;
@@ -492,6 +515,13 @@ export function OutdoorEntranceVisual({
   onClick,
   showEntryLabelByDefault = true,
   showEntryPill = true,
+  compactEntryAction = false,
+  routeRelevant = false,
+  active = false,
+  suppressActiveAction = false,
+  reducedMotion = false,
+  overviewDuplicate = false,
+  onEmphasisChange,
 }: {
   building: CampusBuilding;
   entrance: ReadonlyOutdoorEntrance;
@@ -501,54 +531,81 @@ export function OutdoorEntranceVisual({
   showEntryLabelByDefault?: boolean;
   /** Hide the permanent world-space action pill while preserving the entrance glyph and hit target. */
   showEntryPill?: boolean;
+  /** Student maps omit the separate action pill and rely on the authored direction arrow. */
+  compactEntryAction?: boolean;
+  routeRelevant?: boolean;
+  active?: boolean;
+  /** The active route control replaces the passive arrow at this doorway. */
+  suppressActiveAction?: boolean;
+  reducedMotion?: boolean;
+  overviewDuplicate?: boolean;
+  onEmphasisChange?: (entranceId: string | null) => void;
 }) {
   const [emphasized, setEmphasized] = useState(false);
   const position = outdoorEntrancePosition(building, entrance);
   const label = entranceDisplayName(entrance, (building.entrances ?? []).findIndex((item) => item.id === entrance.id));
+  const entryActionLabel = `Enter ${building.code || building.name}`;
   const color = BUILDING_ENTRANCE_TYPE_COLORS[normalizeEntranceType(entrance.type)];
   const canEnterBuilding = Boolean(
     onClick
       && canEnterOutdoorBuilding(entrance),
   );
+  const canActivateEntrance = canEnterBuilding && !suppressActiveAction;
   const badgePoint = entranceDirectionBadgePlacement(
     position.x,
     position.y,
     entrance.edge,
     entrance.legacyPosition ? 0 : building.rotation ?? 0,
   );
-  const labelOrigin = outdoorEntryLabelOrigin(badgePoint);
-  const showEntryIndicator = showEntryPill && canEnterBuilding && (showEntryLabelByDefault || emphasized);
+  const originalLabelOrigin = outdoorEntryLabelOrigin(badgePoint);
+  const labelOrigin = originalLabelOrigin;
+  const showEntryIndicator = showEntryPill && canEnterBuilding && !compactEntryAction && (emphasized || showEntryLabelByDefault);
   return (
     <g data-testid="readonly-entrance" data-entrance-id={entrance.id}
-      role={canEnterBuilding ? "button" : undefined}
-      tabIndex={canEnterBuilding ? 0 : undefined}
-      aria-label={canEnterBuilding ? `Enter ${building.name}` : undefined}
-      style={{ cursor: canEnterBuilding ? "pointer" : undefined }}
-      onKeyDown={canEnterBuilding ? (event) => {
+      className={compactEntryAction && canEnterBuilding ? "student-map-doorway-action" : undefined}
+      role={canActivateEntrance ? "button" : undefined}
+      tabIndex={canActivateEntrance ? 0 : undefined}
+      aria-label={canActivateEntrance ? `Enter ${building.name}` : undefined}
+      style={{ cursor: canActivateEntrance ? "pointer" : undefined }}
+      onKeyDown={canActivateEntrance ? (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         event.stopPropagation();
         onClick?.(building.id);
       } : undefined}
-      onFocus={canEnterBuilding ? () => setEmphasized(true) : undefined}
-      onBlur={canEnterBuilding ? () => setEmphasized(false) : undefined}
-      onMouseEnter={canEnterBuilding ? () => setEmphasized(true) : undefined}
-      onMouseLeave={canEnterBuilding ? () => setEmphasized(false) : undefined}
-      onClick={canEnterBuilding ? (event) => { event.stopPropagation(); onClick?.(building.id); } : undefined}>
-      <title>{label}{canEnterBuilding ? " · Enter Building" : ""}{entrance.accessible ? " · Accessible" : ""}</title>
+      onFocus={canActivateEntrance ? () => { setEmphasized(true); onEmphasisChange?.(entrance.id); } : undefined}
+      onBlur={canActivateEntrance ? () => { setEmphasized(false); onEmphasisChange?.(null); } : undefined}
+      onMouseEnter={canActivateEntrance ? () => { setEmphasized(true); onEmphasisChange?.(entrance.id); } : undefined}
+      onMouseLeave={canActivateEntrance ? () => { setEmphasized(false); onEmphasisChange?.(null); } : undefined}
+      onClick={canActivateEntrance ? (event) => { event.stopPropagation(); onClick?.(building.id); } : undefined}>
+      <title>{compactEntryAction && canEnterBuilding
+        ? `${entryActionLabel} building`
+        : `${label}${canEnterBuilding ? " · Enter Building" : ""}${entrance.accessible ? " · Accessible" : ""}`}</title>
       <g transform={`translate(${position.x},${position.y}) rotate(${position.angle ?? 0})`}>
-        {canEnterBuilding && <rect data-testid="readonly-enter-building-door-hit-target" x={-20} y={-18}
-          width={40} height={36} fill="transparent" pointerEvents="all" />}
+        {canActivateEntrance && <rect data-testid="readonly-enter-building-door-hit-target" x={-24} y={-24}
+          width={48} height={48} fill="transparent" pointerEvents="all" />}
         <OutdoorEntranceArtwork entrance={entrance} color={color} />
       </g>
-      <EntranceDirectionBadge
+      {!suppressActiveAction && <EntranceDirectionBadge
         x={position.x}
         y={position.y}
         edge={entrance.edge}
         direction={entrance.direction}
         type={entrance.type}
         rotation={entrance.legacyPosition ? 0 : building.rotation ?? 0}
-      />
+        routeRelevant={compactEntryAction && routeRelevant}
+        active={compactEntryAction && active}
+        emphasized={emphasized}
+        pressableDirection={compactEntryAction && canEnterBuilding ? "entrance" : undefined}
+        activeDirection={compactEntryAction && active ? "entrance" : undefined}
+        screenConsistent={compactEntryAction}
+        interactiveHitTarget={compactEntryAction && canEnterBuilding}
+        overviewDuplicate={compactEntryAction && overviewDuplicate}
+        actionLabel={compactEntryAction && canEnterBuilding ? "Enter" : undefined}
+        expandedActionLabel={compactEntryAction && canEnterBuilding ? entryActionLabel : undefined}
+        showActionLabel={!compactEntryAction || showEntryLabelByDefault}
+        reducedMotion={reducedMotion}
+      />}
       {showEntryIndicator && (
         <g data-testid="student-enter-building-indicator" pointerEvents="all">
           {emphasized && <circle cx={badgePoint.x} cy={badgePoint.y} r={10.5} fill="#60a5fa" opacity={0.32} />}
@@ -560,7 +617,7 @@ export function OutdoorEntranceVisual({
               stroke={emphasized ? "#1d4ed8" : "#3b82f6"} strokeWidth={emphasized ? 1.4 : 1} />
             <path d="M5.5 5.5 12 12m-5.5 0H12V6.5" fill="none" stroke="#1e40af" strokeWidth={1.3}
               strokeLinecap="round" strokeLinejoin="round" />
-            <text x={16} y={11.8} fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">Enter Building</text>
+            <text data-testid="student-enter-building-label" x={16} y={11.8} textLength={64} lengthAdjust="spacingAndGlyphs" fill="#1e3a8a" fontSize={7.2} fontWeight={700} fontFamily="inherit">{entryActionLabel}</text>
           </g>
           <title>Enter Building — open {building.name}</title>
         </g>
@@ -570,7 +627,7 @@ export function OutdoorEntranceVisual({
 }
 
 /** Canonical physical entrance glyph used in both Admin Canvas and viewer. */
-export function OutdoorEntranceArtwork({ entrance, color, outlineColor = color, outlineWidth = 1.8, showPrimary = true, showAccessible = true }: {
+function OutdoorEntranceArtworkView({ entrance, color, outlineColor = color, outlineWidth = 1.8, showPrimary = true, showAccessible = true }: {
   entrance: Pick<CampusEntrance, "isPrimary" | "accessible">;
   color: string;
   outlineColor?: string;
@@ -589,7 +646,7 @@ export function OutdoorEntranceArtwork({ entrance, color, outlineColor = color, 
   );
 }
 
-export function OutdoorEmergencyStairVisual({
+export const OutdoorEmergencyStairVisual = memo(function OutdoorEmergencyStairVisual({
   building,
   stair,
   selected = false,
@@ -624,7 +681,7 @@ export function OutdoorEmergencyStairVisual({
       <line x1={-width / 2 + 5} y1={height / 2 - 3} x2={width / 2 - 5} y2={-height / 2 + 3} stroke={stroke} strokeWidth={0.8} opacity={0.28} />
     </g>
   );
-}
+});
 
 export function OutdoorDecorVisual({ asset, gridSize }: { asset: CampusDecorAsset; gridSize?: number }) {
   if (isDecorAreaType(asset.type)) return <OutdoorGroundAreaVisual asset={asset} gridSize={gridSize} />;
@@ -644,7 +701,9 @@ export function OutdoorDecorVisual({ asset, gridSize }: { asset: CampusDecorAsse
   );
 }
 
-export function OutdoorMarkerArtwork({ marker, selected = false, zoom = 1, showName = true }: { marker: CampusMarker; selected?: boolean; zoom?: number; showName?: boolean }) {
+export const OutdoorEntranceArtwork = memo(OutdoorEntranceArtworkView);
+
+function OutdoorMarkerArtworkView({ marker, selected = false, zoom = 1, showName = true }: { marker: CampusMarker; selected?: boolean; zoom?: number; showName?: boolean }) {
   const style = MARKER_STYLES[marker.type] ?? MARKER_STYLES.custom;
   const color = marker.color || style.color;
   return (
@@ -657,7 +716,9 @@ export function OutdoorMarkerArtwork({ marker, selected = false, zoom = 1, showN
   );
 }
 
-function OutdoorMarkerVisual({ marker, zoom, showLabel, selected = false, onSelect }: { marker: CampusMarker; zoom: number; showLabel: boolean; selected?: boolean; onSelect?: (markerId: string) => void }) {
+export const OutdoorMarkerArtwork = memo(OutdoorMarkerArtworkView);
+
+function OutdoorMarkerVisual({ marker, zoom, showLabel, selected = false, pickTarget = false, onSelect }: { marker: CampusMarker; zoom: number; showLabel: boolean; selected?: boolean; pickTarget?: boolean; onSelect?: (markerId: string) => void }) {
   return (
     <g data-testid="readonly-campus-marker" data-marker-id={marker.id} data-no-drag={onSelect ? "true" : undefined}
       role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined}
@@ -667,17 +728,18 @@ function OutdoorMarkerVisual({ marker, zoom, showLabel, selected = false, onSele
       onKeyDown={onSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onSelect(marker.id); } } : undefined}
       style={onSelect ? { cursor: "pointer" } : undefined}>
       <title>{marker.name}</title>
+      {pickTarget && !selected && <circle data-testid="student-map-pick-place-target" cx={marker.x} cy={marker.y} r={20} fill="rgba(37,99,235,0.08)" stroke="#60a5fa" strokeWidth={2} strokeDasharray="5 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       {selected && <circle className="campus-place-selection-ring" cx={marker.x} cy={marker.y} r={22} fill="rgba(37,99,235,0.12)" stroke="#2563eb" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       <OutdoorMarkerArtwork marker={marker} selected={selected} zoom={zoom} showName={showLabel} />
     </g>
   );
 }
 
-function OutdoorCampusGateVisual({ marker, showLabel, selected = false, onSelect }: { marker: CampusMarker; showLabel: boolean; selected?: boolean; onSelect?: (markerId: string) => void }) {
+function OutdoorCampusGateVisual({ marker, showLabel, selected = false, pickTarget = false, onSelect, screenConsistent = false, studentZoom = 1 }: { marker: CampusMarker; showLabel: boolean; selected?: boolean; pickTarget?: boolean; onSelect?: (markerId: string) => void; screenConsistent?: boolean; studentZoom?: number }) {
   const emergency = marker.purpose === "emergency_exit";
   const color = emergency ? "#dc2626" : "#2563eb";
   return (
-    <g data-testid="readonly-campus-gate" data-marker-id={marker.id} data-no-drag={onSelect ? "true" : undefined}
+    <g data-testid="readonly-campus-gate" data-marker-id={marker.id} data-student-gate-screen-space={screenConsistent ? "true" : undefined} data-no-drag={onSelect ? "true" : undefined}
       role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined}
       aria-label={onSelect ? `View ${marker.name || "Campus Gate"} details` : undefined}
       onPointerDown={onSelect ? (event) => event.stopPropagation() : undefined}
@@ -685,16 +747,26 @@ function OutdoorCampusGateVisual({ marker, showLabel, selected = false, onSelect
       onKeyDown={onSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onSelect(marker.id); } } : undefined}
       style={onSelect ? { cursor: "pointer" } : undefined}>
       <title>{marker.name || (emergency ? "Emergency Exit Gate" : "Campus Gate")}</title>
+      {pickTarget && !selected && <circle data-testid="student-map-pick-gate-target" cx={marker.x} cy={marker.y} r={27} fill="rgba(37,99,235,0.08)" stroke="#60a5fa" strokeWidth={2} strokeDasharray="5 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       {selected && <circle className="campus-place-selection-ring" cx={marker.x} cy={marker.y} r={25} fill="rgba(37,99,235,0.14)" stroke="#2563eb" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
-      <CampusGateVisual x={marker.x - 18} y={marker.y - 15} width={36} height={30} color={color} />
-      {showLabel && marker.name && <text x={marker.x} y={marker.y + 18} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="700" className="pointer-events-none select-none">{marker.name}</text>}
+      {screenConsistent ? <g transform={`translate(${marker.x},${marker.y})`}>
+        <g className="student-map-screen-marker"><g className="student-transition-marker-lod">
+          <CampusGateVisual x={-18} y={-15} width={36} height={30} color={color} />
+        </g></g>
+      </g> : <CampusGateVisual x={marker.x - 18} y={marker.y - 15} width={36} height={30} color={color} />}
+      {showLabel && marker.name && (!screenConsistent || studentZoom >= 0.5) && <text x={marker.x} y={marker.y + 18} textAnchor="middle" fill="var(--map-building-name, #475569)" fontSize={6.5} fontWeight="700" className="pointer-events-none select-none">{marker.name}</text>}
     </g>
   );
 }
 
 export interface ReadonlyOutdoorCampusSceneProps {
   campus: ReadonlyOutdoorCampus;
+  /** Student route stroke is composed above map artwork and below entrance/exit markers. */
+  routeOverlay?: ReactNode;
   zoom?: number;
+  /** Camera zoom and CSS-pixel scale affect student marker decluttering only. */
+  studentZoom?: number;
+  studentPixelScale?: number;
   /** Keep physical layers independently visible; layer toggles should not hide authored paths. */
   showBuildings?: boolean;
   showLabels?: boolean;
@@ -706,17 +778,39 @@ export interface ReadonlyOutdoorCampusSceneProps {
   onClickEntrance?: (buildingId: string) => void;
   /** Whether read-only outdoor entrances render a permanent Enter Building pill. */
   showEntryPills?: boolean;
+  /** Keep student-side entrance actions icon-only until hover/focus. */
+  compactEntryActions?: boolean;
+  routeRelevantEntranceIds?: ReadonlySet<string>;
+  activeEntranceId?: string | null;
+  /** Hide the ordinary arrow while the active route transition owns the doorway. */
+  suppressActiveEntranceId?: string | null;
+  /** Suppress every ambient action for a Building while its route Enter is active. */
+  suppressActiveEntranceBuildingId?: string | null;
+  reducedMotion?: boolean;
+  /** Preview routable map-pick targets without exposing editor handles. */
+  mapPickActive?: boolean;
+  emergencyMode?: boolean;
 }
 
-/** Read-only scene composition shared by Preview and the public campus map. */
-export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = true, showLabels = true, selectedBuildingId, selectedCampusPlaceId, onSelectBuilding, onSelectCampusPlace, onDoubleClickBuilding, onClickEntrance, showEntryPills = true }: ReadonlyOutdoorCampusSceneProps) {
-  const buildingById = new Map(campus.buildings.map((building) => [building.id, building]));
-  const defaultEntryLabelIds = defaultOutdoorEntryLabelIds(campus);
+interface ReadonlyOutdoorArtworkLayerProps extends Pick<ReadonlyOutdoorCampusSceneProps,
+  "campus" | "zoom" | "showBuildings" | "showLabels" | "selectedBuildingId" | "onSelectBuilding" | "onDoubleClickBuilding" | "mapPickActive"> {}
+
+/** Heavy authored artwork is isolated from route progress and transition UI. */
+export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkLayer({
+  campus,
+  zoom = 1,
+  showBuildings = true,
+  showLabels = true,
+  selectedBuildingId,
+  mapPickActive = false,
+  onSelectBuilding,
+  onDoubleClickBuilding,
+}: ReadonlyOutdoorArtworkLayerProps) {
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
   const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
   if (showBuildings) {
-    campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
+    campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} pickTarget={mapPickActive && Boolean(onSelectBuilding)} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
   }
   // Keep the semantic ground layer behind paths and physical objects while
   // honoring its authored order exactly as Admin Canvas does. Overlapping
@@ -736,43 +830,123 @@ export function ReadonlyOutdoorCampusScene({ campus, zoom = 1, showBuildings = t
     });
   });
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
-  return (
-    <g data-testid="readonly-outdoor-scene">
-      <defs><CampusGroundPatternDefs /></defs>
-      {(() => {
-        const appearance = campusGroundAppearance(campus);
-        return <>
-          <CampusGroundSurface material={appearance.material} texture={appearance.texture} color={appearance.color}
-            width={campus.canvasW} height={campus.canvasH} backgroundTestId="readonly-campus-background"
-            backgroundOpacity={campus.backgroundOpacity ?? 1} textureTestId="readonly-campus-ground-texture" />
-        </>;
-      })()}
-      {campus.backgroundImage && (
-        <image
-          data-testid="readonly-campus-background-image"
-          href={campus.backgroundImage}
-          x={0}
-          y={0}
-          width={campus.canvasW}
-          height={campus.canvasH}
-          preserveAspectRatio={campus.backgroundFit === "contain" ? "xMidYMid meet" : campus.backgroundFit === "center" ? "xMidYMid slice" : "xMidYMid slice"}
-          opacity={campus.backgroundOpacity ?? 1}
-          pointerEvents="none"
-        />
-      )}
-      {stack.map((entry) => entry.node)}
-      {showBuildings && campus.entrances.map((entrance) => {
-        const building = buildingById.get(entrance.buildingId);
-        return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance}
-          onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} showEntryPill={showEntryPills} /> : null;
-      })}
-      {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
-        const building = buildingById.get(stair.buildingId);
-        return building ? <OutdoorEmergencyStairVisual key={`stair-${stair.id}`} building={building} stair={stair} /> : null;
-      })}
-      {campus.markers.map((marker) => isCampusGate(marker)
-        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} onSelect={onSelectCampusPlace} />
-        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} onSelect={onSelectCampusPlace} />)}
-    </g>
-  );
-}
+  const appearance = campusGroundAppearance(campus);
+  return <g data-testid="readonly-outdoor-authored-artwork">
+    <defs><CampusGroundPatternDefs /></defs>
+    <CampusGroundSurface material={appearance.material} texture={appearance.texture} color={appearance.color}
+      width={campus.canvasW} height={campus.canvasH} backgroundTestId="readonly-campus-background"
+      backgroundOpacity={campus.backgroundOpacity ?? 1} textureTestId="readonly-campus-ground-texture" />
+    {campus.backgroundImage && (
+      <image
+        data-testid="readonly-campus-background-image"
+        href={campus.backgroundImage}
+        x={0}
+        y={0}
+        width={campus.canvasW}
+        height={campus.canvasH}
+        preserveAspectRatio={campus.backgroundFit === "contain" ? "xMidYMid meet" : campus.backgroundFit === "center" ? "xMidYMid slice" : "xMidYMid slice"}
+        opacity={campus.backgroundOpacity ?? 1}
+        pointerEvents="none"
+      />
+    )}
+    {stack.map((entry) => entry.node)}
+  </g>;
+});
+
+type ReadonlyOutdoorTransitionLayerProps = Pick<ReadonlyOutdoorCampusSceneProps,
+  "campus" | "showBuildings" | "showLabels" | "selectedCampusPlaceId" | "onSelectCampusPlace" | "onClickEntrance" | "showEntryPills" | "compactEntryActions" | "routeRelevantEntranceIds" | "activeEntranceId" | "suppressActiveEntranceId" | "suppressActiveEntranceBuildingId" | "reducedMotion" | "zoom" | "studentZoom" | "studentPixelScale" | "mapPickActive" | "emergencyMode">;
+
+const ReadonlyOutdoorTransitionLayer = memo(function ReadonlyOutdoorTransitionLayer({
+  campus,
+  showBuildings = true,
+  showLabels = true,
+  selectedCampusPlaceId,
+  onSelectCampusPlace,
+  onClickEntrance,
+  showEntryPills = true,
+  compactEntryActions = false,
+  routeRelevantEntranceIds,
+  activeEntranceId,
+  suppressActiveEntranceId,
+  suppressActiveEntranceBuildingId,
+  reducedMotion = false,
+  zoom = 1,
+  studentZoom = zoom,
+  studentPixelScale = 1,
+  mapPickActive = false,
+  emergencyMode = false,
+}: ReadonlyOutdoorTransitionLayerProps) {
+  const [hoveredEntranceId, setHoveredEntranceId] = useState<string | null>(null);
+  const buildingById = useMemo(() => new Map(campus.buildings.map((building) => [building.id, building])), [campus.buildings]);
+  const defaultEntryLabelIds = useMemo(() => defaultOutdoorEntryLabelIds(campus, activeEntranceId, hoveredEntranceId, suppressActiveEntranceId), [activeEntranceId, campus, hoveredEntranceId, suppressActiveEntranceId]);
+  const overviewDuplicates = useMemo(() => !compactEntryActions ? new Set<string>() : studentOverviewDuplicateIds(campus.entrances.map((entrance) => {
+    const building = buildingById.get(entrance.buildingId);
+    const point = building ? outdoorEntrancePosition(building, entrance) : { x: 0, y: 0 };
+    return { id: entrance.id, x: point.x, y: point.y, direction: normalizeEntranceDirection(entrance) };
+  }), activeEntranceId), [activeEntranceId, buildingById, campus.entrances, compactEntryActions]);
+  const entranceEntries = campus.entrances.map((entrance) => ({ entrance }));
+  const orderedEntrances = compactEntryActions
+    ? [...entranceEntries].sort((left, right) =>
+      Number(left.entrance.id === activeEntranceId || left.entrance.id === hoveredEntranceId)
+      - Number(right.entrance.id === activeEntranceId || right.entrance.id === hoveredEntranceId))
+    : entranceEntries;
+  const renderEntrance = ({ entrance }: (typeof entranceEntries)[number]) => {
+    const building = buildingById.get(entrance.buildingId);
+    return building ? <OutdoorEntranceVisual key={`entrance-${entrance.id}`} building={building} entrance={entrance}
+      onClick={onClickEntrance} showEntryLabelByDefault={defaultEntryLabelIds.has(entrance.id)} showEntryPill={showEntryPills} compactEntryAction={compactEntryActions}
+      routeRelevant={routeRelevantEntranceIds?.has(entrance.id)} active={activeEntranceId === entrance.id} reducedMotion={reducedMotion}
+      suppressActiveAction={suppressActiveEntranceId === entrance.id || suppressActiveEntranceBuildingId === entrance.buildingId}
+      overviewDuplicate={overviewDuplicates.has(entrance.id)}
+      onEmphasisChange={compactEntryActions ? setHoveredEntranceId : undefined} /> : null;
+  };
+  return <g data-testid="readonly-outdoor-student-overlays" data-student-marker-layer={compactEntryActions ? "outdoor" : undefined}>
+    {showBuildings && campus.exteriorEmergencyStairs.map((stair) => {
+      const building = buildingById.get(stair.buildingId);
+      return building ? <OutdoorEmergencyStairVisual key={`stair-${stair.id}`} building={building} stair={stair} /> : null;
+    })}
+    {campus.markers.map((marker) => {
+      const pickTarget = mapPickActive && Boolean(onSelectCampusPlace) && !(emergencyMode && isCampusGate(marker));
+      return isCampusGate(marker)
+        ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} pickTarget={pickTarget} onSelect={onSelectCampusPlace} screenConsistent={compactEntryActions} studentZoom={studentZoom * studentPixelScale} />
+        : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} pickTarget={pickTarget} onSelect={onSelectCampusPlace} />;
+    })}
+    {showBuildings && orderedEntrances.map(renderEntrance)}
+  </g>;
+});
+
+/** Read-only scene composition shared by Preview and the public campus map. */
+export const ReadonlyOutdoorCampusScene = memo(function ReadonlyOutdoorCampusScene(props: ReadonlyOutdoorCampusSceneProps) {
+  return <g data-testid="readonly-outdoor-scene">
+    <ReadonlyOutdoorArtworkLayer
+      campus={props.campus}
+      zoom={props.zoom}
+      showBuildings={props.showBuildings}
+      showLabels={props.showLabels}
+      selectedBuildingId={props.selectedBuildingId}
+      mapPickActive={props.mapPickActive}
+      onSelectBuilding={props.onSelectBuilding}
+      onDoubleClickBuilding={props.onDoubleClickBuilding}
+    />
+    {props.routeOverlay}
+    <ReadonlyOutdoorTransitionLayer
+      campus={props.campus}
+      showBuildings={props.showBuildings}
+      showLabels={props.showLabels}
+      selectedCampusPlaceId={props.selectedCampusPlaceId}
+      onSelectCampusPlace={props.onSelectCampusPlace}
+      onClickEntrance={props.onClickEntrance}
+      showEntryPills={props.showEntryPills}
+      compactEntryActions={props.compactEntryActions}
+      routeRelevantEntranceIds={props.routeRelevantEntranceIds}
+      activeEntranceId={props.activeEntranceId}
+      suppressActiveEntranceId={props.suppressActiveEntranceId}
+      suppressActiveEntranceBuildingId={props.suppressActiveEntranceBuildingId}
+      reducedMotion={props.reducedMotion}
+      zoom={props.zoom}
+      studentZoom={props.studentZoom}
+      studentPixelScale={props.studentPixelScale}
+      mapPickActive={props.mapPickActive}
+      emergencyMode={props.emergencyMode}
+    />
+  </g>;
+});

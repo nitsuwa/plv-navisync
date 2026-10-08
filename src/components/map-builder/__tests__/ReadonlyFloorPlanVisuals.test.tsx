@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FloorPlan } from "../types";
 import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../ReadonlyFloorPlanVisuals";
+import { RouteMapOverlay } from "../../map/RouteMapOverlay";
 
 const floor = {
   id: "floor-1",
@@ -306,6 +307,130 @@ describe("ReadonlyFloorPlanScene", () => {
     expect(screen.getByTestId("readonly-entrance-ramp")).toHaveAttribute("data-edge", "bottom");
     expect(screen.getByTestId("readonly-entrance-steps-symbol")).toBeInTheDocument();
     expect(screen.getByTestId("readonly-entrance-ramp-symbol")).toBeInTheDocument();
+  });
+
+  it("previews only routable Floor rooms as student map-pick targets", () => {
+    render(<svg><ReadonlyFloorPlanScene
+      floor={sharedVisualFloor}
+      mapPickActive
+      interactiveRoomIds={new Set(["lab-room"])}
+      onRoomClick={vi.fn()}
+    /></svg>);
+    expect(screen.getByTestId("student-map-pick-room-target")).toHaveAttribute("data-room-id", "lab-room");
+    expect(screen.queryByTestId("readonly-room-selection")).not.toBeInTheDocument();
+  });
+
+  it("keeps the student Exit to Campus arrow compact and reveals a detached label on focus", () => {
+    const studentFloor = {
+      ...floor,
+      doors: [{ id: "exit-door", x: 210, y: 18, width: 18, color: "#8b6f4e", direction: "left" as const, buildingEntranceId: "west" }],
+    } as FloorPlan;
+    const onDoorClick = vi.fn();
+    render(<svg><ReadonlyFloorPlanScene
+      floor={studentFloor}
+      entrances={[{ id: "west", buildingId: "building-1", edge: "top", offset: 0.5 }]}
+      interactiveExitDoorIds={new Set(["exit-door"])}
+      compactExitActions
+      onDoorClick={onDoorClick}
+    /></svg>);
+
+    const exit = screen.getByTestId("readonly-door");
+    const marker = screen.getByTestId("student-exit-campus-arrow");
+    expect(marker).toBeInTheDocument();
+    expect(marker).toHaveAttribute("data-screen-space", "true");
+    expect(marker.querySelector('[data-testid="entrance-direction-disc"]')).toHaveAttribute("r", "7.5");
+    expect(marker.querySelector('.student-transition-marker-lod')).toBeInTheDocument();
+    expect(marker.querySelectorAll("[data-transition-arrow]")).toHaveLength(2);
+    expect(marker.querySelector('[data-testid="entrance-direction-disc"]')).toHaveAttribute("vector-effect", "non-scaling-stroke");
+    expect(marker.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(marker.querySelector('[data-transition-arrow="entrance"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(screen.queryByTestId("student-exit-campus-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-enter-building-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-exit-campus-tooltip")).not.toBeInTheDocument();
+    fireEvent.focus(exit);
+    expect(screen.queryByTestId("student-exit-campus-tooltip")).not.toBeInTheDocument();
+    expect(marker.querySelector('[data-transition-arrow="exit"]')).toHaveAttribute("data-transition-emphasis", "pressable");
+    expect(screen.getByTestId("readonly-exit-door-hit-target")).toHaveAttribute("height", "48");
+    expect(marker.querySelector('[data-testid="entrance-direction-disc"]')).toHaveAttribute("r", "7.5");
+    fireEvent.blur(exit);
+    expect(screen.queryByTestId("student-exit-campus-tooltip")).not.toBeInTheDocument();
+    fireEvent.click(exit);
+    expect(onDoorClick).toHaveBeenCalledWith("exit-door");
+  });
+
+  it("does not rerender Floor artwork when only the parent camera transform changes", () => {
+    const component = ReadonlyFloorPlanScene as unknown as { type: (...args: unknown[]) => unknown };
+    const sceneRender = vi.spyOn(component, "type");
+    const routeLayer = <RouteMapOverlay points={[{ x: 24, y: 24 }, { x: 120, y: 24 }]} mode="standard" animated={false} layer="line" />;
+    const view = (transform: string) => <svg><g transform={transform}>
+      <ReadonlyFloorPlanScene floor={floor} routeOverlay={routeLayer} />
+    </g></svg>;
+    const { rerender } = render(view("translate(0,0) scale(1)"));
+    expect(sceneRender).toHaveBeenCalledTimes(1);
+
+    rerender(view("translate(-120,40) scale(2.5)"));
+    expect(sceneRender).toHaveBeenCalledTimes(1);
+    sceneRender.mockRestore();
+  });
+
+  it("places the route stroke above Floor artwork and below the Exit to Campus marker", () => {
+    const studentFloor = {
+      ...sharedVisualFloor,
+      doors: [{ ...sharedVisualFloor.doors![0], id: "exit-door", buildingEntranceId: "west" }],
+    } as FloorPlan;
+    const { container } = render(<svg>
+      <ReadonlyFloorPlanScene
+        floor={studentFloor}
+        entrances={[{ id: "west", buildingId: "building-1", edge: "top", offset: 0.5 }]}
+        interactiveExitDoorIds={new Set(["exit-door"])}
+        compactExitActions
+        onDoorClick={vi.fn()}
+        routeOverlay={<RouteMapOverlay points={[{ x: 24, y: 160 }, { x: 100, y: 160 }, { x: 170, y: 160 }]} mode="accessible" animated={false} layer="line" />}
+      />
+    </svg>);
+    const walls = container.querySelector('[data-semantic-layer="walls"]')!;
+    const route = container.querySelector('[data-route-group][data-route-layer="line"]')!;
+    const marker = screen.getByTestId("student-exit-campus-arrow");
+    expect(route.querySelector('polyline[stroke="#16a34a"]')).toHaveAttribute("points", "24,160 100,160 170,160");
+    expect(Boolean(walls.compareDocumentPosition(route) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(route.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("emphasizes the active Exit arrow and keeps a static ring for reduced motion", () => {
+    const studentFloor = {
+      ...floor,
+      doors: [{ id: "exit-door", x: 210, y: 18, width: 18, color: "#8b6f4e", buildingEntranceId: "west" }],
+    } as FloorPlan;
+    const { container, rerender } = render(<svg><ReadonlyFloorPlanScene
+      floor={studentFloor}
+      entrances={[{ id: "west", buildingId: "building-1", edge: "top", offset: 0.5 }]}
+      interactiveExitDoorIds={new Set(["exit-door"])}
+      routeRelevantExitDoorIds={new Set(["exit-door"])}
+      activeExitDoorId="exit-door"
+      compactExitActions
+      onDoorClick={() => undefined}
+    /></svg>);
+    const arrow = screen.getByTestId("student-exit-campus-arrow");
+    expect(arrow).toHaveAttribute("data-active-transition", "true");
+    expect(arrow.querySelector('[data-transition-arrow="exit"]')).toHaveAttribute("data-transition-emphasis", "active");
+    expect(arrow.querySelector('[data-transition-arrow="entrance"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(arrow.querySelector('[data-testid="entrance-direction-exit-emphasis"] animate')).toBeInTheDocument();
+    expect(arrow.querySelector('[data-testid="entrance-direction-entrance-emphasis"]')).toBeNull();
+    expect(screen.queryByTestId("student-exit-campus-tooltip")).not.toBeInTheDocument();
+
+    rerender(<svg><ReadonlyFloorPlanScene
+      floor={studentFloor}
+      entrances={[{ id: "west", buildingId: "building-1", edge: "top", offset: 0.5 }]}
+      interactiveExitDoorIds={new Set(["exit-door"])}
+      routeRelevantExitDoorIds={new Set(["exit-door"])}
+      activeExitDoorId="exit-door"
+      compactExitActions
+      reducedMotion
+      onDoorClick={() => undefined}
+    /></svg>);
+    expect(container.querySelector('[data-testid="entrance-direction-exit-emphasis"] animate')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-testid="entrance-direction-exit-emphasis"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="entrance-direction-active-ring"]')).toBeInTheDocument();
   });
 
   it("expands the floor viewBox only enough to keep exterior content visible", () => {

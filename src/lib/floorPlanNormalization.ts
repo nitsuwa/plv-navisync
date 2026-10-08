@@ -24,6 +24,43 @@ const FLOOR_COLLECTION_KEYS = [
 
 type FloorCollectionKey = typeof FLOOR_COLLECTION_KEYS[number];
 
+function sameFloorValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameFloorValue(value, right[index]));
+  }
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameFloorValue(a[key], b[key]));
+}
+
+/** Preserve authored object identities across normalization when a record did
+ * not change. Memoized SVG children then render only objects whose authored
+ * geometry or properties actually changed. */
+export function reuseUnchangedFloorObjectReferences(previous: FloorPlan, normalized: FloorPlan): FloorPlan {
+  let result = normalized;
+  for (const key of FLOOR_COLLECTION_KEYS) {
+    const oldItems = previous[key] as unknown as { id: string }[] | undefined;
+    const nextItems = normalized[key] as unknown as { id: string }[] | undefined;
+    if (!Array.isArray(oldItems) || !Array.isArray(nextItems)) continue;
+    const oldById = new Map(oldItems.map((item) => [item.id, item]));
+    const stableItems = nextItems.map((item) => {
+      const old = oldById.get(item.id);
+      return old && sameFloorValue(old, item) ? old : item;
+    });
+    const stableCollection = stableItems.length === oldItems.length
+      && stableItems.every((item, index) => item === oldItems[index])
+      ? oldItems
+      : stableItems;
+    if (stableCollection !== nextItems) result = { ...result, [key]: stableCollection };
+  }
+  return result;
+}
+
 export interface FloorDefaults {
   id?: string;
   buildingId?: string;

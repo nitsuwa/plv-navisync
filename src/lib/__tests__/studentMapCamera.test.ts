@@ -1,39 +1,88 @@
 import { describe, expect, it } from "vitest";
 import { getStudentFloorInspectionSlack, getStudentOutdoorInspectionSlack, getStudentOverviewCamera, getStudentRoomFocusCamera, getStudentRoomFocusProgress } from "../studentMapCamera";
-import { getViewportFitZoom, getViewportPanBounds } from "../mapViewport";
+import { getViewportFitZoom, getViewportPanBounds, STUDENT_FLOOR_MAP_MAX_ZOOM, STUDENT_MAP_MAX_ZOOM } from "../mapViewport";
 
 describe("student overview camera", () => {
+  it("keeps the Campus overview cap while allowing the higher bounded Floor inspection zoom", () => {
+    const cameraInput = {
+      mapWidth: 900,
+      mapHeight: 600,
+      viewportWidth: 1_800,
+      viewportHeight: 1_200,
+      content: { x: 100, y: 80, width: 100, height: 60 },
+      fillRatio: 1.35,
+    };
+    const campusCamera = getStudentOverviewCamera(cameraInput);
+    const floorCamera = getStudentOverviewCamera({ ...cameraInput, maxZoom: STUDENT_FLOOR_MAP_MAX_ZOOM });
+
+    expect(campusCamera.zoom).toBe(STUDENT_MAP_MAX_ZOOM);
+    expect(floorCamera.zoom).toBe(STUDENT_FLOOR_MAP_MAX_ZOOM);
+  });
+
   it("fits mapped campus content into the safe mobile viewport instead of the whole empty canvas", () => {
+    const viewportWidth = 390;
+    const viewportHeight = 800;
+    const mapWidth = 1_200;
+    const mapHeight = 800;
+    const content = { x: 250, y: 180, width: 700, height: 420 };
+    const insets = { top: 150, right: 44, bottom: 144, left: 8 };
     const camera = getStudentOverviewCamera({
-      mapWidth: 1_200,
-      mapHeight: 800,
-      viewportWidth: 390,
-      viewportHeight: 800,
-      content: { x: 250, y: 180, width: 700, height: 420 },
-      insets: { top: 176, right: 64, bottom: 132, left: 8 },
-      fillRatio: 0.82,
+      mapWidth,
+      mapHeight,
+      viewportWidth,
+      viewportHeight,
+      content,
+      insets,
+      fillRatio: 0.78,
     });
 
     expect(camera.zoom).toBeGreaterThan(1);
     expect(camera.pan.x).not.toBe(0);
     expect(camera.pan.y).not.toBe(0);
+    const baseScale = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
+    const campusWidthRatio = content.width * baseScale * camera.zoom / (viewportWidth - insets.left - insets.right);
+    expect(campusWidthRatio).toBeCloseTo(0.78);
   });
 
   it("centers structural floor bounds while accounting for the rendered floor offset", () => {
+    const viewportWidth = 390;
+    const viewportHeight = 760;
+    const mapWidth = 700;
+    const mapHeight = 500;
+    const content = { x: 0, y: 0, width: 440, height: 290 };
+    const insets = { top: 124, right: 8, bottom: 140, left: 8 };
     const camera = getStudentOverviewCamera({
-      mapWidth: 700,
-      mapHeight: 500,
-      viewportWidth: 390,
-      viewportHeight: 760,
-      content: { x: 0, y: 0, width: 440, height: 290 },
+      mapWidth,
+      mapHeight,
+      viewportWidth,
+      viewportHeight,
+      content,
       contentOffset: { x: 130, y: 105 },
-      insets: { top: 88, right: 8, bottom: 112, left: 8 },
-      fillRatio: 1.35,
+      insets,
+      fillRatio: 1,
     });
 
     expect(camera.zoom).toBeGreaterThan(1);
     expect(Number.isFinite(camera.pan.x)).toBe(true);
     expect(Number.isFinite(camera.pan.y)).toBe(true);
+    const baseScale = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
+    const floorWidthRatio = content.width * baseScale * camera.zoom / (viewportWidth - insets.left - insets.right);
+    expect(floorWidthRatio).toBeCloseTo(1);
+  });
+
+  it("preserves the higher bounded inspection zoom when focusing an indoor room", () => {
+    const camera = getStudentRoomFocusCamera({
+      mapWidth: 700,
+      mapHeight: 500,
+      roomBounds: { x: 300, y: 220, width: 80, height: 50 },
+      currentPan: { x: 0, y: 0 },
+      zoom: 4.8,
+      maxZoom: 5,
+      visibleThreshold: 0,
+    });
+
+    expect(camera.zoom).toBe(4.8);
+    expect(camera.shouldMove).toBe(false);
   });
 
   it("gives indoor panning a finite, proportional inspection range", () => {
@@ -134,8 +183,8 @@ describe("student overview camera", () => {
 
   it("uses a bounded ease-out for the 330ms room focus pan", () => {
     expect(getStudentRoomFocusProgress(0)).toBe(0);
-    expect(getStudentRoomFocusProgress(165)).toBeGreaterThan(0.8);
-    expect(getStudentRoomFocusProgress(330)).toBe(1);
+    expect(getStudentRoomFocusProgress(400)).toBe(0.5);
     expect(getStudentRoomFocusProgress(800)).toBe(1);
+    expect(getStudentRoomFocusProgress(1600)).toBe(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { memo, useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Building2, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
@@ -26,6 +26,7 @@ import {
   reconcileStairDirectionsForFloorOrder,
 } from "../../lib/floorManagement";
 import type { Campus, CampusBuilding, CampusSelection, BuildingTypeDescriptor, CampusDecorAsset, DecorAssetType } from "./types";
+import { useStableCallbackProps } from "./useStableCallbackProps";
 
 interface HierarchyPanelProps {
   campus: Campus;
@@ -69,7 +70,7 @@ interface HierarchyPanelProps {
   onReserveBuildingIdentity?: (identity: BuildingIdentity) => void;
 }
 
-export function HierarchyPanel({
+function HierarchyPanelView({
   campus, selected, onSelect, onOpenFloor, onAddBuilding,
   onUpdateBuilding, onUpdate, pushHistory, toast,
   onDeleteBuilding,
@@ -965,4 +966,10 @@ export function HierarchyPanel({
       />
     </motion.div>
   );
+}
+
+const MemoHierarchyPanel = memo(HierarchyPanelView);
+
+export function HierarchyPanel(props: HierarchyPanelProps) {
+  return <MemoHierarchyPanel {...useStableCallbackProps(props)} />;
 }

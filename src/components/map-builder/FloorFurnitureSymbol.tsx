@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
 import { getCanvasAsset, resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
 
@@ -1313,7 +1314,7 @@ function FurnitureArtwork({ type, x, y, width, height, color, selected = false, 
  * it remains the item's Floor orientation; these optional mirrors are local
  * artwork transforms around the item's own center. Selection controls remain
  * outside this group and therefore are never mirrored. */
-export function FloorFurnitureSymbol({ type, x, y, width, height, color, selected = false, assetKey, flipX = false, flipY = false }: {
+function FloorFurnitureSymbolView({ type, x, y, width, height, color, selected = false, assetKey, flipX = false, flipY = false }: {
   type: string;
   x: number;
   y: number;
@@ -1336,3 +1337,5 @@ export function FloorFurnitureSymbol({ type, x, y, width, height, color, selecte
     </g>
   );
 }
+
+export const FloorFurnitureSymbol = memo(FloorFurnitureSymbolView);

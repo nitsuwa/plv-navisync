@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   X, Settings2, Copy, ChevronUp, ChevronDown, Trash2, Grid3X3, Eye, EyeOff, Square,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { FloorPlan } from "./types";
 import { isFloorAuthoringGridEligible, normalizeFloorAppearance } from "../../lib/floorAppearance";
+import { useStableCallbackProps } from "./useStableCallbackProps";
 
 interface FloorOverviewSidebarProps {
   floor: FloorPlan;
@@ -80,7 +81,7 @@ function CommitInput({ ariaLabel, value, onCommit, min = 1 }: {
  * and no object is selected (object selection always wins). Floor Settings
  * remains the detailed editor — this is a quick-edit surface only.
  */
-export function FloorOverviewSidebar({
+function FloorOverviewSidebarView({
   floor, canvasW, canvasH, isFirst, isLast, isOnly,
   onClose, onRename, onCanvasSize, onShowGrid, onShowWallJunctions, onGridSize,
   onOpenSettings, onEditFloorShape, onSaveAsTemplate, onDuplicate, onMoveUp, onMoveDown, onDelete,
@@ -258,4 +259,10 @@ export function FloorOverviewSidebar({
       </div>
     </div>
   );
+}
+
+const MemoFloorOverviewSidebar = memo(FloorOverviewSidebarView);
+
+export function FloorOverviewSidebar(props: FloorOverviewSidebarProps) {
+  return <MemoFloorOverviewSidebar {...useStableCallbackProps(props)} />;
 }

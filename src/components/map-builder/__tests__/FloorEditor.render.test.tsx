@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler, useState } from "react";
 import { FloorEditor, exteriorEmergencyStairSafeOffsetRange } from "../FloorEditor";
 import { ReadonlyFloorPlanScene } from "../ReadonlyFloorPlanVisuals";
+import * as FloorMapVisuals from "../FloorMapVisuals";
+import * as FloorExteriorVisuals from "../FloorExteriorVisuals";
+import { FloorFurnitureSymbol } from "../FloorFurnitureSymbol";
+import { FloorGroundSurface } from "../FloorGroundSurface";
 import type { Campus, FloorStairs } from "../types";
 import { syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
 import { createFloorPerimeterWalls } from "../../../lib/floorShape";
@@ -70,6 +74,12 @@ function mockFloorSvgViewport(svg: SVGSVGElement, width = 600, height = 450) {
   Object.defineProperty(svg, "getBoundingClientRect", {
     configurable: true,
     value: () => ({ left: 0, top: 0, width, height, right: width, bottom: height }),
+  });
+}
+
+async function flushFloorFrame() {
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
 }
 
@@ -158,7 +168,9 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(svg).toBeTruthy();
     mockFloorSvgViewport(svg!);
     const readLines = () => {
-      const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="resized-long-room"]')!;
+      const label = container.querySelector('[data-testid="floor-imperative-preview-items"] [data-testid="room-label-overlay"][data-room-id="resized-long-room"]')
+        ?? container.querySelector('[data-testid="room-name-overlay-layer"] [data-testid="room-label-overlay"][data-room-id="resized-long-room"]');
+      if (!label) throw new Error("Room label preview is missing");
       return {
         label,
         lines: Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? ""),
@@ -171,6 +183,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
 
     fireEvent.mouseDown(eastHandle!, { clientX: 340, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 180, clientY: 140, bubbles: true });
+    await flushFloorFrame();
     await waitFor(() => expect(readLines().lines.length).toBeGreaterThan(initial.lines.length));
     const narrow = readLines();
     expect(narrow.label).toBeTruthy();
@@ -178,6 +191,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(narrow.lines.length).toBeGreaterThan(initial.lines.length);
 
     fireEvent.mouseMove(svg!, { clientX: 400, clientY: 140, bubbles: true });
+    await flushFloorFrame();
     await waitFor(() => expect(readLines().lines.length).toBeLessThan(narrow.lines.length));
     const wide = readLines();
     expect(wide.lines.join(" ")).toBe(name);
@@ -242,7 +256,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
 
     const { container } = render(<svg><ReadonlyFloorPlanScene floor={floor} /></svg>);
 
-    const label = container.querySelector('[data-testid="readonly-room-label-overlay"][data-room-id="readonly-long-room"]')!;
+    const label = container.querySelector('[data-testid="room-label-overlay"][data-room-id="readonly-long-room"]')!;
     const lines = Array.from(label.querySelectorAll("tspan"), (line) => line.textContent ?? "");
     expect(lines.join(" ")).toBe(name);
     expect(lines.join(" ")).toContain("FINANCE");
@@ -521,6 +535,180 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.queryByRole("combobox", { name: "Exterior Zone side" })).toBeNull();
   });
 
+  it("opens Floor Overview without committing or replacing authored scene geometry", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [{ id: "sidebar-room", name: "Sidebar Room", type: "classroom", x: 40, y: 50, w: 100, h: 70, floorId: "f1", buildingId: "b1" }];
+    const onUpdate = vi.fn();
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={onUpdate} />);
+    const roomSceneNode = container.querySelector('[data-layer-key="room:sidebar-room"]');
+    const originalFloor = campus.buildings[0].floors[0];
+
+    fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
+
+    expect(screen.getByTestId("floor-properties-panel")).toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(campus.buildings[0].floors[0]).toBe(originalFloor);
+    expect(container.querySelector('[data-layer-key="room:sidebar-room"]')).toBe(roomSceneNode);
+  });
+
+  it("keeps memoized authored artwork from rerendering when Floor sidebars and unrelated selections change", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "render-room", name: "Render Room", type: "classroom", x: 40, y: 50, w: 100, h: 70, floorId: "f1", buildingId: "b1" }];
+    floor.walls = [{ id: "render-wall", x1: 40, y1: 120, x2: 180, y2: 120, thickness: 5, color: "#475569" }];
+    floor.furniture = [{ id: "render-furniture", type: "desk", name: "Desk", category: "tables", x: 55, y: 65, width: 24, height: 18, rotation: 0, color: "#9a7048" }];
+    floor.exteriorZones = [{ id: "render-exterior", type: "veranda", side: "bottom", offset: 0.5, width: 120, depth: 30, label: "Veranda" }];
+    floor.doors = [{ id: "render-door", x: 100, y: 120, width: 32, offset: 0.43, wallId: "render-wall", direction: "left", color: "#92400e" }];
+    floor.windows = [{ id: "render-window", x: 145, y: 120, width: 28, height: 8, offset: 0.75, wallId: "render-wall", color: "#0284c7" }];
+    campus.navNodes = [{ id: "render-waypoint", name: "Walking Point", type: "hallway", x: 240, y: 220, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" }];
+    campus.navEdges = [];
+
+    const memoRender = (component: unknown) => vi.spyOn(component as { type: (...args: any[]) => unknown }, "type");
+    const roomRender = memoRender(FloorMapVisuals.FloorRoomArtwork);
+    const roomLabelRender = memoRender(FloorMapVisuals.FloorRoomLabelArtwork);
+    const wallRender = memoRender(FloorMapVisuals.FloorWallArtwork);
+    const pathRender = memoRender(FloorMapVisuals.FloorPathArtwork);
+    const openingRender = memoRender(FloorMapVisuals.WallOpeningSymbol);
+    const furnitureRender = memoRender(FloorFurnitureSymbol);
+    const groundRender = memoRender(FloorGroundSurface);
+    const exteriorRender = memoRender(FloorExteriorVisuals.FloorExteriorZoneArtwork);
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const artworkSpies = [roomRender, roomLabelRender, wallRender, pathRender, openingRender, furnitureRender, groundRender, exteriorRender];
+    const artworkNames = ["Room", "Room label", "Wall", "Floor path", "Door/Window", "Furniture", "Ground", "Exterior"];
+    const artworkCounts = () => artworkSpies.map((spy) => spy.mock.calls.length);
+    const assertStable = async (label: string, action: () => void, mayUpdate: number[] = []) => {
+      const before = artworkCounts();
+      action();
+      await waitFor(() => {
+        const after = artworkCounts();
+        for (let index = 0; index < before.length; index += 1) {
+          if (mayUpdate.includes(index)) expect(after[index], `${label}: ${artworkNames[index]} updated unexpectedly often`).toBeLessThanOrEqual(before[index] + (index === 4 ? 2 : 1));
+          else expect(after[index], `${label}: unrelated ${artworkNames[index]} artwork rendered`).toBe(before[index]);
+        }
+      });
+    };
+
+    // Opening/closing the Floor Overview and selecting unrelated objects may
+    // rerender FloorEditor, but must leave authored heavy artwork behind its
+    // existing memo boundary.
+    await assertStable("Floor Overview open", () => fireEvent.click(screen.getByTitle("Toggle Properties Panel")));
+    expect(screen.getByTestId("floor-properties-panel")).toBeInTheDocument();
+    await assertStable("Floor Overview close", () => fireEvent.click(screen.getByTitle("Toggle Properties Panel")));
+    expect(screen.getByTitle("Toggle Properties Panel")).toHaveAttribute("aria-pressed", "false");
+
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(container.querySelector('[data-nav-node-id="render-waypoint"] [data-testid="nav-node-hit"]')).toBeTruthy());
+    const waypointHit = container.querySelector('[data-nav-node-id="render-waypoint"] [data-testid="nav-node-hit"]')!;
+    await assertStable("Walking Point select", () => {
+      fireEvent.mouseDown(waypointHit, { button: 0, clientX: 240, clientY: 220, bubbles: true });
+      fireEvent.mouseUp(svg, { button: 0, clientX: 240, clientY: 220, bubbles: true });
+    });
+
+    const selectByLayer = async (key: string, x: number, y: number, mayUpdate: number[] = []) => {
+      const layer = container.querySelector(`[data-layer-key="${key}"]`);
+      expect(layer, `missing artwork ${key}`).toBeTruthy();
+      await assertStable(key, () => {
+        fireEvent.mouseDown(layer!, { button: 0, clientX: x, clientY: y, bubbles: true });
+        fireEvent.mouseUp(svg, { button: 0, clientX: x, clientY: y, bubbles: true });
+      }, mayUpdate);
+    };
+    await selectByLayer("room:render-room", 60, 70, [0, 1]);
+    await selectByLayer("furniture:render-furniture", 65, 75, [0, 1, 5]);
+    await selectByLayer("wall:render-wall", 70, 120, [5]);
+    await selectByLayer("door:render-door", 100, 120, [4]);
+    await selectByLayer("window:render-window", 145, 120, [4]);
+
+    artworkSpies.forEach((spy) => spy.mockRestore());
+  });
+
+  it("selects a Walking Point without committing or mutating navigation geometry", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [{ id: "sidebar-waypoint", name: "Walking Point", type: "hallway", x: 240, y: 220, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" }];
+    campus.navEdges = [];
+    const beforeNodes = structuredClone(campus.navNodes);
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hide Navigation" })).toBeInTheDocument());
+    const hit = container.querySelector('[data-nav-node-id="sidebar-waypoint"] [data-testid="nav-node-hit"]');
+    expect(hit).toBeTruthy();
+
+    fireEvent.mouseDown(hit!, { button: 0, clientX: 240, clientY: 220, bubbles: true });
+    fireEvent.mouseUp(svg!, { button: 0, clientX: 240, clientY: 220, bubbles: true });
+
+    expect(updates).toHaveLength(0);
+    expect(campus.navNodes).toEqual(beforeNodes);
+    expect(container.querySelector('[data-nav-node-id="sidebar-waypoint"] [data-testid="nav-node-selected"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="floor-nav-node-props"]')).toBeTruthy();
+  });
+
+  it("keeps Veranda pointer samples transient and commits its final position once", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].exteriorZones = [{ id: "drag-zone", type: "veranda", side: "bottom", offset: 0.5, width: 180, depth: 72, label: "Veranda" }];
+    const updates: Campus[] = [];
+    const onRender = vi.fn();
+    const { container } = render(
+      <Profiler id="floor-veranda-drag" onRender={onRender}>
+        <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />
+      </Profiler>,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const zone = container.querySelector('[data-layer-key="exteriorZone:drag-zone"]');
+    expect(zone).toBeTruthy();
+
+    fireEvent.mouseDown(zone!, { button: 0, clientX: 300, clientY: 416, bubbles: true });
+    const dragStartRenderCount = onRender.mock.calls.length;
+    fireEvent.mouseMove(svg!, { clientX: 350, clientY: 416, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 370, clientY: 416, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="exteriorZone:drag-zone"]')).toBeTruthy());
+
+    expect(onRender).toHaveBeenCalledTimes(dragStartRenderCount);
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg!, { clientX: 370, clientY: 416, bubbles: true });
+
+    await waitFor(() => expect(updates).toHaveLength(1));
+    expect(updates[0].buildings[0].floors[0].exteriorZones?.[0].offset).not.toBe(0.5);
+  });
+
+  it("moves the Exterior Zone placement ghost imperatively without Floor renders or commits", async () => {
+    const updates: Campus[] = [];
+    const onRender = vi.fn();
+    const { container } = render(
+      <Profiler id="floor-exterior-zone-placement" onRender={onRender}>
+        <FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />
+      </Profiler>,
+    );
+    const svg = container.querySelector<SVGSVGElement>("svg.w-full.h-full");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    fireEvent.click(screen.getByTitle("Exterior Zone"));
+    expect(screen.getByTitle("Exterior Zone")).toHaveClass("border-primary");
+    const gestureStartRenderCount = onRender.mock.calls.length;
+
+    fireEvent.mouseMove(svg!, { clientX: 180, clientY: 260, bubbles: true });
+    await waitFor(() => expect(container.querySelector('[data-testid="exterior-zone-placement-preview"]')).toBeTruthy());
+    const preview = container.querySelector('[data-testid="exterior-zone-placement-preview"]');
+    expect(preview).toHaveAttribute("visibility", "visible");
+    const shape = preview?.querySelector("rect");
+    const firstX = shape?.getAttribute("x");
+    fireEvent.mouseMove(svg!, { clientX: 300, clientY: 320, bubbles: true });
+    await waitFor(() => expect(shape?.getAttribute("x")).not.toBe(firstX));
+
+    expect(onRender).toHaveBeenCalledTimes(gestureStartRenderCount);
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseDown(svg!, { button: 0, clientX: 300, clientY: 320, bubbles: true });
+    fireEvent.mouseUp(svg!, { button: 0, clientX: 300, clientY: 320, bubbles: true });
+    expect(updates).toHaveLength(1);
+  });
+
   it("keeps Room creation in the Build group and ignores modified tool hotkeys", () => {
     render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
     const roomAction = screen.getByTestId("room-library-tool");
@@ -692,7 +880,13 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="wall-draw-interaction-overlay"]')).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(container.querySelector('[data-testid="floor-interaction-items"]')?.children).toHaveLength(0);
+    // The stable interaction layer retains its hidden marquee rect and its
+    // preview-owned mount point. Cleanup should remove transient artwork and
+    // hide the marquee, not tear down those persistent React-owned nodes.
+    expect(container.querySelector('[data-testid="floor-imperative-preview-items"]')?.children).toHaveLength(0);
+    expect(container.querySelector('[data-testid="floor-marquee-selection"]')?.getAttribute("visibility")).toBe("hidden");
+    expect(container.querySelector('[data-testid="floor-alignment-guides-layer"]')?.children).toHaveLength(0);
+    expect(container.querySelector('[data-testid="floor-nav-interaction-overlay"]')?.children).toHaveLength(0);
   });
 
   it("previews Door and Window attachment without committing pointer samples", async () => {
@@ -710,6 +904,78 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.mouseMove(svg, { clientX: 280, clientY: 100 });
     await waitFor(() => expect(container.querySelector('[data-preview-kind="window"]')).toBeTruthy());
     expect(updates).toHaveLength(0);
+  });
+
+  it("shows and clears Door and Window alignment guides without committing pointer samples", async () => {
+    for (const kind of ["door", "window"] as const) {
+      const campus = makeCampus();
+      const floor = campus.buildings[0].floors[0];
+      floor.rooms = [{ id: `${kind}-guide-room`, name: "Guide Room", type: "classroom", x: 150, y: 60, w: 300, h: 80, floorId: "f1", buildingId: "b1" }];
+      floor.walls = [{ id: `${kind}-guide-wall`, x1: 150, y1: 140, x2: 450, y2: 140, thickness: 8, color: "#334155" }];
+      if (kind === "door") {
+        floor.doors = [{ id: "door-guide", x: 205, y: 140, width: 32, offset: 0.183, wallId: `${kind}-guide-wall`, direction: "left", color: "#92400e" }];
+      } else {
+        floor.windows = [{ id: "window-guide", x: 205, y: 140, width: 32, height: 8, offset: 0.183, wallId: `${kind}-guide-wall`, color: "#0284c7" }];
+      }
+      const updates: Campus[] = [];
+      const { container, unmount } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+      const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+      mockFloorSvgViewport(svg);
+      const opening = container.querySelector(`[data-layer-key="${kind}:${kind}-guide"]`)!;
+      fireEvent.mouseDown(opening, { button: 0, clientX: 205, clientY: 140, bubbles: true });
+
+      fireEvent.mouseMove(svg, { clientX: 300, clientY: 140, bubbles: true });
+      const readGuide = () => container.querySelector('[data-testid="floor-alignment-guides-layer"] [data-guide-axis="v"]');
+      await waitFor(() => expect(readGuide()?.getAttribute("visibility")).toBe("visible"));
+      expect(updates).toHaveLength(0);
+      expect(kind === "door" ? floor.doors[0].x : floor.windows?.[0].x).toBe(205);
+
+      fireEvent.mouseMove(svg, { clientX: 430, clientY: 140, bubbles: true });
+      await waitFor(() => expect(readGuide()?.getAttribute("visibility")).toBe("hidden"));
+      expect(updates).toHaveLength(0);
+
+      fireEvent.mouseMove(svg, { clientX: 300, clientY: 140, bubbles: true });
+      await waitFor(() => expect(readGuide()?.getAttribute("visibility")).toBe("visible"));
+      if (kind === "door") {
+        fireEvent.mouseUp(svg, { bubbles: true });
+        expect(updates).toHaveLength(1);
+        await waitFor(() => expect(readGuide()?.getAttribute("visibility")).toBe("hidden"));
+        expect(updates[0].buildings[0].floors[0].doors?.[0]).toMatchObject({ wallId: `${kind}-guide-wall`, x: 300, y: 140 });
+      } else {
+        fireEvent.pointerCancel(svg, { pointerId: 1, bubbles: true });
+        await waitFor(() => expect(readGuide()?.getAttribute("visibility")).toBe("hidden"));
+        expect(updates).toHaveLength(0);
+        expect(floor.windows?.[0]).toMatchObject({ wallId: `${kind}-guide-wall`, x: 205, y: 140 });
+      }
+      unmount();
+    }
+  });
+
+  it("keeps a dragged Window projected and reoriented on a differently oriented Wall", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [
+      { id: "window-horizontal", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" },
+      { id: "window-vertical", x1: 300, y1: 100, x2: 300, y2: 320, thickness: 8, color: "#334155" },
+    ];
+    floor.windows = [{ id: "window-cross-wall", x: 200, y: 100, width: 48, offset: 0.286, wallId: "window-horizontal", color: "#0284c7" }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    const windowNode = container.querySelector('[data-layer-key="window:window-cross-wall"]')!;
+    fireEvent.mouseDown(windowNode, { clientX: 200, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 300, clientY: 160, bubbles: true });
+
+    const preview = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="window:window-cross-wall"]') as SVGGElement;
+    await waitFor(() => expect(preview).toBeTruthy());
+    expect(windowNode.getAttribute("visibility")).toBe("hidden");
+    expect(preview.getAttribute("transform")).toContain("rotate(90)");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].windows?.[0]).toMatchObject({ wallId: "window-vertical", x: 300, y: 160 });
   });
 
   it("keeps a dragged Door projected and reorients its live preview onto a vertical Wall", async () => {
@@ -873,7 +1139,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(chairB).toMatchObject({ width: 28, height: 22, rotation: 90, flipX: true });
   });
 
-  it("shows temporary Space-pan feedback, restores it on release/blur, and leaves typing alone", () => {
+  it("shows temporary Space-pan feedback, restores it on release/blur, and leaves typing alone", async () => {
     const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
     const svg = container.querySelector('[data-testid="floor-canvas-boundary"]')?.closest("svg");
     expect(svg).toBeTruthy();
@@ -886,14 +1152,49 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     input.blur();
     input.remove();
 
+    fireEvent.mouseMove(svg as SVGSVGElement, { clientX: 190, clientY: 120, bubbles: true });
+    const cameraGroups = Array.from((svg as SVGSVGElement).querySelectorAll<SVGGElement>('g[transform*="scale("]'));
+    const cameraBeforeSpace = cameraGroups.map((group) => group.getAttribute("transform"));
     fireEvent.keyDown(window, { code: "Space", key: " " });
     expect(screen.getByTestId("floor-space-pan-indicator")).toHaveTextContent("Pan mode");
     expect(container.querySelector('[data-temporary-pan-active="true"]')).toBeTruthy();
     expect((svg as SVGSVGElement).style.cursor).toBe("grab");
+    fireEvent.mouseMove(svg as SVGSVGElement, { clientX: 390, clientY: 280, bubbles: true });
+    await flushFloorFrame();
+    expect(cameraGroups.map((group) => group.getAttribute("transform"))).toEqual(cameraBeforeSpace);
 
     fireEvent.blur(window);
     expect(screen.getByTestId("floor-space-pan-indicator")).not.toBeVisible();
     expect(container.querySelector('[data-temporary-pan-active="true"]')).toBeNull();
+  });
+
+  it("uses Space + drag only for camera pan when a Floor Room is selected", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.rooms = [{ id: "space-room", name: "Space Room", type: "classroom", x: 80, y: 70, w: 140, h: 90, floorId: "f1", buildingId: "b1" }];
+    const originalRoom = structuredClone(floor.rooms[0]);
+    const onUpdate = vi.fn();
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "room", id: "space-room" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={onUpdate} />);
+    const svg = container.querySelector('[data-testid="floor-canvas-boundary"]')?.closest("svg") as SVGSVGElement;
+    mockFloorSvgViewport(svg, 600, 450);
+    const canvas = container.querySelector('[data-tutorial="floor-canvas"]') as HTMLElement;
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 1200, height: 800, right: 1200, bottom: 800 }),
+    });
+    const content = svg.querySelector("g[transform^='translate(']")!;
+    const beforePan = content.getAttribute("transform");
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.mouseDown(container.querySelector('[data-layer-key="room:space-room"]')!, { button: 0, clientX: 120, clientY: 100, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 190, clientY: 160, bubbles: true });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+
+    expect(content.getAttribute("transform")).not.toBe(beforePan);
+    expect(floor.rooms[0]).toEqual(originalRoom);
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 
   it("allows furniture to cross the perimeter wall when the final footprint enters a Veranda", () => {
@@ -970,7 +1271,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     fireEvent.mouseUp(svg!, { bubbles: true });
   });
 
-  it("lets a coincident selected Room copy preview through overlap and commit once clear", () => {
+  it("lets a coincident selected Room copy preview through overlap and commit once clear", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.rooms = [
@@ -996,6 +1297,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     // the copy selected so another drag can recover it.
     fireEvent.mouseDown(copy!, { clientX: 90, clientY: 90, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 120, clientY: 90, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy();
     expect(Number(container.querySelector('[data-testid="room-invalid-preview"] rect')?.getAttribute("x"))).toBe(110);
     fireEvent.mouseUp(svg!, { bubbles: true });
@@ -1007,6 +1309,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     const retryCopy = container.querySelector('[data-layer-key="room:room-copy"]');
     fireEvent.mouseDown(retryCopy!, { clientX: 90, clientY: 90, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 190, clientY: 90, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
     fireEvent.mouseUp(svg!, { bubbles: true });
 
@@ -1036,7 +1339,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
   });
 
-  it("shows invalid feedback while a nested Room crosses its parent, then lets it move completely outside", () => {
+  it("shows invalid feedback while a nested Room crosses its parent, then lets it move completely outside", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.rooms = [
@@ -1061,10 +1364,12 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="collab"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="room-resize-handle"]')).toBeTruthy();
     fireEvent.mouseMove(svg!, { clientX: 350, clientY: 130, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="placement-warning-badge"]')?.textContent).toMatch(/Overlaps.*Room/);
 
     fireEvent.mouseMove(svg!, { clientX: 490, clientY: 130, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')).toBeNull();
     fireEvent.mouseUp(svg!, { bubbles: true });
     const movedFloor = updates.at(-1)?.buildings[0].floors[0];
@@ -1108,7 +1413,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="library"]')).toBeNull();
   });
 
-  it("blocks shrinking a parent Room when that would leave its existing child outside", () => {
+  it("blocks shrinking a parent Room when that would leave its existing child outside", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.rooms = [
@@ -1127,6 +1432,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(eastHandle).toBeTruthy();
     fireEvent.mouseDown(eastHandle!, { clientX: 380, clientY: 180, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 340, clientY: 180, bubbles: true });
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(container.querySelector('[data-testid="room-invalid-preview"]')?.getAttribute("data-preview-kind")).toBe("resize");
     expect(container.querySelector('[data-testid="placement-warning-badge"]')?.getAttribute("aria-label"))
       .toBe("Resize would leave a contained Room outside");
@@ -1251,7 +1557,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.getByTitle("Select (V)").className).toContain("bg-primary");
   });
 
-  it("keeps furniture resizing in an authored Veranda instead of clamping to the indoor floor", () => {
+  it("keeps furniture resize previews transient in an authored Veranda and commits once on release", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.exteriorZones = [{ id: "zone-1", type: "veranda", side: "bottom", offset: 0.5, width: 180, depth: 72, label: "Veranda 1" }];
@@ -1268,7 +1574,12 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(eastHandle).toBeTruthy();
     fireEvent.mouseDown(eastHandle!, { clientX: 274, clientY: 480, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 320, clientY: 480, bubbles: true });
-    const resized = updates.at(-1)?.buildings[0].floors[0].furniture?.find((item) => item.id === "chair-1");
+    await flushFloorFrame();
+    expect(updates).toHaveLength(0);
+    expect(container.querySelector('[data-testid="floor-imperative-preview-items"] [data-layer-key="furniture:chair-1"]')).toBeTruthy();
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    const resized = updates[0].buildings[0].floors[0].furniture?.find((item) => item.id === "chair-1");
     expect(resized?.y).toBeGreaterThan(450);
     expect((resized?.x ?? 0) + (resized?.width ?? 0)).toBeLessThanOrEqual(390.5);
   });
@@ -1309,6 +1620,43 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(screen.getByTestId("exterior-stair-platform")).toBeInTheDocument();
     expect(screen.getByTestId("exterior-stair-door-opening")).toBeInTheDocument();
     expect(screen.getByTestId("exterior-emergency-stair-floor-symbol")).toBeInTheDocument();
+  });
+
+  it("keeps generated exterior stair pointer feedback in the interaction overlay until release", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    campus.buildings[0].exteriorEmergencyStairs = [{
+      id: "ext-east", buildingId: "b1", label: "East Fire Escape", state: "open",
+      width: 28, height: 42, attachment: { edge: "right", offset: 0.5 },
+      servedFloorIds: ["f1"], sharedId: "ext-east-shared", emergencySafe: true,
+    }];
+    floor.stairs = [{
+      id: "landing-f1", x: 886, y: 319, width: 28, height: 42, direction: "both",
+      label: "East Fire Escape", exteriorEmergencyStairId: "ext-east",
+      attachment: { edge: "right", offset: 0.5 }, locked: true, visible: true,
+    } as FloorStairs];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+    const source = container.querySelector('[data-layer-key="stairs:landing-f1"]')!;
+    const updatesBeforeGesture = updates.length;
+
+    fireEvent.mouseDown(source, { button: 0, clientX: 590, clientY: 225, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 565, clientY: 285, bubbles: true });
+
+    await waitFor(() => {
+      const preview = container.querySelector('[data-testid="floor-imperative-preview-items"] [data-layer-key="stairs:landing-f1"]');
+      expect(preview).toBeTruthy();
+      expect(preview?.getAttribute("transform")).toContain("translate(");
+      expect(source.getAttribute("visibility")).toBe("hidden");
+    });
+    expect(updates).toHaveLength(updatesBeforeGesture);
+
+    fireEvent.mouseUp(svg!, { bubbles: true });
+    await waitFor(() => expect(updates).toHaveLength(updatesBeforeGesture + 1));
+    expect(updates.at(-1)?.buildings[0].exteriorEmergencyStairs?.[0].attachment.offset).not.toBe(0.5);
   });
 
   it("uses the generated exterior inspector and visible-module bounds when selected", () => {
@@ -1620,7 +1968,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates).toHaveLength(1);
   });
 
-  it("preserves an authored ramp depth while dragging along its parent edge", () => {
+  it("preserves authored ramp depth through a transient drag and one release commit", () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     floor.exteriorZones = [{ id: "zone-1", type: "veranda", side: "bottom", offset: 0.5, width: 220, depth: 180, label: "Veranda 1" }];
@@ -1633,11 +1981,32 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
 
     fireEvent.mouseDown(screen.getByTestId("entrance-ramp"), { clientX: 300, clientY: 640, bubbles: true });
     fireEvent.mouseMove(svg!, { clientX: 340, clientY: 630, bubbles: true });
-    const movedRamp = updates.at(-1)?.buildings[0].floors[0].entranceRamps?.[0];
-    expect(movedRamp?.attachmentOffset).not.toBe(0.5);
-    expect(movedRamp?.height).toBe(70);
+    expect(updates).toHaveLength(0);
     fireEvent.mouseUp(svg!, { bubbles: true });
+    expect(updates).toHaveLength(1);
+    const movedRamp = updates[0].buildings[0].floors[0].entranceRamps?.[0];
+    expect(movedRamp?.attachmentOffset).not.toBe(0.5);
     expect(updates.at(-1)?.buildings[0].floors[0].entranceRamps?.[0].height).toBe(70);
+  });
+
+  it("keeps Entrance Steps drag transient and commits once on release", () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.exteriorZones = [{ id: "zone-steps", type: "veranda", side: "bottom", offset: 0.5, width: 220, depth: 180, label: "Veranda" }];
+    floor.entranceSteps = [{ id: "steps-live", x: 0, y: 0, width: 48, height: 28, label: "Steps", parentZoneId: "zone-steps", attachmentEdge: "outer", attachmentOffset: 0.5, accessible: false }];
+    const updates: Campus[] = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "entranceSteps", id: "steps-live" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    expect(svg).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+
+    fireEvent.mouseDown(screen.getByTestId("entrance-steps"), { button: 0, clientX: 300, clientY: 640, bubbles: true });
+    fireEvent.mouseMove(svg!, { clientX: 340, clientY: 630, bubbles: true });
+    expect(updates).toHaveLength(0);
+    fireEvent.mouseUp(svg!, { bubbles: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].entranceSteps?.[0].attachmentOffset).not.toBe(0.5);
   });
 
   it("mirrors a selected access feature to the opposite parent edge", () => {
@@ -1743,9 +2112,11 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     floor.stairs = [{ id: "ext-occ", x: 860, y: 300, width: 28, height: 42, direction: "both", label: "Fire Escape", exteriorEmergencyStairId: owner.id, attachment: owner.attachment, locked: true, visible: true } as FloorStairs];
     const view = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
     for (const edge of ["right", "left", "top", "bottom"] as const) {
-      owner.attachment = { edge, offset: 0.5 };
-      floor.stairs[0].attachment = owner.attachment;
-      view.rerender(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+      const nextCampus = structuredClone(campus);
+      const nextOwner = nextCampus.buildings[0].exteriorEmergencyStairs![0];
+      nextOwner.attachment = { edge, offset: 0.5 };
+      nextCampus.buildings[0].floors[0].stairs[0].attachment = nextOwner.attachment;
+      view.rerender(<FloorEditor campus={nextCampus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
       expect(screen.getByTestId("floor-exterior-emergency-module")).toHaveAttribute("data-edge", edge);
     }
   });
@@ -1840,26 +2211,29 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
     renderEditor();
     const save = screen.getByRole("button", { name: /^Save$/i });
     const publish = screen.getByRole("button", { name: /^Publish$/i });
-    expect(save.parentElement).toBe(publish.parentElement);
-    expect(save.parentElement?.className).toContain("shrink-0");
-    // Both sit inside the deterministic flex-wrap toolbar row.
-    const wrap = save.closest(".flex-wrap");
-    expect(wrap).toBeTruthy();
-    expect(wrap?.className).toContain("min-h-11");
+    const lifecycleGroup = screen.getByTestId("floor-toolbar-lifecycle");
+    expect(save.closest('[data-testid="floor-toolbar-lifecycle"]')).toBe(lifecycleGroup);
+    expect(publish.closest('[data-testid="floor-toolbar-lifecycle"]')).toBe(lifecycleGroup);
+    expect(lifecycleGroup.className).toContain("shrink-0");
+    // Save and Publish are atomic within their lifecycle group. Their current
+    // header uses a three-zone grid rather than the former flex-wrap row.
+    expect(lifecycleGroup.className).toContain("whitespace-nowrap");
   });
 
   it("keeps Undo and Redo in the same group", () => {
     renderEditor();
     const undo = screen.getByRole("button", { name: /^Undo/i });
     const redo = screen.getByRole("button", { name: /^Redo/i });
-    expect(undo.parentElement).toBe(redo.parentElement);
+    const group = screen.getByTestId("floor-toolbar-right").querySelector('[data-tutorial="floor-undo-redo"]');
+    expect(undo.closest('[data-tutorial="floor-undo-redo"]')).toBe(group);
+    expect(redo.closest('[data-tutorial="floor-undo-redo"]')).toBe(group);
   });
 
   it("still renders the major control groups (mode switch, floor tabs, issues, save/publish)", () => {
     renderEditor();
     expect(screen.getByTestId("floor-tab-bar")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Design" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Navigation" })).toBeTruthy();
+    expect(screen.getByTestId("floor-toolbar-center")).toBeTruthy();
+    expect(screen.getByTestId("floor-nav-toolbar")).toBeTruthy();
     expect(screen.getByTestId("issues-toolbar")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Save$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Publish$/i })).toBeTruthy();
@@ -1938,6 +2312,40 @@ describe("FloorEditor Furniture duplication and color actions", () => {
     await waitFor(() => expect(floorFurniture()).toHaveLength(2));
     expect(floorFurniture().some((item) => item.id === secondCopy.id)).toBe(false);
     expect(container.querySelector('[data-layer-key^="furniture:"]')).toBeTruthy();
+  });
+
+  it("keeps a duplicated Floor Furniture item visibly following the pointer before release", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.furniture = [{ id: "source-chair", type: "chair", name: "Chair", category: "Seating", x: 100, y: 100, width: 24, height: 20, rotation: 0, color: "#8b6f4e" }];
+    let latestCampus = campus;
+    const updates: Campus[] = [];
+    function Harness() {
+      const [liveCampus, setLiveCampus] = useState(campus);
+      return <FloorEditor campus={liveCampus} buildingId="b1" floorId="f1" initialSelection={{ type: "furniture", id: "source-chair" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; updates.push(next); setLiveCampus(next); }} />;
+    }
+    const { container } = render(<Harness />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg as SVGSVGElement);
+    fireEvent.keyDown(window, { key: "d", ctrlKey: true });
+    const duplicate = latestCampus.buildings[0].floors[0].furniture!.find((item) => item.id !== "source-chair")!;
+    const copyElement = container.querySelector(`[data-layer-key="furniture:${duplicate.id}"]`)!;
+    updates.length = 0;
+
+    fireEvent.mouseDown(copyElement, { button: 0, clientX: duplicate.x + 12, clientY: duplicate.y + 10, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: duplicate.x + 32, clientY: duplicate.y + 40, bubbles: true });
+    await flushFloorFrame();
+
+    const preview = container.querySelector(`[data-testid="floor-imperative-preview-items"] [data-layer-key="furniture:${duplicate.id}"]`);
+    expect(preview).toBeTruthy();
+    expect(preview?.getAttribute("transform")).toContain("translate(20 30)");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const committed = updates[0]?.buildings[0].floors[0].furniture?.find((item) => item.id === duplicate.id);
+    expect(updates).toHaveLength(1);
+    expect(committed).toMatchObject({ x: duplicate.x + 20, y: duplicate.y + 30 });
+    expect(container.querySelector(`[data-testid="floor-imperative-preview-items"] [data-layer-key="furniture:${duplicate.id}"]`)).toBeNull();
   });
 
   it("applies color to recolorable members of the selected group as one undoable action", async () => {

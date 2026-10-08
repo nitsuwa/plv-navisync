@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { ReadonlyFloorPlanScene } from "../ReadonlyFloorPlanVisuals";
+import { entranceDirectionBadgePlacement } from "../EntranceDirectionBadge";
 import type { CampusEntrance, FloorPlan } from "../types";
 
 const wall = { id: "wall-entry", x1: 20, y1: 100, x2: 180, y2: 100, thickness: 6, color: "#475569" };
@@ -90,21 +91,91 @@ describe("Readonly Entrance-linked opening visuals", () => {
         floor={floorWithDoor()}
         entrances={[entrance("both")]}
         interactiveExitDoorIds={new Set([door.id])}
+        compactExitActions
         onDoorClick={onDoorClick}
       /></svg>,
     );
 
-    const transitionDoor = getByRole("button", { name: "Exit to campus view" });
-    expect(container.querySelector('[data-testid="student-exit-campus-indicator"]')?.textContent).toContain("Exit to Campus");
+    const transitionDoor = getByRole("button", { name: "Exit to Campus" });
+    const indicator = container.querySelector('[data-testid="student-exit-campus-indicator"]');
+    expect(indicator?.querySelector('[data-testid="student-exit-campus-arrow"]')).toBeTruthy();
+    expect(indicator?.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveTextContent("Exit");
+    const arrows = indicator?.querySelectorAll("[data-transition-arrow]");
+    expect(arrows).toHaveLength(2);
+    expect(indicator?.querySelector('[data-transition-arrow="exit"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(indicator?.querySelector('[data-transition-arrow="entrance"]')).not.toHaveAttribute("data-transition-emphasis");
+    expect(container.querySelector('[data-testid="student-exit-campus-marker"]')).toBeNull();
+    expect(container.querySelector('[data-testid="student-exit-campus-tooltip"]')).toBeNull();
     expect(container.querySelector('[data-testid="readonly-exit-door-hit-target"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="readonly-exit-indicator-hit-target"]')).toBeTruthy();
-    expect(transitionDoor.querySelector("title")?.textContent).toContain("return to the outdoor map");
+    expect(transitionDoor.querySelector("title")?.textContent).toBe("Exit to Campus");
     fireEvent.mouseEnter(transitionDoor);
-    expect(container.querySelector('[data-testid="student-exit-campus-pill"]')?.getAttribute("fill")).toBe("#dbeafe");
-    fireEvent.click(container.querySelector('[data-testid="readonly-exit-indicator-hit-target"]')!);
+    expect(container.querySelector('[data-testid="student-exit-campus-tooltip"]')).toBeNull();
+    expect(indicator?.querySelector('[data-transition-arrow="exit"]')).toHaveAttribute("data-transition-emphasis", "pressable");
+    fireEvent.click(container.querySelector('[data-testid="readonly-exit-door-hit-target"]')!);
     fireEvent.keyDown(transitionDoor, { key: "Enter" });
     expect(onDoorClick).toHaveBeenNthCalledWith(1, door.id);
     expect(onDoorClick).toHaveBeenNthCalledWith(2, door.id);
+  });
+
+  it("keeps the active Floor exit arrow at the authored door without duplicating the shared route callout", () => {
+    const floor = floorWithDoor();
+    const props = { floor, entrances: [entrance("both")], compactExitActions: true, activeExitDoorId: door.id,
+      interactiveExitDoorIds: new Set([door.id]), onDoorClick: vi.fn() };
+    const { container, rerender } = render(<svg><ReadonlyFloorPlanScene {...props} /></svg>);
+    const badge = container.querySelector('[data-testid="student-exit-campus-arrow"]')!;
+    const anchor = [badge.getAttribute("data-world-anchor-x"), badge.getAttribute("data-world-anchor-y")];
+    expect(anchor).toEqual(["100", "100"]);
+    const placement = entranceDirectionBadgePlacement(100, 100, "bottom");
+    expect(badge.getAttribute("transform")).toBe(`translate(${placement.x},${placement.y}) rotate(${placement.angle})`);
+    expect(badge.querySelector('[data-transition-arrow="exit"]')).toHaveAttribute("data-transition-emphasis", "active");
+    expect(container.querySelector('[data-testid="student-exit-campus-tooltip"]')).toBeNull();
+    rerender(<svg><ReadonlyFloorPlanScene {...props} mapMode="accessible" /></svg>);
+    expect(container.querySelector('[data-testid="student-exit-campus-arrow"]')).toBe(badge);
+    expect(badge.getAttribute("data-world-anchor-x")).toBe(anchor[0]);
+    expect(badge.getAttribute("data-world-anchor-y")).toBe(anchor[1]);
+    expect(container.querySelector('[data-testid="student-exit-campus-tooltip"]')).toBeNull();
+  });
+
+  it("adds hover emphasis without moving the Floor exit action anchor", () => {
+    const { container, getByRole } = render(
+      <svg><ReadonlyFloorPlanScene
+        floor={floorWithDoor()}
+        entrances={[entrance("both")]}
+        compactExitActions
+        interactiveExitDoorIds={new Set([door.id])}
+        onDoorClick={vi.fn()}
+      /></svg>,
+    );
+    const action = getByRole("button", { name: "Exit to Campus" });
+    const badge = container.querySelector('[data-testid="student-exit-campus-arrow"]')!;
+    const anchorTransform = badge.getAttribute("transform");
+    const anchorX = badge.getAttribute("data-world-anchor-x");
+    const anchorY = badge.getAttribute("data-world-anchor-y");
+
+    fireEvent.mouseEnter(action);
+
+    expect(badge).toHaveAttribute("transform", anchorTransform);
+    expect(badge).toHaveAttribute("data-world-anchor-x", anchorX);
+    expect(badge).toHaveAttribute("data-world-anchor-y", anchorY);
+    expect(badge).toHaveAttribute("data-emphasized-direction", "exit");
+    expect(badge.querySelector('[data-testid="student-doorway-micro-label-text"]')).toHaveTextContent("Exit to Campus");
+  });
+
+  it("suppresses the passive Floor exit arrow while the active route control owns that door", () => {
+    const { container } = render(
+      <svg><ReadonlyFloorPlanScene
+        floor={floorWithDoor()}
+        entrances={[entrance("both")]}
+        compactExitActions
+        activeExitDoorId={door.id}
+        suppressActiveExitDoorId={door.id}
+        interactiveExitDoorIds={new Set([door.id])}
+        onDoorClick={vi.fn()}
+      /></svg>,
+    );
+
+    expect(container.querySelector('[data-testid="student-exit-campus-arrow"]')).toBeNull();
+    expect(container.querySelector('[data-testid="readonly-exit-door-hit-target"]')).toBeTruthy();
   });
 
   it("does not add the campus-exit cue to ordinary doors", () => {
@@ -121,5 +192,21 @@ describe("Readonly Entrance-linked opening visuals", () => {
     expect(queryByRole("button", { name: "Exit to campus view" })).toBeNull();
     expect(container.querySelector('[data-testid="student-exit-campus-indicator"]')).toBeNull();
     expect(container.querySelector('[data-testid="readonly-exit-door-hit-target"]')).toBeNull();
+  });
+
+  it("keeps the authored inward arrow visible on a non-exitable Floor door without inventing an Exit", () => {
+    const { container } = render(
+      <svg><ReadonlyFloorPlanScene
+        floor={floorWithDoor()}
+        entrances={[entrance("entrance_only")]}
+        compactExitActions
+      /></svg>,
+    );
+    const badge = container.querySelector('[data-testid="student-exit-campus-arrow"]')!;
+    expect(badge.querySelectorAll("[data-transition-arrow]")).toHaveLength(1);
+    expect(badge.querySelector('[data-transition-arrow="entrance"]')).toBeInTheDocument();
+    expect(badge.querySelector('[data-transition-arrow="exit"]')).toBeNull();
+    expect(badge.querySelector('[data-testid$="-emphasis"]')).toBeNull();
+    expect(container.querySelector('[data-testid="readonly-door"][role="button"]')).toBeNull();
   });
 });
