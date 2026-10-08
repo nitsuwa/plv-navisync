@@ -21,6 +21,8 @@ interface MobileBuildingSheetProps {
   onReport: (building: Building) => void;
   onSignInPrompt: (message: string) => void;
   saved: Set<string>;
+  savedStateLoading?: boolean;
+  savedStateUnavailable?: boolean;
   studentAuth: StudentAuthState;
   hasFloorPlans: boolean;
   floorPlanCount: number;
@@ -71,6 +73,7 @@ export function resolveMobileBuildingSheetSnap(
 export function MobileBuildingSheet({
   selected, campusId, onClose, onDirections, onEnterBuilding, onSave, onReport,
   onSignInPrompt, saved, studentAuth, hasFloorPlans, floorPlanCount, facilities,
+  savedStateLoading = false, savedStateUnavailable = false,
   accessibility, showQR, onToggleQR, onStateChange,
   onBackToRoutePlanner,
   interactionPaused = false,
@@ -295,6 +298,26 @@ export function MobileBuildingSheet({
             <h2 className="line-clamp-2 pr-1 text-[15px] font-extrabold leading-[1.1] tracking-tight text-foreground">{selected.name}</h2>
           </div>
         </header>
+
+        <div className={`shrink-0 px-3 ${sheetState === "peek" ? "pb-3" : "pb-2"}`}>
+          <BuildingDetailsActions
+            building={selected}
+            campusId={campusId}
+            hasFloorPlans={hasFloorPlans}
+            saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
+            studentAuth={studentAuth}
+            showQR={showQR}
+            showSecondaryActions={sheetState !== "peek"}
+            onDirections={onDirections}
+            onEnterBuilding={onEnterBuilding}
+            onSave={onSave}
+            onReport={onReport}
+            onSignInPrompt={onSignInPrompt}
+            onToggleQR={onToggleQR}
+          />
+        </div>
 
         {sheetState === "default" && (
           <div className="shrink-0 px-4 pb-1">

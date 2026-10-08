@@ -1,0 +1,33 @@
+{
+  "title": "QA poster 6ad37ce1",
+  "id": "200a718a-10f2-4092-a663-fbfadf0c1688",
+  "checks": [
+    {
+      "name": "Upload failure preserves proposal and makes no event",
+      "status": "PASS"
+    },
+    {
+      "name": "Create save failure stays in form after upload",
+      "status": "PASS"
+    },
+    {
+      "name": "Lost create response recovers one draft using cached poster",
+      "status": "PASS"
+    },
+    {
+      "name": "Created poster persists after reload in Edit details",
+      "status": "PASS"
+    },
+    {
+      "name": "Replacement failure/retry retains saved image and reuses new upload",
+      "status": "PASS"
+    },
+    {
+      "name": "Remove persists after reload without deleting shared poster contents",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "cleaned": true,
+  "objectsCleaned": true
+}

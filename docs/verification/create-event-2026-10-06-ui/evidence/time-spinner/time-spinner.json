@@ -1,0 +1,53 @@
+{
+  "checks": [
+    {
+      "name": "Publication spinner: desktop typing/arrows/validation/Done/Escape",
+      "mode": "ACTUAL EXISTING UI / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Publication spinner: mobile typing/arrows/validation/Done/Escape",
+      "mode": "ACTUAL EXISTING UI / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Publication spinner: landscape typing/arrows/validation/Done/Escape",
+      "mode": "ACTUAL EXISTING UI / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Review start/end/publication controls: desktop",
+      "mode": "ACTUAL UI / CONTROLLED READ RESPONSE / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Review start/end/publication controls: mobile",
+      "mode": "ACTUAL UI / CONTROLLED READ RESPONSE / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Review start/end/publication controls: landscape",
+      "mode": "ACTUAL UI / CONTROLLED READ RESPONSE / UNSAVED",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin create form controls: desktop",
+      "mode": "ACTUAL UI / UNSAVED EMPTY FORM",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin create form controls: mobile",
+      "mode": "ACTUAL UI / UNSAVED EMPTY FORM",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin create form controls: landscape",
+      "mode": "ACTUAL UI / UNSAVED EMPTY FORM",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteAttempts": 0,
+  "retainedFixtures": 0,
+  "existingSampleUnchanged": true
+}

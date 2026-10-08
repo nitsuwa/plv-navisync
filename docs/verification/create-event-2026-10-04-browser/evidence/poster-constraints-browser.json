@@ -1,0 +1,26 @@
+{
+  "title": "QA poster constraints 846b89c4",
+  "checks": [
+    {
+      "name": "Unsupported MIME is rejected inline without replacing form values",
+      "status": "PASS"
+    },
+    {
+      "name": "Poster over 5 MB is rejected inline and title remains intact",
+      "status": "PASS"
+    },
+    {
+      "name": "Valid JPEG and WebP selections are accepted by the create form",
+      "status": "PASS"
+    },
+    {
+      "name": "Remove, cancel/keep editing, discard and reopen reset poster state correctly",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "noEventCreated": true,
+  "noUpload": true,
+  "keepEditingLeavesProposalOpen": true,
+  "uploadRequests": 0
+}

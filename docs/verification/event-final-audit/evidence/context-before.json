@@ -1,0 +1,57 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "student-320x568: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 340.34375,
+        "width": 296,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-320x568: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320",
+      "status": "FAIL",
+      "detail": "locator.click: Timeout 18000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('region', { name: 'Campus events', exact: true }).getByRole('button', { name: 'Fit map', exact: true })\u001b[22m\n"
+    },
+    {
+      "label": "student-360x640: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 412.34375,
+        "width": 336,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-360x640: actual floor context replaces campus",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "RUNNING"
+}

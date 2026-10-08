@@ -99,7 +99,7 @@ export function validateEventLayout(input: {
           itemIds: [item.id],
           message: region.kind === "building"
             ? `${item.name} overlaps building ${region.label}. Place it on open campus grounds, or use the requested building floor map for indoor items.`
-            : `${item.name} overlaps the blocked access area: ${region.label}.`,
+            : `${item.name} overlaps ${region.label}. Move it away to keep access clear.`,
         });
       }
     }
@@ -152,7 +152,11 @@ export function eventProtectedAccessRegions(floor: Pick<FloorPlan, "doors" | "fu
     ...(floor.id === "campus" ? (floor.rooms ?? []).filter(room => room.type === "building" && room.visible !== false).map(room => ({
       x: room.x, y: room.y, width: room.w, height: room.h, rotation: room.rotation ?? 0, label: room.name, kind: "building" as const,
     })) : []),
-    ...(floor.doors ?? []).filter(door => door.visible !== false).map(door => ({ x: door.x - door.width / 2, y: door.y - door.width / 2, width: door.width, height: door.width, label: `${door.isEmergencyExit ? "Emergency exit" : "Entrance"} ${door.label || door.id}` })),
+    ...(floor.doors ?? []).filter(door => door.visible !== false).map(door => {
+      const name = door.label?.trim();
+      const humanLabel = name && name !== door.id && !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(name) ? name : null;
+      return { x: door.x - door.width / 2, y: door.y - door.width / 2, width: door.width, height: door.width, label: humanLabel ? `the ${door.isEmergencyExit ? "emergency exit" : "entrance"} (${humanLabel})` : `the ${door.isEmergencyExit ? "emergency exit" : "entrance"}` };
+    }),
     ...(floor.furniture ?? []).filter(item => item.visible !== false).map(item => ({ ...polygonBounds(rotatedRectPoints(item)), label: `Permanent asset: ${item.name}` })),
   ];
 }

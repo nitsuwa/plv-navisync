@@ -1,0 +1,14 @@
+{
+  "checks": [
+    {
+      "name": "Mobile creation Tab/Shift+Tab stays in active dialog",
+      "status": "PASS"
+    },
+    {
+      "name": "Mobile dark creation remains contained",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "failure": "Closing creation did not return focus to Create event"
+}

@@ -1,0 +1,3143 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "student-320x568: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 340.34375,
+        "width": 296,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-320x568: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 320.84375,
+        "width": 296,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-320x568: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 7.3367719650268555,
+        "y": 172.7972869873047,
+        "right": 264.21601390838623,
+        "bottom": 274.8749694824219,
+        "width": 256.8792419433594,
+        "height": 102.07768249511719,
+        "panelTop": 320.84375,
+        "panelRight": 308,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(27.2035px, -72.2576px, 0px) scale(0.814206); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-320x568: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 120,
+        "width": 296,
+        "height": 368
+      }
+    },
+    {
+      "label": "student-320x568: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 412.34375,
+        "width": 336,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-360x640: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 392.84375,
+        "width": 336,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-360x640: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 6.745172500610352,
+        "y": 202.24493408203125,
+        "right": 304.8960208892822,
+        "bottom": 320.7867736816406,
+        "width": 298.1508483886719,
+        "height": 118.54183959960938,
+        "panelTop": 392.84375,
+        "panelRight": 348,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(19.909px, -57.9379px, 0px) scale(0.840471); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-360x640: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 120,
+        "width": 336,
+        "height": 440
+      }
+    },
+    {
+      "label": "student-360x640: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 616.34375,
+        "width": 366,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-390x844: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 616.34375,
+        "width": 366,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-390x844: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 6.3112382888793945,
+        "y": 309.0806579589844,
+        "right": 335.7510576248169,
+        "bottom": 439.9706115722656,
+        "width": 329.4398193359375,
+        "height": 130.88995361328125,
+        "panelTop": 616.34375,
+        "panelRight": 378,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(15.4201px, -11.1257px, 0px) scale(0.856633); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-390x844: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 156.328125,
+        "width": 366,
+        "height": 607.671875
+      }
+    },
+    {
+      "label": "student-390x844: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-740x390: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-740x390: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 327.23516845703125,
+        "y": 121.97765350341797,
+        "right": 712.6639404296875,
+        "bottom": 275.30895233154297,
+        "width": 385.42877197265625,
+        "height": 153.331298828125,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(666.164px, 217.696px, 0px) scale(0.528874); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-740x390: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 302
+      }
+    },
+    {
+      "label": "student-740x390: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 858.5,
+        "width": 744,
+        "height": 130.5
+      }
+    },
+    {
+      "label": "student-768x1024: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 858.5,
+        "width": 744,
+        "height": 130.5
+      }
+    },
+    {
+      "label": "student-768x1024: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 0.16800011694431305,
+        "y": 396.73907470703125,
+        "right": 719.8319405466318,
+        "bottom": 683.2151489257812,
+        "width": 719.6639404296875,
+        "height": 286.47607421875,
+        "panelTop": 858.5,
+        "panelRight": 756,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(-11.0926px, 39.1957px, 0px) scale(0.952096); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-768x1024: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 340.5,
+        "width": 744,
+        "height": 648.5
+      }
+    },
+    {
+      "label": "student-768x1024: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1024x768: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1024x768: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 381.52801513671875,
+        "y": 300.09375,
+        "right": 1018.4720458984375,
+        "bottom": 553.6416015625,
+        "width": 636.9440307617188,
+        "height": 253.5478515625,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(558.747px, 149.928px, 0px) scale(0.631994); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1024x768: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 660
+      }
+    },
+    {
+      "label": "student-1024x768: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1440x900: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1440x900: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 374.4560241699219,
+        "y": 297.94927978515625,
+        "right": 1441.5439147949219,
+        "bottom": 722.7242431640625,
+        "width": 1067.087890625,
+        "height": 424.77496337890625,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(386.224px, 122.973px, 0px) scale(0.752922); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1440x900: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 792
+      }
+    },
+    {
+      "label": "student-1440x900: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1920x1080: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1920x1080: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 366.2960205078125,
+        "y": 309.321044921875,
+        "right": 1929.703857421875,
+        "bottom": 931.6657104492188,
+        "width": 1563.4078369140625,
+        "height": 622.3446655273438,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(280.056px, 106.385px, 0px) scale(0.827338); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1920x1080: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 967.90625
+      }
+    },
+    {
+      "label": "student-1920x1080: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 320,
+        "height": 568
+      }
+    },
+    {
+      "label": "proposal-320x568: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 320,
+        "height": 568
+      }
+    },
+    {
+      "label": "proposal-320x568: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 56.5,
+        "width": 288,
+        "height": 455
+      }
+    },
+    {
+      "label": "proposal-320x568: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 reduced input viewport: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 reduced input viewport: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 320,
+        "height": 320
+      }
+    },
+    {
+      "label": "proposal-320x568: actions reachable with keyboard-sized viewport reduction",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 169,
+        "width": 288,
+        "height": 230
+      }
+    },
+    {
+      "label": "proposal-320x568: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-320x568: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 544
+      }
+    },
+    {
+      "label": "review-320x568 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 20,
+        "y": 12,
+        "width": 288,
+        "height": 242.171875
+      }
+    },
+    {
+      "label": "review-320x568: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 98,
+        "width": 288,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-320x568: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 544
+      }
+    },
+    {
+      "label": "review-320x568: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 13,
+        "y": 219,
+        "width": 294,
+        "height": 121
+      }
+    },
+    {
+      "label": "review-320x568: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 360,
+        "height": 640
+      }
+    },
+    {
+      "label": "proposal-360x640: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 360,
+        "height": 640
+      }
+    },
+    {
+      "label": "proposal-360x640: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 109.5,
+        "width": 328,
+        "height": 421
+      }
+    },
+    {
+      "label": "proposal-360x640: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 205,
+        "width": 328,
+        "height": 230
+      }
+    },
+    {
+      "label": "proposal-360x640: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-360x640: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616
+      }
+    },
+    {
+      "label": "review-360x640 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 42,
+        "y": 12,
+        "width": 304,
+        "height": 278.28125
+      }
+    },
+    {
+      "label": "review-360x640: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 28,
+        "y": 134,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-360x640: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616
+      }
+    },
+    {
+      "label": "review-360x640: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 13,
+        "y": 291,
+        "width": 334,
+        "height": 140
+      }
+    },
+    {
+      "label": "review-360x640: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-360x640: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 229.5,
+        "width": 358,
+        "height": 385
+      }
+    },
+    {
+      "label": "proposal-390x844: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 307,
+        "width": 358,
+        "height": 230
+      }
+    },
+    {
+      "label": "proposal-390x844: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 366,
+        "height": 820
+      }
+    },
+    {
+      "label": "review-390x844 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 42,
+        "y": 12,
+        "width": 304,
+        "height": 380.28125
+      }
+    },
+    {
+      "label": "review-390x844: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 43,
+        "y": 236,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-390x844: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 366,
+        "height": 820
+      }
+    },
+    {
+      "label": "review-390x844: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 13,
+        "y": 264,
+        "width": 364,
+        "height": 371.5
+      }
+    },
+    {
+      "label": "review-390x844: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-390x844: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 29.6015625,
+        "y": 15.6015625,
+        "width": 680.796875,
+        "height": 358.796875
+      }
+    },
+    {
+      "label": "proposal-740x390: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 29.6015625,
+        "y": 15.6015625,
+        "width": 680.796875,
+        "height": 358.796875
+      }
+    },
+    {
+      "label": "proposal-740x390: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 146,
+        "y": 34.5,
+        "width": 448,
+        "height": 321
+      }
+    },
+    {
+      "label": "proposal-740x390: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 178,
+        "y": 106,
+        "width": 384,
+        "height": 178
+      }
+    },
+    {
+      "label": "proposal-740x390: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-740x390: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 716,
+        "height": 366
+      }
+    },
+    {
+      "label": "review-740x390 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 50,
+        "y": 12,
+        "width": 304,
+        "height": 153.390625
+      }
+    },
+    {
+      "label": "review-740x390: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 218,
+        "y": 12,
+        "width": 304,
+        "height": 366
+      }
+    },
+    {
+      "label": "review-740x390: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 8,
+        "y": 8,
+        "width": 724,
+        "height": 374
+      }
+    },
+    {
+      "label": "review-740x390: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 9,
+        "y": 70,
+        "width": 722,
+        "height": 140
+      }
+    },
+    {
+      "label": "review-740x390: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 30.7265625,
+        "y": 146.0625,
+        "width": 706.546875,
+        "height": 731.875
+      }
+    },
+    {
+      "label": "proposal-768x1024: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 30.7265625,
+        "y": 40.9609375,
+        "width": 706.546875,
+        "height": 942.078125
+      }
+    },
+    {
+      "label": "proposal-768x1024: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 160,
+        "y": 329.5,
+        "width": 448,
+        "height": 365
+      }
+    },
+    {
+      "label": "proposal-768x1024: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 192,
+        "y": 423,
+        "width": 384,
+        "height": 178
+      }
+    },
+    {
+      "label": "proposal-768x1024: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-768x1024: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 744,
+        "height": 1000
+      }
+    },
+    {
+      "label": "review-768x1024 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 50,
+        "y": 415,
+        "width": 304,
+        "height": 467
+      }
+    },
+    {
+      "label": "review-768x1024: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 232,
+        "y": 326,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-768x1024: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 24,
+        "y": 24,
+        "width": 720,
+        "height": 976
+      }
+    },
+    {
+      "label": "review-768x1024: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 25,
+        "y": 248,
+        "width": 718,
+        "height": 575
+      }
+    },
+    {
+      "label": "review-768x1024: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-768x1024: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 128,
+        "y": 30.7265625,
+        "width": 768,
+        "height": 706.546875
+      }
+    },
+    {
+      "label": "proposal-1024x768: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 128,
+        "y": 30.7265625,
+        "width": 768,
+        "height": 706.546875
+      }
+    },
+    {
+      "label": "proposal-1024x768: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 288,
+        "y": 201.5,
+        "width": 448,
+        "height": 365
+      }
+    },
+    {
+      "label": "proposal-1024x768: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 320,
+        "y": 297,
+        "width": 384,
+        "height": 174
+      }
+    },
+    {
+      "label": "proposal-1024x768: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1024x768: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 128,
+        "y": 12,
+        "width": 768,
+        "height": 744
+      }
+    },
+    {
+      "label": "review-1024x768 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 166,
+        "y": 408,
+        "width": 304,
+        "height": 347.609375
+      }
+    },
+    {
+      "label": "review-1024x768: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 360,
+        "y": 198,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-1024x768: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 24,
+        "y": 24,
+        "width": 976,
+        "height": 720
+      }
+    },
+    {
+      "label": "review-1024x768: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 25,
+        "y": 244,
+        "width": 974,
+        "height": 342.5
+      }
+    },
+    {
+      "label": "review-1024x768: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1024x768: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 336,
+        "y": 89.75,
+        "width": 768,
+        "height": 720.5
+      }
+    },
+    {
+      "label": "proposal-1440x900: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 336,
+        "y": 36,
+        "width": 768,
+        "height": 828
+      }
+    },
+    {
+      "label": "proposal-1440x900: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 496,
+        "y": 267.5,
+        "width": 448,
+        "height": 365
+      }
+    },
+    {
+      "label": "proposal-1440x900: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 528,
+        "y": 363,
+        "width": 384,
+        "height": 174
+      }
+    },
+    {
+      "label": "proposal-1440x900: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1440x900: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 336,
+        "y": 12,
+        "width": 768,
+        "height": 876
+      }
+    },
+    {
+      "label": "review-1440x900 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 374,
+        "y": 371,
+        "width": 304,
+        "height": 395
+      }
+    },
+    {
+      "label": "review-1440x900: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 568,
+        "y": 264,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-1440x900: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 24,
+        "y": 24,
+        "width": 1392,
+        "height": 852
+      }
+    },
+    {
+      "label": "review-1440x900: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 25,
+        "y": 244,
+        "width": 1390,
+        "height": 474.5
+      }
+    },
+    {
+      "label": "review-1440x900: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1440x900: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 576,
+        "y": 179.75,
+        "width": 768,
+        "height": 720.5
+      }
+    },
+    {
+      "label": "proposal-1920x1080: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 576,
+        "y": 43.203125,
+        "width": 768,
+        "height": 993.59375
+      }
+    },
+    {
+      "label": "proposal-1920x1080: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 736,
+        "y": 357.5,
+        "width": 448,
+        "height": 365
+      }
+    },
+    {
+      "label": "proposal-1920x1080: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 768,
+        "y": 453,
+        "width": 384,
+        "height": 174
+      }
+    },
+    {
+      "label": "proposal-1920x1080: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-1920x1080: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 576,
+        "y": 12,
+        "width": 768,
+        "height": 1056
+      }
+    },
+    {
+      "label": "review-1920x1080 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 614,
+        "y": 455,
+        "width": 304,
+        "height": 395
+      }
+    },
+    {
+      "label": "review-1920x1080: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 808,
+        "y": 354,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-1920x1080: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 24,
+        "y": 24,
+        "width": 1872,
+        "height": 1032
+      }
+    },
+    {
+      "label": "review-1920x1080: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 25,
+        "y": 244,
+        "width": 1870,
+        "height": 654.5
+      }
+    },
+    {
+      "label": "review-1920x1080: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-1920x1080: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 229.5,
+        "width": 358,
+        "height": 385
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 307,
+        "width": 358,
+        "height": 230
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "Cached selected event exposes refresh error/retry while collapsed",
+      "status": "PASS"
+    },
+    {
+      "label": "Fit map keeps floor above persistent long refresh-error panel",
+      "status": "PASS",
+      "detail": {
+        "floorBox": {
+          "x": 7.3367719650268555,
+          "y": 139.097412109375,
+          "width": 256.9563798904419,
+          "height": 103.39326477050781
+        },
+        "panelBox": {
+          "x": 12,
+          "y": 255.84375,
+          "width": 296,
+          "height": 232.15625
+        }
+      }
+    },
+    {
+      "label": "Offline refresh retains event context",
+      "status": "PASS"
+    },
+    {
+      "label": "Reconnect retry restores event feed",
+      "status": "PASS"
+    },
+    {
+      "label": "Foreign Org event response cannot expose editor or mutation controls",
+      "status": "PASS"
+    },
+    {
+      "label": "Expired-session read shows recovery path and no save controls",
+      "status": "PASS"
+    },
+    {
+      "label": "Expired read explains signing in again rather than claiming the event is missing",
+      "status": "PASS"
+    },
+    {
+      "label": "student: native browser 200% zoom verified by CSS viewport/device-pixel ratio",
+      "status": "PASS",
+      "detail": {
+        "width": 707,
+        "height": 403,
+        "dpr": 2,
+        "outerWidth": 1440
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 147.6640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 167.1640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 309.6249694824219,
+        "y": 128.32168579101562,
+        "right": 697.375,
+        "bottom": 282.67303466796875,
+        "width": 387.7500305175781,
+        "height": 154.35134887695312,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(658.985px, 213.089px, 0px) scale(0.557243); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 315.5
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "org: native browser 200% zoom verified by CSS viewport/device-pixel ratio",
+      "status": "PASS",
+      "detail": {
+        "width": 707,
+        "height": 403,
+        "dpr": 2,
+        "outerWidth": 1440
+      }
+    },
+    {
+      "label": "proposal-707x403-zoom200: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 28.28125,
+        "y": 16.140625,
+        "width": 650.4375,
+        "height": 371.21875
+      }
+    },
+    {
+      "label": "proposal-707x403-zoom200: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 28.28125,
+        "y": 16.140625,
+        "width": 650.4375,
+        "height": 371.21875
+      }
+    },
+    {
+      "label": "proposal-707x403-zoom200: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 129.5,
+        "y": 41.25,
+        "width": 448,
+        "height": 321
+      }
+    },
+    {
+      "label": "proposal-707x403-zoom200: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200 discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 161.5,
+        "y": 112.75,
+        "width": 384,
+        "height": 178
+      }
+    },
+    {
+      "label": "proposal-707x403-zoom200: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-707x403-zoom200: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "admin: native browser 200% zoom verified by CSS viewport/device-pixel ratio",
+      "status": "PASS",
+      "detail": {
+        "width": 707,
+        "height": 403,
+        "dpr": 2,
+        "outerWidth": 1440
+      }
+    },
+    {
+      "label": "review-707x403-zoom200: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 683,
+        "height": 379.5
+      }
+    },
+    {
+      "label": "review-707x403-zoom200 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 50,
+        "y": 12,
+        "width": 304,
+        "height": 159.8984375
+      }
+    },
+    {
+      "label": "review-707x403-zoom200: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 201.5,
+        "y": 15.75,
+        "width": 304,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-707x403-zoom200: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 8,
+        "y": 8,
+        "width": 691,
+        "height": 387.5
+      }
+    },
+    {
+      "label": "review-707x403-zoom200: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 9,
+        "y": 70,
+        "width": 689,
+        "height": 148.5
+      }
+    },
+    {
+      "label": "review-707x403-zoom200: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-707x403-zoom200: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS",
+  "zoomSelectors": [],
+  "zoomControls": [],
+  "zoomMeasurements": [
+    {
+      "role": "student",
+      "width": 707,
+      "height": 403,
+      "dpr": 2,
+      "outerWidth": 1440
+    },
+    {
+      "role": "org",
+      "width": 707,
+      "height": 403,
+      "dpr": 2,
+      "outerWidth": 1440
+    },
+    {
+      "role": "admin",
+      "width": 707,
+      "height": 403,
+      "dpr": 2,
+      "outerWidth": 1440
+    }
+  ]
+}

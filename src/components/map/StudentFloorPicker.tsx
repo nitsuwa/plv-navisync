@@ -135,6 +135,10 @@ export function StudentFloorPicker({
   const fallbackOpenRef = useRef(false);
   const reducedMotion = useReducedMotion();
   const current = floors.find((floor) => floor.number === activeFloor) ?? floors[0];
+  const changeOpen = useCallback((nextOpen: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [controlledOpen, onOpenChange]);
 
   const measureLayout = () => {
     if (typeof window === "undefined") return;
@@ -394,7 +398,7 @@ export function StudentFloorPicker({
         aria-haspopup={layout?.kind === "sheet" && open ? "dialog" : "listbox"}
         aria-controls={open ? "student-floor-picker-options" : undefined}
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => changeOpen(!open)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
             event.preventDefault();

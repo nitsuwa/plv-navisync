@@ -202,8 +202,8 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open event map" }));
     await screen.findByTestId("event-map-panel");
 
-    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
-    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    expect(screen.queryByRole("searchbox", { name: "Search campus map" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("readonly-building"));
 
     await waitFor(() => expect(screen.queryByTestId("event-map-panel")).not.toBeInTheDocument());
     expect(screen.getByTestId("mobile-building-sheet")).toBeInTheDocument();

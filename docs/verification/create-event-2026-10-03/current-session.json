@@ -1,0 +1,79 @@
+{
+  "project": "aaketmqvxqjgaznvclqc.supabase.co",
+  "roles": [
+    {
+      "label": "org",
+      "authenticated": true,
+      "profile": {
+        "role": "student_org",
+        "is_active": true
+      }
+    },
+    {
+      "label": "admin",
+      "authenticated": true,
+      "profile": {
+        "role": "super_admin",
+        "is_active": true
+      }
+    },
+    {
+      "label": "student",
+      "authenticated": true,
+      "profile": {
+        "role": "student",
+        "is_active": true
+      }
+    }
+  ],
+  "browser": [
+    {
+      "label": "org",
+      "url": "http://127.0.0.1:5173/student/events",
+      "text": "Skip to main content\nPLV NaviSync\nSMART CAMPUS NAVIGATOR\nHome\nMap\nMy Events\nDE\nDEMO STUDENT ORG\nBack to Home\nMy Events\n\nRequest one or more campus locations, design each map on top of the published base map, and send the complete proposal for one GSO decision.\n\nCreate event\nTEST: College Week 2026\nPending Review\n\nNext step\n\nGSO is reviewing your proposal. You can edit the submitted maps or withdraw to Draft.\n\nMAIN CAMPUS - PLV\n\n1 location · Campus Grounds\n5 furniture\n0 labels\n\nLast edited: Oct 3, 2026, 4:42 PM PHT · Revision 18\n\nView edit history\nWithdraw submission\nDuplicate layout\nEdit maps",
+      "errors": [],
+      "overflow": false
+    },
+    {
+      "label": "creation",
+      "text": "Skip to main content\nPLV NaviSync\nSMART CAMPUS NAVIGATOR\nHome\nMap\nMy Events\nDE\nDEMO STUDENT ORG\nBack to Home\nMy Events\n\nRequest one or more campus locations, design each map on top of the published base map, and send the complete proposal for one GSO decision.\n\nCreate event\nTEST: College Week 2026\nPending Review\n\nNext step\n\nGSO is reviewing your proposal. You can edit the submitted maps or withdraw to Draft.\n\nMAIN CAMPUS - PLV\n\n1 location · Campus Grounds\n5 furniture\n0 labels\n\nLast edited: Oct 3, 2026, 4:42 PM PHT · Revision 18\n\nView edit history\nWithdraw submission\nDuplicate layout\nEdit maps\nCreate event proposal\n\nStep 1 of 2 · Event information\n\n1Event information\n2Requested locations\nStart with the event information. The administrator will set the event schedule after reviewing the proposal.\nEVENT TITLE *\nDESCRIPTION\nORGANIZATION NAME (OPTIONAL)\nEVENT POSTER (OPTIONAL)\nChoose an image to help identify the event\n\nJPEG, PNG or WebP · Up to 5 MB\n\nCancel\nContinue "
+    },
+    {
+      "label": "admin",
+      "url": "http://127.0.0.1:5173/admin-dashboard/event-layouts",
+      "text": "PLV NaviSync\nADMIN PORTAL\nDashboard\nMap Builder\nReports\nAnnouncements\nEvents\nEvent Layouts\nUsers\nActivity Logs\nSettings\nSign Out\nAdmin\n6\n\nDemo Administrator\n\nSuper Administrator · PLV NaviSync\n\nEvent Layouts\n\nReview and approve student organization event map layouts.\n\n2 Pending Reviews\n\nStudent organizations are waiting for approval on their event layouts.\n\nCtrl\n/\nAll2\nPending2\nApproved0\nDisapproved0\nTEST: College Week 2026\nPending\n1 requested location\nOrganizer:\nOSA\n\nCampus Grounds\n\nSUBMITTED TO GSO\nOct 3, 2026, 5:25 PM PHT\nLATEST CONTENT EDIT\nOct 3, 2026, 4:42 PM PHT · Revision 18\n5 furniture\n0 labels\nReview submission\nOpen map preview\nFurniture summary\nCreator account\nTEST\nPending\n1 requested location\nOrganizer:\nVITS\n\nCampus Grounds\n\nSUBMITTED TO GSO\nSubmission time unavailable\nLATEST CONTENT EDIT\nNot recorded\n2 furniture\n0 labels\nReview submission\nOpen map preview\nFurniture summary\nCreator account",
+      "errors": [],
+      "overflow": false
+    },
+    {
+      "label": "T01",
+      "status": "PASS",
+      "case": "Minute 59 and noon PM selection in desktop/mobile popover"
+    },
+    {
+      "label": "preview-pan-scroll",
+      "status": "PASS"
+    },
+    {
+      "label": "F01-F03",
+      "status": "PASS",
+      "case": "Visible draft, canceled discard preserves comment, Save pin stages to review only"
+    },
+    {
+      "label": "preview",
+      "text": "Requested map preview\n\nRead-only · Close to return to your review.\n\nFurniture summary\nTEST: College Week 2026\n\nRead-only · 1 requested locations · Submitted Oct 3, 2026, 5:25 PM PHT\n\n1/30 pins\nAdd pin\nCampus Grounds\n1\nGSO map feedback · 1 pins\n62%\nPan\nShortcuts\nFocus items\nSC\n4F\nSTUDENT CENTER BUILDING\nCABA\n6F\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION\nCAN\n1F\nCANTEEN\nCOED\n6F\nCOLLEGE OF EDUCATION BUILDING\nCEIT\n6F\nCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY\nCampus Gate\n5 furniture · 0 labels\nTool: Pan\nPending\nPan\nRead-only\nPublished base map and submitted additions"
+    },
+    {
+      "label": "responsive-preview",
+      "status": "PASS",
+      "case": "390,768,1440,1920,short-landscape and 720x450 effective viewport; light/dark screenshots"
+    },
+    {
+      "label": "student",
+      "url": "http://127.0.0.1:5173/home",
+      "text": "Skip to main content\nPLV NaviSync\nSMART CAMPUS NAVIGATOR\nHome\nMap\nDE\nDemo Student\nPLV NaviSync\nSMART CAMPUS NAVIGATOR\n\nNavigate buildings, rooms, facilities, and walking routes across PLV.\n\nQUICK LINKS\nHome\nCampus Map\nHelp / FAQ\nStudent Portal\nCONTACT\nMaysan Road corner Tongco Street, Barangay Maysan, Valenzuela City, 1440 Metro Manila\nregistrarsoffice@plv.edu.ph\n\n© 2026 Pamantasan ng Lungsod ng Valenzuela\n\nNaviSync v1.0.3",
+      "errors": [],
+      "overflow": false
+    }
+  ]
+}

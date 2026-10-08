@@ -38,6 +38,11 @@ export function visibleEventCards(
   });
 }
 
+export function eventVenueCandidates(events: PublicEventPreview[], nowMs: number, filter: EventMapFilter, selectedEventId: string | null): VisibleEventCard[] {
+  if (selectedEventId) return visibleEventCards(events, nowMs, 'all').filter(event => event.id === selectedEventId);
+  return visibleEventCards(events, nowMs, filter);
+}
+
 export function resolveEventLocation(
   campus: Campus,
   locationRef: PublicEventPreview["locations"][number]["locationRef"],
@@ -65,11 +70,14 @@ export function buildEventVenues(campus: Campus, events: PublicEventPreview[]): 
       let id: string, type: EventVenue["type"], x: number, y: number, label: string;
       if (resolved.kind === "campus") {
         id = "campus"; type = "campus";
-        const authoredMarker = campus.markers.find((marker) => /event|grounds|plaza|quad/i.test(`${marker.type} ${marker.name}`));
-        const authoredEventMarker = event.markers.find((marker) => Number.isFinite(marker.x) && Number.isFinite(marker.y));
-        x = authoredEventMarker?.x ?? authoredMarker?.x ?? campus.canvasW / 2;
-        y = authoredEventMarker?.y ?? authoredMarker?.y ?? campus.canvasH / 2;
-        label = authoredEventMarker?.label || authoredMarker?.name || "Campus Grounds (approximate)";
+        const centralMonument = campus.decorAssets?.find((asset) => asset.type === "monument" && asset.visible !== false && Number.isFinite(asset.x) && Number.isFinite(asset.y));
+        const authoredMarker = campus.markers.find((marker) => /grounds|plaza|quad/i.test(`${marker.type} ${marker.name}`) && Number.isFinite(marker.x) && Number.isFinite(marker.y));
+        const plaza = campus.decorAssets?.find((asset) => asset.visible !== false && (asset.type === "plaza-area" || asset.groundType === "plaza") && Number.isFinite(asset.x) && Number.isFinite(asset.y));
+        // Grounds is a shared campus venue, not the first event-specific stage/booth marker.
+        const center = centralMonument ?? authoredMarker ?? plaza;
+        x = center?.x ?? campus.canvasW / 2;
+        y = center?.y ?? campus.canvasH / 2;
+        label = centralMonument || plaza ? "Campus Grounds" : authoredMarker?.name || "Campus Grounds (approximate)";
       } else {
         const building = campus.buildings.find((item) => item.id === resolved.buildingId)!;
         id = `building:${building.id}`; type = "building";
@@ -94,6 +102,15 @@ export function selectedEventLocation(
   const event = events.find((item) => item.id === eventId);
   const location = event?.locations.find((item) => item.id === locationId);
   return event && location ? { event, location } : null;
+}
+
+/** Follow the actual map while retaining a chosen room when several layouts share a floor. */
+export function eventLocationOnMap(event: PublicEventPreview | undefined, floorId: string | null, selectedLocationId: string | null): EventOverlayLocation | null {
+  const matches = (location: EventOverlayLocation) => floorId
+    ? location.locationRef.type !== 'campus' && location.locationRef.floorId === floorId
+    : location.locationRef.type === 'campus';
+  return event?.locations.find(location => location.id === selectedLocationId && matches(location))
+    ?? event?.locations.find(matches) ?? null;
 }
 
 export function toEventOverlayPreview(

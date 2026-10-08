@@ -1,0 +1,82 @@
+{
+  "checks": [
+    {
+      "name": "Desktop event panel has full title and both location controls without duplicate search/back chrome",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Campus Grounds venue is centered at the published monument",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin and student stage artwork/color/geometry match; student has no white editing box",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Both roles show the same floor furniture and top-left label positions",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Already visible publication shows disabled Published and no initial stale-time error",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Mobile event details expand; location selection collapses the sheet and closing restores the regular map",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Short mobile landscape keeps location selection and publication actions reachable",
+      "mode": "ACTUAL UI / READ-ONLY",
+      "status": "PASS"
+    },
+    {
+      "name": "Scheduled feed remains hidden then reflects Upcoming, Ongoing and expiry at controlled server boundaries",
+      "mode": "CONTROLLED RESPONSES / CLOCK, NO DATABASE WRITES",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin schedules future publication through UI and sends the intended command without touching an existing event",
+      "mode": "CONTROLLED RPC / NO DATABASE WRITES",
+      "status": "PASS"
+    },
+    {
+      "name": "Expired event and past publication date are blocked with actionable guidance on mobile",
+      "mode": "CONTROLLED RESPONSES / NO DATABASE WRITES",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "actualEventWrites": 0,
+  "retainedFixtures": 0,
+  "labelComparison": [
+    {
+      "text": "BOOTH",
+      "adminX": "721.707px",
+      "adminY": "270.12px",
+      "publicX": 721.7066528320311,
+      "publicY": 270.1200276692708,
+      "adminWeight": "700"
+    },
+    {
+      "text": "Event Label",
+      "adminX": "706.52px",
+      "adminY": "234.08px",
+      "publicX": 706.5200276692707,
+      "publicY": 234.08000691731775,
+      "adminWeight": "700"
+    }
+  ],
+  "existingSampleUnchanged": true,
+  "controlledCommands": [
+    {
+      "action": "schedule",
+      "publicationAt": "2026-10-06T16:00:00.000Z"
+    }
+  ]
+}

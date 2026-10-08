@@ -1,0 +1,44 @@
+{
+  "checks": [
+    {
+      "name": "B04.1 queue loads visible event titles, organizers, status, locations, submission time, and a matching All count",
+      "status": "PASS"
+    },
+    {
+      "name": "Queue exact-title search narrows to the matching submission",
+      "status": "PASS"
+    },
+    {
+      "name": "Queue partial-organizer search finds the same event",
+      "status": "PASS"
+    },
+    {
+      "name": "Queue empty search shows a distinct no-match state",
+      "status": "PASS"
+    },
+    {
+      "name": "Pending, Approved, and Disapproved filters match their visible status rows or empty state",
+      "status": "PASS"
+    }
+  ],
+  "filterResults": {
+    "Pending": {
+      "visibleRows": 2,
+      "badge": "Pending2",
+      "emptyState": false
+    },
+    "Approved": {
+      "visibleRows": 0,
+      "badge": "Approved0",
+      "emptyState": true
+    },
+    "Disapproved": {
+      "visibleRows": 0,
+      "badge": "Disapproved0",
+      "emptyState": true
+    }
+  },
+  "errors": [],
+  "allTab": "All2",
+  "initialCardCount": 2
+}

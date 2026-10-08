@@ -5,23 +5,33 @@ import { reportService } from "../../../services/reportService";
 import type { Building } from "../../../types";
 import type { FloorPlan } from "../../map-builder/types";
 
+const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+
 vi.mock("../../../services/reportService", async importOriginal => ({
   ...(await importOriginal<typeof import("../../../services/reportService")>()),
   reportService: { submitReport: vi.fn() },
 }));
-vi.mock("../../../hooks/useToast", () => ({ useToast: () => ({ showToast: vi.fn() }) }));
+vi.mock("../../../hooks/useToast", () => ({ useToast: () => toastMock }));
 const building = { id: "b1", name: "Student Center" } as Building;
 const floors = [
   { id: "f1", label: "Ground Floor", rooms: [{ id: "room1", name: "Copy Shop" }] },
   { id: "f2", label: "Second Floor", rooms: [{ id: "room2", name: "Admin Office" }] },
 ] as FloorPlan[];
 const submit = vi.mocked(reportService.submitReport);
-function showForm() { render(<ReportModal building={building} campusId="c1" floors={floors} onClose={vi.fn()} />); }
+function showForm(initialFloorId?: string) { render(<ReportModal building={building} campusId="c1" floors={floors} initialFloorId={initialFloorId} onClose={vi.fn()} />); }
 describe("student building and room reporting", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("locks the report location to the selected building when no floor or room was selected", () => {
+    showForm();
+
+    expect(screen.getByLabelText("Floor")).toHaveValue("Whole building");
+    expect(screen.getByLabelText("Floor")).toHaveAttribute("readonly");
+    expect(screen.queryByLabelText("Floor (optional)")).not.toBeInTheDocument();
+  });
+
   it("submits the selected room with its building and floor", async () => {
     submit.mockResolvedValue({ id: "r1" } as never);
-    showForm();
+    showForm("f1");
     fireEvent.change(screen.getByLabelText("Floor (optional)"), { target: { value: "f1" } });
     fireEvent.change(screen.getByLabelText("Room (optional)"), { target: { value: "room1" } });
     fireEvent.click(screen.getByRole("radio", { name: "Broken Light" }));
@@ -30,6 +40,7 @@ describe("student building and room reporting", () => {
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ buildingId: "b1", floorId: "f1", roomId: "room1", category: "electrical_issue" }));
     expect(screen.getByText("Student Center · Ground Floor · Copy Shop")).toBeInTheDocument();
     expect(screen.queryByText(/maintenance has been notified/)).not.toBeInTheDocument();
+    expect(toastMock.showToast).not.toHaveBeenCalledWith("Report submitted successfully!", "success");
   });
   it("keeps the form and description available for retry on failure", async () => {
     submit.mockRejectedValue(new Error("Sign in to submit a report."));
@@ -42,7 +53,7 @@ describe("student building and room reporting", () => {
     expect(screen.queryByRole("dialog", { name: "Report submitted" })).not.toBeInTheDocument();
   });
   it("clears room selection when the selected floor changes", () => {
-    showForm();
+    showForm("f1");
     fireEvent.change(screen.getByLabelText("Floor (optional)"), { target: { value: "f1" } });
     fireEvent.change(screen.getByLabelText("Room (optional)"), { target: { value: "room1" } });
     fireEvent.change(screen.getByLabelText("Floor (optional)"), { target: { value: "f2" } });

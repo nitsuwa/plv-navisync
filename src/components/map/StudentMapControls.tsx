@@ -19,6 +19,8 @@ export interface StudentMapControlsProps {
   directionsMode: boolean;
   navigationActive?: boolean;
   profileOpen?: boolean;
+  eventMode?: boolean;
+  notificationBellVisible?: boolean;
   pinning?: boolean;
   youAreHere?: boolean;
   hasSelectedRoom?: boolean;
@@ -43,6 +45,8 @@ export function StudentMapControls({
   directionsMode,
   navigationActive = false,
   profileOpen = false,
+  eventMode = false,
+  notificationBellVisible = false,
   pinning = false,
   youAreHere = false,
   hasSelectedRoom = false,
@@ -77,15 +81,22 @@ export function StudentMapControls({
 
   return (
     <div data-testid="student-map-controls" className="map-layer-controls absolute inset-0 pointer-events-none">
-      {!directionsMode && (
+      {!directionsMode && !eventMode && (
         <div
           data-testid="student-map-search-panel"
           data-no-drag
           className={cn(
-            "absolute left-2 top-2 w-auto pointer-events-auto transition-[right] duration-200 ease-out motion-reduce:duration-0 md:left-3 md:right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
-            searchFocused ? "right-2" : "right-16",
+            "absolute left-2 top-2 w-auto pointer-events-auto transition-[right] duration-200 ease-out motion-reduce:duration-0 md:left-3 md:!right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
+            searchFocused ? "right-2" : notificationBellVisible ? "right-32" : "right-16",
           )}
-          style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
+          style={{
+            top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))",
+            right: searchFocused
+              ? "max(0.5rem, env(safe-area-inset-right, 0px))"
+              : notificationBellVisible
+                ? "calc(8rem + env(safe-area-inset-right, 0px))"
+                : "calc(4rem + env(safe-area-inset-right, 0px))",
+          }}
         >
           <CampusDestinationSearch
             query={search}
@@ -115,14 +126,17 @@ export function StudentMapControls({
         </div>
       )}
 
+      {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
+
       {utilityControlsVisible && (
         <div
           data-testid="student-map-utility-controls"
           data-no-drag
           data-profile-open={profileOpen ? "true" : "false"}
+          data-event-mode={eventMode ? "true" : "false"}
           aria-hidden={profileOpen}
           inert={profileOpen ? ("" as never) : undefined}
-          className="student-map-utility-stack pointer-events-auto absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20"
+          className={cn("student-map-utility-stack pointer-events-auto absolute right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20", eventMode ? "top-3 bottom-auto" : "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]")}
         >
           {!navigationActive && (
             <button

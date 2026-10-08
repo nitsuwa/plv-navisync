@@ -1,0 +1,20 @@
+{
+  "title": "QA pending update 60e14151",
+  "id": "31dcce82-3774-47b9-aac2-33033ab3ecb0",
+  "cleaned": true,
+  "checks": [
+    {
+      "name": "Actual UI creates and submits an owned Pending proposal",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner UI review/update confirms; Pending and original submission time remain, latest map is saved",
+      "status": "PASS"
+    },
+    {
+      "name": "Admin UI previews the same updated furniture and label while event remains Pending",
+      "status": "PASS"
+    }
+  ],
+  "errors": []
+}

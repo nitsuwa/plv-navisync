@@ -43,11 +43,7 @@ function supabaseErrorParts(error: unknown): { code: string; message: string } {
   };
 }
 
-function isMissingActivityPreferences(error: unknown): boolean {
-  const { code, message } = supabaseErrorParts(error);
-  return (code === "PGRST205" || code === "42P01")
-    && message.includes("admin_activity_preferences");
-}
+const cutoffUnavailable = new WeakSet<object>();
 
 /** Turn PostgREST's plain error objects into an actionable message for Admin UI. */
 export function activityLogErrorMessage(error: unknown): string {
@@ -116,17 +112,19 @@ async function getActivityClearCutoff(): Promise<string | null> {
   if (userError) throw userError;
   const adminId = userData.user?.id;
   if (!adminId) return null;
-  const { data, error } = await supabase
-    .from("admin_activity_preferences")
-    .select("activity_cleared_before")
-    .eq("admin_id", adminId)
-    .maybeSingle();
+  if (cutoffUnavailable.has(supabase)) return null;
+  const { data, error } = await supabase.rpc('get_admin_activity_clear_cutoff');
   // Activity preferences are an optional UI enhancement during rollout. If a
   // deployed project has not applied that migration yet, keep the append-only
   // audit log readable and show all historical rows (no clear cutoff).
-  if (error && isMissingActivityPreferences(error)) return null;
+  if (error) {
+    const {code,message}=supabaseErrorParts(error);
+    if ((code==='PGRST202' || code==='42883') && message.includes('get_admin_activity_clear_cutoff')) {
+      cutoffUnavailable.add(supabase); return null;
+    }
+  }
   if (error) throw error;
-  return data?.activity_cleared_before ?? null;
+  return data ?? null;
 }
 
 /** The per-admin view hides entries at or before its saved clear-history cutoff. */
@@ -155,6 +153,7 @@ export async function clearAdminActivityHistory(): Promise<string> {
     throw error;
   }
   const clearedBefore = data ?? new Date().toISOString();
+  cutoffUnavailable.delete(getSupabase());
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("plv-admin-activity-cleared"));
     try {

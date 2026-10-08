@@ -1,0 +1,228 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "review-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 16.095367431640625,
+        "width": 296,
+        "height": 543.9999694824219
+      }
+    },
+    {
+      "label": "review-320x568 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 20,
+        "y": 12,
+        "width": 288,
+        "height": 242.171875
+      }
+    },
+    {
+      "label": "review-320x568: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 98,
+        "width": 288,
+        "height": 372
+      }
+    },
+    {
+      "label": "review-320x568: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 544
+      }
+    },
+    {
+      "label": "review-320x568: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 13,
+        "y": 219,
+        "width": 294,
+        "height": 121
+      }
+    },
+    {
+      "label": "review-320x568: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-320x568: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 716,
+        "height": 366
+      }
+    },
+    {
+      "label": "review-740x390 calendar: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 calendar: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 50,
+        "y": 12,
+        "width": 304,
+        "height": 153.390625
+      }
+    },
+    {
+      "label": "review-740x390: calendar Escape preserves parent and restores focus",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 time: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 time: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 218,
+        "y": 12,
+        "width": 304,
+        "height": 366
+      }
+    },
+    {
+      "label": "review-740x390: invalid minute disables Done and explains range",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: invalid time instructions are visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: minute arrows work without scrolling",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: time Escape closes only nested picker",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390 preview: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 8,
+        "y": 8,
+        "width": 724,
+        "height": 374
+      }
+    },
+    {
+      "label": "review-740x390: an unobstructed authored map point is available for pin placement",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: draft pin keeps a visible map while entering feedback",
+      "status": "PASS",
+      "detail": {
+        "x": 9,
+        "y": 70,
+        "width": 722,
+        "height": 140
+      }
+    },
+    {
+      "label": "review-740x390: pin comment/save action visible",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: saved pin clearly remains a review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: map preview Escape restores review trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "review-740x390: decision footer remains reachable with long feedback",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS"
+}

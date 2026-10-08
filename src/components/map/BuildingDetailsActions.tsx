@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Bookmark, Check, ChevronDown, ClipboardCopy, Layers3, MoreHorizontal, Navigation, QrCode, Share2 } from "lucide-react";
+import { Bookmark, Check, ChevronDown, ClipboardCopy, Layers3, Loader2, MoreHorizontal, Navigation, QrCode, Share2 } from "lucide-react";
 import type { Building } from "../../types";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { buildingMapDeepLink, copyBuildingLink, shareBuildingLink } from "../../lib/buildingShare";
@@ -12,6 +12,8 @@ interface BuildingDetailsActionsProps {
   campusId?: string;
   hasFloorPlans: boolean;
   saved: Set<string>;
+  savedStateLoading?: boolean;
+  savedStateUnavailable?: boolean;
   studentAuth: StudentAuthState;
   showQR: boolean;
   showSecondaryActions?: boolean;
@@ -27,10 +29,13 @@ const iconButton = "inline-flex min-w-0 items-center justify-center gap-1.5 roun
 
 export function BuildingDetailsActions({
   building, campusId = "", hasFloorPlans, saved, studentAuth, showQR, showSecondaryActions = true,
+  savedStateLoading = false, savedStateUnavailable = false,
   onDirections, onEnterBuilding, onSave, onReport, onSignInPrompt, onToggleQR,
 }: BuildingDetailsActionsProps) {
   const toast = useToast();
   const isSaved = saved.has(building.id) || Boolean(building.code && (saved.has(building.code) || saved.has(building.code.toLowerCase())));
+  const isCheckingSavedState = studentAuth.isStudent && savedStateLoading;
+  const savedStateFailed = studentAuth.isStudent && !savedStateLoading && savedStateUnavailable;
   const share = async () => {
     try {
       const result = await shareBuildingLink({
@@ -65,12 +70,30 @@ export function BuildingDetailsActions({
       {showSecondaryActions && <div className="grid grid-cols-4 gap-1.5">
         <button
           type="button"
-          aria-label={isSaved ? `Remove ${building.name} from saved places` : `Save ${building.name}`}
+          aria-label={isCheckingSavedState
+            ? `Checking saved status for ${building.name}`
+            : savedStateFailed
+              ? `Saved status unavailable for ${building.name}`
+              : isSaved
+                ? `Remove ${building.name} from saved places`
+                : `Save ${building.name}`}
+          aria-busy={isCheckingSavedState}
+          disabled={isCheckingSavedState || savedStateFailed}
           onClick={() => studentAuth.isStudent ? onSave(building.id) : onSignInPrompt("save locations")}
-          className={cn(iconButton, "h-11 gap-1 px-1 text-[10px]", isSaved && studentAuth.isStudent && "border-primary/25 bg-primary/5 text-primary")}
+          className={cn(
+            iconButton,
+            "h-11 gap-1 px-1 text-[10px] disabled:opacity-70",
+            isCheckingSavedState && "disabled:cursor-wait",
+            savedStateFailed && "disabled:cursor-not-allowed",
+            isSaved && studentAuth.isStudent && "border-primary/25 bg-primary/5 text-primary",
+          )}
         >
-          {isSaved && studentAuth.isStudent ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Bookmark className={cn("h-3.5 w-3.5 shrink-0", isSaved && "fill-current")} />}
-          <span>{isSaved && studentAuth.isStudent ? "Saved" : "Save"}</span>
+          {isCheckingSavedState
+            ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            : isSaved && studentAuth.isStudent
+              ? <Check className="h-3.5 w-3.5 shrink-0" />
+              : <Bookmark className={cn("h-3.5 w-3.5 shrink-0", isSaved && "fill-current")} />}
+          <span>{isCheckingSavedState ? "Checking" : savedStateFailed ? "Unavailable" : isSaved && studentAuth.isStudent ? "Saved" : "Save"}</span>
         </button>
         <button
           type="button"

@@ -1,0 +1,33 @@
+{
+  "mode": "Actual live Org submission and Admin desktop/mobile receipt sync; no approval; QA deleted afterward",
+  "title": "QA Admin Badge Sync 69140131",
+  "eventId": "eb269ade-570c-453e-a255-838cbb21faae",
+  "checks": [
+    "Student Org created one owned temporary draft through the UI",
+    "Saved layout submitted to the real GSO queue without approval",
+    "Desktop notification shows a new submission red mark",
+    "Mobile independent session shows the same unread red mark",
+    "Admin bell number badge includes the new submission",
+    "Read acknowledgement clears exactly one bell badge count on the other session",
+    "One acknowledgement reached the real hosted Admin RPC",
+    "Second session has no browser-local Admin receipt",
+    "Read status is stored in the hosted private receipt table",
+    "Reading the notification leaves proposal metadata and revision unchanged",
+    "Desktop sidebar and mobile queue retain pending-review count after reading",
+    "Admin server read mark survives mobile reload",
+    "QA submission withdrawn and draft deleted through Student Org UI",
+    "QA receipt removed with the deleted event",
+    "Deleted QA event removed from both Admin queues",
+    "All pre-existing event metadata and revisions remain unchanged",
+    "No browser page errors",
+    "No notification or activity endpoint errors",
+    "No unexpected or approval/publication write attempted"
+  ],
+  "pageErrors": [],
+  "endpointErrors": [],
+  "blockedWrites": [],
+  "ackCount": 1,
+  "cleanup": true,
+  "status": "PASS",
+  "baselinePending": 0
+}

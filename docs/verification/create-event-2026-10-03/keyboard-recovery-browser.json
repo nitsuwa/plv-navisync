@@ -1,0 +1,68 @@
+{
+  "project": "aaketmqvxqjgaznvclqc.supabase.co",
+  "id": "aa026a8e-4bf4-46f5-8dbc-4d3820ef402d",
+  "created": true,
+  "cleaned": true,
+  "checks": [
+    {
+      "name": "Keyboard acknowledgement failure keeps the note and server state; no false success",
+      "status": "PASS"
+    },
+    {
+      "name": "Keyboard submission is blocked while the second pin remains open",
+      "status": "PASS"
+    },
+    {
+      "name": "Keyboard actions address both pins and survive browser refresh",
+      "status": "PASS"
+    },
+    {
+      "name": "Keyboard submit network failure preserves the proposal and leaves a retry action",
+      "status": "PASS"
+    },
+    {
+      "name": "Keyboard retry resubmits once with both student notes and original pins; no browser exceptions",
+      "status": "PASS"
+    }
+  ],
+  "errors": [],
+  "submitRequests": [
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/map_elements"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/map_elements"
+    }
+  ],
+  "routeCalls": [
+    {
+      "method": "GET",
+      "path": "/rest/v1/map_elements",
+      "matchesDisposableWrite": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/map_elements",
+      "matchesDisposableWrite": true
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/map_elements",
+      "matchesDisposableWrite": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/map_elements",
+      "matchesDisposableWrite": true
+    }
+  ],
+  "interceptedSubmitPath": "/rest/v1/map_elements",
+  "submitFailureAttempt": {
+    "intercepted": true,
+    "status": "disapproved",
+    "dialogStillOpen": true,
+    "pageText": "Skip to main content\nSubmit failed\nSomething went wrong.\nIssue marked as addressed\nYour checklist was saved for GSO review.\nFeedback checklist · 2/2 addressed\n\nFix each issue on the map, then mark it as addressed before resubmitting.\n\nAll 2\nOpen 0\nAddressed 2\n\nEVENT LOCATIONS\n\nChoose a map to edit your event setup.\n\nPublished map stays locked\nCampus Grounds\nCampus map\n1 furniture · 0 labels\nEDITING\nQA keyboard recovery aa026a8e\nCampus Grounds\nEvent map\nHelp\nSaved\nSave Draft\nReview & submit\nSelect\n🪑\nFurniture\nLabel\nPan\nObjects (1)\nLayout checks\nView checks\n1\n2\nGSO map feedback · 2 pins\nSnap\n114%\nFocus\nCABA\n3F\nCABA\nSTUDC\n3F\nSTUDCENTBLDG\nCOED\n1F\nCOED\nCEIT\n3F\nCEIT\nCAN\n3F\nCanteen\nBL…\n1F\nBuilding\n1\n1 furniture · 0 labels\nTool: Select\nDisapproved\nHold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan\nSubmit failed\nSomething went wrong.\nIssue marked as addressed\nYour checklist was saved for GSO review.\nReview before submitting\n\nQA keyboard recovery aa026a8e: all requested maps will be sent together for GSO review.\n\nSubmission summary\n\n1 requested maps · 1 assets · 0 labels\n\nThe administrator sets the event schedule and publication time.\n\nGSO feedback · 2/2 addressed · 0 open\n\nCampus Grounds\n\n1 assets · 0 labels\n\nLayout checks passed\n\nReview Campus Grounds\n\nReview any design hints, then confirm when all maps are ready.\n\nKeep editing\nConfirm submission"
+  }
+}

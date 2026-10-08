@@ -36,7 +36,7 @@ export function StudentPageHeader({
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full student-header-grid opacity-[0.04] dark:opacity-[0.06]"/>
       </div>
 
-      <div className="relative max-w-2xl mx-auto px-5 py-6 sm:py-7">
+      <div className="relative mx-auto max-w-3xl px-4 py-6 sm:px-5 sm:py-7">
         {backTo && (
           <Link
             to={backTo}

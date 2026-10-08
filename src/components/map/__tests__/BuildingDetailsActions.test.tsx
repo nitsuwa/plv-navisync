@@ -20,6 +20,20 @@ function renderActions(overrides: Partial<React.ComponentProps<typeof BuildingDe
 }
 
 describe("building details actions", () => {
+  it("does not show an unsaved action while the student's saved state is loading", () => {
+    renderActions({ savedStateLoading: true });
+
+    const saveButton = screen.getByRole("button", { name: "Checking saved status for CABA" });
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveTextContent("Checking");
+  });
+
+  it("labels a building as saved when its favorite ID is present", () => {
+    renderActions({ saved: new Set([building.id]) });
+
+    expect(screen.getByRole("button", { name: "Remove CABA from saved places" })).toHaveTextContent("Saved");
+  });
+
   it("offers Directions and Enter Building without duplicate floor-plan actions", () => {
     const { props } = renderActions();
     fireEvent.click(screen.getByTestId("building-directions"));

@@ -1,0 +1,20 @@
+{
+  "id": "af548063-fdd8-45c7-b8cb-e45c36b0af6a",
+  "copyId": "10dca388-217d-45db-a9d5-d65228204ac9",
+  "title": "QA duplicate f7a8d463",
+  "checks": [
+    {
+      "name": "C05 mobile duplicate rejected event creates own fresh Draft with layout only",
+      "status": "PASS"
+    },
+    {
+      "name": "J5 mobile submit/withdraw/continue/resubmit preserves copied layout",
+      "status": "PASS"
+    }
+  ],
+  "cleaned": [
+    "10dca388-217d-45db-a9d5-d65228204ac9",
+    "af548063-fdd8-45c7-b8cb-e45c36b0af6a"
+  ],
+  "errors": []
+}

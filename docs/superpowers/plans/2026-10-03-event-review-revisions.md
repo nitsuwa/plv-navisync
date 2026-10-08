@@ -1,0 +1,9 @@
+# Event review and revision flow
+
+Authorized scope: existing event proposal/review UI and lifecycle only. Preserve plotted assets. No deletion of unexplained records or changes to authentication, environment, campus snapshots, or deployed database without checking access.
+
+- [ ] Diagnose legacy pending records and missing review RPC. Default missing status to draft, show creator identity and revision timestamps, and retain explicit historical pending records with an honest missing-submission-time label.
+- [ ] Add server audit migration: owner/admin readable immutable event revision rows; capture saved before/after metadata, action, actor, timestamp. Keep published preview allowlist free of history. Extend the existing guard to allow pending → pending saves and pending → draft withdrawal, protect approved maps and review feedback, retain rejected feedback during revision. Preserve admin optimistic revision checks.
+- [ ] Service: pending saves preserve pending status/submission time, rejected saves preserve feedback; explicit withdrawal preserves all assets. Read history; distinguish missing migration from generic network errors. Do not downgrade RPC review to insecure direct-table approval.
+- [ ] Student: pending edits and autosave, withdraw confirmation, rejected feedback and location feedback, timestamps and expandable history. Admin: readable responsive review modal with preview early, schedule fields with sufficient width, neutral initial guidance, inline review errors, creator and history.
+- [ ] Tests: malformed legacy status, pending save and withdraw preservation, rejected feedback retention, server-owned audit permissions, stale approval, responsive modal fields and failure states. Run relevant service/page/editor regressions and build. Document database apply order and read-only checks; explicitly distinguish local verification from deployed DB validation.

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {useState} from 'react';
 import { EventDetailsModal, EventProposalModal } from "../EventProposalModal";
 const posterStorage = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
 
@@ -19,6 +20,15 @@ vi.mock("../../../lib/supabase", () => ({
 const buildings = [{ buildingId: "science", buildingName: "Science Building", floors: [{ number: 1, label: "Floor 1" }] }];
 
 describe("EventProposalModal", () => {
+  it('returns focus to the opener after discarding through a nested confirmation',async()=>{
+    function Harness(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Create an event</button>{open&&<EventProposalModal buildings={buildings} onClose={()=>setOpen(false)} onCreate={vi.fn()}/>}</>;}
+    render(<Harness/>);
+    const opener=screen.getByRole('button',{name:'Create an event'});opener.focus();fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText(/Event title/i),{target:{value:'A draft'}});
+    fireEvent.click(screen.getByRole('button',{name:'Close'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Discard changes'}));
+    await waitFor(()=>expect(opener).toHaveFocus());
+  });
   beforeEach(() => {
     vi.unstubAllGlobals();
     posterStorage.upload.mockReset().mockResolvedValue({error:null});
@@ -111,6 +121,19 @@ describe("EventProposalModal", () => {
     expect(onCreate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /back to locations/i }));
     expect(screen.getByRole("checkbox", { name: /campus grounds/i })).toBeChecked();
+  });
+
+  it("keeps the confirmation actions outside the scrollable proposal summary", () => {
+    render(<EventProposalModal buildings={buildings} onClose={vi.fn()} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Campus Fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+
+    const review = screen.getByRole("alertdialog", { name: /review event proposal/i });
+    expect(within(review).getByTestId("proposal-confirmation-summary")).toHaveClass("min-h-0", "overflow-y-auto");
+    expect(within(review).getByTestId("proposal-confirmation-actions")).toHaveClass("shrink-0");
+    expect(within(review).getByRole("button", { name: /confirm & design/i })).toBeInTheDocument();
   });
   it("guides the org through details and multiple locations without date fields", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);

@@ -1,0 +1,50 @@
+{
+  "mode": "Hosted schema/role probes; existing events only; no writes",
+  "checks": [
+    "Admin activity cutoff RPC installed",
+    "Original activity preferences endpoint no longer returns 404",
+    "Admin state RPC reads existing pending submissions",
+    "Admin displayed payloads match hosted metadata",
+    "Org state RPC reads existing reviewed proposals",
+    "Org displayed payloads match hosted metadata",
+    "Expected actor mismatch is denied",
+    "Regular Student cannot read private Org notifications",
+    "Anonymous receipt RPC access denied",
+    "Regular Student cannot SELECT private receipt rows"
+  ],
+  "status": "PASS",
+  "existingPending": 0,
+  "existingOrgReviews": 4,
+  "archivedPending": [
+    {
+      "id": "d7693715-5ea4-414b-9b14-aac63277bf80",
+      "title": "TEST",
+      "archived": true
+    }
+  ],
+  "browserCandidates": {
+    "admin": [],
+    "org": [
+      {
+        "id": "6f6b3f2c-457b-4e62-b136-1e04a921dfea",
+        "title": "TEST SAMPLE",
+        "wasRead": false
+      },
+      {
+        "id": "db0da611-5738-4c55-a9c1-61d2714d77bc",
+        "title": "QA TEST Event Flow 0487deca",
+        "wasRead": true
+      },
+      {
+        "id": "edb7f0e8-b8dc-453f-ae75-99055f23d625",
+        "title": "TEST: College Week 2026 (sample)",
+        "wasRead": false
+      },
+      {
+        "id": "a841c2f0-3a58-4993-86fa-bea4b596bac1",
+        "title": "TEST upcoming",
+        "wasRead": false
+      }
+    ]
+  }
+}

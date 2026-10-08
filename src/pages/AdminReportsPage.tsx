@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import {
-  Flag, MapPin, Clock, CheckCircle2, XCircle, AlertCircle,
-  Search, Eye, ExternalLink, Image, StickyNote, History, Archive, RefreshCw, Download,
+  ArrowLeft, Flag, MapPin, Clock, CheckCircle2, XCircle, AlertCircle,
+  Search, Eye, Image, StickyNote, History, Archive, RefreshCw, Download,
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { cn } from "../lib/utils";
-import { Link } from "react-router";
 import { ReportsSkeleton } from "../components/ui/PageSkeleton";
 import { useToast } from "../hooks/useToast";
 import { useEscToClose } from "../hooks/useEscToClose";
@@ -19,7 +19,9 @@ import {
   type ReportStatus,
 } from "../services/reportService";
 import type { Tables } from "../types/database.generated";
-import { downloadCsv, downloadJson } from "../lib/exporters";
+import { downloadCsv } from "../lib/exporters";
+
+const CampusMapPage = lazy(() => import("./CampusMapPage").then(module => ({ default: module.CampusMapPage })));
 
 // ── Report workflow ────────────────────────────────────────────────────────
 const STATUS_ORDER: ReportStatus[] = ["pending", "under_review", "in_progress", "resolved", "rejected"];
@@ -33,6 +35,10 @@ const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; bg: st
 };
 
 const CATEGORIES = ["All Categories", ...REPORT_CATEGORIES];
+
+function formatCategoryLabel(category: string): string {
+  return category.replaceAll("_", " ").replace(/\b[a-z]/g, letter => letter.toUpperCase());
+}
 
 function formatDate(iso: string): string {
   try {
@@ -50,6 +56,14 @@ function formatDateTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatExportDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
 }
 
 function friendlyAction(action: string): string {
@@ -71,7 +85,14 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => void;
 }) {
-  useEscToClose(onClose);
+  const [mapOpen, setMapOpen] = useState(false);
+  const mapTriggerRef = useRef<HTMLButtonElement>(null);
+  const wasMapOpenRef = useRef(false);
+  useEscToClose(mapOpen ? () => setMapOpen(false) : onClose);
+  useEffect(() => {
+    if (wasMapOpenRef.current && !mapOpen) mapTriggerRef.current?.focus({ preventScroll: true });
+    wasMapOpenRef.current = mapOpen;
+  }, [mapOpen]);
   const cfg = STATUS_CONFIG[report.status as ReportStatus] ?? STATUS_CONFIG.pending;
   const Icon = cfg.icon;
   const toast = useToast();
@@ -132,8 +153,6 @@ function ReportDetailModal({ report, onClose, onChanged }: {
     }
   };
 
-  const mapTarget = report.buildingId ? `/map?buildingId=${report.buildingId}` : "/map";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>
       <motion.div
@@ -151,7 +170,6 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             </div>
             <div>
               <h3 className="font-extrabold text-foreground text-sm">{report.title}</h3>
-              <p className="text-[11px] text-muted-foreground">Report #{report.id.slice(0, 8)}</p>
             </div>
           </div>
           <button onClick={onClose} aria-label="Close modal"
@@ -172,7 +190,7 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             <div>
               <p className="text-xs font-bold text-foreground">{report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus"}</p>
               {(report.floorLabel || report.roomName) && <p className="text-xs text-muted-foreground">{[report.floorLabel, report.roomName].filter(Boolean).join(" · ")}</p>}
-              <p className="text-xs text-muted-foreground">{report.category} · {report.priority} priority</p>
+              <p className="text-xs text-muted-foreground">{formatCategoryLabel(report.category)} · {formatCategoryLabel(report.priority)} priority</p>
             </div>
           </div>
 
@@ -193,8 +211,13 @@ function ReportDetailModal({ report, onClose, onChanged }: {
           {/* Meta */}
           <div className="grid grid-cols-2 gap-3">
             <div className="px-3 py-2.5 rounded-xl bg-muted/50">
-              <p className="text-[10px] text-muted-foreground mb-0.5">Reporter</p>
-              <p className="text-xs font-bold text-foreground truncate">{report.reporterId}</p>
+              <p className="text-[10px] text-muted-foreground mb-0.5">Reporter account</p>
+              <p className="text-xs font-bold text-foreground truncate" title={report.reporterName ?? report.reporterEmail ?? "Account unavailable"}>
+                {report.reporterName ?? report.reporterEmail ?? "Account unavailable"}
+              </p>
+              {report.reporterName && report.reporterEmail && (
+                <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={report.reporterEmail}>{report.reporterEmail}</p>
+              )}
             </div>
             <div className="px-3 py-2.5 rounded-xl bg-muted/50">
               <p className="text-[10px] text-muted-foreground mb-0.5">Submitted</p>
@@ -258,10 +281,14 @@ function ReportDetailModal({ report, onClose, onChanged }: {
 
         {/* Actions */}
         <div className="flex gap-2 px-6 pb-5 border-t border-border pt-4 flex-wrap">
-          <Link to={mapTarget}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted transition-colors">
-            <ExternalLink className="h-3.5 w-3.5" /> View on Map
-          </Link>
+          <button
+            ref={mapTriggerRef}
+            type="button"
+            onClick={() => setMapOpen(true)}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 text-xs font-bold text-primary transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          >
+            <MapPin className="h-3.5 w-3.5" /> View on Map
+          </button>
           <button onClick={archive} disabled={changingStatus}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50">
             <Archive className="h-3.5 w-3.5" /> Archive
@@ -289,6 +316,68 @@ function ReportDetailModal({ report, onClose, onChanged }: {
           </div>
         </div>
       </motion.div>
+      {mapOpen && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Map location for ${report.title}`}
+          className="fixed inset-0 z-[60] flex flex-col bg-background"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <header className="z-[80] shrink-0 border-b border-border bg-background/95 px-3 py-3 shadow-sm backdrop-blur sm:px-5">
+            <div className="mx-auto flex max-w-[1600px] items-center gap-3 sm:gap-4">
+              <div className="flex min-w-0 flex-1 items-start gap-3 rounded-2xl border border-border bg-card p-3 shadow-sm sm:gap-4 sm:p-4">
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive sm:h-10 sm:w-10">
+                  <Flag className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Report location</p>
+                    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold", cfg.bg, cfg.color)}>
+                      <Icon className="h-3 w-3" /> {cfg.label}
+                    </span>
+                  </div>
+                  <h2 className="line-clamp-2 text-sm font-extrabold leading-snug text-foreground sm:text-base">{report.title}</h2>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground sm:text-xs">
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
+                      <span className="truncate">{report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus map"}</span>
+                    </span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-foreground">{formatCategoryLabel(report.category)}</span>
+                    <span>{formatCategoryLabel(report.priority)} priority</span>
+                  </div>
+                  <p className="line-clamp-2 border-t border-border/70 pt-1.5 text-xs leading-relaxed text-muted-foreground">{report.description}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setMapOpen(false)}
+                aria-label="Back to report"
+                className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-2.5 text-xs font-bold text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-2 sm:px-3"
+              >
+                <ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">Back to report</span><span className="sm:hidden">Back</span>
+              </button>
+            </div>
+          </header>
+          <div className="relative min-h-0 flex-1">
+            <Suspense fallback={
+              <div role="status" className="flex h-full items-center justify-center text-sm font-semibold text-muted-foreground">
+                Loading campus map…
+              </div>
+            }>
+              <CampusMapPage
+                fullScreen
+                fullScreenHeight="100%"
+                initialCampusId={report.campusId ?? undefined}
+                initialBuildingId={report.buildingId ?? undefined}
+                initialPlaceId={report.campusPlaceId ?? undefined}
+              />
+            </Suspense>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -302,14 +391,12 @@ export function AdminReportsPage() {
   const [categoryFilter, setCategoryFilter] = useState("All Categories");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<IssueReport | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const requestRef = useRef(0);
   const toast = useToast();
 
   const loadReports = useCallback(async (showSpinner = true) => {
     const requestId = ++requestRef.current;
     if (showSpinner) setLoading(true);
-    else setRefreshing(true);
     try {
       const data = await reportService.listAllReports({ status: statusFilter, category: categoryFilter === "All Categories" ? undefined : categoryFilter, search });
       if (requestId !== requestRef.current) return;
@@ -323,7 +410,6 @@ export function AdminReportsPage() {
     } finally {
       if (requestId === requestRef.current) {
         setLoading(false);
-        setRefreshing(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,21 +423,22 @@ export function AdminReportsPage() {
     loadReports(false);
   };
 
-  /** Export the currently filtered reports (CSV or JSON). */
-  const exportReports = (format: "csv" | "json") => {
+  /** Export the currently filtered reports as a readable CSV. */
+  const exportReports = () => {
     const rows = reports.map((r) => ({
-      title: r.title,
-      description: r.description,
-      category: r.category,
-      priority: r.priority,
-      status: r.status,
-      building: r.buildingName ?? r.buildingId ?? "Campus",
-      submitted: r.createdAt,
-      reporter: r.reporterId,
+      "Report Title": r.title,
+      Description: r.description,
+      "Issue Type": formatCategoryLabel(r.category),
+      Priority: formatCategoryLabel(r.priority),
+      Status: STATUS_CONFIG[r.status as ReportStatus]?.label ?? formatCategoryLabel(r.status),
+      "Building / Location": r.campusPlaceName ?? r.buildingName ?? r.buildingId ?? "Campus",
+      Floor: r.floorLabel ?? "",
+      Room: r.roomName ?? "",
+      "Submitted At": formatExportDateTime(r.createdAt),
+      Reporter: r.reporterName ?? r.reporterEmail ?? r.reporterId,
     }));
     const stamp = new Date().toISOString().slice(0, 10);
-    if (format === "csv") downloadCsv(rows, `reports-${stamp}.csv`);
-    else downloadJson(rows, `reports-${stamp}.json`);
+    downloadCsv(rows, `reports-${stamp}.csv`);
   };
 
   const counts: Record<string, number> = {
@@ -379,7 +466,6 @@ export function AdminReportsPage() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">Student Reports</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Review and resolve campus issues reported by students.</p>
         </div>
         <EmptyState
           icon={AlertCircle}
@@ -402,32 +488,13 @@ export function AdminReportsPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">Student Reports</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Review and resolve campus issues reported by students. Reports help keep the navigation system accurate.
-          </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => exportReports("csv")}
+          <button onClick={exportReports}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
             title="Download the current list as CSV" disabled={reports.length === 0}>
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <button onClick={() => exportReports("json")}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-            title="Download the current list as JSON" disabled={reports.length === 0}>
-            <Download className="h-3.5 w-3.5" /> JSON
-          </button>
-          <button onClick={() => loadReports(false)}
-            className="w-9 h-9 rounded-xl border border-border flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
-            aria-label="Refresh reports" title="Refresh">
-            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-          </button>
-          {counts.pending > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/30">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{counts.pending} pending</span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -459,7 +526,7 @@ export function AdminReportsPage() {
       {/* Filters */}
       <div className="bg-card rounded-2xl border border-border shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center gap-3 px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {tabs.map(t => (
               <button key={t.key} onClick={() => setStatusFilter(t.key)}
                 className={cn("shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-bold transition-all",
@@ -473,14 +540,14 @@ export function AdminReportsPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-2 lg:ml-auto">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row lg:ml-auto lg:w-auto lg:shrink-0">
             <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-              className="custom-select h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm"
+              className="custom-select h-10 w-full rounded-xl border border-border bg-input-background px-4 text-sm text-foreground sm:w-56"
               style={{ fontFamily: "var(--font-body)" }}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              {CATEGORIES.map(c => <option key={c} value={c}>{c === "All Categories" ? c : formatCategoryLabel(c)}</option>)}
             </select>
 
-            <div className="w-48">
+            <div className="w-full sm:w-48">
               <SearchBar
                 placeholder="Search reports…"
                 value={search}
@@ -538,7 +605,7 @@ export function AdminReportsPage() {
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
                       <MapPin className="h-3 w-3 text-primary shrink-0" />
-                      <span className="truncate">{report.buildingName ?? report.buildingId ?? "Campus"} · {report.category}</span>
+                      <span className="truncate">{report.buildingName ?? report.buildingId ?? "Campus"} · {formatCategoryLabel(report.category)}</span>
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-1">{report.description}</p>
                   </div>
@@ -548,9 +615,13 @@ export function AdminReportsPage() {
                       <StatusIcon className="h-2.5 w-2.5" /> {cfg.label}
                     </div>
                     <span className="text-[11px] text-muted-foreground">{formatDate(report.createdAt)}</span>
-                    <button onClick={() => setSelected(report)}
-                      className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Eye className="h-3 w-3" /> View
+                    <button
+                      type="button"
+                      aria-label={`View report: ${report.title}`}
+                      onClick={() => setSelected(report)}
+                      className="inline-flex min-h-11 min-w-[6rem] items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 text-xs font-bold text-primary shadow-sm transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card active:scale-[0.98]"
+                    >
+                      <Eye className="h-4 w-4" aria-hidden="true" /> View details
                     </button>
                   </div>
                 </div>

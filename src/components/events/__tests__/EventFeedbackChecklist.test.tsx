@@ -8,6 +8,7 @@ const overlay = { id: "event", locations: [{ id: "campus", locationRef: { type: 
 it('reveals and focuses an open issue when submission is blocked after filtering', async () => {
   const props={overlay:overlay as never,onChange:vi.fn(),onLocatePin:vi.fn()};
   const {rerender}=render(<EventFeedbackChecklist {...props} />);
+  fireEvent.click(screen.getByText('Feedback checklist'));
   fireEvent.click(screen.getByRole('button',{name:/^Addressed/}));
   rerender(<EventFeedbackChecklist {...props} forceOpen />);
   await waitFor(()=>expect(screen.getByRole('button',{name:'Show pin 1 on map'})).toHaveFocus());
@@ -15,7 +16,10 @@ it('reveals and focuses an open issue when submission is blocked after filtering
 it("locates a pin without acknowledging it and filters addressed issues", () => {
   const locate = vi.fn(); const change = vi.fn();
   render(<EventFeedbackChecklist overlay={overlay as never} onChange={change} onLocatePin={locate} />);
+  fireEvent.click(screen.getByText('Feedback checklist'));
   fireEvent.click(screen.getByRole('button', { name: 'Show pin 1 on map' }));
+  expect(document.querySelector('details')).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByText('Feedback checklist'));
   expect(locate).toHaveBeenCalledWith('campus', 'pin');
   expect(change).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /^Addressed/ }));
@@ -24,6 +28,7 @@ it("locates a pin without acknowledging it and filters addressed issues", () => 
 it("lets the owner submit a resolution note for the correct pin", () => {
   const onChange = vi.fn();
   render(<EventFeedbackChecklist overlay={overlay as never} onChange={onChange} />);
+  fireEvent.click(screen.getByText("Feedback checklist"));
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "Moved booth to courtyard" } });
   fireEvent.click(screen.getByRole("button", { name: "Mark as addressed" }));
   expect(onChange).toHaveBeenCalledWith("campus", "pin", true, "Moved booth to courtyard");
@@ -34,4 +39,11 @@ it("shows administrators the student claim without offering student controls", (
   expect(screen.getByText(/Student note: Moved booth/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: 'Mark as addressed' })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: 'Reopen issue' })).not.toBeInTheDocument();
+});
+
+it("starts read-only feedback collapsed and lets the reader expand it", () => {
+  render(<EventFeedbackChecklist overlay={overlay as never} />);
+  expect(document.querySelector("details")).not.toHaveAttribute("open");
+  fireEvent.click(screen.getByText("Feedback checklist"));
+  expect(document.querySelector("details")).toHaveAttribute("open");
 });

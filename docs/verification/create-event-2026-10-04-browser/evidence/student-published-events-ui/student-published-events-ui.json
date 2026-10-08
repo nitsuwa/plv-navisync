@@ -1,0 +1,36 @@
+{
+  "commit": "4ea2618",
+  "role": "regular student",
+  "dataMode": "read-only; existing published event data only",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "filters": [
+    {
+      "filter": "all",
+      "count": 0,
+      "titles": [],
+      "emptyMessage": "No published events\n\nCheck again later for campus event maps.",
+      "resultText": "Campus events\n\n0 published events\n\nAll\nOngoing\nUpcoming\n\nNo published events\n\nCheck again later for campus event maps."
+    },
+    {
+      "filter": "ongoing",
+      "count": 0,
+      "titles": [],
+      "emptyMessage": "No ongoing events\n\nCheck again later for campus event maps.",
+      "resultText": "Campus events\n\n0 published events\n\nAll\nOngoing\nUpcoming\n\nNo ongoing events\n\nCheck again later for campus event maps."
+    },
+    {
+      "filter": "upcoming",
+      "count": 0,
+      "titles": [],
+      "emptyMessage": "No upcoming events\n\nCheck again later for campus event maps.",
+      "resultText": "Campus events\n\n0 published events\n\nAll\nOngoing\nUpcoming\n\nNo upcoming events\n\nCheck again later for campus event maps."
+    }
+  ],
+  "pageErrors": [],
+  "failure": null,
+  "positiveEventSelection": "NOT TESTABLE: All returned zero currently published events",
+  "status": "PASS empty-state and filter controls only; positive event visibility not testable because no published events are returned"
+}

@@ -6,6 +6,14 @@ const item = (id: string, x: number, y: number, width = 20, height = 20, rotatio
 });
 
 describe("validateEventLayout", () => {
+  it("keeps generated entrance identifiers out of the placement warning while still blocking access", () => {
+    const id = "fd73dc9f-3b53-4178-9ae4-0d4f722ffe2d";
+    const regions = eventProtectedAccessRegions({ doors: [{ id, x: 50, y: 50, width: 20, label: "", visible: true } as never], furniture: [] });
+    const warning = validateEventLayout({ furniture: [item("booth", 45, 45)], canvasWidth: 200, canvasHeight: 200, blockedRegions: regions })[0];
+    expect(warning).toMatchObject({ code: "blocked-access", severity: "critical", itemIds: ["booth"] });
+    expect(warning.message).toMatch(/entrance/i);
+    expect(warning.message).not.toContain(id);
+  });
   it("blocks campus building footprints but not indoor rooms", () => {
     const floor = { id: "campus", doors: [], furniture: [], rooms: [{ id: "hall", name: "Student Hall", type: "building", x: 40, y: 40, w: 80, h: 20, rotation: 0, floorId: "campus", buildingId: "campus", color: "orange" }] };
     const warnings = validateEventLayout({ furniture: [item("chair", 60, 45, 10, 10)], canvasWidth: 200, canvasHeight: 200, blockedRegions: eventProtectedAccessRegions(floor) });

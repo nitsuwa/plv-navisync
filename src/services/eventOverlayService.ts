@@ -647,6 +647,22 @@ export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, 
   return overlayFromAdminResult(data);
 }
 
+/** Admin-only identity enrichment; never added to the public event feed or saved metadata. */
+export async function listEventSubmitterNames(ownerIds: string[]): Promise<Record<string, string>> {
+  const ids = [...new Set(ownerIds.filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const { data, error } = await getSupabase().from("profiles").select("id, first_name, last_name").in("id", ids);
+    if (error) return {};
+    return Object.fromEntries((data ?? []).flatMap(profile => {
+      const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim();
+      return name ? [[profile.id, name]] : [];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 export async function listEventOverlays(
   filters: EventOverlayFilters = {}
 ): Promise<CampusEventOverlay[]> {
@@ -658,7 +674,8 @@ export async function listEventOverlays(
     let query = supabase
       .from("map_elements")
       .select("id, campus_id, metadata, name, updated_at")
-      .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay");
+      .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
+      .is("archived_at", null);
     if (campusId) query = query.eq("campus_id", campusId);
     if (filters.createdByUserId) query = query.eq("metadata->>createdByUserId", filters.createdByUserId);
     const result = query.order("created_at", { ascending: false });
@@ -720,24 +737,28 @@ export async function getEventOverlay(
 ): Promise<CampusEventOverlay | null> {
   const supabase = getSupabase();
 
-  try {
-    const { data, error } = await supabase
-      .from("map_elements")
-      .select("id, campus_id, metadata, updated_at")
-      .eq("id", overlayId)
-      .eq("element_type", "event_overlay")
-      .single();
+  const { data, error } = await supabase
+    .from("map_elements")
+    .select("id, campus_id, metadata, updated_at")
+    .eq("id", overlayId)
+    .eq("element_type", "event_overlay")
+    .is("archived_at", null)
+    .single();
 
-    if (error || !data) return null;
-    return overlayFromMetadata(
-      (data.metadata as Record<string, unknown>) || {},
-      data.id,
-      data.campus_id,
-      data.updated_at
-    );
-  } catch {
-    return MOCK_OVERLAYS.find((o) => o.id === overlayId) || null;
+  if (error?.code === 'PGRST116') return null;
+  if (error) {
+    if (['PGRST301','PGRST302','PGRST303'].includes(error.code) || /(?:jwt|session|token).*expired/i.test(error.message)) {
+      throw new Error('Your session has expired or is no longer valid. Sign in again, then reopen this event from My Events.');
+    }
+    throw new Error(error.message || 'This event could not be loaded. Check your connection and try again.');
   }
+  if (!data) return null;
+  return overlayFromMetadata(
+    (data.metadata as Record<string, unknown>) || {},
+    data.id,
+    data.campus_id,
+    data.updated_at,
+  );
 }
 
 /**
@@ -831,13 +852,16 @@ export async function manageEventPublication(
   command: EventPublicationCommand,
 ): Promise<CampusEventOverlay> {
   if (!expectedUpdatedAt) throw new Error("Refresh this event before changing publication.");
+  if (command.action === "schedule" && (!isValidEventInstant(command.publicationAt) || Date.parse(command.publicationAt) <= Date.now())) {
+    throw new Error("Choose a future publication time.");
+  }
   const { data, error } = await getSupabase().rpc("manage_event_publication", {
     p_overlay_id: overlayId,
     p_expected_updated_at: expectedUpdatedAt,
     p_action: command.action,
     p_publication_at: command.action === "schedule" ? command.publicationAt : null,
   });
-  if (error) throw error;
+  if (error) throw eventCommandError(error);
   return overlayFromAdminResult(data);
 }
 
@@ -946,6 +970,7 @@ export const eventOverlayService = {
   submitEventOverlayLayout,
   setEventFeedbackPinAddressed,
   listEventOverlays,
+  listEventSubmitterNames,
   getEventOverlay,
   reviewEventOverlay,
   manageEventPublication,

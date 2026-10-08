@@ -1,5 +1,19 @@
 # Findings & Decisions
 
+## Create Event follow-up findings
+
+- A fresh service read is insufficient concurrency protection if the layout originated from an older browser version. Forward the version displayed to the editor/details/submission caller; reject newer rows before merging and retain CAS on writes. Actual two-tab test reproduced this defect and passed after correction.
+- Existing poster removal should clear the reference without deleting stored contents, since duplicated proposals may share URLs. Only QA-owned disposable object paths are deleted by test cleanup.
+- Public storage responses may remain cached after deletion; verify the authoritative storage listing rather than interpreting a cached HTTP 200 as a failed delete.
+- Creation dialog close previously focused a control inside the unmounted dialog; preserve the entry trigger for focus return. Real keyboard RED/GREEN evidence verifies the fix.
+
+## October 3 — final Create Event browser findings
+
+- Supabase JSONB can return equivalent object keys in a different order. Raw JSON.stringify equality falsely reported dirty layouts and failed lost-response creation recovery. Canonical recursive object-key ordering now preserves array order and matches semantic JSON equality.
+- A save callback retained an old active-location closure while its shared editor ref belonged to the newly selected floor. Capturing through the current location ID ref prevents the next floor's snapshot from replacing the old layout; deferred-switch regression and actual two-location persistence checks pass.
+- Mounting the review dialog and direct card preview together left the preview aria-hidden. Open the nested preview on the next animation frame after the parent dialog mounts; actual accessible Pan and second-floor controls pass from the card entry.
+- Final event verification: 263 core + 156 helper/public tests PASS; build PASS; actual J1 and L03 PASS with own disposable fixture removed. Poster SQL, missing configured roles, positive live publication and remaining integrated/manual cases keep acceptance PARTIAL.
+
 ## Requirements
 
 - Improve the student user role UI/UX and frontend experience.
@@ -243,3 +257,35 @@ Announcements and Today's Schedule/classes are intentionally excluded from this 
 - Browser inspection exposed a separate performance defect that source-level interaction tests did not initially reveal: `onDraftChange` was included in an editor effect dependency list while `StudentEventEditPage` recreated that callback whenever the active draft location changed. The resulting feedback loop produced repeated maximum-update-depth warnings and unnecessary rerenders. Callback identity is now decoupled from draft publication.
 - CABA browser parity after the fix: 12 rooms, 32 walls, 14 doors, 4 stair elements, 1 elevator, and 1 authored label. The prior event view exposed only the 12 rooms.
 - The mobile editor at 390x844 has no document-level horizontal overflow. Location cards remain horizontally browsable, primary Save/Submit actions wrap safely, and the viewport controls stay reachable above the map.
+
+## October 3, 2026 — Create Event completion planning
+
+- The user requested a consolidated plan for already implemented work, pending checks, UI/UX improvements and future increments; no implementation was requested in this planning turn.
+- Current code includes pending updates, withdrawal, in-place preview, 12-hour time controls, revision history, furniture summary, feedback pins and student resolution checklist.
+- User screenshots establish successful migration execution and SQL helper/grant assertions. Authenticated role tests, integrated browser journeys and final visual QA remain distinct and unverified.
+- Historical feedback-clearing documentation is superseded by preservation on resubmission. Current acknowledgement matching is location-wide, based on the full encoded feedback string.
+- Risks to reproduce: invalid pin entries suppressing valid neighboring pins, callback-identity changes resetting preview Pan mode, and acknowledgement/autosave/submission overlaps. The public-feed verifier does not yet explicitly list feedbackResolutions as a forbidden key.
+- Main plan: docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md. Detailed test matrix: docs/2026-10-03-create-event-acceptance-matrix.md.
+- Recommended executor: GPT-6.1 Sol Medium for the integrated plan; Luna Max for bounded work and Sol Low for isolated presentation work. This is a workload recommendation, not a measured repository benchmark.
+# October 8 next-batch findings
+
+- Final live Admin validation is complete:19 PASS checks with a temporary pending-only proposal that was withdrawn/deleted. Hosted read status synchronizes desktop/mobile contexts while pending-review count remains. No browser-local receipt exists in the second context.
+- A backend/frontend eligibility mismatch caused an archived pending `TEST` row to appear in Admin counts even though the receipt RPC excludes archived rows. Event list and single-event queries now match that archive rule. Two regressions RED→GREEN;65 affected tests and build PASS; existing archived data preserved.
+
+- The user's SQL installation is now verified against the app's configured hosted project (10 API checks PASS). Real Org receipt sync also passes10 browser checks across independent desktop/mobile contexts with no local receipt on the second context. Event metadata/revision is unchanged. Admin has0 pending submissions, leaving its positive live acknowledgement case conditional; ordinary and anonymous access gates are verified.
+
+- Completed local implementation/verification: private typed server receipts for Admin/Org, exact displayed payload acknowledgement, guarded activity cutoff getter, truthful browser-only fallback, visible refresh retry, action-specific loading and reduced motion. User-run hosted SQL remains pending.
+- Independent review caught navigation teardown and delayed navigation overriding Home; regressions were observed failing and corrected. Actor-scoped session receipts now survive a route round trip while event snapshots clear on unsubscribe.
+- Real rendered browser testing exposed raw PostgREST publication errors being replaced by generic UI text. Normalize through the existing event command error handler; a regression verifies an actual Error reaches the dialog.
+- Evidence: 26 isolated PostgreSQL checks; 128 broader regression tests; final affected63 and30 overlapping tests;25 controlled browser checks; fresh production build and clean diff check. Earlier TypeScript comparison retained1,010 diagnostics with0 introduced. See event-sync-next-batch README for exact limits.
+
+- User approved backend 404 cleanup, cross-device read synchronization, loading/animations, and remaining revision/clock tests.
+- First batch remains uncommitted in the shared checkout; preserve it and previous Sonner/proposal changes.
+- The activity endpoint returns 404 for `admin_activity_preferences`; an existing additive migration defines that table and its own-admin policy. The frontend already tolerates a missing table, but repeatedly calls the absent endpoint.
+- Admin and Org unread receipts currently live in browser storage. Both streams need account-private server receipts and current-content validation, not a global “mark everything read” timestamp.
+- No Supabase/psql/docker CLI was found in PATH; `.env.local` contains the public endpoint/key and demo credentials only. No database/admin environment credentials were found. Browser inventory initially contained no Supabase session.
+- Asked the user how to provide live SQL execution/secure database access while code and validation proceed. No schema or event data has yet changed for this batch.
+
+## October 8, 2026 — final event context/recovery findings
+
+Resolved defects and evidence are in docs/verification/event-final-audit/README.md. Event/map/venue identity now stays explicit across campus/floor and collapsed states. Owner+event keyed editor sessions reject foreign data and stale completions. Event reads distinguish expired/transport failures from missing records. Measured compact header/error and complete floor bounds drive fit; detail disclosure preserves manual zoom. Admin pin drafts retain map space and reachable form controls on320px instead of clipping/overlap. UI changes use existing palette and all previous dirty work is preserved. Verification is browser/control-fixture scoped, with native200% Edge zoom; physical devices and second liveOrg account are not certified.

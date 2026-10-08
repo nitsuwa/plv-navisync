@@ -1,5 +1,21 @@
 # Progress Log
 
+## Poster catalog assertions confirmed
+
+- User supplied successful SQL Editor screenshot for `event_poster_storage_assertions.sql`: public bucket, 5 MB limit, JPEG/PNG/WebP constraints and named policy presence PASS, transaction rolled back. Recorded separately from functional role tests; removed catalog check from current pending acceptance.
+
+## Create Event continuation — poster, concurrency and keyboard
+
+- Actual poster create/edit/reload/replace/remove and injected upload/save/lost-response retries PASS; one draft and cached uploads; fixture/images cleaned. Twelve available storage permission checks PASS.
+- Two owner browsers exposed stale writes; caller versions now protect layout/details/submission. RED/GREEN tests plus actual competing saves/stale admin rejection PASS. Later feedback, failed acknowledgement retaining note, keyboard retry and reopen PASS.
+- Mobile rejected duplicate and submit/withdraw/continue/resubmit PASS; both rows cleaned. Creation Escape focus return fixed; actual Tab trap, mobile dark containment and scroll restoration PASS.
+- Fresh core 266 PASS; unchanged helper/public 156 PASS; final affected proposal 14 PASS; build PASS. TypeScript 1,005 baseline errors, no new event errors. Exact remaining gates in results/matrix; no SQL migration rerun, account, commit/push/deploy.
+
+## Poster migration follow-up
+
+- User supplied successful SQL screenshot. Existing Org disposable upload, anonymous public read HTTP 200 with exact bytes and deletion PASS. Both test images cleaned; no event rows changed.
+- Missing-bucket blocker resolved. Full poster form/retry, role-denial and catalog assertion acceptance remain pending. Do not rerun CREATE POLICY migration.
+
 ## Session: 2026-09-12
 
 ### Phase 1: Requirements & Discovery
@@ -310,3 +326,41 @@
 - Production Vite build passed twice in this phase; the final run transformed 2,633 modules. Existing large-chunk warnings remain, with no build errors.
 - Filtered TypeScript diagnostics for the student/report/support/header files returned no matching errors. Full repository TypeScript still reports the known pre-existing map-builder/generated-contract baseline errors.
 - Final `git diff --check` passed. No commit or push was performed.
+
+## October 3, 2026 — Consolidated event plan prepared
+
+- Read conversation evidence, current dirty working tree, event components/services/migrations, test inventory and existing reports.
+- Created an execution plan with Tasks 0–8, explicit checkpoints, model guidance, commands and a separate post-gate roadmap.
+- Created an acceptance matrix for creation/editor/lifecycle/review/pins/history/time/publication/errors, role checks, seven integrated journeys and responsive visual testing.
+- Reconciled user-applied SQL evidence without claiming a full live application test. No migration rerun, code implementation, test execution, commit or push in this planning turn.
+- Next: user selects executor; begin Task 0 of the new plan. Do not repeat older implementation plans from scratch.
+
+## October 3 — Main Create Event plan execution
+
+- Executed main implementation inline, preserving dirty main. Optional roadmap excluded. Release gate remains PARTIAL; exact gaps are in `docs/verification/create-event-2026-10-03/results.md` and the matrix.
+- Fixed parser/resolution edge cases, mutation races/stale saves, checklist locate/filter/focus, preview Pan/discard/capacity/responsive layout, history baseline/resolution labels, failed-list retry and approved inspection.
+- Confirmed absent live event_posters bucket; prepared a forward storage migration/assertions without applying SQL. Added validated owner uploads, cached retry, stable creation UUID/lost-response recovery and referenced-poster cleanup protection.
+- Fresh core: 263 tests/24 files PASS. Helper/public: 156 tests/23 files PASS. Build/diff whitespace PASS. Repository TypeScript still fails with 1,005 baseline-related diagnostics; changed event runtime files have none.
+- Final actual two-location browser journey J1 and cancel/confirm withdrawal L03 PASS. Browser QA exposed and verified JSONB key-order false-dirty states, cross-location async snapshot corruption, and direct nested-preview accessibility; deferred/key-order regressions now cover the first two. Latest create fixture removed successfully; no page exceptions.
+- Existing configured Org/student/super-admin plus anonymous checks: 19 live API assertions PASS, disposable row removed. Actual mobile feedback acknowledgement/reload/resubmit and admin-note browser checks PASS, fixture removed. Preview Pan/wheel/time59/discard and responsive light/dark checks PASS.
+- No commit, push, account provisioning or existing-event mutation. New SQL remains unapplied; missing Org B/non-super admin and remaining publication/full-browser journey checks are explicit gates.
+# October 8 — Next batch execution
+
+- Final Admin follow-up, explicitly authorized by user: real UI draft/furniture save/submission, two independent Admin contexts, new submission badge, hosted acknowledgement, remote badge clear, retained pending count, reload persistence and owned QA UI cleanup all pass19 live checks. No event approved/published; QA rows and receipts removed, existing event metadata/revisions untouched. Prior incomplete QA attempts were also cleaned.
+- Found phantom pending count from one archived `TEST` record. Added null-archive filters to event list and direct lookup; both new regressions failed before the fix and affected65 tests pass afterward. Build and independent source review pass. The archived database record was not altered.
+
+- Deployment follow-up: user supplied successful SQL Editor screenshot; hosted probes verified10 schema/role/API checks, including the repaired404. Real browser10 checks verified Org acknowledgement persists across independent desktop/mobile contexts and reload, with no local receipt on the second context and unchanged event metadata/revision. Only one private receipt for the existing QA event was written. No pending Admin submission exists, so positive live Admin badge acknowledgement remains a conditional recheck on the next real submission; no new QA event created.
+
+- Local SQL/frontend implementation and verification finished; live application is intentionally user-run per their selection. Deliverable: `supabase/migrations/20261008120000_event_notification_receipts.sql` with exact run/retry steps in `docs/verification/event-sync-next-batch/README.md`.
+- Verified role/ownership/identity and stale payload boundaries in26 isolated PostgreSQL checks. Browser25 PASS covers independent receipt sessions, mobile/desktop layouts, reduced motion, failed saves and Upcoming/Ongoing/end clock transitions. No live event created or changed.
+- Broader12-suite128 PASS; final affected4-suite63 PASS and3-suite30 PASS after fixes. Production build passes, diff check passes; existing React act/chunk warnings and TypeScript diagnostic baseline documented separately.
+- Fixed all material independent-review findings: acknowledgement completes before route unsubscription, abandoned/latest actor navigation is guarded, session-only mark survives normal route change, nonempty Admin stale list shows retry, visible unpublish progress, and actionable server publication errors.
+
+- Resumed after a deliberate turn interruption; only read-only discovery had executed before the interruption.
+- Loaded Supabase Postgres rules before SQL work and recovered existing planning files.
+- Inspected existing activity-preference migration and local admin/org unread stores.
+- Identified missing live DDL access; requested the deployment path asynchronously. Continuing with reviewable SQL, frontend integration, and isolated verification.
+
+## October 8, 2026 — final event audit completed locally
+
+Approved map-context/responsive changes and available audit1–3 implemented. Browser matrix573PASS checks, geometry129PASS, final venue/reduced-motion retestPASS (overlap, not summed). Fixed private cached editor across actors/late reads, room matching, hidden refresh retry, expired read masquerading as missing event, nested discard focus, draft pin collapsed map/form overlap, and clipped complete-floor access features. Final map/proposal/integration67testsPASS; broader98PASS; affected65PASS; preview6 and readonly8PASS. Final build3020modulesPASS, type baselineHEAD/current1010/no added file-code counts, diffcheckPASS, independent final review no material issue. Existing act/scrollTo/chunk/type baselines documented. No new real event/content write, migration, commit or push. Report: docs/verification/event-final-audit/README.md. Physical phone keyboard/gestures, screen-reader speech, Safari/Firefox and live OrgB unavailable; larger manual checklist remainsPARTIAL.

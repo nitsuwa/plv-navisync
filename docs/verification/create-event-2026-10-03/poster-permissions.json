@@ -1,0 +1,54 @@
+{
+  "checks": [
+    {
+      "name": "Owner Org inserts own UID folder",
+      "status": "PASS"
+    },
+    {
+      "name": "Anonymous upload denied",
+      "status": "PASS"
+    },
+    {
+      "name": "Regular student upload denied",
+      "status": "PASS"
+    },
+    {
+      "name": "Org wrong owner folder upload denied",
+      "status": "PASS"
+    },
+    {
+      "name": "Existing object overwrite denied",
+      "status": "PASS"
+    },
+    {
+      "name": "Anonymous deletion cannot remove owner poster",
+      "status": "PASS"
+    },
+    {
+      "name": "Anonymous owner-folder listing denied/empty",
+      "status": "PASS"
+    },
+    {
+      "name": "Regular student deletion cannot remove owner poster",
+      "status": "PASS"
+    },
+    {
+      "name": "Regular student owner-folder listing denied/empty",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner lists own poster",
+      "status": "PASS"
+    },
+    {
+      "name": "Super admin lists owner poster",
+      "status": "PASS"
+    },
+    {
+      "name": "Owner deletes own QA poster (authoritative listing; public URL may be cached)",
+      "status": "PASS"
+    }
+  ],
+  "cleaned": true,
+  "errors": []
+}

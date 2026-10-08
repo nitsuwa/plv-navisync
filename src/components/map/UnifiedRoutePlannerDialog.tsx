@@ -76,6 +76,8 @@ export interface UnifiedRoutePlannerDialogProps {
   onConfirmMapSelection?: () => void;
   onClearMapSelectionCandidate?: () => void;
   selectionError?: string | null;
+  /** Explain that a location QR code prefilled the route start and prompt for a destination. */
+  qrStartNotice?: string | null;
   /** Keep the planner mounted while a selected building is foregrounded on small screens. */
   suspendedForBuilding?: boolean;
   /** Temporarily collapse the mobile planner while a constrained-screen Floor Picker owns focus. */
@@ -126,7 +128,7 @@ function endpointText(
 }
 
 function EndpointCard({
-  purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel, onChange,
+  purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel, onChange, compact = false,
 }: {
   purpose: RoutePlannerEndpoint;
   building: Building | null;
@@ -136,6 +138,7 @@ function EndpointCard({
   youAreHere?: { x: number; y: number } | null;
   youAreHereLabel?: string | null;
   onChange: () => void;
+  compact?: boolean;
 }) {
   const isStart = purpose === "start";
   const text = endpointText(purpose, building, campusPlace, room, useMyLocation, youAreHere, youAreHereLabel);
@@ -522,7 +525,7 @@ export function UnifiedRoutePlannerDialog({
           onPointerCancel={handleResizePointerEnd}
           onKeyDown={handleResizeKeyDown}
         >
-          <span aria-hidden="true" className="h-1 w-9 rounded-full bg-border" />
+          <span aria-hidden="true" className="h-1 w-8 rounded-full bg-border md:w-9" />
         </div>
         <div className="flex items-center gap-2.5">
           {mapSelectionEndpoint ? (
@@ -721,7 +724,7 @@ export function UnifiedRoutePlannerDialog({
                 </div>
                 {mode === "accessible" && <p data-testid="accessible-route-note" className="rounded-lg bg-emerald-700/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-emerald-800 dark:text-emerald-200">Accessible route · Uses ramps and elevators where the authored path supports them.</p>}
                 {mode === "standard" && (
-                  <div data-testid="standard-route-preferences" className="grid grid-cols-3 gap-1 rounded-xl border border-border/70 bg-muted/25 p-1" role="group" aria-label="Standard route preference">
+                  <div data-testid="standard-route-preferences" className="grid grid-cols-3 gap-0.5 rounded-xl border border-border/70 bg-muted/25 p-0.5 md:gap-1 md:p-1" role="group" aria-label="Standard route preference">
                     {([
                       ["best", "Best"],
                       ["stairs", "Prefer stairs"],
@@ -733,7 +736,7 @@ export function UnifiedRoutePlannerDialog({
                     ))}
                   </div>
                 )}
-                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} />
+                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} compact={isMobileViewport} />
                 {canSwapEndpoints && (
                   <div data-testid="route-planner-swap-row" className="flex h-10 shrink-0 items-center justify-center">
                     <button type="button" onClick={swapEndpoints} disabled={sameEndpoint} aria-label="Swap start and destination" title="Swap start and destination" className="flex h-10 w-10 items-center justify-center rounded-full border border-border/80 bg-muted/50 text-muted-foreground transition-[transform,background-color,color,border-color] duration-150 hover:border-primary/30 hover:bg-primary/5 hover:text-primary active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 motion-reduce:transition-none"><ArrowUpDown className="h-4 w-4" /></button>
@@ -742,7 +745,7 @@ export function UnifiedRoutePlannerDialog({
                 {isEmergency ? (
                   <div data-testid="emergency-destination" className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] px-3 py-2.5"><p className="text-[10px] font-extrabold text-rose-700 dark:text-rose-300">Automatic evacuation destination</p><p className="mt-0.5 truncate text-[12px] font-bold">{toDisplay.label}</p><p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Uses valid emergency exits and excludes elevators.</p>{selectionError && <p role="status" className="mt-1 text-[10px] font-semibold text-rose-700 dark:text-rose-300">{selectionError}</p>}</div>
                 ) : (
-                  <EndpointCard purpose="destination" building={to} campusPlace={toCampusPlace} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} />
+                  <EndpointCard purpose="destination" building={to} campusPlace={toCampusPlace} room={toRoom} useMyLocation={false} onChange={() => openSearch("destination")} compact={isMobileViewport} />
                 )}
                 {sameEndpoint && <p role="alert" data-testid="same-route-endpoint-error" className="rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs font-semibold text-destructive">Choose two different places for your route.</p>}
                 {(routeAttempted || failedRouteAttempt) && bothSet && !sameEndpoint && !route && <RouteErrorState fromCode={fromDisplay.label} toCode={toDisplay.label} mode={mode} onSwitchMode={onModeChange} />}

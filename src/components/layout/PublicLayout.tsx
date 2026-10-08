@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
-import { Toaster } from "../../app/components/ui/sonner";
 import { Navbar } from "./Navbar";
 import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
@@ -72,7 +71,7 @@ export function PublicLayout() {
   const isMapPage     = pathname === "/map";
 
   return (
-    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-hidden", !isMapPage && "app-page-bg")}>
+    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-clip", !isMapPage && "app-page-bg")}>
       {/* Skip-to-content link for keyboard and screen reader users */}
       <a
         href="#main-content"
@@ -80,26 +79,10 @@ export function PublicLayout() {
       >
         Skip to main content
       </a>
-      <Toaster
-        position="bottom-center"
-        toastOptions={{
-          className: "shadow-lg rounded-2xl border",
-          duration: 4000,
-          style: {
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            color: "var(--foreground)",
-            borderRadius: "12px",
-            fontFamily: "var(--font-body)",
-          },
-        }}
-        closeButton
-        richColors
-      />
       <NavigationProgress />
       <ScrollToTop />
       {/* Navbar hidden on mobile map for immersive experience */}
-      {!isEventEditor && <div className={isMapPage ? "hidden md:block" : ""}>
+      {!isEventEditor && <div className={cn("sticky top-0 z-40", isMapPage && "hidden md:block")}>
         <Navbar />
       </div>}
       {/* Emergency banner hidden on map view */}

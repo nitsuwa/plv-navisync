@@ -50,6 +50,10 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
         changeOpen(false);
         return;
       }
+      if (target instanceof Element && target.closest("[data-testid='student-map-notification-trigger']")) {
+        changeOpen(false);
+        return;
+      }
       // The outside gesture dismisses the menu only; it must not activate a
       // building, map control, or sheet underneath the popover.
       suppressOutsideClickRef.current = true;
@@ -91,6 +95,10 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || wrapperRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest("[data-testid='student-map-search-panel']")) {
+        changeOpen(false);
+        return;
+      }
+      if (target instanceof Element && target.closest("[data-testid='student-map-notification-trigger']")) {
         changeOpen(false);
         return;
       }

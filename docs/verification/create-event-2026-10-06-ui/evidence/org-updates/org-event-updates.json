@@ -1,0 +1,32 @@
+{
+  "checks": [
+    {
+      "name": "One shared fetch, no pending badge and no foreign-owner card",
+      "status": "PASS"
+    },
+    {
+      "name": "Approval/disapproval mark only the affected cards; reading one leaves the other unread",
+      "status": "PASS"
+    },
+    {
+      "name": "Later GSO feedback re-notifies; own edits do not; a new review cycle is unread",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive badge, specific-card read and reload: portrait",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive badge, specific-card read and reload: landscape",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive badge, specific-card read and reload: tablet",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteAttempts": 0,
+  "retainedFixtures": 0,
+  "existingEventsUnchanged": true
+}

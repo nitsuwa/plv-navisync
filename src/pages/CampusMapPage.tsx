@@ -15,6 +15,7 @@ import { type RoomType } from "../data/floorPlans";
 import type { Building } from "../types";
 import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
+import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { useToast } from "../hooks/useToast";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
@@ -80,8 +81,9 @@ import { StudentRouteTransitionMarker } from "../components/map/StudentRouteTran
 import { EventPreviewLayer } from "../components/map/EventPreviewLayer";
 import { EventMapPanel } from "../components/map/EventMapPanel";
 import { EventVenueLayer } from "../components/map/EventVenueLayer";
+import { StudentNotificationBellForCampus } from "../components/layout/StudentNotificationBell";
 import { useEventMapPreviews } from "../hooks/useEventMapPreviews";
-import { resolveEventLocation, selectedEventLocation, toEventOverlayPreview } from "../lib/eventMapView";
+import { buildEventVenues, eventLocationOnMap, eventVenueCandidates, resolveEventLocation, selectedEventLocation, toEventOverlayPreview, visibleEventCards } from "../lib/eventMapView";
 import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
 
@@ -190,6 +192,15 @@ function resolveCampusLocationQr(
       point: { x: node.x, y: node.y },
       label: [building?.name, node.name].filter(Boolean).join(" · ") || node.name,
       buildingId: building?.id,
+    };
+  }
+
+  const gate = (campus.markers ?? []).find((candidate) => candidate.id === locationId && isCampusGate(candidate));
+  if (gate) {
+    return {
+      kind: "outdoor",
+      point: { x: gate.x, y: gate.y },
+      label: gate.name || "Campus Gate",
     };
   }
 
@@ -551,6 +562,27 @@ function indoorSegmentsForBuilding(
   );
 }
 
+function activeRouteSegmentsForBuilding(
+  route: PlannedRoute | null | undefined,
+  buildingId: string,
+  navigationPhase: NavigationPhase,
+  roomOriginBuildingId?: string,
+): RouteIndoorSegment[] {
+  if (roomOriginBuildingId === buildingId) {
+    return indoorSegmentsForBuilding(route, buildingId, "before-outdoor");
+  }
+  if (route?.destinationRoom?.buildingId === buildingId) {
+    return indoorSegmentsForBuilding(route, buildingId, "after-outdoor");
+  }
+  if (navigationPhase === "origin-indoor") {
+    return indoorSegmentsForBuilding(route, buildingId, "before-outdoor");
+  }
+  if (navigationPhase === "destination-indoor") {
+    return indoorSegmentsForBuilding(route, buildingId, "after-outdoor");
+  }
+  return indoorSegmentsForBuilding(route, buildingId);
+}
+
 function indoorSegmentFloorNumber(
   segment: RouteIndoorSegment | undefined,
   building: PublishedBuildingFloorLookup | undefined,
@@ -738,14 +770,19 @@ function fallbackIndoorRoute(
 export interface CampusMapPageProps {
   /** Candidate campus supplied by Admin Student Preview. */
   previewCampus?: EditorCampus | null;
+  /** Optional initial target supplied by an admin report location preview. */
+  initialCampusId?: string;
+  initialBuildingId?: string;
+  initialPlaceId?: string;
   /** Remove the public-layout header offset when embedded full-screen. */
   fullScreen?: boolean;
   /** Allow an admin preview shell to reserve space for its own toolbar. */
   fullScreenHeight?: string;
 }
 
-export function CampusMapPage({ previewCampus = null, fullScreen = false, fullScreenHeight }: CampusMapPageProps = {}) {
+export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, fullScreen = false, fullScreenHeight }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const studentAuth = useStudentAuth();
   const { error: showError, warning: showWarning, success: showSuccess, info: showInfo } = useToast();
   const publishedCampusState = usePublishedCampus(previewCampus);
@@ -823,14 +860,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const displayZoomRef = useRef(1);
   const [pan,          setPan]          = useState<Pt>({ x:0, y:0 });
   const [saved,        setSaved]        = useState<Set<string>>(new Set());
+  const [savedStateLoading, setSavedStateLoading] = useState(true);
+  const [savedStateUnavailable, setSavedStateUnavailable] = useState(false);
   const animFrameRef   = useRef<number>(undefined);
 
-  // Load initial bookmarked buildings from studentAccountService
+  // Load favorites only after auth and campus resolution. Cancel stale reads so
+  // an earlier empty-campus response cannot overwrite the selected campus's
+  // saved state when a deep link opens a building from Home.
   useEffect(() => {
-    Promise.all([
+    let current = true;
+    if (studentAuth.loading || isCampusLoading) {
+      setSavedStateLoading(true);
+      return () => { current = false; };
+    }
+    if (!activeCampus) {
+      setSaved(new Set());
+      setSavedStateUnavailable(false);
+      setSavedStateLoading(false);
+      return () => { current = false; };
+    }
+
+    setSavedStateLoading(true);
+    setSavedStateUnavailable(false);
+    void Promise.all([
       studentAccountService.getSavedBuildings(MOCK_BUILDINGS),
       studentAccountService.getSavedCampusPlaceIdsAsync(),
     ]).then(([buildings, campusPlaceIds]) => {
+      if (!current) return;
       const idSet = new Set<string>();
       buildings.forEach((b) => {
         idSet.add(b.id);
@@ -841,8 +897,15 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       });
       campusPlaceIds.forEach((id) => idSet.add(`campus-place:${id}`));
       setSaved(idSet);
+    }).catch(() => {
+      if (!current) return;
+      setSaved(new Set());
+      setSavedStateUnavailable(true);
+    }).finally(() => {
+      if (current) setSavedStateLoading(false);
     });
-  }, [MOCK_BUILDINGS]);
+    return () => { current = false; };
+  }, [MOCK_BUILDINGS, activeCampus, isCampusLoading, studentAuth.loading, studentAuth.profile?.id]);
 
   // Floor plan state (replaces buildingView — floor plans now render in the main SVG)
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
@@ -874,6 +937,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const [highlightedRoom, setHighlightedRoom] = useState<string|null>(null);
   const [selectedRoomContext, setSelectedRoomContext] = useState<RoomDest | null>(null);
   const [routePlannerEndpoint, setRoutePlannerEndpoint] = useState<"start" | "destination" | null>(null);
+  const [qrRouteStartNotice, setQrRouteStartNotice] = useState<string | null>(null);
   const [routePlannerMapPick, setRoutePlannerMapPick] = useState<"start" | "destination" | null>(null);
   const [routePlannerMapPickCandidate, setRoutePlannerMapPickCandidate] = useState<{ endpoint: RouteEndpoint; purpose: "start" | "destination" } | null>(null);
   const [routePlannerSelectionError, setRoutePlannerSelectionError] = useState<string | null>(null);
@@ -1020,6 +1084,29 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const [eventOverlaysEnabled, setEventOverlaysEnabled] = useState(false);
   const eventMapTriggerRef = useRef<HTMLButtonElement>(null);
   const eventMapWasOpenRef = useRef(false);
+  const eventMapDeepLink = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const eventId = params.get("eventId");
+    if (!eventId) return null;
+    const campusId = params.get("eventCampusId");
+    const locationId = params.get("eventLocationId");
+    return {
+      eventId,
+      campusId,
+      locationId,
+      key: JSON.stringify([eventId, campusId, locationId]),
+    };
+  }, [location.search]);
+  const clearEventMapDeepLinkQuery = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete("eventId");
+    params.delete("eventCampusId");
+    params.delete("eventLocationId");
+    const nextSearch = params.toString();
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}${location.hash}`, { replace: true });
+  }, [location, navigate]);
+  const startedEventMapDeepLinkRef = useRef<string | null>(null);
+  const completedEventMapDeepLinkRef = useRef<string | null>(null);
 
   // Modals
   const [reportModal,   setReportModal]   = useState<Building|null>(null);
@@ -1291,11 +1378,13 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     window.visualViewport?.addEventListener("scroll", updateOverlayLayout);
     return () => {
       observer?.disconnect();
+      navigationDock?.removeEventListener("animationend", updateOverlayLayout);
+      navigationDock?.removeEventListener("transitionend", updateOverlayLayout);
       window.removeEventListener("resize", updateOverlayLayout);
       window.visualViewport?.removeEventListener("resize", updateOverlayLayout);
       window.visualViewport?.removeEventListener("scroll", updateOverlayLayout);
     };
-  }, [isFloorMode, selectedRoomContext?.roomId, searchFocused]);
+  }, [floorPickerOpen, isFloorMode, navigationPhase, navigationTransitioning, selectedRoomContext?.roomId, searchFocused]);
   const mapSurface: MapSurface = directionsMode
     ? "route-planner"
     : (studentRouteUi.phase !== "idle" || navigationPhase !== "idle" || navigationTransitioning)
@@ -1425,6 +1514,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
 
   // ── Student event map preview ─────────────────────────────────────────
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [inspectedEventVenueId, setInspectedEventVenueId] = useState<string | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [eventFilter, setEventFilter] = useState<EventMapFilter>("all");
   useEffect(() => {
@@ -1457,31 +1547,33 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     open: showEventMaps,
     identityKey: studentAuth.profile?.id ?? "guest",
   });
-  const selectedEventLocationData = selectedEventLocation(eventFeed.events, selectedEventId, selectedLocationId);
+  const visibleEvents = useMemo(() => visibleEventCards(eventFeed.events, eventFeed.nowMs, "all"), [eventFeed.events, eventFeed.nowMs]);
+  const venueEvents = useMemo(() => eventVenueCandidates(eventFeed.events, eventFeed.nowMs, eventFilter, selectedEventId), [eventFeed.events, eventFeed.nowMs, eventFilter, selectedEventId]);
+  const inspectedEventVenue = useMemo(() => activeCampus && inspectedEventVenueId ? buildEventVenues(activeCampus, venueEvents).find(venue => venue.id === inspectedEventVenueId) ?? null : null, [activeCampus, venueEvents, inspectedEventVenueId]);
+  useEffect(() => { if (!showEventMaps || isFloorMode) setInspectedEventVenueId(null); }, [showEventMaps, isFloorMode]);
+  useEffect(() => { setInspectedEventVenueId(null); }, [activeCampus?.id]);
+  const currentEventLocationId = eventLocationOnMap(visibleEvents.find(event => event.id === selectedEventId), isFloorMode ? floorLookupId ?? null : null, selectedLocationId)?.id ?? null;
+  const selectedEventLocationData = selectedEventLocation(visibleEvents, selectedEventId, currentEventLocationId);
   const selectedEventOverlay = selectedEventLocationData
     ? toEventOverlayPreview(selectedEventLocationData.event, selectedEventLocationData.location)
     : null;
 
   useEffect(() => {
-    if (selectedEventId && !eventFeed.events.some((event) => event.id === selectedEventId)) {
+    if (selectedEventId && !visibleEvents.some((event) => event.id === selectedEventId)) {
       setSelectedEventId(null);
       setSelectedLocationId(null);
-    } else if (selectedEventId && selectedLocationId && !selectedEventLocation(eventFeed.events, selectedEventId, selectedLocationId)) {
+    } else if (selectedEventId && selectedLocationId && !selectedEventLocation(visibleEvents, selectedEventId, selectedLocationId)) {
       setSelectedEventId(null);
       setSelectedLocationId(null);
     }
-  }, [eventFeed.events, selectedEventId, selectedLocationId]);
-
-  const selectEventLocation = useCallback((eventId: string, locationId: string) => {
-    setSelectedEventId(eventId);
-    setSelectedLocationId(locationId);
-  }, []);
+  }, [visibleEvents, selectedEventId, selectedLocationId]);
 
   const viewEventLocation = useCallback((eventId: string, locationId: string) => {
     if (!activeCampus) return;
-    const event = eventFeed.events.find((item) => item.id === eventId);
+    const event = visibleEvents.find((item) => item.id === eventId);
     const location = event?.locations.find((item) => item.id === locationId);
     if (!event || !location) return;
+    setInspectedEventVenueId(null);
     const resolved = resolveEventLocation(activeCampus, location.locationRef);
     if (!resolved) return;
     setSelectedEventId(eventId);
@@ -1492,7 +1584,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     }
     const building = MOCK_BUILDINGS.find((item) => item.id === resolved.buildingId);
     if (building) setFloorView({ building, floor: resolved.floorNumber });
-  }, [activeCampus, eventFeed.events, MOCK_BUILDINGS]);
+  }, [activeCampus, visibleEvents, MOCK_BUILDINGS]);
 
   const selectedLocationIsVisible = Boolean(selectedEventLocationData && (
     (!isFloorMode && selectedEventLocationData.location.locationRef.type === "campus") ||
@@ -1772,6 +1864,56 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setZoom(nextZoom);
     settleCameraTransform(nextPan, nextZoom);
   }, [clampActiveStudentZoom, clampMapPan, settleCameraTransform]);
+
+  const fitEventMap = useCallback(() => {
+    const surface = mapContainerRef.current;
+    const viewport = surface?.getBoundingClientRect();
+    const panel = surface?.querySelector<HTMLElement>('[data-testid="event-map-panel"]');
+    const panelRect = panel?.getBoundingClientRect();
+    const headerRect = panel?.querySelector<HTMLElement>('[data-event-context-header]')?.getBoundingClientRect();
+    const errorHeight = panel?.querySelector<HTMLElement>('[data-event-refresh-error]')?.getBoundingClientRect().height ?? 0;
+    if (!viewport || !panelRect || !headerRect || viewport.width <= 0 || viewport.height <= 0) return;
+    const sidePanel = window.innerWidth >= 1024 || (window.innerWidth >= 640 && window.innerHeight <= 500);
+    const topControls = [...(surface?.querySelectorAll<HTMLElement>('[data-testid="student-floor-picker"] > button, [data-testid="student-event-back-campus"]') ?? [])];
+    const controlsBottom = Math.max(viewport.top + 64, ...topControls.map(control => control.getBoundingClientRect()).filter(rect=>rect.top<viewport.top+viewport.height*.4).map(rect=>rect.bottom));
+    const insets = sidePanel
+      ? {left:panelRect.right - viewport.left + 16,right:16,top:Math.max(16,controlsBottom-viewport.top+12),bottom:isFloorMode?80:16}
+      : {left:12,right:60,top:controlsBottom-viewport.top+12,bottom:headerRect.height+errorHeight+viewport.bottom-panelRect.bottom+(isFloorMode?16:64)};
+    const buildings = Object.values(B_POS);
+    const floorScene = surface?.querySelector<SVGGraphicsElement>('[data-testid="readonly-floor-plan-scene"]');
+    const floorSceneBounds = floorScene && typeof floorScene.getBBox === 'function' ? floorScene.getBBox() : null;
+    const completeFloorBounds = floorSceneBounds && [floorSceneBounds.x,floorSceneBounds.y,floorSceneBounds.width,floorSceneBounds.height].every(Number.isFinite) && floorSceneBounds.width > 0 && floorSceneBounds.height > 0 ? floorSceneBounds : null;
+    const content = isFloorMode && activeFloorPlan
+      ? completeFloorBounds ?? getFloorShapeBounds(getFloorShapeRegions(activeFloorPlan,{canvasW:activeFloorPlan.canvasW||440,canvasH:activeFloorPlan.canvasH||290}))
+      : buildings.length ? {
+        x:Math.min(...buildings.map(b=>b.x)),y:Math.min(...buildings.map(b=>b.y)),
+        width:Math.max(...buildings.map(b=>b.x+b.w))-Math.min(...buildings.map(b=>b.x)),
+        height:Math.max(...buildings.map(b=>b.y+b.h))-Math.min(...buildings.map(b=>b.y)),
+      } : {x:0,y:0,width:outdoorCanvasW,height:outdoorCanvasH};
+    const camera = getStudentOverviewCamera({
+      mapWidth:viewportCanvasW,mapHeight:viewportCanvasH,viewportWidth:viewport.width,viewportHeight:viewport.height,
+      content,contentOffset:isFloorMode?{x:floorViewport.offsetX,y:floorViewport.offsetY}:undefined,insets,fillRatio:0.94,
+    });
+    cancelCameraAnimation(false);
+    applyOverviewCamera(camera);
+  }, [B_POS,activeFloorPlan,applyOverviewCamera,cancelCameraAnimation,floorViewport,isFloorMode,outdoorCanvasH,outdoorCanvasW,viewportCanvasH,viewportCanvasW]);
+
+  const fitEventMapRef = useRef(fitEventMap);
+  fitEventMapRef.current = fitEventMap;
+  const eventFitFrameRef = useRef<number | null>(null);
+  const requestEventMapFit = useCallback(() => {
+    if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
+    eventFitFrameRef.current = requestAnimationFrame(() => {
+      eventFitFrameRef.current = null;
+      fitEventMapRef.current();
+    });
+  }, []);
+  useEffect(() => {
+    if (showEventMaps) requestEventMapFit();
+    return () => {
+      if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
+    };
+  }, [showEventMaps, selectedEventId, floorLookupId, activeCampus?.id, requestEventMapFit]);
 
   useLayoutEffect(() => {
     if (!activeCampus || isFloorMode) return;
@@ -2295,13 +2437,21 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       setUseMyLocation(false);
       setPinning(false);
       setSelected(null);
+      setSelectedCampusPlaceId(null);
       setShowQR(false);
       setSearch("");
       setSearchFocused(false);
-      setDirectionsMode(false);
+      routeModeTouchedRef.current = false;
+      setMapMode(platformSettings.defaultRouteMode);
+      setDirectionsMode(true);
       setRoutePlannerEndpoint(null);
-      setFromBuilding(room ? building : null);
+      setRoutePlannerMapPick(null);
+      setRoutePlannerSelectionError(null);
+      setQrRouteStartNotice(`${location.label} is set as your starting point. Choose a destination to continue.`);
+      setFromBuilding(building);
       setToBuilding(null);
+      setFromCampusPlace(null);
+      setToCampusPlace(null);
       setRoomOrigin(room ?? null);
       setRoomDestination(null);
       floorShiftDirectionRef.current = null;
@@ -2322,23 +2472,32 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       setWalkProgress(0);
       setIndoorWalkProgress(0);
       setShowArrival(false);
-      showSuccess("Current location set", { description: location.label });
       return true;
     }
 
     const building = MOCK_BUILDINGS.find((candidate) => candidate.id === location.buildingId) ?? null;
     setCurrentLocationLabel(location.label);
-    setYouAreHere(location.point);
+    setYouAreHere(building ? null : location.point);
     setIndoorQrLocation(null);
-    setUseMyLocation(true);
+    setUseMyLocation(!building);
     setPinning(false);
-    setSelected(building);
+    setSelected(null);
+    setSelectedCampusPlaceId(null);
+    setSelectedRoomContext(null);
     setShowQR(false);
     setSearch("");
     setSearchFocused(false);
-    setDirectionsMode(false);
-    setFromBuilding(null);
+    routeModeTouchedRef.current = false;
+    setMapMode(platformSettings.defaultRouteMode);
+    setDirectionsMode(true);
+    setRoutePlannerEndpoint(null);
+    setRoutePlannerMapPick(null);
+    setRoutePlannerSelectionError(null);
+    setQrRouteStartNotice(`${location.label} is set as your starting point. Choose a destination to continue.`);
+    setFromBuilding(building);
     setToBuilding(null);
+    setFromCampusPlace(null);
+    setToCampusPlace(null);
     setRoomOrigin(null);
     setRoomDestination(null);
     setFloorView(null);
@@ -2354,9 +2513,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setWalkProgress(0);
     setIndoorWalkProgress(0);
     setShowArrival(false);
-    showSuccess("Current location set", { description: location.label });
     return true;
-  }, [MOCK_BUILDINGS, showError, showSuccess]);
+  }, [MOCK_BUILDINGS, platformSettings.defaultRouteMode, showError]);
 
   const openLocationScanner = useCallback(() => {
     setSearchFocused(false);
@@ -2579,6 +2737,82 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setFollowCameraDetached(false);
     setInspectedRouteStepIndex(null);
   }, []);
+
+  useEffect(() => {
+    if (!eventMapDeepLink) {
+      startedEventMapDeepLinkRef.current = null;
+      completedEventMapDeepLinkRef.current = null;
+      return;
+    }
+    if (completedEventMapDeepLinkRef.current === eventMapDeepLink.key || startedEventMapDeepLinkRef.current === eventMapDeepLink.key) return;
+    if (isCampusLoading || availableCampuses.length === 0 || !platformSettingsReady) return;
+
+    const targetCampus = eventMapDeepLink.campusId
+      ? availableCampuses.find((campus) => campus.id === eventMapDeepLink.campusId)
+      : activeCampus;
+    if (!targetCampus) {
+      completedEventMapDeepLinkRef.current = eventMapDeepLink.key;
+      showWarning("Event unavailable", { description: "This event is not available on the selected campus." });
+      clearEventMapDeepLinkQuery();
+      return;
+    }
+    if (activeCampus?.id !== targetCampus.id) {
+      setSelectedCampusId(targetCampus.id);
+      return;
+    }
+    if (!platformSettings.showApprovedEventOverlays) {
+      completedEventMapDeepLinkRef.current = eventMapDeepLink.key;
+      showWarning("Event map unavailable", { description: "Campus event maps are currently disabled." });
+      clearEventMapDeepLinkQuery();
+      return;
+    }
+
+    startedEventMapDeepLinkRef.current = eventMapDeepLink.key;
+    dismissSearch();
+    if (directionsMode || navigationTransitioning || navigationPhase !== "idle") endNavigation();
+    setDirectionsMode(false);
+    setNavigationTransitioning(false);
+    setNavigationPhase("idle");
+    setFromBuilding(null);
+    setToBuilding(null);
+    setFromCampusPlace(null);
+    setToCampusPlace(null);
+    setRoomOrigin(null);
+    setRoomDestination(null);
+    setUseMyLocation(false);
+    setSelected(null);
+    setSelectedCampusPlaceId(null);
+    setFloorView(null);
+    setIndoorRoute(null);
+    setActiveRouteRoom(null);
+    setHighlightedRoom(null);
+    setSelectedRoomContext(null);
+    setEventFilter("all");
+    setSelectedEventId(null);
+    setSelectedLocationId(null);
+    setShowEventMaps(true);
+  }, [
+    eventMapDeepLink, isCampusLoading, availableCampuses, platformSettingsReady, activeCampus?.id,
+    platformSettings.showApprovedEventOverlays, setSelectedCampusId, showWarning, directionsMode, navigationTransitioning,
+    navigationPhase, endNavigation, dismissSearch, clearEventMapDeepLinkQuery,
+  ]);
+
+  useEffect(() => {
+    if (!eventMapDeepLink || startedEventMapDeepLinkRef.current !== eventMapDeepLink.key
+      || completedEventMapDeepLinkRef.current === eventMapDeepLink.key || !showEventMaps) return;
+    const event = visibleEvents.find((candidate) => candidate.id === eventMapDeepLink.eventId && candidate.campusId === activeCampus?.id);
+    if (!event) return;
+    const eventLocation = eventMapDeepLink.locationId
+      ? event.locations.find((candidate) => candidate.id === eventMapDeepLink.locationId) ?? event.locations[0]
+      : event.locations[0];
+
+    setSelectedEventId(event.id);
+    if (eventLocation) viewEventLocation(event.id, eventLocation.id);
+    else setSelectedLocationId(null);
+    completedEventMapDeepLinkRef.current = eventMapDeepLink.key;
+    startedEventMapDeepLinkRef.current = null;
+    clearEventMapDeepLinkQuery();
+  }, [eventMapDeepLink, activeCampus?.id, visibleEvents, showEventMaps, viewEventLocation, clearEventMapDeepLinkQuery]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as Element).closest("[data-no-drag]")) return;
@@ -2869,7 +3103,25 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   const openFloorPlan = useCallback((building: Building, floor?: number) => {
     const publishedBuilding = activeCampus?.buildings.find((candidate) => candidate.id === building.id);
     const entryFloor = entryFloorForBuilding(publishedBuilding);
-    const initialFloor = floor ?? entryFloor?.number ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
+    const activeRoute = routeRef.current;
+    const routeSegments = activeRouteSegmentsForBuilding(
+      activeRoute,
+      building.id,
+      navigationPhase,
+      roomOrigin?.buildingId,
+    );
+    const currentIndoorSegment = navigationPhase === "origin-indoor"
+      ? originIndoorSegments[originIndoorSegmentIndex]
+      : navigationPhase === "destination-indoor"
+        ? destinationIndoorSegments[destinationIndoorSegmentIndex]
+        : undefined;
+    const routeSegment = currentIndoorSegment?.buildingId === building.id
+      ? currentIndoorSegment
+      : routeSegments[0];
+    const routeFloor = routeSegment
+      ? indoorSegmentFloorNumber(routeSegment, publishedBuilding)
+      : undefined;
+    const initialFloor = floor ?? routeFloor ?? entryFloor?.number ?? FLOOR_PLANS[building.id]?.floors[0]?.number ?? 1;
     setFloorView({ building, floor: initialFloor });
     // The details sheet otherwise covers the floor picker on the right.
     setSelected(null);
@@ -2877,7 +3129,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     setSearch(""); setSearchFocused(false);
     setHighlightedRoom(null); setHoveredRoom(null);
     setSelectedRoomContext(null);
-  }, [FLOOR_PLANS, activeCampus]);
+  }, [FLOOR_PLANS, activeCampus, navigationPhase, roomOrigin?.buildingId, originIndoorSegments, originIndoorSegmentIndex, destinationIndoorSegments, destinationIndoorSegmentIndex]);
 
   const changeStudentFloor = useCallback((floorNumber: number) => {
     if (!floorView || floorView.floor === floorNumber) return;
@@ -2902,6 +3154,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   }, [activeCampus, detachFollowCamera, floorView, selectedRoomContext]);
 
   const closeFloorPlan = useCallback(() => {
+    setSelectedLocationId(null);
     cancelAnimationFrame(navigationTransitionAnimRef.current ?? 0);
     navigationTransitionAnimRef.current = null;
     cancelAnimationFrame(indoorWalkAnimRef.current ?? 0);
@@ -3085,6 +3338,25 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     return planned;
   }, [fromBuilding, toBuilding, fromCampusPlace, toCampusPlace, roomOrigin, useMyLocation, youAreHere, mapMode, B_POS, activeCampus, roomDestination, standardRoutePreference]);
 
+  useEffect(() => {
+    if (!route || !isFloorMode || directionsMode || navigationTransitioning) {
+      setFloorPickerOpen(false);
+    }
+  }, [directionsMode, isFloorMode, navigationTransitioning, route]);
+
+  // A student can open a building while a campus route is still active. Show
+  // that route's authored floor-local segment even when the outdoor leg owns
+  // the navigation animation, so entering a building does not hide the path.
+  const activeNavigationFloorSegment = useMemo(() => {
+    if (!route || !floorView) return null;
+    const building = activeCampus?.buildings.find((candidate) => candidate.id === floorView.building.id);
+    return activeRouteSegmentsForBuilding(route, floorView.building.id, navigationPhase, roomOrigin?.buildingId)
+      .find((segment) => indoorSegmentFloorNumber(segment, building) === floorView.floor) ?? null;
+  }, [activeCampus, floorView, navigationPhase, roomOrigin?.buildingId, route]);
+  const visibleIndoorRoute = route && floorView
+    ? activeNavigationFloorSegment ? indoorRouteFromSegment(activeNavigationFloorSegment) : null
+    : indoorRoute;
+
   // ── Auto-close planner when the route becomes ready ────────────────────
   // The unified Route Planner owns plan, preview, and guided-navigation UI.
   // Room routes stay there until the user explicitly starts navigation.
@@ -3156,9 +3428,10 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     const placeId = params.get("placeId");
     const destinationPlaceId = params.get("destinationPlaceId");
     const destinationBuildingId = params.get("destinationBuildingId");
-    const campusHint = locationPayload?.campusId ?? params.get("campusId");
-    const targetPlaceId = destinationPlaceId || placeId;
-    const targetId = locationId || params.get("buildingId") || targetPlaceId || destinationBuildingId || params.get("select");
+    const hasExplicitTarget = Boolean(initialBuildingId || initialPlaceId);
+    const campusHint = initialCampusId ?? locationPayload?.campusId ?? params.get("campusId");
+    const targetPlaceId = initialPlaceId ?? (destinationPlaceId || placeId);
+    const targetId = initialBuildingId || locationId || params.get("buildingId") || targetPlaceId || destinationBuildingId || params.get("select");
     if (!targetId) {
       initialSelectionRef.current = true;
       return;
@@ -3179,7 +3452,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     if (!targetCampus) {
       if (locationId) {
         showError("Location QR not recognized", { description: "This code does not match a published campus location." });
-        window.history.replaceState(window.history.state, "", window.location.pathname);
+        if (!hasExplicitTarget) window.history.replaceState(window.history.state, "", window.location.pathname);
       }
       initialSelectionRef.current = true;
       return;
@@ -3191,7 +3464,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
     if (locationId) {
       applyCampusLocationQr(targetCampus, locationId, locationPayload ?? undefined);
       initialSelectionRef.current = true;
-      window.history.replaceState(window.history.state, "", window.location.pathname);
+      if (!hasExplicitTarget) window.history.replaceState(window.history.state, "", window.location.pathname);
       return;
     }
     if (targetPlaceId) {
@@ -3224,7 +3497,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
         }
       }
       initialSelectionRef.current = true;
-      window.history.replaceState(window.history.state, "", window.location.pathname);
+      if (!hasExplicitTarget) window.history.replaceState(window.history.state, "", window.location.pathname);
       return;
     }
     const building = MOCK_BUILDINGS.find((candidate) =>
@@ -3249,8 +3522,8 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
       setSelected(building);
     }
     initialSelectionRef.current = true;
-    window.history.replaceState(window.history.state, "", window.location.pathname);
-  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError, youAreHere]);
+    if (!initialBuildingId) window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError, youAreHere, initialCampusId, initialBuildingId, initialPlaceId]);
 
   useEffect(() => {
     if (!pendingLocationScan || isCampusLoading || !activeCampus || activeCampus.id !== pendingLocationScan.campusId) return;
@@ -3968,6 +4241,7 @@ export function CampusMapPage({ previewCampus = null, fullScreen = false, fullSc
   /** Open the route planner as the only active mobile map sheet. */
   const openDirections = useCallback(() => {
     prepareFreshRoutePlannerMode();
+    setQrRouteStartNotice(null);
     setSelected(null);
     setSelectedCampusPlaceId(null);
     setShowQR(false);
@@ -5033,7 +5307,7 @@ const buildingFill = (id: string) =>
     }
   }, [studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback, route, roomOrigin?.buildingId, navigationPhase, navigationTransitioning, walkProgress, indoorWalkProgress, originIndoorSegmentIndex, originIndoorSegments.length, destinationIndoorSegmentIndex, destinationIndoorSegments.length]);
 
-  const activeIndoorSegment = navigationPhase === "origin-indoor"
+  const phaseIndoorSegment = navigationPhase === "origin-indoor"
     ? originIndoorSegments[originIndoorSegmentIndex]
     : navigationPhase === "destination-indoor"
       ? destinationIndoorSegments[destinationIndoorSegmentIndex]
@@ -5931,7 +6205,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* Scanned QR or dropped-pin chip — plan from the identified map point. */}
-      {youAreHere && !pinning && !searchFocused && !isFloorMode && !directionsMode && (
+      {youAreHere && !qrRouteStartNotice && !pinning && !searchFocused && !isFloorMode && !directionsMode && (
         <div data-no-drag className="absolute left-2 top-[calc(env(safe-area-inset-top,0px)_+_4.5rem)] z-40 flex max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-2xl border border-blue-400/40 bg-blue-500 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xl md:left-1/2 md:top-14 md:max-w-none md:-translate-x-1/2 md:rounded-full">
           <Crosshair className="h-3 w-3 shrink-0 animate-pulse" />
           <span className="max-w-[38vw] truncate whitespace-nowrap md:max-w-[220px]" title={currentLocationLabel ?? "Dropped pin"}>
@@ -6215,7 +6489,7 @@ const buildingFill = (id: string) =>
                 onClickEntrance={handleStudentOutdoorEntranceClick}
               />
             )}
-            {showEventMaps && !isFloorMode && activeCampus && <EventVenueLayer campus={activeCampus} events={eventFeed.events} zoom={displayZoom} onSelect={selectEventLocation} />}
+            {showEventMaps && !isFloorMode && activeCampus && <EventVenueLayer campus={activeCampus} events={venueEvents} zoom={displayZoom} selectedLocationId={currentEventLocationId} onInspectVenue={setInspectedEventVenueId} onSelect={viewEventLocation} />}
             {showEventMaps && !isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
             {/* Route */}
             {route && (
@@ -6296,8 +6570,10 @@ const buildingFill = (id: string) =>
               to={toBuilding}
               fromCampusPlace={fromCampusPlace}
               toCampusPlace={toCampusPlace}
+              qrStartNotice={qrRouteStartNotice}
               onFromChange={(building) => {
                 setNavigationPhase("idle");
+                setQrRouteStartNotice(null);
                 setRoomOrigin(null);
                 setFromCampusPlace(null);
                 setFromBuilding(building);
@@ -6306,6 +6582,7 @@ const buildingFill = (id: string) =>
               onFromRoomChange={(room) => {
                 if (!room) {
                   setNavigationPhase("idle");
+                  setQrRouteStartNotice(null);
                   setRoomOrigin(null);
                   setFromCampusPlace(null);
                   setFromBuilding(null);
@@ -6316,6 +6593,7 @@ const buildingFill = (id: string) =>
                 // Keep the containing building in state for outdoor routing,
                 // while the authored room remains the true indoor origin.
                 setNavigationPhase("idle");
+                setQrRouteStartNotice(null);
                 setRoomOrigin(room);
                 setFromCampusPlace(null);
                 setFromBuilding(building);
@@ -6325,6 +6603,7 @@ const buildingFill = (id: string) =>
               }}
               onToChange={(building) => {
                 setNavigationPhase("idle");
+                setQrRouteStartNotice(null);
                 setRoomDestination(null);
                 setToCampusPlace(null);
                 setToBuilding(building);
@@ -6468,6 +6747,7 @@ const buildingFill = (id: string) =>
                 setNavigationPhase("idle");
                 setUseMyLocation(useLocation);
                 if (useLocation) {
+                  setQrRouteStartNotice(null);
                   setRoomOrigin(null);
                   setFromCampusPlace(null);
                   setFromBuilding(null);
@@ -6494,9 +6774,13 @@ const buildingFill = (id: string) =>
               }}
               onSelectToDestination={(result) => {
                 const endpoint = routeEndpointFromSearchResult(result, MOCK_BUILDINGS, roomDestinationCatalog, activeCampus?.markers);
-                if (endpoint) applyRoutePlannerEndpoint(endpoint, "destination");
+                if (endpoint) {
+                  setQrRouteStartNotice(null);
+                  applyRoutePlannerEndpoint(endpoint, "destination");
+                }
               }}
               onToRoomChange={(room) => {
+                setQrRouteStartNotice(null);
                 if (!room) {
                   setNavigationPhase("idle");
                   setRoomDestination(null);
@@ -6507,8 +6791,8 @@ const buildingFill = (id: string) =>
                 setNavigationPhase("idle");
                 selectRoomDestination(`${room.buildingId}:${room.floorNumber}:${room.roomId}`);
               }}
-              onClearFromRoom={() => { setNavigationPhase("idle"); setRoomOrigin(null); setFromCampusPlace(null); setFromBuilding(null); }}
-              onClearToRoom={() => { setNavigationPhase("idle"); setRoomDestination(null); setToCampusPlace(null); setToBuilding(null); }}
+              onClearFromRoom={() => { setNavigationPhase("idle"); setQrRouteStartNotice(null); setRoomOrigin(null); setFromCampusPlace(null); setFromBuilding(null); }}
+              onClearToRoom={() => { setNavigationPhase("idle"); setQrRouteStartNotice(null); setRoomDestination(null); setToCampusPlace(null); setToBuilding(null); }}
               onSwapEndpoints={() => {
                 const previousFromBuilding = fromBuilding;
                 const previousToBuilding = toBuilding;
@@ -6765,6 +7049,8 @@ const buildingFill = (id: string) =>
         <>
           <StudentMapControls
             isFloorMode={isFloorMode}
+            eventMode={showEventMaps}
+            notificationBellVisible={studentAuth.isStudent && !studentAuth.loading && Boolean(studentAuth.profile?.id)}
             floorLabel={floorView ? `${floorView.building.code} · ${currentFloor?.label ?? `Floor ${floorView.floor}`}` : undefined}
             search={search}
             searchFocused={searchFocused}
@@ -6914,11 +7200,27 @@ const buildingFill = (id: string) =>
         aria-hidden={searchFocused}
         inert={searchFocused ? ("" as never) : undefined}
         className={cn(
-          "absolute right-2 map-layer-controls pointer-events-auto transition-[opacity,transform] duration-200 ease-out motion-reduce:duration-0 md:hidden",
+          "absolute right-2 map-layer-controls pointer-events-auto flex items-center gap-2 transition-[opacity,transform] duration-200 ease-out motion-reduce:duration-0 md:hidden",
           searchFocused && "pointer-events-none translate-x-1 scale-95 opacity-0",
         )}
         style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
       >
+        {studentAuth.isStudent && !studentAuth.loading && studentAuth.profile?.id && (
+          <div data-testid="student-map-notification-trigger" data-no-drag>
+            <StudentNotificationBellForCampus
+              key={studentAuth.profile.id}
+              containerRef={mobileStudentNotificationRef}
+              ownerId={studentAuth.profile.id}
+              isStudentOrg={studentAuth.isStudentOrg}
+              eventUpdates={studentEventUpdates.events}
+              unreadEventIds={studentEventUpdates.unreadIds}
+              markEventRead={studentEventUpdates.markRead}
+              eventUpdatesError={studentEventUpdates.error}
+              refreshEventUpdates={studentEventUpdates.refresh}
+              campusId={activeCampus?.id ?? null}
+            />
+          </div>
+        )}
         <MobileMapAccountMenu open={profileMenuOpen} onOpenChange={handleProfileMenuOpenChange} />
       </div>
 
@@ -7016,6 +7318,8 @@ const buildingFill = (id: string) =>
             onDirections={startDirectionsTo}
             onEnterBuilding={(building) => openFloorPlan(building)}
             saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
             studentAuth={studentAuth}
             onToggleSave={toggleSave}
             onReport={building => { setReportCampusPlace(null); setReportRoomContext(null); setReportModal(building); }}
@@ -7036,6 +7340,7 @@ const buildingFill = (id: string) =>
             key={`campus-place-${selectedCampusPlace.id}`}
             place={selectedCampusPlace}
             campusId={activeCampus?.id}
+            qrLocationId={activeCampus?.navNodes?.find((node) => node.id === selectedCampusPlace.navNodeId || node.gateId === selectedCampusPlace.id)?.id}
             canRouteTo={campusPlaceCanRoute(selectedCampusPlace, activeCampus, "inbound")}
             canStartAt={campusPlaceCanRoute(selectedCampusPlace, activeCampus, "outbound")}
             saved={saved.has(`campus-place:${selectedCampusPlace.id}`)}
@@ -7308,6 +7613,8 @@ const buildingFill = (id: string) =>
             onReport={building => { setReportCampusPlace(null); setReportRoomContext(null); setReportModal(building); }}
             onSignInPrompt={setSignInPrompt}
             saved={saved}
+            savedStateLoading={savedStateLoading}
+            savedStateUnavailable={savedStateUnavailable}
             studentAuth={studentAuth}
             hasFloorPlans={Boolean(FLOOR_PLANS[selected.id])}
             floorPlanCount={FLOOR_PLANS[selected.id]?.floors?.length ?? 0}
@@ -7413,8 +7720,9 @@ const buildingFill = (id: string) =>
           </div>
         </div>
       )}
-      {eventOverlaysEnabled && !isFloorMode && <button ref={eventMapTriggerRef} type="button" data-testid="student-event-map-button" data-dock="event-map-bottom-left" data-suppressed={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace)} aria-label="Open event map" aria-hidden={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps)} disabled={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps)} tabIndex={directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps ? -1 : 0} aria-expanded={showEventMaps} onClick={() => {
+      {eventOverlaysEnabled && <button ref={eventMapTriggerRef} type="button" data-testid="student-event-map-button" data-indoor={isFloorMode ? "true" : "false"} data-dock="event-map-bottom-left" data-suppressed={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace)} aria-label="Open event map" aria-hidden={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps)} disabled={Boolean(directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps)} tabIndex={directionsMode || navigationTransitioning || route || selected || selectedCampusPlace || showEventMaps ? -1 : 0} aria-expanded={showEventMaps} onClick={() => {
         const nextOpen = !showEventMaps;
+        if (nextOpen) { dismissSearch(); setSelectedRoomContext(null); setSelectedEventId(null); setSelectedLocationId(null); }
         setShowEventMaps(nextOpen);
         if (!nextOpen) { setSelectedEventId(null); setSelectedLocationId(null); }
       }} className="student-map-event-control map-layer-controls absolute left-3 bottom-24 z-20 inline-flex min-h-11 items-center rounded-xl border border-border bg-card px-3 text-sm font-bold text-primary shadow-md md:bottom-5" data-no-drag>
@@ -7429,12 +7737,15 @@ const buildingFill = (id: string) =>
         filter={eventFilter}
         selectedEventId={selectedEventId}
         selectedLocationId={selectedLocationId}
+        currentMap={{label:isFloorMode ? `${activeFloorBuilding?.name ?? floorView?.building.name ?? 'Building'} · ${currentFloor?.label ?? 'Floor'}` : 'Campus Grounds',locationId:currentEventLocationId,isFloor:isFloorMode}}
+        onFitMap={requestEventMapFit}
+        inspectedVenue={inspectedEventVenue}
         onClose={() => { setShowEventMaps(false); setSelectedEventId(null); setSelectedLocationId(null); }}
         onRetry={eventFeed.refresh}
         onFilterChange={setEventFilter}
-        onSelectEvent={(eventId) => { setSelectedEventId(eventId); setSelectedLocationId(null); }}
+        onSelectEvent={(eventId) => { setInspectedEventVenueId(null); setSelectedEventId(eventId); setSelectedLocationId(null); }}
         onViewLocation={viewEventLocation}
-        onBackToEvents={() => { setSelectedEventId(null); setSelectedLocationId(null); }}
+        onBackToEvents={() => { setInspectedEventVenueId(null); setSelectedEventId(null); setSelectedLocationId(null); }}
       />}
     </div>
   );

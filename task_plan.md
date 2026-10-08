@@ -1,16 +1,28 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 8, 2026 — approved final audit
+
+- **Status:** local implementation and available browser audit complete.
+- Approved design: `docs/superpowers/specs/2026-10-08-event-map-context-design.md`; plan: `docs/superpowers/plans/2026-10-08-event-final-audit.md`.
+- Implemented consistent actual-map/event/venue context, explicit details/fit controls, room matching, responsive preview pin form/map space, focus return and reduced motion.
+- Fixed cached editor data across actor changes, late asynchronous completions, and misleading expired/network read failures. No database change.
+- Browser matrix: 573 PASS checks; final complete-floor geometry retest:129 PASS; final mobile/desktop venue/reduced-motion retest PASS. Runs overlap and are not added together. Eight viewport sizes; real200% Edge page zoom for three roles; zero page errors and event mutation attempts.
+- Tests: final map/proposal/integration3files67 PASS, broader8files98 PASS, affected read/editor/preview/panel4files65 PASS, preview6 and readonly/feedback8 PASS (overlap). Final build3020modules PASS. Type diagnostic counts HEAD/current1010 with no added file/code counts; not a clean typecheck. Diff check PASS.
+- Independent final source review: no remaining material issue. Report and screenshots: `docs/verification/event-final-audit/README.md`.
+- Physical Android/iOS keyboard/gestures, screen-reader speech, Safari/Firefox and live second Org access were unavailable. Broader manual checklist remains PARTIAL with dated evidence rather than blanket checkmarks.
+- Existing approved QA fixture read only. No new live event, migration, commit, push or deployment; earlier approved dirty work preserved.
+
 ## Goal
 
 Design and later implement a polished student-organization event workflow in which admins grant the student-org role, student organizations request and build event maps on top of admin-published campus/building maps, and admins review and approve submissions without allowing students to delete admin-owned map content.
 
 ## Next Step
 
-Execute `docs/superpowers/plans/2026-09-21-event-builder-input-motion-parity.md` inline, starting with the RED Snap click-through regression test.
+The user applied the October 8 SQL successfully. Hosted API/Org sync (10+10 PASS) and real Admin desktop/mobile badge sync (19 PASS) are verified. Temporary pending QA layouts were withdrawn and deleted. An archived event list/deep-link filter bug was fixed with RED/GREEN tests (65 affected PASS, build PASS). See `docs/verification/event-sync-next-batch/README.md` for evidence and limits. Preserve all first-batch and earlier local changes.
 
 ## Current Phase
 
-Phase 16: Event Builder Input and Motion Polish
+October 8 next batch — backend activity endpoint repair, cross-device read receipts, loading/motion clarity, and remaining revision/publication-boundary tests. User explicitly authorized execution with “Do it now.” Earlier phases below are historical.
 
 ## Phases
 
@@ -104,6 +116,15 @@ Phase 16: Event Builder Input and Motion Polish
 - **Status:** complete
 
 ## Key Questions
+
+### October 8 execution phases
+
+- [x] Phase 12: Prepared additive activity repair + private receipt SQL; 26 isolated PostgreSQL role/state/integrity checks pass.
+- [x] Phase 13: Integrated typed server read/acknowledgement with browser-only fallback, account teardown guards and visible retry for Admin/Org.
+- [x] Phase 14: Action-specific loading, reduced motion, revision/resubmit regressions and desktop/mobile publication-clock checks verified locally.
+- [x] Phase 15: User applied SQL; hosted API/auth gates and real Org/Admin read sync across independent desktop/mobile contexts verified. Temporary Admin QA submission cleaned; no existing event content changed. Physical devices were not tested.
+
+Live deployment was completed by the user's SQL Editor execution. Verification used ordinary demo app access; no account role or existing event content was changed.
 
 1. Should student organizations be allowed to submit multiple event-map revisions, or only one active submission per event?
 2. Which admin-published map elements must be locked: all published campus/building content, or only the geometry and navigation layers while labels/appearance remain editable?
@@ -239,3 +260,19 @@ No further implementation is included in this request. The remaining placeholder
 - Authenticated browser QA confirmed Snap count stability, progressive zoom animation, functional pan movement, full CABA floor layers, no mobile horizontal overflow at 390x844, and no fresh browser warning/error logs after reload.
 - The unrelated full-repository Vitest run was stopped because existing Admin Map Builder tests continuously emit `act(...)` warnings and did not finish in a reasonable time; no full-suite green claim is made.
 - No commit, push, Save Draft, or Submit to GSO action was performed.
+
+## Main Create Event completion plan — October 3 execution
+
+- **Status:** implementation and verification advanced; acceptance gate PARTIAL.
+- One active plan: `docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md`, Tasks 0–8. Optional future roadmap excluded.
+- [x] Preserve existing checkout; reproduce/fix parser, mutation race, preview/checklist, creation retry and history defects.
+- [x] Run unfiltered event/helper suites: 419 passing tests; production build and diff checks pass.
+- [x] Verify existing-role authenticated lifecycle with disposable API fixture; owner/mobile feedback/browser/admin-note cycle; clean fixtures.
+- [x] Actual two-location UI creation/design/save/reload/submission/admin-preview J1; cancel/confirm withdrawal L03, with strict persisted asset counts and fixture cleanup.
+- [x] Record exact PASS/BLOCKED/NOT RUN evidence in the acceptance matrix/results.
+- [x] User applied poster migration; existing Org upload, anonymous public read and cleanup verified live.
+- [x] Actual poster form/retry/remove, available storage permissions, two owner browser saves, later feedback retry/reopen, mobile rejected duplicate/resubmit and creation keyboard focus/scroll checks.
+- [x] Poster catalog assertions user-verified PASS via SQL Editor screenshot.
+- [ ] Missing-role cases, positive publication and remaining manual acceptance permutations as recorded in results.
+- [ ] Finish remaining full browser/keyboard/touch/publication journeys and unrelated Org/non-super admin checks as listed in results. Do not claim universal acceptance from segment coverage.
+- No commit/push/deployment. Existing migrations not reapplied; no new accounts created.

@@ -1191,6 +1191,77 @@
     pointer-events: none;
     transform: translate3d(0, 6px, 0);
   }
+  @media (max-width: 767px) {
+    .student-map-event-control[data-indoor="true"] {
+      bottom: calc(var(--student-map-utility-bottom, 1rem) + 3.5rem);
+    }
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] {
+      top: calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem);
+      bottom: auto;
+    }
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] [data-testid="student-floor-picker-menu"] {
+      top: 100%;
+      bottom: auto;
+      margin-top: 0.75rem;
+      margin-bottom: 0;
+    }
+    .student-map-utility-stack[data-event-mode="true"] {
+      top: calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem);
+      bottom: auto;
+    }
+    .student-map-surface [data-testid="event-map-panel"] {
+      max-height: min(var(--event-sheet-max-height), calc(100% - 8.5rem));
+    }
+  }
+  @media (max-width: 767px) and (max-height: 500px) {
+    .student-map-utility-stack[data-event-mode="true"] {
+      flex-direction: row;
+    }
+  }
+  @media (min-width: 768px) and (max-width: 1023px) {
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] {
+      top: 4rem;
+      bottom: auto;
+      left: 0.75rem;
+      right: auto;
+      width: auto;
+      transform: none;
+    }
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] [data-testid="student-floor-picker-menu"] {
+      top: 100%;
+      bottom: auto;
+      margin-top: 0.75rem;
+    }
+  }
+  @media (min-width: 640px) and (max-width: 1023px) and (max-height: 500px) {
+    .student-map-surface [data-testid="event-map-panel"] {
+      top: 0.75rem;
+      bottom: auto;
+      right: auto;
+      width: min(18rem, 42vw);
+      max-height: calc(100% - 1.5rem);
+    }
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] {
+      left: calc(min(18rem, 42vw) + 1.5rem);
+      top: 4rem;
+      transform: none;
+    }
+    .student-map-surface [data-testid="student-event-back-campus"] {
+      left: calc(min(18rem, 42vw) + 1.5rem);
+    }
+  }
+  @media (min-width: 1024px) {
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] {
+      left: auto;
+      right: 1rem;
+      width: min(420px, calc(100% - 26rem));
+      transform: none;
+    }
+    [data-testid="student-floor-picker"][data-event-panel-open="true"] > button {
+      width: 100%;
+      max-width: 100%;
+    }
+  }
   /* Keep the planner mounted so route state survives inspection. On narrower
      viewports the selected place takes the foreground and exposes a return
      action; the planner is visible again when that place is dismissed. */
@@ -1661,4 +1732,64 @@
 
 @media (prefers-reduced-motion: reduce) {
   .campus-place-selection-ring { animation: none; }
+}
+
+
+/* Keep event feedback secondary to the canvas, including short mobile screens. */
+.event-feedback-checklist > summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 24px;
+}
+.event-feedback-checklist .feedback-progress {
+  margin-left: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.event-feedback-checklist .feedback-checklist-body {
+  border-top: 1px solid var(--border);
+  padding: 0 12px 12px;
+  max-height: min(280px, 36dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.event-feedback-checklist button,
+.event-feedback-checklist input {
+  min-height: 44px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.event-feedback-checklist [aria-label="Filter feedback"] { gap: 4px; margin-top: 8px; }
+.event-feedback-checklist .feedback-checklist-body > div:last-child {
+  max-height: none;
+  overflow: visible;
+  margin-top: 8px;
+}
+.event-feedback-checklist [data-open-issue] { padding: 10px; }
+[data-map-feedback] {
+  width: auto;
+  max-width: min(280px, calc(100% - 24px));
+  padding: 0;
+  max-height: min(180px, 30dvh);
+  overscroll-behavior: contain;
+}
+[data-map-feedback] > summary {
+  min-height: 44px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 20px;
+}
+[data-map-feedback] > button {
+  min-height: 44px;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  padding: 8px 12px;
+}
+@media (max-width: 480px) {
+  .event-feedback-checklist > summary { font-size: 12px; }
+  .event-feedback-checklist .feedback-progress { margin-left: 4px; font-size: 11px; }
 }

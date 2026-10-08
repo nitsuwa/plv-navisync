@@ -10,11 +10,11 @@ import { useTheme } from "../../hooks/useTheme";
 import { PLVLogo } from "../ui/PLVLogo";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { useToast } from "../../hooks/useToast";
-import { reportService } from "../../services/reportService";
-import { notificationService } from "../../lib/notificationService";
 import { cn } from "../../lib/utils";
 import { StudentAvatar } from "../ui/StudentAvatar";
-import { loadStudentPreferences } from "../../services/studentPreferencesService";
+import { useStudentOrgEventUpdates } from "../../hooks/useStudentOrgEventUpdates";
+import { EventUnreadBadge } from "../events/EventUnreadBadge";
+import { StudentNotificationBell } from "./StudentNotificationBell";
 
 const ALL_NAV_LINKS = [
   { label: "Home", path: "/", icon: Home },
@@ -41,42 +41,16 @@ export function Navbar() {
   const suppressOutsideClickRef = useRef(false);
   const suppressOutsideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { loading: authLoading, isAdmin, isStudent, isStudentOrg, username, role, profile, signOut } = useStudentAuth();
+  const {
+    events: studentEventUpdates,
+    unreadIds: unreadEventIds,
+    unreadCount: eventUnreadCount,
+    error: eventUpdatesError,
+    refresh: refreshEventUpdates,
+    markRead: markEventRead,
+  } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
   const toast = useToast();
-  const [reportNotifCount, setReportNotifCount] = useState(0);
-  const notifiedRef = useRef(false);
-
-  // Detect admin-side report status changes and surface them as a badge + toast.
-  useEffect(() => {
-    if (authLoading || !isStudent || notifiedRef.current) return;
-    let mounted = true;
-    (async () => {
-      try {
-        const [reports, preferences] = await Promise.all([reportService.getStudentReports(), loadStudentPreferences()]);
-        if (!mounted || reports.length === 0) return;
-        if (!preferences.reportStatus) {
-          notificationService.markReportStatusSeen(reports);
-          notifiedRef.current = true;
-          return;
-        }
-        const changes = notificationService.detectReportStatusChanges(reports);
-        notificationService.markReportStatusSeen(reports);
-        if (changes.length > 0) {
-          const first = changes[0];
-          setReportNotifCount(changes.length);
-          notifiedRef.current = true;
-          toast.info(
-            "Report updated",
-            `"${first.title}" is now ${first.to.toLowerCase()}.`
-          );
-        }
-      } catch {
-        // Notifications are best-effort; never block the navbar.
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [authLoading, isStudent, toast]);
+  const studentNotificationRef = useRef<HTMLDivElement>(null);
 
   const handleStudentLogout = async () => {
     try {
@@ -100,6 +74,10 @@ export function Navbar() {
   useEffect(() => {
     const outsidePointer = (event: PointerEvent) => {
       if (!dropdownOpen || dropdownRef.current?.contains(event.target as Node)) return;
+      if (studentNotificationRef.current?.contains(event.target as Node)) {
+        setDropdownOpen(false);
+        return;
+      }
       suppressOutsideClickRef.current = true;
       if (suppressOutsideTimerRef.current) clearTimeout(suppressOutsideTimerRef.current);
       suppressOutsideTimerRef.current = setTimeout(() => { suppressOutsideClickRef.current = false; }, 700);
@@ -188,10 +166,11 @@ export function Navbar() {
               const active = isActive(path);
               return (
                 <Link key={path} to={path}
+                  aria-label={path === "/student/events" && eventUnreadCount ? `My Events, ${eventUnreadCount} unread layout updates` : undefined}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex items-center gap-1.5 rounded-xl transition-colors duration-150 select-none",
-                    "px-3.5 py-2 text-sm font-semibold",
+                    "whitespace-nowrap px-2.5 py-2 text-sm font-semibold lg:px-3.5",
                     active
                       ? showWhiteText ? "text-white" : "text-primary"
                       : showWhiteText ? "text-white/80 hover:text-white" : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -200,6 +179,7 @@ export function Navbar() {
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   {label}
+                  {path === "/student/events" && <EventUnreadBadge count={eventUnreadCount} />}
                   {active && (
                     <motion.span
                       layoutId="nav-underline"
@@ -216,6 +196,20 @@ export function Navbar() {
           {/* ── Right actions ── */}
           <div className="flex items-center gap-1.5 shrink-0">
             {!isStudent && <ThemeToggle theme={theme} onToggle={toggleTheme} />}
+
+            {isStudent && !authLoading && profile?.id && (
+              <StudentNotificationBell
+                key={profile.id}
+                containerRef={studentNotificationRef}
+                ownerId={profile.id}
+                isStudentOrg={isStudentOrg}
+                eventUpdates={studentEventUpdates}
+                unreadEventIds={unreadEventIds}
+                markEventRead={markEventRead}
+                eventUpdatesError={eventUpdatesError}
+                refreshEventUpdates={refreshEventUpdates}
+              />
+            )}
 
             {authLoading ? (
               /* Keep the control useful and visible while the session resolves.
@@ -284,11 +278,6 @@ export function Navbar() {
                         </Link>
                         <Link to="/student/reports" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <Flag className="h-4 w-4 text-muted-foreground shrink-0" /> My Reports
-                          {reportNotifCount > 0 && (
-                            <span className="ml-auto min-w-4 h-4 px-1 rounded-full bg-accent text-accent-foreground text-[9px] font-extrabold flex items-center justify-center">
-                              {reportNotifCount > 9 ? "9+" : reportNotifCount}
-                            </span>
-                          )}
                         </Link>
                       </div>
                       <div className="h-px mx-3 bg-border" />

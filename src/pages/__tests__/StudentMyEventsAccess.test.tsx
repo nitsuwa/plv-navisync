@@ -1,9 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentEventEditPage } from "../StudentEventEditPage";
 import { StudentMyEventsPage } from "../StudentMyEventsPage";
 import { eventOverlayService } from "../../services/eventOverlayService";
+import { isEventReviewUnread } from "../../lib/studentEventUpdates";
+import { eventNotificationService } from '../../services/eventNotificationService';
+vi.mock('../../services/eventNotificationService',async(importOriginal)=>{const actual=await importOriginal<typeof import('../../services/eventNotificationService')>();return {...actual,eventNotificationService:{getStates:vi.fn().mockRejectedValue(new actual.EventNotificationSyncUnavailable('Browser only')),acknowledge:vi.fn().mockRejectedValue(new actual.EventNotificationSyncUnavailable('Browser only'))}};});
 
 const authState = vi.hoisted(() => ({
   isStudent: true,
@@ -56,6 +59,41 @@ vi.mock("../../services/eventOverlayService", () => ({
 }));
 
 describe("StudentMyEventsPage access", () => {
+  beforeEach(() => localStorage.clear());
+  it('does not force an old editor navigation after the user leaves during acknowledgement',async()=>{
+    authState.isStudentOrg=true;authState.profile={id:'org-late-route'};
+    let finish!:(value:void)=>void;
+    vi.mocked(eventNotificationService.acknowledge).mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{id:'delayed',createdByUserId:'org-late-route',title:'Delayed',organizer:'Org',status:'approved',locations:[]}] as never);
+    render(<MemoryRouter initialEntries={['/student/events']}><Routes><Route path='/student/events' element={<StudentMyEventsPage/>}/><Route path='/home' element={<div>Home destination</div>}/><Route path='/student/events/:id/edit' element={<div>Old editor destination</div>}/></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('link',{name:'View maps'}));
+    fireEvent.click(screen.getByRole('link',{name:'Back to Home'}));
+    expect(await screen.findByText('Home destination')).toBeInTheDocument();
+    await act(async()=>{finish();});
+    expect(screen.getByText('Home destination')).toBeInTheDocument();
+    expect(screen.queryByText('Old editor destination')).not.toBeInTheDocument();
+  });
+  it("acknowledges only the layout whose maps are opened", async () => {
+    authState.isStudentOrg = true; authState.profile = { id: "org-1" };
+    const events = ["First", "Second"].map((title, index) => ({ id: `view-${index}`, createdByUserId: "org-1", title, organizer: "Org", status: "approved", locations: [] }));
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce(events as never);
+    render(<MemoryRouter initialEntries={["/student/events"]}><Routes><Route path="/student/events" element={<StudentMyEventsPage />} /><Route path="/student/events/:id/edit" element={<div>Opened event maps</div>} /></Routes></MemoryRouter>);
+    const first = await screen.findByTestId("org-event-card-view-0");
+    fireEvent.click(first.querySelector<HTMLAnchorElement>('a[href="/student/events/view-0/edit"]')!);
+    expect(await screen.findByText("Opened event maps")).toBeInTheDocument();
+    expect(isEventReviewUnread("org-1", events[0] as never)).toBe(false);
+    expect(isEventReviewUnread("org-1", events[1] as never)).toBe(true);
+  });
+  it("marks only the chosen reviewed layout read and keeps the other layout unread", async () => {
+    authState.isStudentOrg = true; authState.profile = { id: "org-1" };
+    const events = ["First", "Second"].map((title, index) => ({ id: `review-${index}`, createdByUserId: "org-1", title, organizer: "Org", status: "approved", locations: [] }));
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce(events as never);
+    render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
+    expect(await screen.findByTestId("org-event-card-review-0")).toHaveAttribute("data-unread", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Mark GSO update for First as read" }));
+    await waitFor(()=>expect(screen.getByTestId("org-event-card-review-0")).toHaveAttribute("data-unread", "false"));
+    expect(screen.getByTestId("org-event-card-review-1")).toHaveAttribute("data-unread", "true");
+  });
   it('shows a retryable error instead of an empty event list on fetch failure', async () => {
     authState.isStudentOrg = true;
     authState.profile = { id: 'org-1' };
@@ -75,7 +113,7 @@ describe("StudentMyEventsPage access", () => {
     authState.isStudentOrg = true;
     authState.profile = { id: "org-1" };
     publishedCampusState.loading = false;
-    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", title: "Fair", organizer: "Org", status, locations: [] }] as never);
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", createdByUserId: "org-1", title: "Fair", organizer: "Org", status, locations: [] }] as never);
     render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
     expect(await screen.findByText(instruction)).toBeInTheDocument();
   });
@@ -83,7 +121,7 @@ describe("StudentMyEventsPage access", () => {
     authState.isStudentOrg = true;
     authState.profile = { id: "org-1" };
     publishedCampusState.loading = false;
-    const event = { id: "pending", title: "Submitted Fair", organizer: "Org", status: "pending", updatedAt: "2026-10-03T00:00:00Z", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] };
+    const event = { id: "pending", createdByUserId: "org-1", title: "Submitted Fair", organizer: "Org", status: "pending", updatedAt: "2026-10-03T00:00:00Z", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] };
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([event] as never).mockResolvedValueOnce([{ ...event, status: "draft" }] as never);
     vi.mocked(eventOverlayService.withdrawEventSubmission).mockResolvedValue({ ...event, status: "draft" } as never);
     render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
@@ -102,7 +140,7 @@ describe("StudentMyEventsPage access", () => {
     publishedCampusState.loading = false;
     publishedCampusState.error = null;
     publishedCampusState.isCached = false;
-    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", campusId: "campus", title: "Fair", organizer: "Org", status: "draft", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] }] as never);
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{ id: "event", createdByUserId: "org-1", campusId: "campus", title: "Fair", organizer: "Org", status: "draft", locations: [{ id: "loc", locationRef: { type: "campus", label: "Campus Grounds" }, eventFurniture: [], eventLabels: [] }] }] as never);
     render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
     expect(await screen.findByRole("button", { name: /duplicate layout/i })).toBeInTheDocument();
   });
