@@ -44,6 +44,7 @@ import {
   STUDENT_MAP_ZOOM_STEP,
 } from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
+import { isCampusGate } from "../lib/campusGates";
 import { routeEndpointFromSearchResult, routeEndpointKey, type RouteEndpoint } from "../lib/routeEndpoints";
 import { outdoorWalkingDistance, walkingAnimationDuration } from "../lib/walkingAnimation";
 import { planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
@@ -187,6 +188,15 @@ function resolveCampusLocationQr(
       point: { x: node.x, y: node.y },
       label: [building?.name, node.name].filter(Boolean).join(" · ") || node.name,
       buildingId: building?.id,
+    };
+  }
+
+  const gate = (campus.markers ?? []).find((candidate) => candidate.id === locationId && isCampusGate(candidate));
+  if (gate) {
+    return {
+      kind: "outdoor",
+      point: { x: gate.x, y: gate.y },
+      label: gate.name || "Campus Gate",
     };
   }
 
@@ -2259,7 +2269,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setWalkProgress(0);
       setIndoorWalkProgress(0);
       setShowArrival(false);
-      showSuccess("Route start set", { description: `${location.label} is your starting point. Choose a destination in the route planner.` });
       return true;
     }
 
@@ -2301,9 +2310,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setWalkProgress(0);
     setIndoorWalkProgress(0);
     setShowArrival(false);
-    showSuccess("Route start set", { description: `${location.label} is your starting point. Choose a destination in the route planner.` });
     return true;
-  }, [MOCK_BUILDINGS, platformSettings.defaultRouteMode, showError, showSuccess]);
+  }, [MOCK_BUILDINGS, platformSettings.defaultRouteMode, showError]);
 
   const openLocationScanner = useCallback(() => {
     setSearchFocused(false);
@@ -4799,7 +4807,7 @@ const buildingFill = (id: string) =>
       )}
 
       {/* Scanned QR or dropped-pin chip — plan from the identified map point. */}
-      {youAreHere && !pinning && !searchFocused && !isFloorMode && !directionsMode && (
+      {youAreHere && !qrRouteStartNotice && !pinning && !searchFocused && !isFloorMode && !directionsMode && (
         <div data-no-drag className="absolute left-2 top-[calc(env(safe-area-inset-top,0px)_+_4.5rem)] z-40 flex max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-2xl border border-blue-400/40 bg-blue-500 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xl md:left-1/2 md:top-14 md:max-w-none md:-translate-x-1/2 md:rounded-full">
           <Crosshair className="h-3 w-3 shrink-0 animate-pulse" />
           <span className="max-w-[38vw] truncate whitespace-nowrap md:max-w-[220px]" title={currentLocationLabel ?? "Dropped pin"}>
@@ -5656,6 +5664,7 @@ const buildingFill = (id: string) =>
             key={`campus-place-${selectedCampusPlace.id}`}
             place={selectedCampusPlace}
             campusId={activeCampus?.id}
+            qrLocationId={activeCampus?.navNodes?.find((node) => node.id === selectedCampusPlace.navNodeId || node.gateId === selectedCampusPlace.id)?.id}
             canRouteTo={campusPlaceCanRoute(selectedCampusPlace, activeCampus, "inbound")}
             canStartAt={campusPlaceCanRoute(selectedCampusPlace, activeCampus, "outbound")}
             saved={saved.has(`campus-place:${selectedCampusPlace.id}`)}

@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Accessibility, Bookmark, Check, DoorOpen, MapPin, Navigation, Play, Share2, X } from "lucide-react";
+import { Accessibility, Bookmark, Check, DoorOpen, MapPin, Navigation, Play, QrCode, Share2, X } from "lucide-react";
 import type { CampusMarker } from "../map-builder/types";
 import type { StudentAuthState } from "../../hooks/useStudentAuth";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
+import { isCampusGate } from "../../lib/campusGates";
 import { formatWeeklyOperatingHours } from "../../lib/buildingInformation";
 import { campusPlaceDeepLink, shareCampusPlaceLink } from "../../lib/campusPlaceShare";
 import { buildingCoverPublicUrl } from "../../services/buildingImageService";
 import { useToast } from "../../hooks/useToast";
 import { StudentReportAction } from "./StudentReportAction";
+import { CampusGateQR } from "./CampusGateQR";
 
 interface CampusPlaceDetailsProps {
   place: CampusMarker;
   campusId?: string;
+  qrLocationId?: string;
   canRouteTo: boolean;
   canStartAt: boolean;
   saved: boolean;
@@ -52,9 +55,11 @@ function PlaceCover({ place, compact = false }: { place: CampusMarker; compact?:
   );
 }
 
-export function CampusPlaceDetails({ place, campusId = "", canRouteTo, canStartAt, saved, studentAuth, onClose, onDirections, onStartHere, onSave, onReport, onSignInPrompt }: CampusPlaceDetailsProps) {
+export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRouteTo, canStartAt, saved, studentAuth, onClose, onDirections, onStartHere, onSave, onReport, onSignInPrompt }: CampusPlaceDetailsProps) {
   const reducedMotion = useReducedMotion();
   const toast = useToast();
+  const [showGateQR, setShowGateQR] = useState(false);
+  const isGate = isCampusGate(place);
   const info = place.studentInfo;
   const kind = placeKind(place);
   const schedule = useMemo(() => formatWeeklyOperatingHours(info?.operatingHoursSchedule), [info?.operatingHoursSchedule]);
@@ -64,6 +69,8 @@ export function CampusPlaceDetails({ place, campusId = "", canRouteTo, canStartA
     info?.securityCheckpoint && "Security checkpoint",
     info?.accessibleEntrance && "Accessible entrance",
   ].filter((value): value is string => Boolean(value));
+
+  useEffect(() => { setShowGateQR(false); }, [place.id]);
 
   const share = async () => {
     try {
@@ -82,13 +89,17 @@ export function CampusPlaceDetails({ place, campusId = "", canRouteTo, canStartA
           <Play className="h-3 w-3 shrink-0 fill-current" />Start here
         </button>
       </div>
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className={`grid ${isGate ? "grid-cols-4" : "grid-cols-3"} gap-1.5`}>
         <button type="button" aria-label={saved ? `Remove ${place.name} from saved places` : `Save ${place.name}`} onClick={() => studentAuth.isStudent ? onSave() : onSignInPrompt("save locations")} className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-card px-1 text-[10px] font-bold text-foreground">
           {saved ? <Check className="h-3.5 w-3.5 text-primary" /> : <Bookmark className="h-3.5 w-3.5" />}{saved ? "Saved" : "Save"}
         </button>
+        {isGate && <button type="button" aria-label={showGateQR ? `Hide ${place.name} QR code` : `Show ${place.name} QR code`} aria-pressed={showGateQR} onClick={() => setShowGateQR((visible) => !visible)} className={`inline-flex h-9 items-center justify-center gap-1 rounded-xl border px-1 text-[10px] font-bold transition-colors ${showGateQR ? "border-primary/25 bg-primary/5 text-primary" : "border-border bg-card text-foreground"}`}>
+          <QrCode className="h-3.5 w-3.5" />QR
+        </button>}
         <button type="button" onClick={() => void share()} className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-card px-1 text-[10px] font-bold text-foreground"><Share2 className="h-3.5 w-3.5" />Share</button>
         <StudentReportAction testId="campus-place-report" ariaLabel={`Report an issue with ${place.name}`} onClick={() => studentAuth.isStudent ? onReport() : onSignInPrompt("report issues")} className="h-9 gap-1 px-1 text-[10px]" />
       </div>
+      {isGate && showGateQR && <CampusGateQR gate={place} campusId={campusId} locationId={qrLocationId || place.navNodeId || place.id} />}
       {!canRouteTo && !canStartAt && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
       {!mobile && schedule && <p className="text-[11px] text-muted-foreground"><span className="font-bold text-foreground">Hours</span> · {schedule}</p>}
     </div>
