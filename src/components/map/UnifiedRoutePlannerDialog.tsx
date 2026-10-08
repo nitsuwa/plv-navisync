@@ -50,6 +50,8 @@ export interface UnifiedRoutePlannerDialogProps {
   mapSelectionEndpoint?: RoutePlannerEndpoint | null;
   onChooseOnMap?: (endpoint: RoutePlannerEndpoint | null) => void;
   selectionError?: string | null;
+  /** Explain that a location QR code prefilled the route start and prompt for a destination. */
+  qrStartNotice?: string | null;
   /** Keep the planner mounted while a selected building is foregrounded on small screens. */
   suspendedForBuilding?: boolean;
 }
@@ -140,6 +142,7 @@ export function UnifiedRoutePlannerDialog({
   activeEndpoint: controlledEndpoint, onActiveEndpointChange,
   standardPreference = "best", onStandardPreferenceChange,
   mapSelectionEndpoint = null, onChooseOnMap, selectionError = null,
+  qrStartNotice = null,
   suspendedForBuilding = false,
 }: UnifiedRoutePlannerDialogProps) {
   const [compactPanelLayout, setCompactPanelLayout] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -491,6 +494,12 @@ export function UnifiedRoutePlannerDialog({
             ) : (
               <>
                 {route && editingRoute && <div className="flex justify-end"><button type="button" onClick={() => setEditingRoute(false)} className="min-h-7 rounded-lg px-2 text-[10px] font-extrabold text-primary hover:bg-primary/10">Done editing route</button></div>}
+                {qrStartNotice && (
+                  <div role="status" aria-live="polite" data-testid="route-planner-qr-start-notice" className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/[0.06] px-3 py-2 text-[11px] font-semibold leading-relaxed text-foreground">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span>{qrStartNotice}</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-0.5 rounded-xl bg-muted/60 p-0.5 md:gap-1 md:p-1" role="group" aria-label="Route modes">
                   {MODES.map(({ key, label, icon }) => (
                     <button key={key} type="button" onClick={() => onModeChange(key)} aria-label={`${label} routing`} aria-pressed={mode === key} className={cn("flex min-h-9 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:min-h-11", mode === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-card hover:text-foreground", mode === key && key === "accessible" && "bg-emerald-700", mode === key && key === "emergency" && "bg-rose-700")}>

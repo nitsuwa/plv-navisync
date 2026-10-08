@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import {
-  Building2, Bell, AlertTriangle, Clock, ArrowRight,
+  Building2, AlertTriangle, Clock, ArrowRight,
   Flag, Layers, Route, Users, CheckCircle2, CalendarDays, History,
   BarChart3, Search as SearchIcon, MapPin, Flag as FlagIcon,
 } from "lucide-react";
@@ -145,7 +145,6 @@ export function AdminDashboardPage() {
   const QUICK_ACTIONS: QuickAction[] = [
     { label: "Open Map Builder", to: "/admin-dashboard/map-builder", icon: Building2, desc: "Edit campus map", color: "bg-primary" },
     { label: "Review Reports", to: "/admin-dashboard/reports", icon: Flag, desc: `${s.pendingReports} pending`, color: "bg-amber-500" },
-    { label: "Post Announcement", to: "/admin-dashboard/announcements", icon: Bell, desc: "Notify students", color: "bg-violet-500" },
     { label: "Manage Users", to: "/admin-dashboard/users", icon: Users, desc: `${s.activeStudents} students`, color: "bg-emerald-500" },
   ];
 

@@ -50,6 +50,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/map-builder":    "Map Builder",
   "/admin-dashboard/announcements":  "Announcements",
   "/admin-dashboard/reports":        "Reports",
+  "/admin-dashboard/event-layouts":  "Event Layouts",
   "/admin-dashboard/users":          "Users",
   "/admin-dashboard/settings":       "Settings",
   // Legacy pages still reachable by URL but not in sidebar
@@ -59,7 +60,6 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/locations":      "Campus Locations",
   "/admin-dashboard/accessibility":  "Accessibility",
   "/admin-dashboard/events":         "Event Maps",
-  "/admin-dashboard/event-layouts":  "Event Layouts",
 };
 
 export function AdminLayout() {
@@ -166,7 +166,8 @@ export function AdminLayout() {
   if (loading && !profile) return <AuthGateLoader />;
   if (!isAdmin) return <AuthGateLoader />;
 
-  const pageTitle = ROUTE_LABELS[location.pathname] ?? "Admin";
+  const pageTitle = ROUTE_LABELS[location.pathname]
+    ?? (location.pathname.startsWith("/admin-dashboard/event-layouts/") ? "Event Layout Preview" : "Admin");
 
   return (
     <UnsavedChangesProvider>

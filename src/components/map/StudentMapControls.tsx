@@ -20,6 +20,7 @@ export interface StudentMapControlsProps {
   navigationActive?: boolean;
   profileOpen?: boolean;
   eventMode?: boolean;
+  notificationBellVisible?: boolean;
   pinning?: boolean;
   youAreHere?: boolean;
   hasSelectedRoom?: boolean;
@@ -45,6 +46,7 @@ export function StudentMapControls({
   navigationActive = false,
   profileOpen = false,
   eventMode = false,
+  notificationBellVisible = false,
   pinning = false,
   youAreHere = false,
   hasSelectedRoom = false,
@@ -84,10 +86,17 @@ export function StudentMapControls({
           data-testid="student-map-search-panel"
           data-no-drag
           className={cn(
-            "absolute left-2 top-2 w-auto pointer-events-auto transition-[right] duration-200 ease-out motion-reduce:duration-0 md:left-3 md:right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
-            searchFocused ? "right-2" : "right-16",
+            "absolute left-2 top-2 w-auto pointer-events-auto transition-[right] duration-200 ease-out motion-reduce:duration-0 md:left-3 md:!right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]",
+            searchFocused ? "right-2" : notificationBellVisible ? "right-32" : "right-16",
           )}
-          style={{ top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))" }}
+          style={{
+            top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))",
+            right: searchFocused
+              ? "max(0.5rem, env(safe-area-inset-right, 0px))"
+              : notificationBellVisible
+                ? "calc(8rem + env(safe-area-inset-right, 0px))"
+                : "calc(4rem + env(safe-area-inset-right, 0px))",
+          }}
         >
           <CampusDestinationSearch
             query={search}
