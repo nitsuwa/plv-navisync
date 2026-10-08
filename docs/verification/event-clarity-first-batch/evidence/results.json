@@ -1,0 +1,175 @@
+{
+  "mode": "CONTROLLED browser UI responses; existing demo sign-ins; no event writes",
+  "checks": [
+    {
+      "label": "Opening admin bell preserves both unread submissions",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin desktop notifications: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin desktop notifications: whole popup stays inside viewport",
+      "status": "PASS"
+    },
+    {
+      "label": "Notification opens exact review and only its unread mark clears",
+      "status": "PASS"
+    },
+    {
+      "label": "Saved feedback pin explicitly remains an unsent review draft",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin mobile pin preview: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin unread receipt survives browser reload; pending work remains two",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin mobile notifications: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin mobile notifications: whole popup stays inside viewport",
+      "status": "PASS"
+    },
+    {
+      "label": "Mobile admin drawer shows pending-review count independently of unread",
+      "status": "PASS"
+    },
+    {
+      "label": "Changed pending layout revision becomes unread again",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin publication modal separates approval from hidden student visibility",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin mobile publication: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Org approved card explicitly says map is hidden from students",
+      "status": "PASS"
+    },
+    {
+      "label": "Org mobile publication: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px: shared venue badge explicitly counts events",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px: selected event scopes pins to its own venues",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px: venue inspection shows event context and both floor choices",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px venue panel: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px: Floor 2 choice enters the building map",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 1440px indoor view: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px: shared venue badge explicitly counts events",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px: selected event scopes pins to its own venues",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px: venue inspection shows event context and both floor choices",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px venue panel: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px: Floor 2 choice enters the building map",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 390px indoor view: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px: shared venue badge explicitly counts events",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px: selected event scopes pins to its own venues",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px: venue inspection shows event context and both floor choices",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px venue panel: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px: Floor 2 choice enters the building map",
+      "status": "PASS"
+    },
+    {
+      "label": "Student 360px indoor view: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors across all role/viewport checks",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/database mutation attempts were made",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "resourceErrors": [
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    }
+  ],
+  "blockedWrites": 0,
+  "status": "PASS",
+  "controlledAdditionalFloor": true
+}

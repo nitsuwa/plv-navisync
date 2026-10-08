@@ -117,7 +117,7 @@ export function StudentMapControls({
         </div>
       )}
 
-      {isFloorMode && eventMode && onBackToCampus && <button type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md md:left-auto md:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
+      {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
 
       {utilityControlsVisible && (
         <div

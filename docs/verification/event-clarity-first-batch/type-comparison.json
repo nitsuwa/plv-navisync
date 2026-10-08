@@ -1,0 +1,6 @@
+{
+  "comparison": "diagnostic count per file and code; ignores shifted lines and native union-description ordering",
+  "baselineCount": 1010,
+  "currentCount": 1010,
+  "introduced": []
+}

@@ -1,0 +1,46 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "Cached selected event exposes refresh error/retry while collapsed",
+      "status": "PASS"
+    },
+    {
+      "label": "Fit map keeps campus venue label above persistent refresh error panel",
+      "status": "PASS",
+      "detail": {
+        "label": {
+          "x": 95.87019348144531,
+          "y": 390.9593200683594,
+          "width": 133.49998474121094,
+          "height": 44.5
+        },
+        "panelBox": {
+          "x": 12,
+          "y": 555.34375,
+          "width": 366,
+          "height": 208.65625
+        }
+      }
+    },
+    {
+      "label": "Offline refresh retains event context",
+      "status": "PASS"
+    },
+    {
+      "label": "Reconnect retry restores event feed",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS"
+}

@@ -1,0 +1,145 @@
+
+ RUN  v4.1.10 C:/Users/Rj/Documents/GitHub/plv-navisync
+
+·······································stdout | src/hooks/__tests__/useAdminEventSubmissions.test.tsx
+[Supabase] Client initialized successfully.
+
+···········stdout | src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx
+[Supabase] Client initialized successfully.
+
+········stdout | src/pages/__tests__/AdminEventLayoutsPage.publication.test.tsx
+[Supabase] Client initialized successfully.
+
+stderr | src/pages/__tests__/AdminEventLayoutsPage.publication.test.tsx > AdminEventLayoutsPage publication controls > explicitly discards the local review draft so it does not return on reopening
+Warning: An update to ReviewModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ReviewModal (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:78:3)
+    at div
+    at AdminEventLayoutsPage (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:841:85)
+    at Router (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9335:13)
+    at MemoryRouter (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9251:3)
+
+stderr | src/pages/__tests__/AdminEventLayoutsPage.publication.test.tsx > AdminEventLayoutsPage publication controls > explicitly discards the local review draft so it does not return on reopening
+Warning: An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:92:64
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-slot@1.1.2_@types+react@19.2.18_react@18.3.1/node_modules/@radix-ui/react-slot/dist/index.mjs:25:11
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-slot@1.1.2_@types+react@19.2.18_react@18.3.1/node_modules/@radix-ui/react-slot/dist/index.mjs:6:11
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-primitive@2_c873785b25206752cf3042cd16e78e21/node_modules/@radix-ui/react-primitive/dist/index.mjs:26:13
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-portal@1.1._e365973ff8c95ae481f38602c7c53477/node_modules/@radix-ui/react-portal/dist/index.mjs:11:22
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at DialogPortal (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:84:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at Dialog (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:25:5)
+    at ReviewModal (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:78:3)
+    at div
+    at AdminEventLayoutsPage (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:841:85)
+    at Router (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9335:13)
+    at MemoryRouter (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9251:3)
+Warning: An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at DialogPortal (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:84:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at Dialog (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:25:5)
+    at ReviewModal (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:78:3)
+    at div
+    at AdminEventLayoutsPage (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:841:85)
+    at Router (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9335:13)
+    at MemoryRouter (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9251:3)
+Warning: An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:92:64
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-slot@1.1.2_@types+react@19.2.18_react@18.3.1/node_modules/@radix-ui/react-slot/dist/index.mjs:25:11
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-slot@1.1.2_@types+react@19.2.18_react@18.3.1/node_modules/@radix-ui/react-slot/dist/index.mjs:6:11
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-primitive@2_c873785b25206752cf3042cd16e78e21/node_modules/@radix-ui/react-primitive/dist/index.mjs:26:13
+    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-portal@1.1._e365973ff8c95ae481f38602c7c53477/node_modules/@radix-ui/react-portal/dist/index.mjs:11:22
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at DialogPortal (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:84:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at Dialog (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:25:5)
+    at ReviewModal (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:78:3)
+    at div
+    at AdminEventLayoutsPage (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:841:85)
+    at Router (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9335:13)
+    at MemoryRouter (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9251:3)
+Warning: An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at Presence (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-presence@1._06b55ce18b9298ec07cb929bc45b9bed/node_modules/@radix-ui/react-presence/dist/index.mjs:19:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at DialogPortal (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:84:11)
+    at Provider (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-context@1.1_9d309ffbcf115a304b69a9198ed268ce/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at Dialog (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@radix-ui+react-dialog@1.1._23aa948b1068a8cda899b6200b037568/node_modules/@radix-ui/react-dialog/dist/index.mjs:25:5)
+    at ReviewModal (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:78:3)
+    at div
+    at AdminEventLayoutsPage (C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/AdminEventLayoutsPage.tsx:841:85)
+    at Router (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9335:13)
+    at MemoryRouter (C:\Users\Rj\Documents\GitHub\plv-navisync\node_modules\.pnpm\react-router@7.13.0_react-d_037aa0b0076d565f7b46474b9e4facd9\node_modules\react-router\dist\development\chunk-WICQJKU6.js:9251:3)
+
+·····································stdout | src/pages/__tests__/StudentMyEventsAccess.test.tsx
+[Supabase] Client initialized successfully.
+
+stderr | src/components/layout/__tests__/AdminLayout.activityNotifications.test.tsx > Admin activity notifications > protects unsaved map work before following a submission notification
+Warning: An update to AdminLayout inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at AdminLayout (C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/layout/AdminLayout.tsx:80:71)
+
+·································
+
+ Test Files  12 passed (12)
+      Tests  128 passed (128)
+   Start at  07:49:38
+   Duration  49.33s (transform 2.88s, setup 2.57s, import 13.37s, tests 9.59s, environment 19.45s)

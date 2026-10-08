@@ -1,8 +1,8 @@
 /** Student Org event proposals and map submission dashboard. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Edit2, Loader2, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Save, Trash2, X, XCircle } from "lucide-react";
 import { Link, Navigate, useNavigate } from "react-router";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../lib/utils";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useStudentAuth } from "../hooks/useStudentAuth";
@@ -17,6 +17,7 @@ import { EventRevisionHistory } from "../components/events/EventRevisionHistory"
 import { eventFeedbackText } from "../lib/eventFeedbackPins";
 import type { CampusEventOverlay, EventLocationRef } from "../components/map-builder/types";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
+import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
 
 const STATUS_CONFIG: Record<EventOverlayStatus, { label: string; color: string; bg: string; icon: React.ElementType }> = {
   draft: { label: "Draft", color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800/30", icon: Save },
@@ -44,16 +45,32 @@ export function StudentMyEventsPage() {
     refetch: refetchCampus,
   } = usePublishedCampus();
   const toast = useToast();
-  const { events: overlays, loading, error: loadError, refresh: loadOverlays, unreadIds, markRead } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
+  const { events: overlays, loading, error: loadError, receiptError, refresh: loadOverlays, unreadIds, markRead } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
+  const reducedMotion = useReducedMotion();
+  const [readingIds,setReadingIds] = useState<ReadonlySet<string>>(new Set());
+  const navigationRequest = useRef(0);
+  const mounted = useRef(true);
+  const currentActor = useRef(profile?.id);
+  currentActor.current = profile?.id;
+  useEffect(()=>{
+    mounted.current=true; ++navigationRequest.current;
+    return ()=>{mounted.current=false; ++navigationRequest.current;};
+  },[profile?.id]);
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<CampusEventOverlay | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampusEventOverlay | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<CampusEventOverlay | null>(null);
   const [withdrawError, setWithdrawError] = useState("");
   const [busy, setBusy] = useState(false);
-  const acknowledge = (event: CampusEventOverlay) => {
-    const result = markRead(event);
+  const acknowledge = async (event: CampusEventOverlay) => {
+    const actor=currentActor.current;
+    setReadingIds(current=>new Set(current).add(event.id));
+    const result = await markRead(event);
+    if(!mounted.current || currentActor.current!==actor) return;
+    setReadingIds(current=>{const next=new Set(current);next.delete(event.id);return next;});
     if (result === "memory") toast.info("Read for this visit", "Browser storage is unavailable, so this read mark may return after reload.");
+    if (result === 'local') toast.info('Read in this browser', 'Cross-device sync is not available yet.');
+    if (result === 'failed') toast.error('Read status could not sync', 'This update stays unread. Please retry.');
     if (result === "changed") toast.info("Newer update available", "Read the latest GSO feedback before marking it as read.");
   };
   const publishedCampuses = useMemo(() => (campuses ?? []).filter((campus) => campus.lifecycleStatus === "published" || campus.publishStatus === "published"), [campuses]);
@@ -162,11 +179,13 @@ export function StudentMyEventsPage() {
           </div>
         )}
 
+        {receiptError && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground"><p className="min-w-0 flex-1">{receiptError}</p><button type="button" onClick={()=>void loadOverlays()} className="min-h-11 rounded-lg px-2 font-bold text-primary hover:bg-muted">Retry sync</button></div>}
+        {loadError && overlays.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs"><p>Showing the last loaded events. {loadError}</p><button type="button" onClick={()=>void loadOverlays()} className="mt-1 min-h-11 font-bold text-primary">Retry events</button></div>}
         {loading ? (
           <div className="space-y-3" aria-label="Loading event proposals">
             {[1, 2, 3].map((item) => <div key={item} className="h-36 rounded-2xl bg-muted/30 animate-pulse" />)}
           </div>
-        ) : loadError ? (
+        ) : loadError && overlays.length === 0 ? (
           <div role="alert" className="rounded-2xl border border-border bg-card p-5"><h2 className="font-bold">Could not load your events</h2><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><button type="button" onClick={() => void loadOverlays()} className="mt-4 min-h-11 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Retry events</button></div>
         ) : overlays.length === 0 ? (
           <EmptyState
@@ -193,7 +212,7 @@ export function StudentMyEventsPage() {
               const counts = countEventOverlayItems(locations);
               const unread = unreadIds.has(overlay.id);
               return (
-                <motion.article key={overlay.id} data-testid={`org-event-card-${overlay.id}`} data-unread={unread ? "true" : "false"} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={cn("bg-card rounded-2xl border shadow-sm overflow-hidden", unread ? "border-red-300 dark:border-red-800" : "border-border")}>
+                <motion.article key={overlay.id} data-testid={`org-event-card-${overlay.id}`} data-unread={unread ? "true" : "false"} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{duration:reducedMotion ? 0 : 0.16}} className={cn("bg-card rounded-2xl border shadow-sm overflow-hidden", unread ? "border-red-300 dark:border-red-800" : "border-border")}>
                   <div className="p-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-extrabold text-foreground text-sm">{overlay.title}</h2>
@@ -202,12 +221,13 @@ export function StudentMyEventsPage() {
                       </span>
                     </div>
                     {overlay.description && <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{overlay.description}</p>}
-                    {unread && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2 dark:bg-red-950/30"><span className="inline-flex items-center gap-2 text-xs font-bold text-red-700 dark:text-red-300"><span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-red-600" />New GSO update</span><button type="button" aria-label={`Mark GSO update for ${overlay.title} as read`} onClick={() => acknowledge(overlay)} className="min-h-11 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:text-red-300 dark:hover:bg-red-950/50">Mark as read</button></div>}
+                    {unread && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2 dark:bg-red-950/30"><span className="inline-flex items-center gap-2 text-xs font-bold text-red-700 dark:text-red-300"><span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-red-600" />New GSO update</span><button type="button" disabled={readingIds.has(overlay.id)} aria-label={`Mark GSO update for ${overlay.title} as read`} onClick={() => void acknowledge(overlay)} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 dark:text-red-300 dark:hover:bg-red-950/50">{readingIds.has(overlay.id) && <Loader2 aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin"/>}{readingIds.has(overlay.id) ? 'Saving read status…' : 'Mark as read'}</button></div>}
                     <div className="mt-3 border-l-2 border-primary/30 pl-3 py-1">
                       <p className="text-xs font-bold text-foreground">Next step</p>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{NEXT_STEP[status]}</p>
                     </div>
                     <p className="mt-2 text-xs font-semibold text-muted-foreground">{campuses?.find((campus) => campus.id === overlay.campusId)?.name ?? "Campus"}{status === "approved" && overlay.dateStart && ` · ${new Date(overlay.dateStart).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short", hour12: true })}`}</p>
+                    {status === 'approved' && <EventStudentVisibility overlay={overlay} />}
                     <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
                       <MapPin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />
                       <span><strong className="text-foreground">{locations.length} location{locations.length === 1 ? "" : "s"}</strong> · {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}</span>
@@ -229,7 +249,14 @@ export function StudentMyEventsPage() {
                     {status === "pending" && <button type="button" disabled={busy || !overlay.updatedAt} onClick={() => { setWithdrawError(""); setWithdrawTarget(overlay); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><ArrowLeft aria-hidden className="h-3.5 w-3.5" />Withdraw submission</button>}
                     <button type="button" disabled={busy || isCached || Boolean(campusError)} onClick={() => void handleDuplicate(overlay)} className="min-h-10 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">Duplicate layout</button>
                     {status !== "pending" && status !== "approved" && <button type="button" onClick={() => setEditTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"><Pencil className="h-3.5 w-3.5" /> Edit details</button>}
-                    <Link to={`/student/events/${overlay.id}/edit`} onClick={() => { if (unread) acknowledge(overlay); }} className="order-first flex min-h-11 items-center gap-2 px-4 rounded-xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary"><Edit2 className="h-3.5 w-3.5" /> {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : status === "approved" ? "View maps" : "Edit maps"}</Link>
+                    <Link to={`/student/events/${overlay.id}/edit`} aria-busy={readingIds.has(overlay.id)} onClick={event => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                      if (readingIds.has(overlay.id)) {event.preventDefault();return;}
+                      if (unread) {
+                        event.preventDefault(); const request=++navigationRequest.current; const actor=currentActor.current;
+                        void acknowledge(overlay).then(()=>{if(mounted.current && currentActor.current===actor && request===navigationRequest.current) navigate(`/student/events/${overlay.id}/edit`);});
+                      }
+                    }} className="order-first flex min-h-11 items-center gap-2 px-4 rounded-xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary">{readingIds.has(overlay.id) ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin"/> : <Edit2 className="h-3.5 w-3.5"/>} {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : status === "approved" ? "View maps" : "Edit maps"}</Link>
                     {status !== "pending" && status !== "approved" && <button type="button" onClick={() => setDeleteTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
                   </div>
                 </motion.article>

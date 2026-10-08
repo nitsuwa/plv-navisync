@@ -1,16 +1,28 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 8, 2026 — approved final audit
+
+- **Status:** local implementation and available browser audit complete.
+- Approved design: `docs/superpowers/specs/2026-10-08-event-map-context-design.md`; plan: `docs/superpowers/plans/2026-10-08-event-final-audit.md`.
+- Implemented consistent actual-map/event/venue context, explicit details/fit controls, room matching, responsive preview pin form/map space, focus return and reduced motion.
+- Fixed cached editor data across actor changes, late asynchronous completions, and misleading expired/network read failures. No database change.
+- Browser matrix: 573 PASS checks; final complete-floor geometry retest:129 PASS; final mobile/desktop venue/reduced-motion retest PASS. Runs overlap and are not added together. Eight viewport sizes; real200% Edge page zoom for three roles; zero page errors and event mutation attempts.
+- Tests: final map/proposal/integration3files67 PASS, broader8files98 PASS, affected read/editor/preview/panel4files65 PASS, preview6 and readonly/feedback8 PASS (overlap). Final build3020modules PASS. Type diagnostic counts HEAD/current1010 with no added file/code counts; not a clean typecheck. Diff check PASS.
+- Independent final source review: no remaining material issue. Report and screenshots: `docs/verification/event-final-audit/README.md`.
+- Physical Android/iOS keyboard/gestures, screen-reader speech, Safari/Firefox and live second Org access were unavailable. Broader manual checklist remains PARTIAL with dated evidence rather than blanket checkmarks.
+- Existing approved QA fixture read only. No new live event, migration, commit, push or deployment; earlier approved dirty work preserved.
+
 ## Goal
 
 Design and later implement a polished student-organization event workflow in which admins grant the student-org role, student organizations request and build event maps on top of admin-published campus/building maps, and admins review and approve submissions without allowing students to delete admin-owned map content.
 
 ## Next Step
 
-The October 3 completion plan is ready: `docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md`. When the user starts execution with their selected model, begin Task 0 and read `docs/2026-10-03-create-event-acceptance-matrix.md`. Preserve the current working tree; this planning turn did not execute implementation or tests.
+The user applied the October 8 SQL successfully. Hosted API/Org sync (10+10 PASS) and real Admin desktop/mobile badge sync (19 PASS) are verified. Temporary pending QA layouts were withdrawn and deleted. An archived event list/deep-link filter bug was fixed with RED/GREEN tests (65 affected PASS, build PASS). See `docs/verification/event-sync-next-batch/README.md` for evidence and limits. Preserve all first-batch and earlier local changes.
 
 ## Current Phase
 
-Create Event completion and verification plan prepared (October 3, 2026). Earlier phases below are historical; the linked completion plan is the current execution checklist.
+October 8 next batch — backend activity endpoint repair, cross-device read receipts, loading/motion clarity, and remaining revision/publication-boundary tests. User explicitly authorized execution with “Do it now.” Earlier phases below are historical.
 
 ## Phases
 
@@ -104,6 +116,15 @@ Create Event completion and verification plan prepared (October 3, 2026). Earlie
 - **Status:** complete
 
 ## Key Questions
+
+### October 8 execution phases
+
+- [x] Phase 12: Prepared additive activity repair + private receipt SQL; 26 isolated PostgreSQL role/state/integrity checks pass.
+- [x] Phase 13: Integrated typed server read/acknowledgement with browser-only fallback, account teardown guards and visible retry for Admin/Org.
+- [x] Phase 14: Action-specific loading, reduced motion, revision/resubmit regressions and desktop/mobile publication-clock checks verified locally.
+- [x] Phase 15: User applied SQL; hosted API/auth gates and real Org/Admin read sync across independent desktop/mobile contexts verified. Temporary Admin QA submission cleaned; no existing event content changed. Physical devices were not tested.
+
+Live deployment was completed by the user's SQL Editor execution. Verification used ordinary demo app access; no account role or existing event content was changed.
 
 1. Should student organizations be allowed to submit multiple event-map revisions, or only one active submission per event?
 2. Which admin-published map elements must be locked: all published campus/building content, or only the geometry and navigation layers while labels/appearance remain editable?

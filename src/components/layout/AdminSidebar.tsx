@@ -19,6 +19,8 @@ import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { useToast } from "../../hooks/useToast";
 import { motion, useReducedMotion } from "motion/react";
 import { sidebarSpring } from "../../config/animation";
+import { useAdminAuth } from "../../hooks/useAdminAuth";
+import { useAdminEventSubmissions } from "../../hooks/useAdminEventSubmissions";
 
 // Core admin navigation — focused on essential workflows.
 // Buildings, Floor Plans, Routes, Locations, and Accessibility are managed
@@ -79,6 +81,7 @@ function NavItem({
         onNavigate();
       }}
       title={collapsed ? label : undefined}
+      aria-label={badge ? `${label}, ${badge} pending ${label === 'Event Layouts' ? (badge === 1 ? 'review' : 'reviews') : (badge === 1 ? 'report' : 'reports')}` : collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex items-center rounded-xl text-sm font-semibold transition-all duration-150 relative active:scale-[0.97]",
@@ -135,6 +138,8 @@ export function AdminSidebar({
   const { signOut } = useStudentAuth();
   const toast = useToast();
   const shouldReduce = useReducedMotion();
+  const { profile, isAdmin, loading } = useAdminAuth();
+  const { pendingCount } = useAdminEventSubmissions(profile?.id, isAdmin && !loading);
 
   const [signingOut, setSigningOut] = useState(false);
   const [pendingReports, setPendingReports] = useState(0);
@@ -160,7 +165,7 @@ export function AdminSidebar({
   const navItems = NAV_ITEMS.map((item) =>
     item.label === "Reports" && pendingReports > 0
       ? { ...item, badge: pendingReports }
-      : item
+      : item.label === "Event Layouts" && pendingCount > 0 ? { ...item, badge: pendingCount } : item
   );
 
   const isActive = (path: string) => {

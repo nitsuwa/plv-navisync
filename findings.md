@@ -267,3 +267,25 @@ Announcements and Today's Schedule/classes are intentionally excluded from this 
 - Risks to reproduce: invalid pin entries suppressing valid neighboring pins, callback-identity changes resetting preview Pan mode, and acknowledgement/autosave/submission overlaps. The public-feed verifier does not yet explicitly list feedbackResolutions as a forbidden key.
 - Main plan: docs/superpowers/plans/2026-10-03-create-event-completion-and-uiux.md. Detailed test matrix: docs/2026-10-03-create-event-acceptance-matrix.md.
 - Recommended executor: GPT-6.1 Sol Medium for the integrated plan; Luna Max for bounded work and Sol Low for isolated presentation work. This is a workload recommendation, not a measured repository benchmark.
+# October 8 next-batch findings
+
+- Final live Admin validation is complete:19 PASS checks with a temporary pending-only proposal that was withdrawn/deleted. Hosted read status synchronizes desktop/mobile contexts while pending-review count remains. No browser-local receipt exists in the second context.
+- A backend/frontend eligibility mismatch caused an archived pending `TEST` row to appear in Admin counts even though the receipt RPC excludes archived rows. Event list and single-event queries now match that archive rule. Two regressions RED→GREEN;65 affected tests and build PASS; existing archived data preserved.
+
+- The user's SQL installation is now verified against the app's configured hosted project (10 API checks PASS). Real Org receipt sync also passes10 browser checks across independent desktop/mobile contexts with no local receipt on the second context. Event metadata/revision is unchanged. Admin has0 pending submissions, leaving its positive live acknowledgement case conditional; ordinary and anonymous access gates are verified.
+
+- Completed local implementation/verification: private typed server receipts for Admin/Org, exact displayed payload acknowledgement, guarded activity cutoff getter, truthful browser-only fallback, visible refresh retry, action-specific loading and reduced motion. User-run hosted SQL remains pending.
+- Independent review caught navigation teardown and delayed navigation overriding Home; regressions were observed failing and corrected. Actor-scoped session receipts now survive a route round trip while event snapshots clear on unsubscribe.
+- Real rendered browser testing exposed raw PostgREST publication errors being replaced by generic UI text. Normalize through the existing event command error handler; a regression verifies an actual Error reaches the dialog.
+- Evidence: 26 isolated PostgreSQL checks; 128 broader regression tests; final affected63 and30 overlapping tests;25 controlled browser checks; fresh production build and clean diff check. Earlier TypeScript comparison retained1,010 diagnostics with0 introduced. See event-sync-next-batch README for exact limits.
+
+- User approved backend 404 cleanup, cross-device read synchronization, loading/animations, and remaining revision/clock tests.
+- First batch remains uncommitted in the shared checkout; preserve it and previous Sonner/proposal changes.
+- The activity endpoint returns 404 for `admin_activity_preferences`; an existing additive migration defines that table and its own-admin policy. The frontend already tolerates a missing table, but repeatedly calls the absent endpoint.
+- Admin and Org unread receipts currently live in browser storage. Both streams need account-private server receipts and current-content validation, not a global “mark everything read” timestamp.
+- No Supabase/psql/docker CLI was found in PATH; `.env.local` contains the public endpoint/key and demo credentials only. No database/admin environment credentials were found. Browser inventory initially contained no Supabase session.
+- Asked the user how to provide live SQL execution/secure database access while code and validation proceed. No schema or event data has yet changed for this batch.
+
+## October 8, 2026 — final event context/recovery findings
+
+Resolved defects and evidence are in docs/verification/event-final-audit/README.md. Event/map/venue identity now stays explicit across campus/floor and collapsed states. Owner+event keyed editor sessions reject foreign data and stale completions. Event reads distinguish expired/transport failures from missing records. Measured compact header/error and complete floor bounds drive fit; detail disclosure preserves manual zoom. Admin pin drafts retain map space and reachable form controls on320px instead of clipping/overlap. UI changes use existing palette and all previous dirty work is preserved. Verification is browser/control-fixture scoped, with native200% Edge zoom; physical devices and second liveOrg account are not certified.

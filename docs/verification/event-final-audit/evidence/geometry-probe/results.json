@@ -1,0 +1,919 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "student-320x568: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 340.34375,
+        "width": 296,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-320x568: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 320.84375,
+        "width": 296,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-320x568: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 19.436843872070312,
+        "y": 167.12026977539062,
+        "right": 252.5600128173828,
+        "bottom": 259.7234802246094,
+        "width": 233.1231689453125,
+        "height": 92.60321044921875,
+        "panelTop": 320.84375,
+        "panelRight": 308,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(85.7997px, -99.7525px, 0px) scale(0.738634); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-320x568: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 19.436843872070312,
+        "y": 167.12026977539062,
+        "right": 252.5600128173828,
+        "bottom": 259.7234802246094,
+        "width": 233.1231689453125,
+        "height": 92.60321044921875,
+        "panelTop": 320.84375,
+        "panelRight": 308,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(85.7997px, -99.7525px, 0px) scale(0.738634); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-320x568: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 120,
+        "width": 296,
+        "height": 368
+      }
+    },
+    {
+      "label": "student-320x568: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-320x568: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 412.34375,
+        "width": 336,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-360x640: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 392.84375,
+        "width": 336,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-360x640: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 20.642126083374023,
+        "y": 195.62255859375,
+        "right": 291.3599910736084,
+        "bottom": 303.22119140625,
+        "width": 270.7178649902344,
+        "height": 107.5986328125,
+        "panelTop": 392.84375,
+        "panelRight": 348,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(79.7601px, -86.4421px, 0px) scale(0.762882); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-360x640: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 20.642126083374023,
+        "y": 195.62255859375,
+        "right": 291.3599910736084,
+        "bottom": 303.22119140625,
+        "width": 270.7178649902344,
+        "height": 107.5986328125,
+        "panelTop": 392.84375,
+        "panelRight": 348,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(79.7601px, -86.4421px, 0px) scale(0.762882); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-360x640: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 120,
+        "width": 336,
+        "height": 440
+      }
+    },
+    {
+      "label": "student-360x640: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-360x640: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 616.34375,
+        "width": 366,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-390x844: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 616.34375,
+        "width": 366,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-390x844: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 21.546253204345703,
+        "y": 301.7469482421875,
+        "right": 320.4599800109863,
+        "bottom": 420.5968017578125,
+        "width": 298.9137268066406,
+        "height": 118.849853515625,
+        "panelTop": 616.34375,
+        "panelRight": 378,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(75.9973px, -40.26px, 0px) scale(0.777835); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-390x844: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 21.546253204345703,
+        "y": 301.7469482421875,
+        "right": 320.4599800109863,
+        "bottom": 420.5968017578125,
+        "width": 298.9137268066406,
+        "height": 118.849853515625,
+        "panelTop": 616.34375,
+        "panelRight": 378,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(75.9973px, -40.26px, 0px) scale(0.777835); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-390x844: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 156.328125,
+        "width": 366,
+        "height": 607.671875
+      }
+    },
+    {
+      "label": "student-390x844: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-390x844: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 147.65625
+      }
+    },
+    {
+      "label": "student-740x390: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 167.15625
+      }
+    },
+    {
+      "label": "student-740x390: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 337.72576904296875,
+        "y": 110.51997375488281,
+        "right": 702.2612915039062,
+        "bottom": 255.4800262451172,
+        "width": 364.5355224609375,
+        "height": 144.96005249023438,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(688.135px, 193.959px, 0px) scale(0.5); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-740x390: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 337.72576904296875,
+        "y": 110.51997375488281,
+        "right": 702.2612915039062,
+        "bottom": 255.4800262451172,
+        "width": 364.5355224609375,
+        "height": 144.96005249023438,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(688.135px, 193.959px, 0px) scale(0.5); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-740x390: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 302
+      }
+    },
+    {
+      "label": "student-740x390: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-740x390: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 858.5,
+        "width": 744,
+        "height": 130.5
+      }
+    },
+    {
+      "label": "student-768x1024: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 858.5,
+        "width": 744,
+        "height": 130.5
+      }
+    },
+    {
+      "label": "student-768x1024: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 32.87999725341797,
+        "y": 380.5335998535156,
+        "right": 687.119987487793,
+        "bottom": 640.9664306640625,
+        "width": 654.239990234375,
+        "height": 260.4328308105469,
+        "panelTop": 858.5,
+        "panelRight": 756,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(54.6885px, 6.51648px, 0px) scale(0.865541); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-768x1024: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 32.87999725341797,
+        "y": 380.5335998535156,
+        "right": 687.119987487793,
+        "bottom": 640.9664306640625,
+        "width": 654.239990234375,
+        "height": 260.4328308105469,
+        "panelTop": 858.5,
+        "panelRight": 756,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(54.6885px, 6.51648px, 0px) scale(0.865541); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-768x1024: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 340.5,
+        "width": 744,
+        "height": 648.5
+      }
+    },
+    {
+      "label": "student-768x1024: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-768x1024: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1024x768: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1024x768: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 410.47998046875,
+        "y": 285.7509765625,
+        "right": 989.5199584960938,
+        "bottom": 516.2490234375,
+        "width": 579.0399780273438,
+        "height": 230.498046875,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(602.412px, 128.236px, 0px) scale(0.57454); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1024x768: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 410.47998046875,
+        "y": 285.7509765625,
+        "right": 989.5199584960938,
+        "bottom": 516.2490234375,
+        "width": 579.0399780273438,
+        "height": 230.498046875,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(602.412px, 128.236px, 0px) scale(0.57454); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1024x768: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 660
+      }
+    },
+    {
+      "label": "student-1024x768: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1024x768: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1440x900: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1440x900: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 422.9599914550781,
+        "y": 273.92047119140625,
+        "right": 1393.0400695800781,
+        "bottom": 660.0795288085938,
+        "width": 970.080078125,
+        "height": 386.1590576171875,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(438.244px, 97.1299px, 0px) scale(0.684474); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1440x900: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 422.9599914550781,
+        "y": 273.92047119140625,
+        "right": 1393.0400695800781,
+        "bottom": 660.0795288085938,
+        "width": 970.080078125,
+        "height": 386.1590576171875,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(438.244px, 97.1299px, 0px) scale(0.684474); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1440x900: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 792
+      }
+    },
+    {
+      "label": "student-1440x900: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1440x900: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 166.90625
+      }
+    },
+    {
+      "label": "student-1920x1080: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 186.40625
+      }
+    },
+    {
+      "label": "student-1920x1080: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 437.3600158691406,
+        "y": 274.1160888671875,
+        "right": 1858.6400451660156,
+        "bottom": 839.8839721679688,
+        "width": 1421.280029296875,
+        "height": 565.7678833007812,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(337.218px, 77.9876px, 0px) scale(0.752126); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1920x1080: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 437.3600158691406,
+        "y": 274.1160888671875,
+        "right": 1858.6400451660156,
+        "bottom": 839.8839721679688,
+        "width": 1421.280029296875,
+        "height": 565.7678833007812,
+        "panelTop": 73,
+        "panelRight": 376,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(337.218px, 77.9876px, 0px) scale(0.752126); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-1920x1080: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 73,
+        "width": 360,
+        "height": 967.90625
+      }
+    },
+    {
+      "label": "student-1920x1080: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-1920x1080: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "student: native browser 200% zoom verified by CSS viewport/device-pixel ratio",
+      "status": "PASS",
+      "detail": {
+        "width": 707,
+        "height": 403,
+        "dpr": 2,
+        "outerWidth": 1440
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 147.6640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 167.1640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 329.540771484375,
+        "y": 120.50218200683594,
+        "right": 677.459228515625,
+        "bottom": 258.997802734375,
+        "width": 347.91845703125,
+        "height": 138.49562072753906,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(702.489px, 195.876px, 0px) scale(0.5); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: complete authored floor and access features fit horizontally",
+      "status": "PASS",
+      "detail": {
+        "x": 329.540771484375,
+        "y": 120.50218200683594,
+        "right": 677.459228515625,
+        "bottom": 258.997802734375,
+        "width": 347.91845703125,
+        "height": 138.49562072753906,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(702.489px, 195.876px, 0px) scale(0.5); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: opening details preserves manual keyboard zoom",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 315.5
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS",
+  "zoomSelectors": [],
+  "zoomControls": [],
+  "zoomMeasurements": [
+    {
+      "role": "student",
+      "width": 707,
+      "height": 403,
+      "dpr": 2,
+      "outerWidth": 1440
+    }
+  ]
+}

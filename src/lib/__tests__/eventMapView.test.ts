@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
 import { eventPreviewFixture } from "../../test/eventFullPackFixtures";
-import { buildEventVenues, resolveEventLocation, selectedEventLocation, visibleEventCards } from "../eventMapView";
+import { buildEventVenues, resolveEventLocation, selectedEventLocation, visibleEventCards, eventVenueCandidates, eventLocationOnMap } from "../eventMapView";
 
 const campus = {
   id: "campus-a", canvasW: 900, canvasH: 600,
@@ -12,6 +12,23 @@ const campus = {
 } as unknown as Campus;
 
 describe("event map view model", () => {
+  it('retains a selected room layout on its floor without choosing another requested room', () => {
+    const event=eventPreviewFixture({locations:[
+      {id:'room-a',locationRef:{type:'room',buildingId:'science',floorId:'science-f2',roomId:'a',label:'Room A'},eventFurniture:[],eventLabels:[]},
+      {id:'room-b',locationRef:{type:'room',buildingId:'science',floorId:'science-f2',roomId:'b',label:'Room B'},eventFurniture:[],eventLabels:[]},
+    ]});
+    expect(eventLocationOnMap(event,'science-f2','room-b')?.id).toBe('room-b');
+    expect(eventLocationOnMap(event,'science-f3','room-b')).toBeNull();
+    expect(eventLocationOnMap(event,null,'room-b')).toBeNull();
+  });
+  it('scopes pins to the selected visible event even when its phase changes outside the list filter', () => {
+    const now = Date.parse('2026-10-08T02:00:00Z');
+    const selected = eventPreviewFixture();
+    const other = eventPreviewFixture({ id: 'other', title: 'Another event', dateStart: '2026-10-08T04:00:00Z' });
+    expect(eventVenueCandidates([selected, other], now, 'upcoming', selected.id).map(event => event.id)).toEqual(['event-a']);
+    expect(eventVenueCandidates([selected, other], now, 'upcoming', null).map(event => event.id)).toEqual(['other']);
+    expect(eventVenueCandidates([selected], Date.parse('2026-10-09T00:00:00Z'), 'all', selected.id)).toEqual([]);
+  });
   it("centers the grounds venue at the visible central monument rather than an event marker or edge anchor", () => {
     const grounds = { ...campus, decorAssets: [{ id: "monument", type: "monument", x: 430, y: 410, visible: true }] } as Campus;
     const event = eventPreviewFixture({ markers: [{ x: 880, y: 20, color: "#fff", label: "Stage" }] });

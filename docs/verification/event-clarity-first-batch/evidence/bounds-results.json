@@ -1,0 +1,35 @@
+{
+  "mode": "CONTROLLED browser UI responses; existing demo sign-ins; no event writes",
+  "checks": [
+    {
+      "label": "Opening admin bell preserves both unread submissions",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin desktop notifications: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin desktop notifications: whole popup stays inside viewport",
+      "status": "PASS"
+    },
+    {
+      "label": "Admin mobile notifications: no document horizontal overflow",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "resourceErrors": [
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    },
+    {
+      "status": 404,
+      "path": "/rest/v1/admin_activity_preferences"
+    }
+  ],
+  "blockedWrites": 0,
+  "status": "FAIL",
+  "failure": "Admin mobile notifications: whole popup stays inside viewport"
+}

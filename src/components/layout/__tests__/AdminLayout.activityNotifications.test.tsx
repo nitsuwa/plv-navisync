@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   resolveContexts: vi.fn(),
   getPreferences: vi.fn(),
   navigate: vi.fn(),
+  submissions: [] as Array<Record<string, unknown>>,
+  markSubmissionRead: vi.fn(),
+  requestGuarded: vi.fn(),
 }));
 
 vi.mock("react-router", async (importOriginal) => {
@@ -30,6 +33,7 @@ vi.mock("../../../hooks/useAdminAuth", () => ({ useAdminAuth: () => ({
 }) }));
 vi.mock("../../map-builder/UnsavedChangesContext", () => ({
   UnsavedChangesProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useUnsavedChangesContext: () => ({ requestGuarded: mocks.requestGuarded }),
 }));
 vi.mock("../../../services/activityLogService", () => ({
   activityLogErrorMessage: (error: unknown) => {
@@ -50,12 +54,16 @@ vi.mock("../../../services/adminNotificationPreferencesService", () => ({
 vi.mock("../../../lib/notificationService", () => ({
   notificationService: { markLogsSeen: vi.fn(), countUnseenLogs: () => 0 },
 }));
+vi.mock("../../../hooks/useAdminEventSubmissions", () => ({ useAdminEventSubmissions: () => ({ events: mocks.submissions, unreadIds: new Set(mocks.submissions.map(event => event.id)), pendingCount: mocks.submissions.length, unreadCount: mocks.submissions.length, eventsEnabled: true, loading: false, error: '', receiptError: '', refresh: vi.fn(), markRead: mocks.markSubmissionRead }) }));
 
 import { AdminLayout } from "../AdminLayout";
 
 describe("Admin activity notifications", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.submissions = [];
+    mocks.markSubmissionRead.mockResolvedValue('saved');
+    mocks.requestGuarded.mockImplementation((action: () => void) => action());
     Object.defineProperty(window, "matchMedia", {
       writable: true,
       value: vi.fn().mockImplementation((media: string) => ({
@@ -95,5 +103,30 @@ describe("Admin activity notifications", () => {
 
     expect(await screen.findByText("Campus map published")).toBeInTheDocument();
     await waitFor(() => expect(mocks.listActivity).toHaveBeenCalledTimes(3));
+  });
+
+  it('keeps submission notices unread when opening the bell and links each notice to its exact review', async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    mocks.submissions = [{ id: 'qa-one', title: 'Student Fair', organizer: 'Science Council', status: 'pending', submittedAt: '2026-10-07T08:00:00Z', locations: [{ id: 'grounds', locationRef: { type: 'campus', label: 'Campus Grounds' }, eventFurniture: [], eventLabels: [] }] }];
+    render(<AdminLayout />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }));
+    const action = await screen.findByRole('button', { name: /Review Student Fair/i });
+    expect(screen.getByText(/Science Council/)).toBeInTheDocument();
+    expect(mocks.markSubmissionRead).not.toHaveBeenCalled();
+    fireEvent.click(action);
+    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/event-layouts?review=qa-one');
+  });
+
+  it('protects unsaved map work before following a submission notification', async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    mocks.submissions = [{ id: 'qa-one', title: 'Student Fair', organizer: 'Science Council', status: 'pending', locations: [] }];
+    let continueNavigation: (() => void) | undefined;
+    mocks.requestGuarded.mockImplementation((action: () => void) => { continueNavigation = action; });
+    render(<AdminLayout />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Review Student Fair/i }));
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    continueNavigation?.();
+    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/event-layouts?review=qa-one');
   });
 });

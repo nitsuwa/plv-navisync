@@ -45,7 +45,6 @@ export function useEventMapPreviews(input: {
       setError(null);
     } catch (cause) {
       if (requestGeneration !== generation.current) return;
-      setEvents([]);
       setError(cause instanceof Error ? cause.message : "Event previews could not be loaded.");
     } finally {
       if (requestGeneration === generation.current) setLoading(false);

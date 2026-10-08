@@ -4,11 +4,33 @@ import { useStudentOrgEventUpdates } from "../useStudentOrgEventUpdates";
 import { eventOverlayService } from "../../services/eventOverlayService";
 import type { CampusEventOverlay } from "../../components/map-builder/types";
 import { eventReviewFingerprint, eventReviewSeenPrefix } from "../../lib/studentEventUpdates";
+import { eventNotificationService, EventNotificationSyncUnavailable } from '../../services/eventNotificationService';
+vi.mock('../../services/eventNotificationService',async(importOriginal)=>({...await importOriginal<typeof import('../../services/eventNotificationService')>(),eventNotificationService:{getStates:vi.fn(),acknowledge:vi.fn()}}));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: { listEventOverlays: vi.fn() } }));
 const event = { id: "one", createdByUserId: "org-hook", title: "Fair", status: "approved", submittedAt: "2026-10-06T00:00:00Z" } as CampusEventOverlay;
-beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([event]); });
+beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([event]); vi.mocked(eventNotificationService.getStates).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); vi.mocked(eventNotificationService.acknowledge).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); });
 afterEach(() => vi.restoreAllMocks());
 describe("shared Student Org review updates", () => {
+  it('retains actor-scoped session-only read marks across a map route round trip',async()=>{
+    const item={...event,createdByUserId:'org-session-route'};
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([item]);
+    const first=renderHook(()=>useStudentOrgEventUpdates('org-session-route',true));
+    await waitFor(()=>expect(first.result.current.unreadCount).toBe(1));
+    vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('Storage blocked');});
+    await act(async()=>{expect(await first.result.current.markRead(item)).toBe('memory');});
+    first.unmount();
+    const returned=renderHook(()=>useStudentOrgEventUpdates('org-session-route',true));
+    await waitFor(()=>expect(returned.result.current.events).toHaveLength(1));
+    expect(returned.result.current.unreadCount).toBe(0);returned.unmount();
+  });
+  it('uses the server read receipt even when this device has no local receipt',async()=>{
+    const item={...event,createdByUserId:'org-server'};
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([item]);
+    vi.mocked(eventNotificationService.getStates).mockResolvedValue(new Map([['one',{isCurrent:true,isRead:true}]]));
+    const view=renderHook(()=>useStudentOrgEventUpdates('org-server',true));
+    await waitFor(()=>expect(view.result.current.events).toHaveLength(1));
+    expect(view.result.current.unreadCount).toBe(0);view.unmount();
+  });
   it("synchronizes an acknowledged event from another tab's storage receipt", async () => {
     const storageEvent = { ...event, createdByUserId: "org-storage" };
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([storageEvent]);
@@ -25,7 +47,7 @@ describe("shared Student Org review updates", () => {
     const view = renderHook(() => useStudentOrgEventUpdates("org-memory", true));
     await waitFor(() => expect(view.result.current.unreadCount).toBe(1));
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    act(() => { expect(view.result.current.markRead(memoryEvent)).toBe("memory"); });
+    await act(async () => { expect(await view.result.current.markRead(memoryEvent)).toBe("memory"); });
     expect(view.result.current.unreadCount).toBe(0);
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...memoryEvent, adminComment: "Later note" }]);
     await act(async () => { await view.result.current.refresh(); });
@@ -46,7 +68,7 @@ describe("shared Student Org review updates", () => {
       const view = renderHook(() => useStudentOrgEventUpdates("org-poll", true));
       vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...event, createdByUserId: "org-poll" }]);
       await act(async () => { await view.result.current.refresh(); });
-      act(() => { view.result.current.markRead(view.result.current.events[0]); });
+      await act(async () => { await view.result.current.markRead(view.result.current.events[0]); });
       const before = vi.mocked(eventOverlayService.listEventOverlays).mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
       expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(before + 1);
@@ -58,18 +80,18 @@ describe("shared Student Org review updates", () => {
     const two = renderHook(() => useStudentOrgEventUpdates("org-hook", true));
     await waitFor(() => expect(one.result.current.unreadCount).toBe(1));
     expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(1);
-    act(() => { one.result.current.markRead(event); });
+    await act(async () => { await one.result.current.markRead(event); });
     expect(one.result.current.unreadCount).toBe(0); expect(two.result.current.unreadCount).toBe(0);
     one.unmount(); two.unmount();
   });
   it("refreshes changed feedback on focus and does not acknowledge a newer version with an old card", async () => {
     const view = renderHook(() => useStudentOrgEventUpdates("org-hook", true));
     await waitFor(() => expect(view.result.current.unreadCount).toBe(1));
-    act(() => { view.result.current.markRead(event); });
+    await act(async () => { await view.result.current.markRead(event); });
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...event, adminComment: "New feedback" }]);
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(view.result.current.unreadCount).toBe(1));
-    act(() => { expect(view.result.current.markRead(event)).toBe("changed"); });
+    await act(async () => { expect(await view.result.current.markRead(event)).toBe("changed"); });
     expect(view.result.current.unreadCount).toBe(1); view.unmount();
   });
   it("filters foreign owners and disables fetches for non-org users", async () => {

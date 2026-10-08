@@ -1,0 +1,46 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "Cached selected event exposes refresh error/retry while collapsed",
+      "status": "PASS"
+    },
+    {
+      "label": "Fit map keeps floor above persistent long refresh-error panel",
+      "status": "PASS",
+      "detail": {
+        "floorBox": {
+          "x": 7.3367719650268555,
+          "y": 139.097412109375,
+          "width": 256.9563798904419,
+          "height": 103.39326477050781
+        },
+        "panelBox": {
+          "x": 12,
+          "y": 255.84375,
+          "width": 296,
+          "height": 232.15625
+        }
+      }
+    },
+    {
+      "label": "Offline refresh retains event context",
+      "status": "PASS"
+    },
+    {
+      "label": "Reconnect retry restores event feed",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS"
+}

@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useLocation } from "react-router";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { NavigationProgress } from "../ui/NavigationProgress";
-import { UnsavedChangesProvider } from "../map-builder/UnsavedChangesContext";
+import { UnsavedChangesProvider, useUnsavedChangesContext } from "../map-builder/UnsavedChangesContext";
 import { AdminSidebar } from "./AdminSidebar";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
@@ -20,8 +20,18 @@ import { notificationService } from "../../lib/notificationService";
 import {
   adminNotificationPreferencesService,
 } from "../../services/adminNotificationPreferencesService";
-import { Link } from "react-router";
 import { isSuperAdminRole } from "../../lib/roles";
+import { useAdminEventSubmissions } from "../../hooks/useAdminEventSubmissions";
+import { submissionUpdateLabel } from "../../lib/adminEventSubmissions";
+import { normalizeEventOverlayLocations } from "../../lib/eventOverlayModel";
+import { formatEventSubmissionTime } from "../../lib/eventSubmissionTime";
+
+/** This child runs inside the provider so notifications protect editor drafts. */
+function AdminNotificationAction({ to, onNavigate, ariaLabel, className, children }: { to: string; onNavigate: () => void; ariaLabel?: string; className: string; children: ReactNode }) {
+  const { requestGuarded } = useUnsavedChangesContext();
+  const navigate = useNavigate();
+  return <button type="button" aria-label={ariaLabel} className={className} onClick={() => requestGuarded(() => { onNavigate(); navigate(to); })}>{children}</button>;
+}
 
 /** Branded full-screen loader shown while the session/profile is checked. */
 function AuthGateLoader() {
@@ -49,6 +59,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/locations":      "Campus Locations",
   "/admin-dashboard/accessibility":  "Accessibility",
   "/admin-dashboard/events":         "Event Maps",
+  "/admin-dashboard/event-layouts":  "Event Layouts",
 };
 
 export function AdminLayout() {
@@ -69,6 +80,9 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { loading, isAdmin, profile } = useAdminAuth();
+  const submissions = useAdminEventSubmissions(profile?.id, isAdmin && !loading);
+  const submissionUnread = submissions.eventsEnabled ? submissions.unreadCount : 0;
+  const notificationUnread = unread + submissionUnread;
 
   const loadActivityNotifications = useCallback(async () => {
     if (loading || !isAdmin) return;
@@ -79,11 +93,14 @@ export function AdminLayout() {
         activityLogService.listVisibleActivityLogs({ limit: 40 }),
         adminNotificationPreferencesService.get(),
       ]);
-      const rows = allRows.filter((row) => adminNotificationPreferencesService.isEnabled(row, preferences)).slice(0, 6);
+      // Pending submissions have their own actionable feed. Draft/autosave audit
+      // records remain in Activity Logs without crowding the notification bell.
+      const eligibleRows = allRows.filter((row) => adminNotificationPreferencesService.isEnabled(row, preferences) && !['event_overlay.submit', 'event_overlay.create', 'event_overlay.update_layout', 'event_overlay.update_details'].includes(row.action));
+      const rows = eligibleRows.slice(0, 6);
       const contextMap = await activityLogService.resolveActivityPresentationContexts(rows);
       setLogs(rows);
       setActivityContexts(contextMap);
-      setUnread(bellOpenRef.current ? 0 : notificationService.countUnseenLogs(rows, profile?.id));
+      setUnread(bellOpenRef.current ? 0 : notificationService.countUnseenLogs(eligibleRows, profile?.id));
     } catch (error) {
       setActivityFeedError(activityLogErrorMessage(error));
     } finally {
@@ -199,8 +216,8 @@ export function AdminLayout() {
           </button>
 
           {/* Breadcrumb */}
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">{pageTitle}</span>
+          <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+            <span className="min-w-0 truncate font-semibold text-foreground">{pageTitle}</span>
           </div>
 
           <div className="flex-1" />
@@ -214,12 +231,12 @@ export function AdminLayout() {
               aria-expanded={bellOpen}
               aria-haspopup="true"
               aria-label="Notifications"
-              className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all"
+              className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all"
             >
               <Bell className="h-4 w-4" />
-              {unread > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-accent text-accent-foreground text-[9px] font-extrabold flex items-center justify-center border border-card">
-                  {unread > 9 ? "9+" : unread}
+              {notificationUnread > 0 && (
+                <span data-testid="admin-notification-unread" className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[10px] font-extrabold flex items-center justify-center border border-card">
+                  {notificationUnread > 99 ? "99+" : notificationUnread}
                 </span>
               )}
             </button>
@@ -231,17 +248,35 @@ export function AdminLayout() {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -5 }}
                   transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                  className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-border bg-card shadow-xl overflow-hidden"
+                  aria-label="Admin notifications"
+                  className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-border bg-card shadow-xl overflow-hidden max-md:fixed max-md:left-3 max-md:right-3 max-md:top-[4.5rem] max-md:mt-0 max-md:w-auto"
                   style={{ zIndex: 60, transformOrigin: "top right" }}
                 >
                   <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                     <Bell className="h-3.5 w-3.5 text-primary" />
-                    <p className="text-xs font-extrabold text-foreground flex-1">Activity</p>
-                    {unread > 0 && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">{unread} new</span>
+                    <p className="text-sm font-extrabold text-foreground flex-1">Notifications</p>
+                    {notificationUnread > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300">{notificationUnread} unread</span>
                     )}
                   </div>
-                  <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                  <div className="max-h-[min(28rem,70dvh)] overflow-y-auto overscroll-contain">
+                    {submissions.eventsEnabled && <div className="border-b border-border">
+                      <div className="px-4 pt-3 pb-2"><p className="text-xs font-bold">Event submissions <span className="font-normal text-muted-foreground">· {submissions.pendingCount} pending</span></p><p className="mt-1 text-[11px] text-muted-foreground">Open a submission to mark its update as read.</p></div>
+                      {submissions.events.slice(0, 6).map(event => {
+                        const isUnread = submissions.unreadIds.has(event.id);
+                        const count = normalizeEventOverlayLocations(event).length;
+                        return <AdminNotificationAction key={event.id} to={`/admin-dashboard/event-layouts?review=${encodeURIComponent(event.id)}`} ariaLabel={`Review ${event.title}`} onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full gap-3 px-4 py-3 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+                          <span className="relative mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><History className="h-4 w-4" />{isUnread && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-600 ring-2 ring-card" />}</span>
+                          <span className="min-w-0 flex-1"><span className="block break-words text-xs font-bold">{event.title}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{event.organizer || 'Student organization'} · {count} map{count === 1 ? '' : 's'}</span><span className="mt-1 block text-[11px] text-muted-foreground">{submissionUpdateLabel(event)} · {formatEventSubmissionTime(event.lastEditedAt && Date.parse(event.lastEditedAt) > Date.parse(event.submittedAt ?? '') ? event.lastEditedAt : event.submittedAt)}</span><span className="mt-2 block text-xs font-bold text-primary">Review submission <span aria-hidden="true">→</span></span></span>
+                        </AdminNotificationAction>;
+                      })}
+                      {submissions.loading && <p role="status" className="px-4 pb-3 text-xs text-muted-foreground">Loading submissions…</p>}
+                      {submissions.error && <div className="px-4 pb-3"><p role="alert" className="text-xs text-destructive">{submissions.error}</p><button type="button" onClick={() => void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry submissions</button></div>}
+                      {submissions.receiptError && <div className="px-4 pb-3"><p role="status" className="text-xs text-muted-foreground">{submissions.receiptError}</p><button type="button" onClick={()=>void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry read sync</button></div>}
+                      {!submissions.loading && !submissions.error && submissions.pendingCount === 0 && <p className="px-4 pb-3 text-xs text-muted-foreground">No submissions waiting for review.</p>}
+                      {submissions.pendingCount > 0 && <AdminNotificationAction to="/admin-dashboard/event-layouts" onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full items-center justify-center border-t border-border text-xs font-bold text-primary hover:bg-muted">View all {submissions.pendingCount} pending submissions</AdminNotificationAction>}
+                    </div>}
+                    <div className="divide-y divide-border">
                     {logs.length > 0 ? (
                       logs.map((l) => (
                         <div key={l.id} className="flex items-center gap-2.5 px-4 py-2.5">
@@ -273,14 +308,15 @@ export function AdminLayout() {
                     ) : (
                       <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet.</p>
                     )}
+                    </div>
                   </div>
-                  <Link
+                  <AdminNotificationAction
                     to="/admin-dashboard/activity-logs"
-                    onClick={() => setBellOpen(false)}
-                    className="flex items-center justify-center gap-1.5 px-4 py-2.5 border-t border-border text-[11px] font-bold text-primary hover:bg-muted transition-colors"
+                    onNavigate={() => setBellOpen(false)}
+                    className="flex min-h-11 w-full items-center justify-center gap-1.5 px-4 py-2.5 border-t border-border text-[11px] font-bold text-primary hover:bg-muted transition-colors"
                   >
                     <CheckCheck className="h-3 w-3" /> View all activity logs
-                  </Link>
+                  </AdminNotificationAction>
                 </motion.div>
               )}
             </AnimatePresence>

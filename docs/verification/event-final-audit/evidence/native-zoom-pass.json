@@ -1,0 +1,112 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "Native browser 200% zoom verified by CSS viewport/device-pixel ratio",
+      "status": "PASS",
+      "detail": {
+        "width": 707,
+        "height": 403,
+        "dpr": 2,
+        "outerWidth": 1440
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: event/map context survives collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 147.6640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: actual floor context replaces campus",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 floor: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 167.1640625
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: floor uses available map width",
+      "status": "PASS",
+      "detail": {
+        "x": 309.6249694824219,
+        "y": 128.32168579101562,
+        "right": 697.375,
+        "bottom": 282.67303466796875,
+        "width": 387.7500305175781,
+        "height": 154.35134887695312,
+        "panelTop": 12,
+        "panelRight": 300,
+        "viewBox": "0 0 1520 596.5116015846066",
+        "cameraTransform": "will-change: transform; transform: translate3d(658.985px, 213.089px, 0px) scale(0.557243); transform-box: view-box; transform-origin: 0px 0px;"
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: current location identified by text/check state",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200 details: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 12,
+        "y": 12,
+        "width": 288,
+        "height": 315.5
+      }
+    },
+    {
+      "label": "student-707x403-zoom200: manual floor change cannot keep a stale viewing marker",
+      "status": "PASS"
+    },
+    {
+      "label": "student-707x403-zoom200: Escape returns focus to event trigger",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS",
+  "zoomSelectors": [],
+  "zoomControls": [],
+  "zoomMeasurement": {
+    "width": 707,
+    "height": 403,
+    "dpr": 2,
+    "outerWidth": 1440
+  }
+}

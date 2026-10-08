@@ -55,7 +55,7 @@ describe("useEventMapPreviews", () => {
     expect(result.current.events).toHaveLength(1);
   });
 
-  it("clears stale cards and exposes retry when refresh fails", async () => {
+  it("retains cached cards with an explicit error when background refresh fails", async () => {
     vi.mocked(eventOverlayService.listPublishedEventPreviews)
       .mockResolvedValueOnce({ serverNow: "2026-10-08T02:00:00.000Z", events: [eventPreviewFixture()] })
       .mockRejectedValueOnce(new Error("Feed unavailable"));
@@ -63,7 +63,19 @@ describe("useEventMapPreviews", () => {
     await act(async () => { await Promise.resolve(); });
     expect(result.current.events).toHaveLength(1);
     await act(async () => { await result.current.refresh(); });
-    expect(result.current.events).toEqual([]);
+    expect(result.current.events).toHaveLength(1);
     expect(result.current.error).toBe("Feed unavailable");
+  });
+
+  it("moves Upcoming to Ongoing then hides an ended event without reload", async () => {
+    const event = eventPreviewFixture({ dateStart: '2026-10-08T02:00:01.000Z', dateEnd: '2026-10-08T02:00:02.000Z' });
+    vi.mocked(eventOverlayService.listPublishedEventPreviews).mockResolvedValue({serverNow:'2026-10-08T02:00:00.000Z',events:[event]});
+    const view=renderHook(()=>useEventMapPreviews({campusId:'campus-clock',enabled:true,open:true,identityKey:'student'}));
+    await act(async()=>{});
+    expect(visibleEventCards(view.result.current.events,view.result.current.nowMs,'upcoming')).toHaveLength(1);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+    expect(visibleEventCards(view.result.current.events,view.result.current.nowMs,'ongoing')).toHaveLength(1);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+    expect(visibleEventCards(view.result.current.events,view.result.current.nowMs,'all')).toHaveLength(0);
   });
 });

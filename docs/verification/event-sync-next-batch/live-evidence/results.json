@@ -1,0 +1,21 @@
+{
+  "mode": "Actual hosted RPCs; two independent browser contexts; one existing QA review read mark only",
+  "eventId": "db0da611-5738-4c55-a9c1-61d2714d77bc",
+  "checks": [
+    "Independent contexts load identical hosted read state",
+    "Org acknowledgement reached the real hosted RPC once",
+    "Mobile context clears the same event unread mark on focus without reload",
+    "Second context has no browser-local review receipt",
+    "App shows no browser-only fallback notice after migration",
+    "Event metadata and row revision are unchanged by the read mark",
+    "Hosted receipt survives page reload",
+    "No receipt or activity-preferences endpoint errors",
+    "No browser page errors",
+    "No event/content/publication mutation attempted"
+  ],
+  "pageErrors": [],
+  "receiptErrors": [],
+  "blockedMutations": [],
+  "ackCount": 1,
+  "status": "PASS"
+}

@@ -1,0 +1,173 @@
+{
+  "runDate": "2026-10-07T13:42:48.535Z",
+  "timezone": "Asia/Manila",
+  "appUrl": "http://localhost:5173",
+  "title": "QA TEST Event Flow 0487deca",
+  "description": "Temporary QA event used to verify create, review feedback, approval, and student Upcoming view.",
+  "eventId": "db0da611-5738-4c55-a9c1-61d2714d77bc",
+  "requestedLocations": [
+    "Campus Grounds",
+    "STUDENT CENTER BUILDING",
+    "1 floor",
+    "STUDENT CENTER BUILDING — Ground Floor"
+  ],
+  "viewportRuns": [
+    {
+      "role": "Student Org",
+      "viewport": "1440x900",
+      "createDialog": {
+        "width": 768,
+        "height": 721,
+        "top": 90,
+        "bottom": 810,
+        "clientHeight": 719,
+        "scrollHeight": 720,
+        "hasInternalVerticalScroll": false,
+        "viewportWidth": 1440,
+        "viewportHeight": 900,
+        "documentHorizontalOverflow": false
+      }
+    },
+    {
+      "role": "Admin",
+      "viewport": "1440x900",
+      "reviewDialog": {
+        "width": 769,
+        "height": 877,
+        "top": 11,
+        "bottom": 888,
+        "clientHeight": 874,
+        "scrollHeight": 874,
+        "hasInternalVerticalScroll": false,
+        "viewportWidth": 1440,
+        "viewportHeight": 900,
+        "documentHorizontalOverflow": false
+      }
+    },
+    {
+      "role": "Admin",
+      "viewport": "390x844",
+      "timePicker": {
+        "width": 304,
+        "height": 372,
+        "top": 236,
+        "bottom": 608,
+        "clientHeight": 370,
+        "scrollHeight": 370,
+        "hasInternalVerticalScroll": false,
+        "viewportWidth": 390,
+        "viewportHeight": 844,
+        "documentHorizontalOverflow": false
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "SET-03",
+      "label": "Separate configured Org, Admin, and Student sessions authenticate",
+      "status": "PASS"
+    },
+    {
+      "id": "TOAST-01",
+      "label": "Save confirmation leaves the primary submit action clickable",
+      "status": "PASS",
+      "stage": "Campus Grounds save"
+    },
+    {
+      "id": "SUBMIT-GATE",
+      "label": "Review blocked an empty requested building map and explained the required fix",
+      "status": "PASS",
+      "location": "STUDENT CENTER BUILDING — Ground Floor"
+    },
+    {
+      "id": "TOAST-01",
+      "label": "Save confirmation leaves the primary submit action clickable",
+      "status": "PASS",
+      "stage": "building floor save"
+    },
+    {
+      "id": "CRE-FLOW",
+      "label": "Org created a multi-location draft, saved furniture, reviewed the map summary, and submitted it",
+      "status": "PASS",
+      "eventId": "db0da611-5738-4c55-a9c1-61d2714d77bc",
+      "requestedLocations": [
+        "Campus Grounds",
+        "STUDENT CENTER BUILDING — Ground Floor"
+      ],
+      "furniture": 2
+    },
+    {
+      "id": "ADM-FLOW",
+      "label": "Admin previewed the submitted maps, saved a feedback pin, set schedule, and approved/published",
+      "status": "PASS",
+      "schedule": {
+        "date": "2026-11-21",
+        "start": "09:30",
+        "end": "17:00",
+        "timezone": "Asia/Manila"
+      },
+      "conflictWarning": null
+    },
+    {
+      "id": "ORG-UPDATE",
+      "label": "Org sees the event-specific unread mark, Approved status, and location pin on mobile",
+      "status": "PASS",
+      "unreadMarkerVisible": true,
+      "feedbackVisible": true
+    },
+    {
+      "id": "ORG-ACK",
+      "label": "Org acknowledged the approved follow-up pin, kept the approved map locked, and the note survived reload",
+      "status": "PASS"
+    },
+    {
+      "id": "STU-FLOW",
+      "label": "Regular student sees this event in Upcoming on desktop and mobile, opens details, and views both maps",
+      "status": "PASS",
+      "locations": 2,
+      "desktop": true,
+      "mobile": true
+    },
+    {
+      "id": "CLEANUP",
+      "label": "Admin unpublished the event after student verification; it no longer appears in Upcoming",
+      "status": "PASS",
+      "eventId": "db0da611-5738-4c55-a9c1-61d2714d77bc",
+      "approvedRecordRetained": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 404 ()",
+    "Failed to load resource: the server responded with a status of 404 ()"
+  ],
+  "approved": true,
+  "unpublished": true,
+  "status": "PASS",
+  "locationIds": [
+    "location-campus",
+    "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1"
+  ],
+  "groundsLocationId": "location-campus",
+  "buildingLocationId": "location-ce5404c9-1f44-4f59-88be-2a90630b8c87-ce5404c9-1f44-4f59-88be-2a90630b8c87-f1",
+  "createdByUI": true,
+  "initialFurnitureCount": 2,
+  "approvedSchedule": {
+    "date": "2026-11-21",
+    "start": "09:30",
+    "end": "17:00",
+    "timezone": "Asia/Manila"
+  },
+  "publication": {
+    "isActive": true,
+    "publicationAt": "2026-10-07T13:43:30.591197+00:00"
+  },
+  "retainedApprovedRecord": true,
+  "publicationResumed": true,
+  "resumedAt": "2026-10-07T13:51:18.924Z",
+  "previousSelectorFailure": "The owner card correctly prefixes pin comments with 'Pin 1:'; the selector now checks the rendered card text."
+}

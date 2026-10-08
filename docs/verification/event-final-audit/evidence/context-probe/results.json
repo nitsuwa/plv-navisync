@@ -1,0 +1,168 @@
+{
+  "mode": "Rendered UI with controlled event responses; no live event writes",
+  "checks": [
+    {
+      "label": "390px: selected event identity survives venue inspection/collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "390px: inspected venue and actual map remain distinct",
+      "status": "PASS"
+    },
+    {
+      "label": "1440px: selected event identity survives venue inspection/collapse",
+      "status": "PASS"
+    },
+    {
+      "label": "1440px: inspected venue and actual map remain distinct",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: reduced-motion entrance avoids scale/translation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: required-title feedback is visible",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce locations: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce locations: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: empty requested locations cannot create",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce proposal summary: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce proposal summary: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 229.5,
+        "width": 358,
+        "height": 385
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: confirmation action remains reachable with long details",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: nested summary preserves requested locations",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: details survive step navigation",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (1)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (2)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (3)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (4)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (5)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (6)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (7)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (8)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (9)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (10)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (11)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: Tab stays inside proposal (12)",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce discard: no document horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce discard: panel/modal inside viewport",
+      "status": "PASS",
+      "detail": {
+        "x": 16,
+        "y": 307,
+        "width": 358,
+        "height": 230
+      }
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: nested discard keeps form content",
+      "status": "PASS"
+    },
+    {
+      "label": "proposal-390x844-dark-reduce: discard restores opener focus",
+      "status": "PASS"
+    },
+    {
+      "label": "No browser page errors",
+      "status": "PASS"
+    },
+    {
+      "label": "No event/content mutation attempts",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "blockedWrites": [],
+  "status": "PASS"
+}

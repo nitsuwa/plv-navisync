@@ -76,7 +76,7 @@ import { EventPreviewLayer } from "../components/map/EventPreviewLayer";
 import { EventMapPanel } from "../components/map/EventMapPanel";
 import { EventVenueLayer } from "../components/map/EventVenueLayer";
 import { useEventMapPreviews } from "../hooks/useEventMapPreviews";
-import { resolveEventLocation, selectedEventLocation, toEventOverlayPreview, visibleEventCards } from "../lib/eventMapView";
+import { buildEventVenues, eventLocationOnMap, eventVenueCandidates, resolveEventLocation, selectedEventLocation, toEventOverlayPreview, visibleEventCards } from "../lib/eventMapView";
 import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
 
@@ -1335,6 +1335,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   // ── Student event map preview ─────────────────────────────────────────
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [inspectedEventVenueId, setInspectedEventVenueId] = useState<string | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [eventFilter, setEventFilter] = useState<EventMapFilter>("all");
   useEffect(() => {
@@ -1368,8 +1369,12 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     identityKey: studentAuth.profile?.id ?? "guest",
   });
   const visibleEvents = useMemo(() => visibleEventCards(eventFeed.events, eventFeed.nowMs, "all"), [eventFeed.events, eventFeed.nowMs]);
-  const venueEvents = useMemo(() => visibleEventCards(eventFeed.events, eventFeed.nowMs, eventFilter), [eventFeed.events, eventFeed.nowMs, eventFilter]);
-  const selectedEventLocationData = selectedEventLocation(visibleEvents, selectedEventId, selectedLocationId);
+  const venueEvents = useMemo(() => eventVenueCandidates(eventFeed.events, eventFeed.nowMs, eventFilter, selectedEventId), [eventFeed.events, eventFeed.nowMs, eventFilter, selectedEventId]);
+  const inspectedEventVenue = useMemo(() => activeCampus && inspectedEventVenueId ? buildEventVenues(activeCampus, venueEvents).find(venue => venue.id === inspectedEventVenueId) ?? null : null, [activeCampus, venueEvents, inspectedEventVenueId]);
+  useEffect(() => { if (!showEventMaps || isFloorMode) setInspectedEventVenueId(null); }, [showEventMaps, isFloorMode]);
+  useEffect(() => { setInspectedEventVenueId(null); }, [activeCampus?.id]);
+  const currentEventLocationId = eventLocationOnMap(visibleEvents.find(event => event.id === selectedEventId), isFloorMode ? floorLookupId ?? null : null, selectedLocationId)?.id ?? null;
+  const selectedEventLocationData = selectedEventLocation(visibleEvents, selectedEventId, currentEventLocationId);
   const selectedEventOverlay = selectedEventLocationData
     ? toEventOverlayPreview(selectedEventLocationData.event, selectedEventLocationData.location)
     : null;
@@ -1389,6 +1394,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const event = visibleEvents.find((item) => item.id === eventId);
     const location = event?.locations.find((item) => item.id === locationId);
     if (!event || !location) return;
+    setInspectedEventVenueId(null);
     const resolved = resolveEventLocation(activeCampus, location.locationRef);
     if (!resolved) return;
     setSelectedEventId(eventId);
@@ -1650,6 +1656,56 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setZoom(nextZoom);
     writeCameraTransform(nextPan, nextZoom);
   }, [clampMapPan, writeCameraTransform]);
+
+  const fitEventMap = useCallback(() => {
+    const surface = mapContainerRef.current;
+    const viewport = surface?.getBoundingClientRect();
+    const panel = surface?.querySelector<HTMLElement>('[data-testid="event-map-panel"]');
+    const panelRect = panel?.getBoundingClientRect();
+    const headerRect = panel?.querySelector<HTMLElement>('[data-event-context-header]')?.getBoundingClientRect();
+    const errorHeight = panel?.querySelector<HTMLElement>('[data-event-refresh-error]')?.getBoundingClientRect().height ?? 0;
+    if (!viewport || !panelRect || !headerRect || viewport.width <= 0 || viewport.height <= 0) return;
+    const sidePanel = window.innerWidth >= 1024 || (window.innerWidth >= 640 && window.innerHeight <= 500);
+    const topControls = [...(surface?.querySelectorAll<HTMLElement>('[data-testid="student-floor-picker"] > button, [data-testid="student-event-back-campus"]') ?? [])];
+    const controlsBottom = Math.max(viewport.top + 64, ...topControls.map(control => control.getBoundingClientRect()).filter(rect=>rect.top<viewport.top+viewport.height*.4).map(rect=>rect.bottom));
+    const insets = sidePanel
+      ? {left:panelRect.right - viewport.left + 16,right:16,top:Math.max(16,controlsBottom-viewport.top+12),bottom:isFloorMode?80:16}
+      : {left:12,right:60,top:controlsBottom-viewport.top+12,bottom:headerRect.height+errorHeight+viewport.bottom-panelRect.bottom+(isFloorMode?16:64)};
+    const buildings = Object.values(B_POS);
+    const floorScene = surface?.querySelector<SVGGraphicsElement>('[data-testid="readonly-floor-plan-scene"]');
+    const floorSceneBounds = floorScene && typeof floorScene.getBBox === 'function' ? floorScene.getBBox() : null;
+    const completeFloorBounds = floorSceneBounds && [floorSceneBounds.x,floorSceneBounds.y,floorSceneBounds.width,floorSceneBounds.height].every(Number.isFinite) && floorSceneBounds.width > 0 && floorSceneBounds.height > 0 ? floorSceneBounds : null;
+    const content = isFloorMode && activeFloorPlan
+      ? completeFloorBounds ?? getFloorShapeBounds(getFloorShapeRegions(activeFloorPlan,{canvasW:activeFloorPlan.canvasW||440,canvasH:activeFloorPlan.canvasH||290}))
+      : buildings.length ? {
+        x:Math.min(...buildings.map(b=>b.x)),y:Math.min(...buildings.map(b=>b.y)),
+        width:Math.max(...buildings.map(b=>b.x+b.w))-Math.min(...buildings.map(b=>b.x)),
+        height:Math.max(...buildings.map(b=>b.y+b.h))-Math.min(...buildings.map(b=>b.y)),
+      } : {x:0,y:0,width:outdoorCanvasW,height:outdoorCanvasH};
+    const camera = getStudentOverviewCamera({
+      mapWidth:viewportCanvasW,mapHeight:viewportCanvasH,viewportWidth:viewport.width,viewportHeight:viewport.height,
+      content,contentOffset:isFloorMode?{x:floorViewport.offsetX,y:floorViewport.offsetY}:undefined,insets,fillRatio:0.94,
+    });
+    cancelCameraAnimation(false);
+    applyOverviewCamera(camera);
+  }, [B_POS,activeFloorPlan,applyOverviewCamera,cancelCameraAnimation,floorViewport,isFloorMode,outdoorCanvasH,outdoorCanvasW,viewportCanvasH,viewportCanvasW]);
+
+  const fitEventMapRef = useRef(fitEventMap);
+  fitEventMapRef.current = fitEventMap;
+  const eventFitFrameRef = useRef<number | null>(null);
+  const requestEventMapFit = useCallback(() => {
+    if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
+    eventFitFrameRef.current = requestAnimationFrame(() => {
+      eventFitFrameRef.current = null;
+      fitEventMapRef.current();
+    });
+  }, []);
+  useEffect(() => {
+    if (showEventMaps) requestEventMapFit();
+    return () => {
+      if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
+    };
+  }, [showEventMaps, selectedEventId, floorLookupId, activeCampus?.id, requestEventMapFit]);
 
   useLayoutEffect(() => {
     if (!activeCampus || isFloorMode || fittedCampusIdRef.current === activeCampus.id) return;
@@ -4862,7 +4918,7 @@ const buildingFill = (id: string) =>
                 }}
               />
             )}
-            {showEventMaps && !isFloorMode && activeCampus && <EventVenueLayer campus={activeCampus} events={venueEvents} zoom={displayZoom} onSelect={viewEventLocation} />}
+            {showEventMaps && !isFloorMode && activeCampus && <EventVenueLayer campus={activeCampus} events={venueEvents} zoom={displayZoom} selectedLocationId={currentEventLocationId} onInspectVenue={setInspectedEventVenueId} onSelect={viewEventLocation} />}
             {showEventMaps && !isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
             {/* Route */}
             {route && (
@@ -5873,12 +5929,15 @@ const buildingFill = (id: string) =>
         filter={eventFilter}
         selectedEventId={selectedEventId}
         selectedLocationId={selectedLocationId}
+        currentMap={{label:isFloorMode ? `${activeFloorBuilding?.name ?? floorView?.building.name ?? 'Building'} · ${currentFloor?.label ?? 'Floor'}` : 'Campus Grounds',locationId:currentEventLocationId,isFloor:isFloorMode}}
+        onFitMap={requestEventMapFit}
+        inspectedVenue={inspectedEventVenue}
         onClose={() => { setShowEventMaps(false); setSelectedEventId(null); setSelectedLocationId(null); }}
         onRetry={eventFeed.refresh}
         onFilterChange={setEventFilter}
-        onSelectEvent={(eventId) => { setSelectedEventId(eventId); setSelectedLocationId(null); }}
+        onSelectEvent={(eventId) => { setInspectedEventVenueId(null); setSelectedEventId(eventId); setSelectedLocationId(null); }}
         onViewLocation={viewEventLocation}
-        onBackToEvents={() => { setSelectedEventId(null); setSelectedLocationId(null); }}
+        onBackToEvents={() => { setInspectedEventVenueId(null); setSelectedEventId(null); setSelectedLocationId(null); }}
       />}
     </div>
   );
