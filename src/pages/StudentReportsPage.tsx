@@ -16,7 +16,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
-import { reportService, type IssueReport } from "../services/reportService";
+import { normalizeReportStatus, reportService, type IssueReport } from "../services/reportService";
 import { ReportModal } from "../components/map/ReportModal";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -79,6 +79,7 @@ export function StudentReportsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
+  const requestedReportId = useMemo(() => new URLSearchParams(location.search).get("reportId"), [location.search]);
 
   const reportBuilding = useMemo<Building | null>(() => {
     const buildingId = new URLSearchParams(location.search).get("building");
@@ -111,6 +112,16 @@ export function StudentReportsPage() {
     };
   }, [authLoading, isStudent, profile?.id]);
 
+  useEffect(() => {
+    if (loading || !requestedReportId || !reports.some((report) => report.id === requestedReportId)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const reportCard = document.getElementById(`student-report-${requestedReportId}`);
+      reportCard?.focus({ preventScroll: true });
+      reportCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, reports, requestedReportId]);
+
   const refreshReports = useCallback(async () => {
     try {
       const res = await reportService.getStudentReports();
@@ -125,6 +136,13 @@ export function StudentReportsPage() {
     void refreshReports();
     const params = new URLSearchParams(location.search);
     params.delete("building");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
+  };
+
+  const clearRequestedReport = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete("reportId");
     const search = params.toString();
     navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
   };
@@ -183,7 +201,8 @@ export function StudentReportsPage() {
   }
 
   const filtered = reports.filter((r) => {
-    const matchFilter = filter === "all" || r.status === filter;
+    if (requestedReportId) return r.id === requestedReportId;
+    const matchFilter = filter === "all" || normalizeReportStatus(r.status) === normalizeReportStatus(filter);
     const q = search.toLowerCase().trim();
     const matchSearch =
       !q ||
@@ -226,30 +245,41 @@ export function StudentReportsPage() {
                   <SearchBar
                     placeholder="Search reports by title, building, or issue type..."
                     value={search}
-                    onSearch={setSearch}
+                    onSearch={(query) => {
+                      setSearch(query);
+                      if (requestedReportId) clearRequestedReport();
+                    }}
                     onClear={() => setSearch("")}
                     size="md"
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                  <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {(["all", "pending", "under_review", "in_progress", "resolved", "dismissed"] as FilterStatus[]).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setFilter(s)}
-                      aria-pressed={filter === s}
-                      className={cn(
-                        "shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                        filter === s
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "bg-muted/60 text-muted-foreground hover:bg-muted-foreground/10"
-                      )}
-                    >
-                      {s === "all" ? "All" : REPORT_STATUS[s]?.label ?? s}
-                    </button>
-                  ))}
+                <div role="group" aria-label="Filter reports by status" className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                    <Filter className="h-3.5 w-3.5 shrink-0" />
+                    <span>Status</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(["all", "pending", "under_review", "in_progress", "resolved", "rejected"] as FilterStatus[]).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => {
+                          setFilter(s);
+                          if (requestedReportId) clearRequestedReport();
+                        }}
+                        aria-pressed={filter === s}
+                        className={cn(
+                          "min-h-9 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                          filter === s
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "bg-muted/60 text-muted-foreground hover:bg-muted-foreground/10"
+                        )}
+                      >
+                        {s === "all" ? "All" : REPORT_STATUS[s]?.label ?? s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </Reveal>
@@ -313,9 +343,14 @@ export function StudentReportsPage() {
                   return (
                     <Reveal key={r.id} delay={i * 40}>
                       <motion.div
+                        id={`student-report-${r.id}`}
+                        tabIndex={requestedReportId === r.id ? -1 : undefined}
                         initial={{ opacity: 0, y: 16 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="rounded-2xl border border-border/60 bg-card shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden"
+                        className={cn(
+                          "rounded-2xl border border-border/60 bg-card shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden",
+                          requestedReportId === r.id && "ring-2 ring-primary/60 shadow-lg shadow-primary/10",
+                        )}
                       >
                         {/* Header */}
                         <div className="px-5 pt-4 pb-3 border-b border-border/50">

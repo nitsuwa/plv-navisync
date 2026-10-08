@@ -78,6 +78,12 @@ describe("StudentMapControls", () => {
     expect(results.getAttribute("style")).toContain("safe-area-inset-bottom");
   });
 
+  it("reserves space for the notification bell beside the profile button", () => {
+    render(<StudentMapControls {...props({ notificationBellVisible: true })} />);
+
+    expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-32");
+  });
+
   it("keeps route modes and building shortcuts out of the search area", () => {
     render(<StudentMapControls {...props()} />);
 

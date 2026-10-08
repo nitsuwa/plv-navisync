@@ -170,7 +170,6 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             </div>
             <div>
               <h3 className="font-extrabold text-foreground text-sm">{report.title}</h3>
-              <p className="text-[11px] text-muted-foreground">Report #{report.id.slice(0, 8)}</p>
             </div>
           </div>
           <button onClick={onClose} aria-label="Close modal"

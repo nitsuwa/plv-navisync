@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link, Navigate } from "react-router";
 import {
-  GraduationCap, Building2, Bookmark, ArrowUpRight, CalendarDays,
+  GraduationCap, Building2, Bookmark, ArrowUpRight, Bell, CalendarDays,
   Compass, Flag, MapPin, Plus, RefreshCw,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -13,6 +13,8 @@ import { Skeleton } from "../components/ui/Skeleton";
 import type { Building } from "../types";
 import { studentAccountService } from "../services/studentAccountService";
 import { reportService, type IssueReport } from "../services/reportService";
+import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
+import { StudentNotificationsSection } from "../components/layout/StudentNotificationBell";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function getGreeting(): string {
@@ -40,6 +42,7 @@ function getReportStatusDetails(status: string): { label: string; className: str
 // ── Main Component ─────────────────────────────────────────────────────────
 export function StudentHomePage() {
   const { username, isStudent, isStudentOrg, loading: authLoading, profile } = useStudentAuth();
+  const eventUpdates = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
   const [loading, setLoading] = useState(true);
   const [savedBuildingIds, setSavedBuildingIds] = useState<Set<string>>(new Set());
   const [savedBuildingsLoading, setSavedBuildingsLoading] = useState(true);
@@ -190,10 +193,11 @@ export function StudentHomePage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.08 }}
-          className="grid grid-cols-3 gap-2 md:hidden"
+          className="grid grid-cols-4 gap-2 md:hidden"
         >
           {[
             { icon: Compass, label: "Navigate", color: "bg-primary/10 text-primary", target: "map" },
+            { icon: Bell, label: "Notifs", color: "bg-sky-500/10 text-sky-600 dark:text-sky-400", target: "notifications" },
             { icon: Bookmark, label: "Saved", color: "bg-green-500/10 text-green-600 dark:text-green-400", target: "saved" },
             { icon: Flag, label: "Report", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400", target: "reports" },
           ].map((action) => {
@@ -214,7 +218,11 @@ export function StudentHomePage() {
               <button
                 key={action.target}
                 type="button"
-                onClick={() => scrollToSection(action.target === "saved" ? "saved-buildings" : "student-reports")}
+                onClick={() => scrollToSection(
+                  action.target === "saved" ? "saved-buildings"
+                    : action.target === "notifications" ? "student-notifications"
+                      : "student-reports",
+                )}
                 className={className}
               >
                 {content}
@@ -222,6 +230,33 @@ export function StudentHomePage() {
             );
           })}
         </motion.div>
+
+        {/* ══ NOTIFICATIONS ══ */}
+        {profile?.id && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.16 }}
+          >
+            <StudentNotificationsSection
+              ownerId={profile.id}
+              isStudentOrg={isStudentOrg}
+              eventUpdates={eventUpdates.events}
+              unreadEventIds={eventUpdates.unreadIds}
+              markEventRead={eventUpdates.markRead}
+              eventUpdatesError={eventUpdates.error}
+              refreshEventUpdates={eventUpdates.refresh}
+              campusId={activeCampus?.id ?? null}
+              reportsSnapshot={reports}
+              reportsSnapshotLoading={reportsLoading}
+              reportsSnapshotError={reportsError}
+              onRetryReports={() => {
+                setReportsLoading(true);
+                setReportsRetryKey((value) => value + 1);
+              }}
+            />
+          </motion.div>
+        )}
 
         {/* ══ QUICK ACCESS BUILDINGS ══ */}
         <motion.div

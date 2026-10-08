@@ -8,10 +8,12 @@ import { cn } from "../../lib/utils";
 
 interface BuildingCardProps {
   building: Building;
+  campusId?: string;
+  campusName?: string;
   className?: string;
 }
 
-const BuildingCardInner = memo(function BuildingCardInner({ building, className }: BuildingCardProps) {
+const BuildingCardInner = memo(function BuildingCardInner({ building, campusId, campusName, className }: BuildingCardProps) {
   const innerRef = useRef<HTMLDivElement>(null);
   const shouldReduce = useReducedMotion();
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -43,6 +45,10 @@ const BuildingCardInner = memo(function BuildingCardInner({ building, className 
     el.style.setProperty("--tilt-y", `0deg`);
   }, []);
 
+  const detailsHref = campusId
+    ? `/buildings/${encodeURIComponent(building.id)}?campusId=${encodeURIComponent(campusId)}`
+    : `/buildings/${encodeURIComponent(building.id)}`;
+
   return (
     <motion.div
       initial={shouldReduce ? false : { opacity: 0, y: 20, scale: 0.97 }}
@@ -51,7 +57,7 @@ const BuildingCardInner = memo(function BuildingCardInner({ building, className 
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
     <Link
-      to={`/buildings/${building.id}`}
+      to={detailsHref}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       className={cn("group block perspective-[800px]", className)}
@@ -125,7 +131,7 @@ const BuildingCardInner = memo(function BuildingCardInner({ building, className 
           )}
           <div className="flex items-center gap-1.5">
             <MapPin className="h-3 w-3 shrink-0 text-primary/60" />
-            <span>{building.floor_count}-story · PLV Campus</span>
+            <span className="min-w-0 break-words">{building.floor_count}-story · {campusName || "PLV Campus"}</span>
           </div>
         </div>
 

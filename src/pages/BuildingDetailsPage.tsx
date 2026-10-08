@@ -1,4 +1,4 @@
-import { useParams, Link, useNavigate } from "react-router";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router";
 import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
@@ -41,31 +41,46 @@ export function BuildingDetailsPage() {
   const [isSaved, setIsSaved] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Use the published campus (same source as the map + directory) so the
-  // detail page resolves seeded building ids like b_scb consistently.
-  const { activeCampus } = usePublishedCampus();
+  // Resolve the campus from the link so building IDs remain unambiguous across campuses.
+  const [searchParams] = useSearchParams();
+  const requestedCampusId = searchParams.get("campusId");
+  const { campuses = [], activeCampus = null, loading: campusesLoading = false } = usePublishedCampus();
+  const publishedCampuses = useMemo(
+    () => campuses.filter((campus) => campus.lifecycleStatus === "published" || campus.publishStatus === "published"),
+    [campuses],
+  );
 
-  // Derive buildings exclusively from the published campus
+  const buildingCampus = useMemo(() => {
+    const containsBuilding = (campus: typeof publishedCampuses[number]) => campus.buildings.some((item) => item.id === id);
+    return (requestedCampusId
+      ? publishedCampuses.find((campus) => campus.id === requestedCampusId && containsBuilding(campus))
+      : undefined)
+      ?? publishedCampuses.find((campus) => campus.id === activeCampus?.id && containsBuilding(campus))
+      ?? publishedCampuses.find(containsBuilding)
+      ?? null;
+  }, [activeCampus?.id, id, publishedCampuses, requestedCampusId]);
+
+  // Resolve the building and its related details from the campus in the link.
   const buildings: Building[] = useMemo(() => {
-    if (activeCampus) {
-      return buildingsFromCampus(activeCampus) as Building[];
+    if (buildingCampus) {
+      return buildingsFromCampus(buildingCampus) as Building[];
     }
     return [];
-  }, [activeCampus]);
+  }, [buildingCampus]);
 
   const buildingFacilities: Record<string, string[]> = useMemo(() => {
-    if (activeCampus) {
-      return facilitiesFromCampus(activeCampus);
+    if (buildingCampus) {
+      return facilitiesFromCampus(buildingCampus);
     }
     return {};
-  }, [activeCampus]);
+  }, [buildingCampus]);
 
   const buildingAccessibility: Record<string, string[]> = useMemo(() => {
-    if (activeCampus) {
-      return accessibilityFromCampus(activeCampus);
+    if (buildingCampus) {
+      return accessibilityFromCampus(buildingCampus);
     }
     return {};
-  }, [activeCampus]);
+  }, [buildingCampus]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -77,7 +92,7 @@ export function BuildingDetailsPage() {
 
   const building = buildings.find((b) => b.id === id);
   const roomGroups = useMemo(() => {
-    const campusBuilding = activeCampus?.buildings.find((item) => item.id === id);
+    const campusBuilding = buildingCampus?.buildings.find((item) => item.id === id);
     return (campusBuilding?.floors ?? [])
       .map((floor) => ({
         id: floor.id,
@@ -89,12 +104,20 @@ export function BuildingDetailsPage() {
       }))
       .filter((floor) => floor.rooms.length > 0)
       .sort((a, b) => a.number - b.number);
-  }, [activeCampus, id]);
+  }, [buildingCampus, id]);
   const roomCount = roomGroups.reduce((total, floor) => total + floor.rooms.length, 0);
   const related = buildings.filter(
     (b) => b.id !== id && b.category === building?.category
   ).slice(0, 3);
   const bHours = building ? getOpenStatus(building) : null;
+  const campusQuery = buildingCampus ? `campusId=${encodeURIComponent(buildingCampus.id)}&` : "";
+  const campusSearch = buildingCampus ? `?campusId=${encodeURIComponent(buildingCampus.id)}` : "";
+  const mapHref = building
+    ? `/map?${campusQuery}buildingId=${encodeURIComponent(building.id)}`
+    : "/map";
+  const campusLocationLabel = [buildingCampus?.name, buildingCampus?.address, buildingCampus?.city]
+    .filter(Boolean)
+    .join(", ") || "Campus";
 
   useEffect(() => {
     if (!building) return;
@@ -109,7 +132,7 @@ export function BuildingDetailsPage() {
     return () => {
       mounted = false;
     };
-  }, [building, activeCampus?.id]);
+  }, [building, buildingCampus?.id]);
 
   const handleToggleSave = async () => {
     if (!building || saving) return;
@@ -117,7 +140,7 @@ export function BuildingDetailsPage() {
     setIsSaved(next);
     setSaving(true);
     try {
-      await studentAccountService.toggleSaveBuilding(building.id, activeCampus?.id);
+      await studentAccountService.toggleSaveBuilding(building.id, buildingCampus?.id);
       success(next ? "Saved to favorites" : "Removed from favorites");
     } catch {
       setIsSaved(!next);
@@ -132,7 +155,7 @@ export function BuildingDetailsPage() {
     const shareText = `${building.name} (${building.code}) — PLV NaviSync`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${building.id}` });
+        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${encodeURIComponent(building.id)}${campusSearch}` });
       } else {
         await navigator.clipboard?.writeText(shareText);
       }
@@ -143,7 +166,7 @@ export function BuildingDetailsPage() {
   };
 
 
-  if (!isLoading && !building) {
+  if (!isLoading && !campusesLoading && !building) {
     return (
       <PageTransition>
         <EmptyState
@@ -161,7 +184,7 @@ export function BuildingDetailsPage() {
   }
 
   // ── Loading skeleton ──
-  if (isLoading) {
+  if (isLoading || campusesLoading) {
     return (
       <PageTransition>
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -248,7 +271,7 @@ export function BuildingDetailsPage() {
             </h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-white/80">
               <span className="flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5" /> PLV Campus
+                <MapPin className="h-3.5 w-3.5" /> {buildingCampus?.name ?? "Campus"}
               </span>
               <span className="w-1 h-1 rounded-full bg-white/40" />
               <span>{building!.floor_count} floor{building!.floor_count !== 1 ? "s" : ""}</span>
@@ -293,10 +316,10 @@ export function BuildingDetailsPage() {
         <Reveal delay={80}>
           <div className="flex flex-wrap gap-2 mb-6"
         >
-          <Button variant="primary" size="md" onClick={() => navigate(`/map?buildingId=${encodeURIComponent(building!.id)}`)}>
+          <Button variant="primary" size="md" onClick={() => navigate(mapHref)}>
             <Navigation className="h-4 w-4" /> Get Directions
           </Button>
-          <Link to={`/map?buildingId=${encodeURIComponent(building!.id)}`}>
+          <Link to={mapHref}>
             <Button variant="outline" size="md">
               <MapPin className="h-4 w-4" /> View on Map
             </Button>
@@ -518,7 +541,7 @@ export function BuildingDetailsPage() {
               <h3 className="font-extrabold text-foreground text-sm">Building Information</h3>
               <div className="space-y-3 text-sm">
                 {[
-                  { icon: MapPin, label: "Location", value: "PLV Campus, Tongco St., Valenzuela City" },
+                  { icon: MapPin, label: "Location", value: campusLocationLabel },
                   { icon: Layers, label: "Floors", value: `${building!.floor_count} ${building!.floor_count === 1 ? "floor" : "floors"}` },
                   ...((bHours?.hoursLabel || building!.operating_hours) ? [{ icon: Clock, label: "Hours", value: bHours?.hoursLabel ?? building!.operating_hours! }] : []),
                   ...(building!.contact ? [{ icon: Phone, label: "Contact", value: building!.contact }] : []),
@@ -539,13 +562,13 @@ export function BuildingDetailsPage() {
             {/* Quick actions */}
             <div className="surface-card p-4 space-y-2">
               <Link
-                to={`/map?buildingId=${encodeURIComponent(building!.id)}`}
+                to={mapHref}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all active:scale-[0.98]"
               >
                 <Navigation className="h-4 w-4" /> Get Directions
               </Link>
               <Link
-                to={`/map?buildingId=${encodeURIComponent(building!.id)}`}
+                to={mapHref}
                 className="flex items-center justify-center gap-2 py-3 rounded-xl border border-border text-sm font-bold text-foreground hover:bg-muted transition-all"
               >
                 <MapPin className="h-4 w-4" /> View on Map
@@ -577,14 +600,14 @@ export function BuildingDetailsPage() {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.08 }}
                 >
-                  <BuildingCard building={b} />
+                  <BuildingCard building={b} campusId={buildingCampus?.id} campusName={buildingCampus?.name} />
                 </motion.div>
               ))}
             </div>
           </div>
         </Reveal>
         )}
-        {showReport && building && <ReportModal building={building} campusId={activeCampus?.id} floors={activeCampus?.buildings.find(item => item.id === building.id)?.floors} onClose={() => setShowReport(false)} />}
+        {showReport && building && <ReportModal building={building} campusId={buildingCampus?.id} floors={buildingCampus?.buildings.find(item => item.id === building.id)?.floors} onClose={() => setShowReport(false)} />}
       </div>
     </PageTransition>
   );

@@ -6,9 +6,8 @@ import {
   Settings,
   Map,
   Flag,
-  Users,
-  Megaphone,
   CalendarDays,
+  Users,
   History,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -22,18 +21,12 @@ import { sidebarSpring } from "../../config/animation";
 
 // Core admin navigation — focused on essential workflows.
 // Buildings, Floor Plans, Routes, Locations, and Accessibility are managed
-// inside the Map Builder workspace via its layer system; operational pages
-// (Reports, Announcements, Events) are standalone routes.
+// inside the Map Builder workspace via its layer system. Event Layouts remains
+// available for reviewing submitted venue layouts.
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/admin-dashboard", icon: LayoutDashboard },
   { label: "Map Builder", path: "/admin-dashboard/map-builder", icon: Map },
   { label: "Reports", path: "/admin-dashboard/reports", icon: Flag },
-  {
-    label: "Announcements",
-    path: "/admin-dashboard/announcements",
-    icon: Megaphone,
-  },
-  { label: "Events", path: "/admin-dashboard/events", icon: CalendarDays },
   { label: "Event Layouts", path: "/admin-dashboard/event-layouts", icon: CalendarDays },
   { label: "Users", path: "/admin-dashboard/users", icon: Users },
   {
@@ -164,7 +157,8 @@ export function AdminSidebar({
   );
 
   const isActive = (path: string) => {
-    return location.pathname === path;
+    return location.pathname === path
+      || (path === "/admin-dashboard/event-layouts" && location.pathname.startsWith(`${path}/`));
   };
 
   /**
