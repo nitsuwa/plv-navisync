@@ -38,6 +38,11 @@ export function visibleEventCards(
   });
 }
 
+export function eventVenueCandidates(events: PublicEventPreview[], nowMs: number, filter: EventMapFilter, selectedEventId: string | null): VisibleEventCard[] {
+  if (selectedEventId) return visibleEventCards(events, nowMs, 'all').filter(event => event.id === selectedEventId);
+  return visibleEventCards(events, nowMs, filter);
+}
+
 export function resolveEventLocation(
   campus: Campus,
   locationRef: PublicEventPreview["locations"][number]["locationRef"],
@@ -97,6 +102,15 @@ export function selectedEventLocation(
   const event = events.find((item) => item.id === eventId);
   const location = event?.locations.find((item) => item.id === locationId);
   return event && location ? { event, location } : null;
+}
+
+/** Follow the actual map while retaining a chosen room when several layouts share a floor. */
+export function eventLocationOnMap(event: PublicEventPreview | undefined, floorId: string | null, selectedLocationId: string | null): EventOverlayLocation | null {
+  const matches = (location: EventOverlayLocation) => floorId
+    ? location.locationRef.type !== 'campus' && location.locationRef.floorId === floorId
+    : location.locationRef.type === 'campus';
+  return event?.locations.find(location => location.id === selectedLocationId && matches(location))
+    ?? event?.locations.find(matches) ?? null;
 }
 
 export function toEventOverlayPreview(

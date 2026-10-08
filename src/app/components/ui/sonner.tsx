@@ -23,11 +23,14 @@ function useActiveTheme() {
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const theme = useActiveTheme();
+  const toastClassNames = props.toastOptions?.classNames;
+  const interactiveButtonClasses = (current?: string) => ["pointer-events-auto", current].filter(Boolean).join(" ");
 
   return (
     <Sonner
+      {...props}
       theme={theme as ToasterProps["theme"]}
-      className="toaster group"
+      className={["toaster group", props.className].filter(Boolean).join(" ")}
       style={
         {
           // Default
@@ -50,13 +53,20 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--info-bg": "color-mix(in srgb, var(--primary) 8%, var(--popover))",
           "--info-text": "var(--primary)",
           "--info-border": "color-mix(in srgb, var(--primary) 20%, var(--border))",
+          ...props.style,
         } as React.CSSProperties
       }
       toastOptions={{
-        className: "shadow-lg rounded-2xl border text-sm font-semibold",
-        duration: 4000,
+        ...props.toastOptions,
+        className: ["shadow-lg rounded-2xl border text-sm font-semibold pointer-events-none", props.toastOptions?.className].filter(Boolean).join(" "),
+        classNames: {
+          ...toastClassNames,
+          closeButton: interactiveButtonClasses(toastClassNames?.closeButton),
+          actionButton: interactiveButtonClasses(toastClassNames?.actionButton),
+          cancelButton: interactiveButtonClasses(toastClassNames?.cancelButton),
+        },
+        duration: props.toastOptions?.duration ?? 4000,
       }}
-      {...props}
     />
   );
 };

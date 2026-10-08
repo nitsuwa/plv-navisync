@@ -2,7 +2,7 @@ import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ImageIcon, Loader2, Plus, XCircle } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../../lib/utils";
 import { removeUnusedEventPoster, uploadEventPoster, validateEventPoster } from "../../lib/eventPosterStorage";
 import { normalizeEventOverlayLocations } from "../../lib/eventOverlayModel";
@@ -44,9 +44,11 @@ function ModalShell({
   footer: React.ReactNode;
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const reducedMotion = useReducedMotion();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const focusBeforeConfirmationRef = useRef<HTMLElement | null>(null);
+  const discardedRef = useRef(false);
   const requestClose = () => {
     if (dismissDisabled) return;
     if (document.activeElement instanceof HTMLElement) focusBeforeConfirmationRef.current = document.activeElement;
@@ -67,16 +69,16 @@ function ModalShell({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (!discardConfirmationOpen) returnFocusRef.current?.focus();
+            if (!discardConfirmationOpen || discardedRef.current) returnFocusRef.current?.focus({preventScroll:true});
           }}
           onEscapeKeyDown={(event) => { if (dismissDisabled) event.preventDefault(); }}
           onPointerDownOutside={(event) => { if (dismissDisabled) event.preventDefault(); }}
           className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden border border-border bg-card text-foreground shadow-2xl outline-none sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[92dvh] sm:w-[min(92vw,48rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl"
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.985, y: 8 }}
+            initial={reducedMotion ? false : { opacity: 0, scale: 0.985, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: "spring", duration: 0.3, bounce: 0.12 }}
+            transition={reducedMotion ? {duration:0} : { type: "spring", duration: 0.3, bounce: 0.12 }}
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:py-5">
@@ -119,7 +121,8 @@ function ModalShell({
             <AlertDialog.Content
               onCloseAutoFocus={(event) => {
                 event.preventDefault();
-                if (document.activeElement === document.body) focusBeforeConfirmationRef.current?.focus();
+                if (discardedRef.current) returnFocusRef.current?.focus({preventScroll:true});
+                else if (document.activeElement === document.body) focusBeforeConfirmationRef.current?.focus();
                 else if (!discardConfirmationOpen) focusBeforeConfirmationRef.current?.focus();
               }}
               className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl outline-none"
@@ -131,7 +134,7 @@ function ModalShell({
                   <button type="button" className="h-10 rounded-xl border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Keep editing</button>
                 </AlertDialog.Cancel>
                 <AlertDialog.Action asChild>
-                  <button type="button" onClick={onDiscard} className="h-10 rounded-xl bg-destructive px-4 text-sm font-bold text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive">Discard changes</button>
+                  <button type="button" onClick={()=>{discardedRef.current=true;onDiscard?.();}} className="h-10 rounded-xl bg-destructive px-4 text-sm font-bold text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive">Discard changes</button>
                 </AlertDialog.Action>
               </div>
             </AlertDialog.Content>
@@ -349,14 +352,28 @@ export function EventProposalModal({
         </>
       )}
       <AlertDialog.Root open={reviewOpen} onOpenChange={(open) => { if (!saving) setReviewOpen(open); }}>
-        <AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70 backdrop-blur-sm" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
-          <AlertDialog.Title className="text-lg font-bold">Review event proposal</AlertDialog.Title>
-          <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">Confirm the areas where you will design and plot event assets. This creates a draft for review later.</AlertDialog.Description>
-          <dl className="my-4 space-y-2 text-sm"><dt className="font-bold">{title}</dt><dd>{organizer || "Student Organization"}</dd><dd>{selectedCampus?.name || "Published campus"}</dd><dd>Event schedule set by the administrator after review</dd></dl>
-          <p className="text-sm font-bold">{locations.length} {locations.length === 1 ? "map" : "maps"} to design</p><ul className="my-3 space-y-2 text-sm">{locations.map((location, index) => <li key={index} className="rounded-lg bg-muted p-2">{location.label}</li>)}</ul>
-          {saving && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} role="status" aria-live="polite" className="mb-4 flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4"><Loader2 className="h-6 w-6 shrink-0 text-primary motion-safe:animate-spin" aria-hidden="true" /><div><p className="text-sm font-bold text-foreground">Preparing your event workspace</p><p className="mt-1 text-xs text-muted-foreground">Creating your draft and connecting the selected maps…</p></div></motion.div>}
-          <div className="flex gap-2"><AlertDialog.Cancel asChild><button disabled={saving} className="flex-1 rounded-xl border border-border p-3 text-sm font-bold">Back to locations</button></AlertDialog.Cancel><button onClick={() => void submit()} disabled={saving} className="flex-1 rounded-xl bg-primary p-3 text-sm font-bold text-primary-foreground">{saving ? "Creating…" : "Confirm & design"}</button></div>
-        </AlertDialog.Content></AlertDialog.Portal>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70 backdrop-blur-sm" />
+          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl [@media(max-height:500px)]:max-h-[calc(100dvh-0.5rem)]">
+            <div className="shrink-0 px-5 pt-5 sm:px-6 [@media(max-height:500px)]:pt-3">
+              <AlertDialog.Title className="text-lg font-bold">Review event proposal</AlertDialog.Title>
+              <AlertDialog.Description className="mt-2 text-sm text-muted-foreground [@media(max-height:500px)]:mt-1 [@media(max-height:500px)]:text-xs [@media(max-height:500px)]:leading-4">Confirm the areas where you will design and plot event assets. This creates a draft for review later.</AlertDialog.Description>
+            </div>
+            <div data-testid="proposal-confirmation-summary" role="region" aria-label="Proposal summary" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6 [@media(max-height:500px)]:py-3">
+              <dl className="text-sm"><dt className="font-bold">{title}</dt><div className="mt-1 flex flex-wrap gap-x-2 text-muted-foreground"><dd>{organizer || "Student Organization"}</dd><dd aria-hidden="true">·</dd><dd>{selectedCampus?.name || "Published campus"}</dd></div></dl>
+              <p className="mt-2 text-xs text-muted-foreground">Event schedule set by the administrator after review</p>
+              <p className="mt-2 text-sm font-bold">{locations.length} {locations.length === 1 ? "map" : "maps"} to design</p>
+              <ul className="mt-1.5 space-y-1.5 text-sm">{locations.map((location, index) => <li key={index} className="rounded-lg bg-muted p-2 [@media(max-height:500px)]:py-1">{location.label}</li>)}</ul>
+            </div>
+            <div data-testid="proposal-confirmation-actions" className="shrink-0 space-y-3 border-t border-border bg-card p-4 [@media(max-height:500px)]:p-3">
+              {saving && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} role="status" aria-live="polite" className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3"><Loader2 className="h-6 w-6 shrink-0 text-primary motion-safe:animate-spin" aria-hidden="true" /><div><p className="text-sm font-bold text-foreground">Preparing your event workspace</p><p className="mt-1 text-xs text-muted-foreground">Creating your draft and connecting the selected maps…</p></div></motion.div>}
+              <div className="flex gap-2">
+                <AlertDialog.Cancel asChild><button disabled={saving} className="min-h-11 flex-1 rounded-xl border border-border px-3 py-2 text-sm font-bold">Back to locations</button></AlertDialog.Cancel>
+                <button type="button" onClick={() => void submit()} disabled={saving} className="min-h-11 flex-1 rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground">{saving ? "Creating…" : "Confirm & design"}</button>
+              </div>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
       </AlertDialog.Root>
       <AlertDialog.Root open={pendingCampusId !== null} onOpenChange={(open) => { if (!open) setPendingCampusId(null); }}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-6"><AlertDialog.Title className="font-bold">Change campus?</AlertDialog.Title><AlertDialog.Description className="my-3 text-sm text-muted-foreground">Selected locations belong to the current campus. Changing campus clears them; your event details stay.</AlertDialog.Description><div className="flex gap-3"><AlertDialog.Cancel asChild><button className="rounded-lg border p-2">Keep campus</button></AlertDialog.Cancel><AlertDialog.Action asChild><button className="rounded-lg bg-primary p-2 text-primary-foreground" onClick={() => { setCampusId(pendingCampusId!); setLocations([]); setPendingCampusId(null); }}>Change and clear</button></AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
     </ModalShell>

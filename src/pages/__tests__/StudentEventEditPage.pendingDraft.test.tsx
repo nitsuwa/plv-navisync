@@ -47,16 +47,20 @@ const publishedCampusState = vi.hoisted(() => ({
 }));
 
 const authState = vi.hoisted(() => ({
+  listeners: new Set<() => void>(),
   isStudent: true,
   isStudentOrg: true,
   loading: false,
   username: "Demo Org",
   role: "student_org" as const,
-  profile: null,
+  profile: {id:'org-a'} as {id:string}|null,
   signOut: vi.fn(),
 }));
 
-vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => authState }));
+vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => {
+  useSyncExternalStore(listener=>{authState.listeners.add(listener);return()=>authState.listeners.delete(listener);},()=>`${authState.profile?.id}:${authState.loading}:${authState.isStudentOrg}`);
+  return authState;
+} }));
 vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => {
   useSyncExternalStore((listener) => {
     publishedCampusState.listeners.add(listener);
@@ -74,6 +78,7 @@ vi.mock("../../lib/eventLocationData", async (importOriginal) => {
 const floorPlan = fixture.floorPlan as FloorPlan;
 const overlay: CampusEventOverlay = {
   id: "event-1",
+  createdByUserId: 'org-a',
   title: "College Week",
   description: "",
   organizer: "Demo Org",
@@ -153,7 +158,10 @@ function startPendingChairMove() {
 }
 
 beforeEach(() => {
+  authState.profile={id:'org-a'};
   localStorage.clear();
+  localStorage.setItem('navisync:event-editor-tour:v2:org-a','done');
+  localStorage.setItem('navisync:event-editor-tour:v2:org-b','done');
   vi.clearAllMocks();
   fixture.floorResolver.mockImplementation(() => fixture.floorPlan);
   publishedCampusState.activeCampus = null;
@@ -168,6 +176,33 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it('clears an already loaded private map when the actor changes on the same URL',async()=>{
+    renderPage();
+    await screen.findByTestId('event-furniture-a-chair');
+    act(()=>{authState.profile={id:'org-b'};authState.listeners.forEach(listener=>listener());});
+    expect(screen.queryByTestId('event-furniture-a-chair')).not.toBeInTheDocument();
+    expect(await screen.findByText(/belongs to another student organization/i)).toBeInTheDocument();
+  });
+  it('ignores a previous actor delayed load after another actor map has loaded',async()=>{
+    let finish!: (value:CampusEventOverlay)=>void;
+    fixture.service.getEventOverlay.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    renderPage();
+    await waitFor(()=>expect(fixture.service.getEventOverlay).toHaveBeenCalledOnce());
+    expect(screen.getByRole('status')).toHaveTextContent('Loading event map');
+    fixture.service.getEventOverlay.mockResolvedValue({...overlay,createdByUserId:'org-b',title:'B private layout'});
+    act(()=>{authState.profile={id:'org-b'};authState.listeners.forEach(listener=>listener());});
+    await screen.findByText('B private layout');
+    await act(async()=>finish(overlay));
+    expect(screen.getByText('B private layout')).toBeInTheDocument();
+    expect(screen.queryByText('College Week',{exact:true})).not.toBeInTheDocument();
+  });
+  it('refuses another organization event even if a read response contains it', async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({...overlay,createdByUserId:'org-b'});
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/belongs to another student organization/i);
+    expect(screen.queryByRole('button',{name:'Save Draft'})).not.toBeInTheDocument();
+    expect(screen.queryByTestId('event-furniture-a-chair')).not.toBeInTheDocument();
+  });
   it('keeps edits and blocks a competing save while acknowledgement is in flight', async () => {
     const feedback = '@event-feedback/v1:' + JSON.stringify({text:'',pins:[{id:'pin',x:24,y:24,comment:'Move this chair'}]});
     const source = { ...overlay, locationFeedback: { 'location-a': feedback } };

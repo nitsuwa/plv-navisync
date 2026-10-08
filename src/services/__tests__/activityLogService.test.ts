@@ -64,13 +64,14 @@ describe("activity log service", () => {
       : { select: vi.fn(() => logQuery) });
     vi.mocked(getSupabase).mockReturnValue({
       from,
+      rpc: vi.fn().mockResolvedValue({data:cutoff,error:null}),
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } }, error: null }) },
     } as never);
 
     const result = await listVisibleActivityHistory({ entityTypes: ["event", "event_overlay"], limit: 50 });
 
     expect(result).toMatchObject({ rows: [{ id: "new-log" }], clearedBefore: cutoff });
-    expect(preferenceEq).toHaveBeenCalledWith("admin_id", "admin-1");
+    expect(from).not.toHaveBeenCalledWith('admin_activity_preferences');
     expect(logQuery.gt).toHaveBeenCalledWith("created_at", cutoff);
     expect(logQuery.in).toHaveBeenCalledWith("entity_type", ["event", "event_overlay"]);
   });
@@ -89,6 +90,7 @@ describe("activity log service", () => {
       : { select: vi.fn(() => logQuery) });
     vi.mocked(getSupabase).mockReturnValue({
       from,
+      rpc: vi.fn().mockResolvedValue({data:null,error:{code:'PGRST202',message:'Could not find the function public.get_admin_activity_clear_cutoff'}}),
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } }, error: null }) },
     } as never);
 
@@ -96,6 +98,9 @@ describe("activity log service", () => {
 
     expect(result).toEqual({ rows: [historical], clearedBefore: null });
     expect(logQuery.gt).not.toHaveBeenCalled();
+    await listVisibleActivityHistory({limit:50});
+    expect(getSupabase().rpc).toHaveBeenCalledTimes(1);
+    expect(from).not.toHaveBeenCalledWith('admin_activity_preferences');
   });
 
   it("treats a missing clear-history row as no cutoff and leaves existing activity visible", async () => {
@@ -109,6 +114,7 @@ describe("activity log service", () => {
       : { select: vi.fn(() => logQuery) });
     vi.mocked(getSupabase).mockReturnValue({
       from,
+      rpc: vi.fn().mockResolvedValue({data:null,error:null}),
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "admin-1" } }, error: null }) },
     } as never);
 

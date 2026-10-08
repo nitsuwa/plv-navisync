@@ -27,4 +27,16 @@ describe("EventVenueLayer", () => {
     fireEvent.click(screen.getByRole("button", { name: /View Open House/i }));
     expect(onSelect).toHaveBeenCalledWith("event-b", "floor-b");
   });
+
+  it('labels venues and shared event counts visibly, then opens venue information on inspection', () => {
+    const first = eventPreviewFixture();
+    const second = eventPreviewFixture({ id: 'event-b', title: 'Open House' });
+    const inspect = vi.fn(); const onSelect = vi.fn();
+    render(<svg><EventVenueLayer campus={campus} events={[first, second]} onSelect={onSelect} onInspectVenue={inspect} /></svg>);
+    expect(screen.getByText('Campus Grounds')).toBeInTheDocument();
+    expect(screen.getByText('2 events')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Campus Grounds.*2 events/i }));
+    expect(inspect).toHaveBeenCalledWith('campus');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

@@ -23,10 +23,10 @@ import { CAMPUS_GROUNDS_ID, resolveFloorPlanForEvent } from "../lib/eventLocatio
 import type { Campus, CampusEventOverlay, EventOverlayLocation, EventLocationRef, FloorFurniture, FloorLabel } from "../components/map-builder/types";
 
 function LoadingState() {
-  return <div className="min-h-screen bg-background flex items-center justify-center"><div className="flex flex-col items-center gap-3"><Loader2 className="h-8 w-8 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Loading event map...</p></div></div>;
+  return <div role="status" aria-live="polite" aria-busy="true" className="h-full min-h-0 bg-background flex items-center justify-center"><div className="flex flex-col items-center gap-3"><Loader2 aria-hidden="true" className="h-8 w-8 text-primary motion-safe:animate-spin" /><p className="text-sm text-muted-foreground">Loading event map...</p></div></div>;
 }
 function ErrorState({ message }: { message: string }) {
-  return <div className="min-h-screen bg-background flex items-center justify-center px-4"><div className="text-center max-w-sm"><AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" /><h2 className="text-lg font-extrabold text-foreground mb-2">Event map unavailable</h2><p className="text-sm text-muted-foreground mb-6">{message}</p><Link to="/student/events" className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all"><ArrowLeft className="h-4 w-4" /> Back to My Events</Link></div></div>;
+  return <div className="h-full min-h-0 overflow-y-auto bg-background flex items-center justify-center px-4 py-6"><div role="alert" className="text-center max-w-sm"><AlertCircle aria-hidden="true" className="h-12 w-12 text-muted-foreground mx-auto mb-4" /><h2 className="text-lg font-extrabold text-foreground mb-2">Event map unavailable</h2><p className="text-sm text-muted-foreground mb-6">{message}</p><Link to="/student/events" className="inline-flex items-center gap-2 min-h-11 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all"><ArrowLeft aria-hidden="true" className="h-4 w-4" /> Back to My Events</Link></div></div>;
 }
 
 function resolveLocationBaseMap(locationRef: EventLocationRef, campus: Campus | null) {
@@ -46,6 +46,16 @@ function layoutsMatch(a: EventOverlayLocation[], b: EventOverlayLocation[]): boo
 }
 
 export function StudentEventEditPage() {
+  const {id}=useParams<{id:string}>();
+  const {isStudentOrg,profile,loading}=useStudentAuth();
+  if (loading) return <LoadingState/>;
+  if (!isStudentOrg) return <Navigate to="/home" replace/>;
+  if (!profile?.id) return <ErrorState message="Your session is unavailable. Sign in again to open your event maps."/>;
+  // Each actor/route owns its editor state and all pending work; no cached map crosses accounts.
+  return <StudentEventEditorSession key={`${profile.id}:${id}`} ownerId={profile.id}/>;
+}
+
+function StudentEventEditorSession({ownerId}:{ownerId:string}) {
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -73,6 +83,8 @@ export function StudentEventEditPage() {
   const latestLocationsRef = useRef<EventOverlayLocation[]>([]);
   const activeEditorLocationIdRef = useRef<string | null>(null);
   const campusSnapshotRef = useRef<{ eventId: string; campus: Campus | null } | null>(null);
+  const activeSession = useRef(true);
+  useEffect(()=>{activeSession.current=true;return()=>{activeSession.current=false;};},[]);
 
   useEffect(() => {
     if (!id) {
@@ -82,8 +94,13 @@ export function StudentEventEditPage() {
     }
     eventOverlayService.getEventOverlay(id)
       .then((data) => {
+        if (!activeSession.current) return;
         if (!data) {
           setError("The event does not exist or is no longer available.");
+          return;
+        }
+        if (data.createdByUserId !== ownerId) {
+          setError('This event belongs to another student organization. Open one of your own events from My Events.');
           return;
         }
         const normalizedLocations = normalizeEventOverlayLocations(data);
@@ -91,9 +108,9 @@ export function StudentEventEditPage() {
         setDraftLocations(normalizedLocations);
         setActiveLocationId(normalizedLocations[0]?.id || "");
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load event."))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .catch((err) => {if(activeSession.current)setError(err instanceof Error ? err.message : "Failed to load event.");})
+      .finally(() => {if(activeSession.current)setLoading(false);});
+  }, [id,ownerId]);
 
   const persistedLocations = useMemo(() => overlay ? normalizeEventOverlayLocations(overlay) : [], [overlay]);
   const locations = draftLocations ?? persistedLocations;
@@ -189,11 +206,12 @@ export function StudentEventEditPage() {
   }, [overlay, persistedLocations]);
 
   const saveLocations = useCallback(async (nextLocations: EventOverlayLocation[]) => {
-    if (!overlay || !activeLocation || mutationRef.current) return false;
+    if (!activeSession.current || !overlay || !activeLocation || mutationRef.current) return false;
     mutationRef.current = true;
     setSaving(true);
     try {
       const saved = await eventOverlayService.updateEventOverlayLayout(overlay.id, nextLocations, overlay.updatedAt);
+      if (!activeSession.current) return false;
       const allCurrentEditsSaved = layoutsMatch(nextLocations, captureLocations());
       updateOverlay(nextLocations);
       if (saved) setOverlay(saved);
@@ -201,11 +219,11 @@ export function StudentEventEditPage() {
       toast.success(overlay.status === "pending" ? "Submission maps saved" : "Draft saved", allCurrentEditsSaved ? `${activeLocation.locationRef.label} map changes were saved.` : "Earlier edits were saved. Newer changes remain in your draft.");
       return allCurrentEditsSaved;
     } catch (err) {
-      toast.error("Save failed", err instanceof Error ? err.message : "Something went wrong.");
+      if(activeSession.current)toast.error("Save failed", err instanceof Error ? err.message : "Something went wrong.");
       return false;
     } finally {
       mutationRef.current = false;
-      setSaving(false);
+      if(activeSession.current)setSaving(false);
     }
   }, [activeLocation, captureLocations, clearRecoveryDrafts, overlay, toast, updateOverlay]);
 
@@ -217,12 +235,13 @@ export function StudentEventEditPage() {
   }, [activeLocation, saveLocations]);
 
   const autosave = useCallback(async () => {
-    if (!overlay || saving || submitting || mutationRef.current) return false;
+    if (!activeSession.current || !overlay || saving || submitting || mutationRef.current) return false;
     mutationRef.current = true;
     const snapshot = captureLocations();
     setSaving(true);
     try {
       const saved = await eventOverlayService.updateEventOverlayLayout(overlay.id, snapshot, overlay.updatedAt);
+      if (!activeSession.current) return false;
       // Advance the persisted baseline without replacing edits made while saving.
       setOverlay((previous) => previous?.id === overlay.id ? {
         ...previous, ...(saved ?? {}), status: saved?.status ?? (previous.status === "pending" ? "pending" : "draft"), submittedAt: previous.status === "pending" ? previous.submittedAt : undefined, locations: snapshot,
@@ -233,7 +252,7 @@ export function StudentEventEditPage() {
       if (layoutsMatch(snapshot, latestLocationsRef.current)) clearRecoveryDrafts();
       return true;
     } catch { return false; }
-    finally { mutationRef.current = false; setSaving(false); }
+    finally { mutationRef.current = false; if(activeSession.current)setSaving(false); }
   }, [captureLocations, clearRecoveryDrafts, overlay, saving, submitting]);
   const saveStatus = useEventAutosave(
     isDirty,
@@ -258,7 +277,7 @@ export function StudentEventEditPage() {
   }, [activeLocation, overlay, toast]);
 
   const confirmSubmission = useCallback(async () => {
-    if (!overlay || !submissionLocations || saving || submitting || mutationRef.current) return;
+    if (!activeSession.current || !overlay || !submissionLocations || saving || submitting || mutationRef.current) return;
     mutationRef.current = true;
     setSubmitting(true);
     try {
@@ -267,15 +286,16 @@ export function StudentEventEditPage() {
       } else {
         await eventOverlayService.submitEventOverlayLayout(overlay.id, submissionLocations, overlay.updatedAt);
       }
+      if (!activeSession.current) return;
       clearRecoveryDrafts();
       allowNavigationRef.current = true;
       toast.success(overlay.status === "pending" ? "Submission updated" : "Submitted to GSO", overlay.status === "pending" ? "Your saved changes are available to GSO. The proposal remains pending review." : "All requested locations and maps are now pending one combined review.");
       navigate("/student/events");
     } catch (err) {
-      toast.error("Submit failed", err instanceof Error ? err.message : "Something went wrong.");
+      if(activeSession.current)toast.error("Submit failed", err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       mutationRef.current = false;
-      setSubmitting(false);
+      if(activeSession.current)setSubmitting(false);
     }
   }, [submissionLocations, saving, submitting, clearRecoveryDrafts, navigate, overlay, toast]);
 
@@ -326,16 +346,17 @@ export function StudentEventEditPage() {
   }, [handleLocationChange]);
 
   const changeFeedback = useCallback(async (locationId: string, pinId: string, addressed: boolean, note: string) => {
-    if (!overlay || mutationRef.current) return;
+    if (!activeSession.current || !overlay || mutationRef.current) return;
     mutationRef.current = true;
     setFeedbackSaving(true);
     try {
       const saved = await eventOverlayService.setEventFeedbackPinAddressed(overlay, locationId, pinId, addressed, note);
+      if (!activeSession.current) return;
       setOverlay(saved);
       toast.success(addressed ? 'Issue marked as addressed' : 'Issue reopened', 'Your checklist was saved for GSO review.');
     } catch (err) {
-      toast.error('Checklist not saved', err instanceof Error ? err.message : 'Please retry.');
-    } finally { mutationRef.current = false; setFeedbackSaving(false); }
+      if(activeSession.current)toast.error('Checklist not saved', err instanceof Error ? err.message : 'Please retry.');
+    } finally { mutationRef.current = false; if(activeSession.current)setFeedbackSaving(false); }
   }, [overlay, toast]);
 
   if (loading || ((authLoading || campusLoading) && !campusSnapshotRef.current)) return <LoadingState />;

@@ -124,6 +124,15 @@ export type Database = {
           },
         ]
       }
+      event_notification_receipts: {
+        Row: { viewer_id: string; event_id: string; stream: string; fingerprint: string; read_at: string }
+        Insert: { viewer_id: string; event_id: string; stream: string; fingerprint: string; read_at?: string }
+        Update: { viewer_id?: string; event_id?: string; stream?: string; fingerprint?: string; read_at?: string }
+        Relationships: [
+          { foreignKeyName: "event_notification_receipts_viewer_id_fkey"; columns: ["viewer_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          { foreignKeyName: "event_notification_receipts_event_id_fkey"; columns: ["event_id"]; isOneToOne: false; referencedRelation: "map_elements"; referencedColumns: ["id"] },
+        ]
+      }
       announcement_locations: {
         Row: {
           announcement_id: string
@@ -1602,6 +1611,15 @@ export type Database = {
       }
       campus_is_published: { Args: { p_campus_id: string }; Returns: boolean }
       clear_admin_activity_history: { Args: never; Returns: string }
+      get_admin_activity_clear_cutoff: { Args: never; Returns: string | null }
+      get_event_notification_states: {
+        Args: { p_expected_user_id: string; p_stream: string; p_candidates: Json }
+        Returns: { event_id: string; is_current: boolean; is_read: boolean }[]
+      }
+      ack_event_notification: {
+        Args: { p_expected_user_id: string; p_stream: string; p_event_id: string; p_payload: Json }
+        Returns: string
+      }
       is_admin: { Args: never; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
       list_coming_soon_campuses: {

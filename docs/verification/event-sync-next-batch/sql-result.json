@@ -1,0 +1,32 @@
+{
+  "status": "PASS",
+  "count": 26,
+  "checks": [
+    "New submission is unread",
+    "Admin acknowledgement is shared across independent sessions",
+    "Account-switch acknowledgement is rejected",
+    "Unknown stream is rejected",
+    "Admin cannot acknowledge an Org stream",
+    "New revision is unread",
+    "Stale displayed payload is not current",
+    "Stale acknowledgement cannot clear a new revision",
+    "Ordinary student cannot read Admin states",
+    "Ordinary student cannot write receipts",
+    "Direct client insert is denied",
+    "Anonymous RPC execution is denied",
+    "Org sees its review unread",
+    "Object order does not prevent acknowledgement",
+    "Owner only sees its receipt rows",
+    "Foreign Org is denied review states",
+    "Foreign Org is denied acknowledgement",
+    "Foreign Org cannot SELECT owner receipts",
+    "New comment becomes unread",
+    "Old review cannot clear new feedback",
+    "Owner cannot clear admin history",
+    "No activity cutoff is returned before clearing",
+    "Admin cutoff persists without deleting audit rows",
+    "Migration is idempotent and keeps receipts",
+    "Event metadata and audit rows remain intact",
+    "Role demotion denies previous receipts"
+  ]
+}

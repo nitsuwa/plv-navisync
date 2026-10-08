@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentEventEditPage } from "../StudentEventEditPage";
 import { StudentMyEventsPage } from "../StudentMyEventsPage";
 import { eventOverlayService } from "../../services/eventOverlayService";
 import { isEventReviewUnread } from "../../lib/studentEventUpdates";
+import { eventNotificationService } from '../../services/eventNotificationService';
+vi.mock('../../services/eventNotificationService',async(importOriginal)=>{const actual=await importOriginal<typeof import('../../services/eventNotificationService')>();return {...actual,eventNotificationService:{getStates:vi.fn().mockRejectedValue(new actual.EventNotificationSyncUnavailable('Browser only')),acknowledge:vi.fn().mockRejectedValue(new actual.EventNotificationSyncUnavailable('Browser only'))}};});
 
 const authState = vi.hoisted(() => ({
   isStudent: true,
@@ -58,6 +60,19 @@ vi.mock("../../services/eventOverlayService", () => ({
 
 describe("StudentMyEventsPage access", () => {
   beforeEach(() => localStorage.clear());
+  it('does not force an old editor navigation after the user leaves during acknowledgement',async()=>{
+    authState.isStudentOrg=true;authState.profile={id:'org-late-route'};
+    let finish!:(value:void)=>void;
+    vi.mocked(eventNotificationService.acknowledge).mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([{id:'delayed',createdByUserId:'org-late-route',title:'Delayed',organizer:'Org',status:'approved',locations:[]}] as never);
+    render(<MemoryRouter initialEntries={['/student/events']}><Routes><Route path='/student/events' element={<StudentMyEventsPage/>}/><Route path='/home' element={<div>Home destination</div>}/><Route path='/student/events/:id/edit' element={<div>Old editor destination</div>}/></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('link',{name:'View maps'}));
+    fireEvent.click(screen.getByRole('link',{name:'Back to Home'}));
+    expect(await screen.findByText('Home destination')).toBeInTheDocument();
+    await act(async()=>{finish();});
+    expect(screen.getByText('Home destination')).toBeInTheDocument();
+    expect(screen.queryByText('Old editor destination')).not.toBeInTheDocument();
+  });
   it("acknowledges only the layout whose maps are opened", async () => {
     authState.isStudentOrg = true; authState.profile = { id: "org-1" };
     const events = ["First", "Second"].map((title, index) => ({ id: `view-${index}`, createdByUserId: "org-1", title, organizer: "Org", status: "approved", locations: [] }));
@@ -76,7 +91,7 @@ describe("StudentMyEventsPage access", () => {
     render(<MemoryRouter><StudentMyEventsPage /></MemoryRouter>);
     expect(await screen.findByTestId("org-event-card-review-0")).toHaveAttribute("data-unread", "true");
     fireEvent.click(screen.getByRole("button", { name: "Mark GSO update for First as read" }));
-    expect(screen.getByTestId("org-event-card-review-0")).toHaveAttribute("data-unread", "false");
+    await waitFor(()=>expect(screen.getByTestId("org-event-card-review-0")).toHaveAttribute("data-unread", "false"));
     expect(screen.getByTestId("org-event-card-review-1")).toHaveAttribute("data-unread", "true");
   });
   it('shows a retryable error instead of an empty event list on fetch failure', async () => {

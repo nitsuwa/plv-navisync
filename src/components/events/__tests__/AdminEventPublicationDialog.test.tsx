@@ -13,6 +13,28 @@ const overlay = {
 describe("AdminEventPublicationDialog", () => {
   beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T02:00:00Z")); });
   afterEach(() => vi.restoreAllMocks());
+  it('shows visible unpublish progress while the confirmation request is pending',async()=>{
+    let finish!:()=>void;
+    const onSave=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    render(<AdminEventPublicationDialog overlay={overlay} onClose={vi.fn()} onSave={onSave}/>);
+    fireEvent.click(screen.getByRole('button',{name:/^Unpublish$/}));
+    fireEvent.click(screen.getByRole('button',{name:/Confirm unpublish/i}));
+    expect(screen.getByRole('button',{name:/Unpublishing/i})).toBeDisabled();
+    await act(async()=>{finish();});
+  });
+
+  it('shows the active publication action and prevents duplicate saves',async()=>{
+    let finish!:()=>void;
+    const onSave=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    render(<AdminEventPublicationDialog overlay={{...overlay,isActive:false}} onClose={vi.fn()} onSave={onSave}/>);
+    fireEvent.click(screen.getByRole('button',{name:/Publish now/i}));
+    const saving=screen.getByRole('button',{name:/Publishing/i});
+    expect(saving).toBeDisabled();
+    expect(screen.getByRole('button',{name:/Save schedule/i})).toBeDisabled();
+    fireEvent.click(saving);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await act(async()=>{finish();});
+  });
 
   it("shows Published instead of allowing redundant publishing and avoids a stale schedule error on open", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-08T02:00:00Z"));

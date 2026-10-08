@@ -21,6 +21,7 @@ const floorLocation = {
 
 function makeClient(rows: unknown[] = []) {
   const filters: Array<{ column: string; value: unknown }> = [];
+  const matchingRows=()=>rows.filter(row=>filters.every(filter=>filter.column!=='archived_at'||((row as {archived_at?:string|null}).archived_at??null)===filter.value));
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn((column: string, value: unknown) => {
@@ -28,8 +29,9 @@ function makeClient(rows: unknown[] = []) {
       return query;
     }),
     or: vi.fn(() => query),
-    order: vi.fn().mockResolvedValue({ data: rows, error: null }),
-    single: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
+    is: vi.fn((column:string,value:unknown)=>{filters.push({column,value});return query;}),
+    order: vi.fn(async()=>({ data: matchingRows(), error: null })),
+    single: vi.fn(async()=>({ data: matchingRows()[0] ?? null, error: null })),
     maybeSingle: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
   };
   const mapElements = {
@@ -67,6 +69,38 @@ function publishedCampus(id: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("event overlay service", () => {
+  it('reports an expired-session read instead of pretending the event was deleted',async()=>{
+    const {client,mapElements}=makeClient();
+    mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.getEventOverlay('event-1')).rejects.toThrow(/session.*expired.*sign in/i);
+  });
+  it('keeps a transient read failure actionable instead of returning an empty event',async()=>{
+    const {client,mapElements}=makeClient();
+    mapElements.select().single.mockRejectedValue(new Error('Network unavailable'));
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.getEventOverlay('event-1')).rejects.toThrow('Network unavailable');
+  });
+  it('excludes archived proposals from the active pending queue',async()=>{
+    const {client}=makeClient([
+      {id:'active',campus_id:'campus-1',archived_at:null,metadata:{status:'pending',title:'Active submission'}},
+      {id:'archived',campus_id:'campus-1',archived_at:'2026-10-01T00:00:00Z',metadata:{status:'pending',title:'Archived submission'}},
+    ]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    const events=await eventOverlayService.listEventOverlays({allCampuses:true,status:'pending',strict:true});
+    expect(events.map(event=>event.id)).toEqual(['active']);
+  });
+  it('does not reopen an archived proposal through a notification deep link',async()=>{
+    const {client}=makeClient([{id:'archived',campus_id:'campus-1',archived_at:'2026-10-01T00:00:00Z',metadata:{status:'pending',title:'Archived submission'}}]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    expect(await eventOverlayService.getEventOverlay('archived')).toBeNull();
+  });
+  it('preserves a server publication conflict as an actionable Error for the dialog',async()=>{
+    const {client}=makeClient();client.rpc.mockResolvedValue({data:null,error:{code:'40001',message:'Refresh the current publication revision.'}} as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.manageEventPublication('event-1','2026-10-08T00:00:00Z',{action:'publish_now'})).rejects.toThrow('Refresh the current publication revision.');
+    await expect(eventOverlayService.manageEventPublication('event-1','2026-10-08T00:00:00Z',{action:'publish_now'})).rejects.toBeInstanceOf(Error);
+  });
   it.each(["not-a-date", "2026-10-02T00:00:00Z"])("rejects invalid or past publication %s before sending a command", async (publicationAt) => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T00:00:00Z"));
     const { client } = makeClient();

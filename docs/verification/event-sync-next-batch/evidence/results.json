@@ -1,0 +1,59 @@
+{
+  "mode": "Controlled desktop/mobile browser contexts and clocks; no live event writes",
+  "checks": [
+    "Admin review acknowledgement saved to shared controlled server",
+    "Stale review keeps feedback and provides retry",
+    "Admin review mobile: no horizontal overflow",
+    "Admin review mobile: modal stays inside viewport",
+    "Separate Admin context reads same receipt without local storage",
+    "Org mobile receipt: no horizontal overflow",
+    "Separate Org context uses server review receipt",
+    "A changed review becomes unread on the second device",
+    "Failed server acknowledgement stays unread with visible retry",
+    "Opening maps saves browser fallback before navigation",
+    "Org small mobile: no horizontal overflow",
+    "Mobile publication loading: no horizontal overflow",
+    "Mobile publication loading: modal stays inside viewport",
+    "1440px: event visible in Upcoming",
+    "1440px: cached event and retry stay visible after background failure",
+    "Student 1440px: no horizontal overflow",
+    "1440px: becomes Ongoing without reload",
+    "1440px: end time dismisses selected overlay and event",
+    "390px: event visible in Upcoming",
+    "390px: cached event and retry stay visible after background failure",
+    "Student 390px: no horizontal overflow",
+    "390px: becomes Ongoing without reload",
+    "390px: end time dismisses selected overlay and event",
+    "No browser page errors",
+    "No event record mutation attempts; all unhandled writes blocked"
+  ],
+  "pageErrors": [],
+  "blockedLiveWrites": 6,
+  "blockedRequests": [
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/list_coming_soon_campuses"
+    }
+  ],
+  "status": "PASS"
+}

@@ -12,7 +12,7 @@ import { AdminEventMapPreviewDialog } from "../components/events/AdminEventMapPr
 import { EventFurnitureSummary } from "../components/events/EventFurnitureSummary";
 import { readEventFeedback, writeEventFeedback } from "../lib/eventFeedbackPins";
 import { EventFeedbackChecklist } from "../components/events/EventFeedbackChecklist";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   CalendarDays,
   MapPin,
@@ -38,7 +38,7 @@ import {
 } from "../services/eventOverlayService";
 import type { CampusEventOverlay } from "../components/map-builder/types";
 import { countEventOverlayItems, normalizeEventOverlayLocations } from "../lib/eventOverlayModel";
-import { findEventConflicts, formatEventDate, getStudentEventPhase } from "../lib/eventPublication";
+import { findEventConflicts, formatEventDate } from "../lib/eventPublication";
 import { formatEventSubmissionTime } from "../lib/eventSubmissionTime";
 import { isValidThemedTime, manilaDateTimeToIso, ThemedDateTimeField } from "../components/ui/ThemedDateTimeField";
 import { AdminEventPublicationDialog } from "../components/events/AdminEventPublicationDialog";
@@ -46,6 +46,10 @@ import type { EventPublicationCommand } from "../types/eventPreview";
 import { useAdminAuth } from "../hooks/useAdminAuth";
 import { clearEventReviewDraft, readEventReviewDraft, writeEventReviewDraft } from "../lib/eventReviewDraft";
 import { EventFeedbackPinList } from "../components/events/EventFeedbackPinList";
+import { useSearchParams } from 'react-router';
+import { useAdminEventSubmissions } from '../hooks/useAdminEventSubmissions';
+import { submissionUpdateLabel } from '../lib/adminEventSubmissions';
+import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -84,16 +88,6 @@ const STATUS_CONFIG: Record<
     icon: XCircle,
   },
 };
-
-function publicationStateLabel(overlay: CampusEventOverlay): string {
-  if (!overlay.isActive) return "Unpublished";
-  const phase = getStudentEventPhase(overlay, Date.now());
-  if (phase === "scheduled") return "Scheduled";
-  if (phase === "upcoming") return "Upcoming";
-  if (phase === "ongoing") return "Ongoing";
-  if (phase === "ended") return "Ended";
-  return "Timing unavailable";
-}
 
 // ── Review Modal ─────────────────────────────────────────────────────────
 
@@ -153,7 +147,9 @@ function ReviewModal({
   const [publicationDate, setPublicationDate] = useState(recoveredDraft?.publicationDate ?? "");
   const [publicationTime, setPublicationTime] = useState(recoveredDraft?.publicationTime ?? "");
   const [locationFeedback, setLocationFeedback] = useState<Record<string, string>>(recoveredDraft?.locationFeedback ?? overlay.locationFeedback ?? {});
-  const [busy, setBusy] = useState(false);
+  const [busyAction,setBusyAction] = useState<'approved' | 'disapproved' | null>(null);
+  const busy = busyAction !== null;
+  const reducedMotion = useReducedMotion();
   const [reviewError, setReviewError] = useState("");
   const [scheduleTouched, setScheduleTouched] = useState(recoveredDraft?.scheduleTouched ?? false);
   const [discardReview, setDiscardReview] = useState(false);
@@ -224,7 +220,7 @@ function ReviewModal({
     if (decision === "approved" && !eventScheduleValid) return;
     if (decision === "approved" && !publicationScheduleValid) return;
     reviewInFlight.current = true;
-    setBusy(true);
+    setBusyAction(decision);
     setReviewError("");
     try {
       await onReview(
@@ -255,7 +251,7 @@ function ReviewModal({
       );
     } finally {
       reviewInFlight.current = false;
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -267,9 +263,10 @@ function ReviewModal({
       <Dialog.Overlay className="fixed inset-0 z-50 bg-background/70 backdrop-blur-sm" />
       <Dialog.Content asChild onCloseAutoFocus={event => { if (returnFocusRef?.current) { event.preventDefault(); returnFocusRef.current.focus(); } }} onEscapeKeyDown={(event) => { if (busy) event.preventDefault(); }} onPointerDownOutside={(event) => event.preventDefault()}>
       <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 6 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
+        transition={{ duration: reducedMotion ? 0 : 0.16 }}
+        aria-busy={busy}
         className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-card border border-border rounded-2xl shadow-2xl w-[calc(100%-1.5rem)] max-w-3xl overflow-hidden max-h-[calc(100dvh-1.5rem)] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
       >
@@ -396,24 +393,24 @@ function ReviewModal({
             disabled={busy || (comment.trim().length === 0) || !overlay.updatedAt}
             className="flex-1 h-10 rounded-xl bg-destructive text-white text-sm font-bold hover:bg-destructive/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+            {busyAction === 'disapproved' ? (
+              <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
             ) : (
               <XCircle className="h-4 w-4" />
             )}
-            Disapprove
+            {busyAction === 'disapproved' ? 'Requesting changes…' : 'Disapprove'}
           </button>
           <button
             onClick={() => handleReview("approved")}
             disabled={busy || !eventScheduleValid || !publicationScheduleValid || !overlay.updatedAt || !locations.length || !overlay.createdByUserId}
             className="flex-1 h-10 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 active:scale-[0.97] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
           >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+            {busyAction === 'approved' ? (
+              <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
             ) : (
               <CheckCircle2 className="h-4 w-4" />
             )}
-            Approve
+            {busyAction === 'approved' ? 'Approving…' : 'Approve'}
           </button>
         </div>
       </motion.div>
@@ -424,7 +421,10 @@ function ReviewModal({
 // ── Main Page ─────────────────────────────────────────────────────────────
 
 export function AdminEventLayoutsPage() {
-  const { profile } = useAdminAuth();
+  const { profile, isAdmin, loading: authLoading } = useAdminAuth();
+  const submissions = useAdminEventSubmissions(profile?.id, isAdmin && !authLoading);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedReviewId = searchParams.get('review');
   const [reviewPreviewFirst, setReviewPreviewFirst] = useState(false);
   const [previewTarget, setPreviewTarget] = useState<CampusEventOverlay | null>(null);
   const standalonePreviewTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -443,6 +443,31 @@ export function AdminEventLayoutsPage() {
   const [publicationTarget, setPublicationTarget] = useState<CampusEventOverlay | null>(null);
   const requestRef = useRef(0);
   const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
+  useEffect(() => {
+    if (!requestedReviewId || !isAdmin || authLoading) return;
+    let cancelled = false;
+    void eventOverlayService.getEventOverlay(requestedReviewId).then(event => {
+      if (cancelled) return;
+      if (event?.status === 'pending') {
+        setSearch(''); setStatusFilter('all'); setReviewPreviewFirst(false);
+        setReviewTarget(event);
+      } else if (!event) toastRef.current.error('Could not open submission', 'Refresh Event Layouts, then retry the notification.');
+      else toastRef.current.error('Submission is no longer pending', 'Refresh Event Layouts to see its current review status.');
+      setSearchParams(current => { const next = new URLSearchParams(current); next.delete('review'); return next; }, { replace: true });
+    }).catch(error => {
+      if (!cancelled) toastRef.current.error('Could not open submission', error instanceof Error ? error.message : 'Please retry from the notification.');
+    });
+    return () => { cancelled = true; };
+  }, [requestedReviewId, isAdmin, authLoading, setSearchParams]);
+
+  useEffect(() => {
+    // The modal is absent during the skeleton and the empty error page.
+    // Do not acknowledge a notification until its review is actually rendered.
+    if (!loading && !(error && overlays.length === 0) && reviewTarget && submissions.unreadIds.has(reviewTarget.id)) void submissions.markRead(reviewTarget);
+  }, [loading, error, overlays.length, reviewTarget, submissions.events, submissions.markRead]);
 
   const loadOverlays = useCallback(async (background = false) => {
     const requestId = ++requestRef.current;
@@ -495,6 +520,7 @@ export function AdminEventLayoutsPage() {
     publication?: { expectedUpdatedAt?: string; dateStart?: string; dateEnd?: string; publicationMode?: "now" | "schedule"; publicationAt?: string; locationFeedback?: Record<string, string> }
   ) => {
     await eventOverlayService.reviewEventOverlay(id, decision, comment, publication);
+    void submissions.refresh();
     // The server decision is confirmed; cleanup must not wait for the queue refresh.
     clearEventReviewDraft(profile?.id, id);
     await loadOverlays();
@@ -565,6 +591,7 @@ export function AdminEventLayoutsPage() {
       </div>
 
       {/* Pending Count Banner */}
+      {error && overlays.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs"><p>Showing the last loaded event layouts. {error}</p><button type="button" onClick={()=>void loadOverlays(true)} className="mt-1 min-h-11 font-bold text-primary">Retry event layouts</button></div>}
       {counts.pending > 0 && (
         <div className="bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/30 rounded-2xl px-4 py-3 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
@@ -661,6 +688,7 @@ export function AdminEventLayoutsPage() {
                       {overlay.description}
                     </p>
                   )}
+                  {status === 'pending' && submissions.unreadIds.has(overlay.id) && <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300"><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />{submissionUpdateLabel(overlay) === 'Maps updated' ? 'Updated submission' : 'New submission'}</p>}
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <MapPin className="h-3 w-3 text-primary" />{" "}
@@ -678,7 +706,7 @@ export function AdminEventLayoutsPage() {
                     <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Submitted to GSO</dt><dd className="mt-1 text-xs text-foreground">{formatEventSubmissionTime(overlay.submittedAt)}</dd></div>
                     <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Latest content edit</dt><dd className="mt-1 text-xs text-foreground">{overlay.lastEditedAt ? formatEventSubmissionTime(overlay.lastEditedAt) : "Not recorded"}{overlay.revision ? ` · Revision ${overlay.revision}` : ""}</dd></div>
                   </dl>
-                  {status === "approved" && <p className="mt-1 text-[11px] font-semibold text-muted-foreground">Student publication: {publicationStateLabel(overlay)}</p>}
+                  {status === 'approved' && <EventStudentVisibility overlay={overlay} />}
                   {/* Layout stats */}
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-[10px] font-bold text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
