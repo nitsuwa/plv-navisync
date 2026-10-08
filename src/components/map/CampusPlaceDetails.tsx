@@ -102,7 +102,7 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
           <Play className="h-3 w-3 shrink-0 fill-current" />Start here
         </button>
       </div>
-      {showSecondary && <div className="grid grid-cols-3 gap-1.5">
+      {showSecondary && (
       <div className={`grid ${isGate ? "grid-cols-4" : "grid-cols-3"} gap-1.5`}>
         <button type="button" aria-label={saved ? `Remove ${place.name} from saved places` : `Save ${place.name}`} onClick={() => studentAuth.isStudent ? onSave() : onSignInPrompt("save locations")} className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-card px-1 text-[10px] font-bold text-foreground">
           {saved ? <Check className="h-3.5 w-3.5 text-primary" /> : <Bookmark className="h-3.5 w-3.5" />}{saved ? "Saved" : "Save"}
@@ -112,11 +112,10 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
         </button>}
         <button type="button" onClick={() => void share()} className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-card px-1 text-[10px] font-bold text-foreground"><Share2 className="h-3.5 w-3.5" />Share</button>
         <StudentReportAction testId="campus-place-report" ariaLabel={`Report an issue with ${place.name}`} onClick={() => studentAuth.isStudent ? onReport() : onSignInPrompt("report issues")} className="h-9 gap-1 px-1 text-[10px]" />
-      </div>}
-      {!canRouteTo && !canStartAt && showSecondary && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
       </div>
+      )}
       {isGate && showGateQR && <CampusGateQR gate={place} campusId={campusId} locationId={qrLocationId || place.navNodeId || place.id} />}
-      {!canRouteTo && !canStartAt && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
+      {!canRouteTo && !canStartAt && showSecondary && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
       {!mobile && schedule && <p className="text-[11px] text-muted-foreground"><span className="font-bold text-foreground">Hours</span> · {schedule}</p>}
     </div>
   );

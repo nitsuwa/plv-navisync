@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useReducer, type CSSProperties } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
 import {
@@ -784,6 +784,11 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const navigate = useNavigate();
   const location = useLocation();
   const studentAuth = useStudentAuth();
+  const mobileStudentNotificationRef = useRef<HTMLDivElement>(null);
+  const studentEventUpdates = useStudentOrgEventUpdates(
+    studentAuth.profile?.id,
+    studentAuth.isStudentOrg && !studentAuth.loading,
+  );
   const { error: showError, warning: showWarning, success: showSuccess, info: showInfo } = useToast();
   const publishedCampusState = usePublishedCampus(previewCampus);
 
@@ -1378,13 +1383,11 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     window.visualViewport?.addEventListener("scroll", updateOverlayLayout);
     return () => {
       observer?.disconnect();
-      navigationDock?.removeEventListener("animationend", updateOverlayLayout);
-      navigationDock?.removeEventListener("transitionend", updateOverlayLayout);
       window.removeEventListener("resize", updateOverlayLayout);
       window.visualViewport?.removeEventListener("resize", updateOverlayLayout);
       window.visualViewport?.removeEventListener("scroll", updateOverlayLayout);
     };
-  }, [floorPickerOpen, isFloorMode, navigationPhase, navigationTransitioning, selectedRoomContext?.roomId, searchFocused]);
+  }, [floorPickerFallbackActive, isFloorMode, navigationPhase, navigationTransitioning, selectedRoomContext?.roomId, searchFocused]);
   const mapSurface: MapSurface = directionsMode
     ? "route-planner"
     : (studentRouteUi.phase !== "idle" || navigationPhase !== "idle" || navigationTransitioning)
@@ -3340,22 +3343,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   useEffect(() => {
     if (!route || !isFloorMode || directionsMode || navigationTransitioning) {
-      setFloorPickerOpen(false);
+      setFloorPickerFallbackActive(false);
     }
   }, [directionsMode, isFloorMode, navigationTransitioning, route]);
-
-  // A student can open a building while a campus route is still active. Show
-  // that route's authored floor-local segment even when the outdoor leg owns
-  // the navigation animation, so entering a building does not hide the path.
-  const activeNavigationFloorSegment = useMemo(() => {
-    if (!route || !floorView) return null;
-    const building = activeCampus?.buildings.find((candidate) => candidate.id === floorView.building.id);
-    return activeRouteSegmentsForBuilding(route, floorView.building.id, navigationPhase, roomOrigin?.buildingId)
-      .find((segment) => indoorSegmentFloorNumber(segment, building) === floorView.floor) ?? null;
-  }, [activeCampus, floorView, navigationPhase, roomOrigin?.buildingId, route]);
-  const visibleIndoorRoute = route && floorView
-    ? activeNavigationFloorSegment ? indoorRouteFromSegment(activeNavigationFloorSegment) : null
-    : indoorRoute;
 
   // ── Auto-close planner when the route becomes ready ────────────────────
   // The unified Route Planner owns plan, preview, and guided-navigation UI.
@@ -5362,6 +5352,11 @@ const buildingFill = (id: string) =>
   // A/B ENDPOINT SEMANTICS: A is only the true route Start and B is only the
   // true final destination. Intermediate building entrances/floor changes use
   // Test Route transition markers instead of B.
+  const activeIndoorSegment = navigationPhase === "origin-indoor"
+    ? originIndoorSegments[originIndoorSegmentIndex]
+    : navigationPhase === "destination-indoor"
+      ? destinationIndoorSegments[destinationIndoorSegmentIndex]
+      : undefined;
   const routeIndoorSegments = route?.indoorSegments ?? [];
   const visibleIndoorRouteSegment = useMemo(() => floorView && activeFloorPlan
     ? studentIndoorSegmentForFloor(route, floorView.building.id, activeFloorPlan.id, floorView.floor)
