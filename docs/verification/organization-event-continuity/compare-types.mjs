@@ -22,7 +22,9 @@ try{
   const archive=path.join(snapshot,'source.tar');
   fs.writeFileSync(archive,execFileSync('git',['archive','--format=tar','0679fa0','src','tsconfig.json'],{maxBuffer:100*1024*1024,windowsHide:true}));
   execFileSync('tar',['-xf',archive,'-C',snapshot],{windowsHide:true});
-  fs.symlinkSync(path.join(root,'node_modules'),path.join(snapshot,'node_modules'),'junction');
+  // The temporary snapshot lives under .tmp inside the repository, so Node/TS
+  // resolution already walks up to the checked-out node_modules. Avoid a Windows
+  // junction here: restricted shells commonly deny symlink creation.
   const baseline=diagnostics(snapshot),current=diagnostics(root);
   fs.writeFileSync(`${output}/types-baseline.txt`,baseline.stdout);
   fs.writeFileSync(`${output}/types-baseline.json`,JSON.stringify({commit:'0679fa0',diagnostics:baseline.rows},null,2));
@@ -35,6 +37,5 @@ try{
   console.log(JSON.stringify(report));process.exitCode=introduced.length?1:0;
 }finally{
   if(path.dirname(path.resolve(snapshot))!==tempRoot||!path.basename(snapshot).startsWith('continuity-types-'))throw new Error('Unsafe type snapshot cleanup');
-  const link=path.join(snapshot,'node_modules');if(fs.existsSync(link))fs.unlinkSync(link);
   fs.rmSync(snapshot,{recursive:true,force:true});
 }

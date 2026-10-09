@@ -108,12 +108,12 @@ export interface ReplaceRepresentativeInput {
 
 **Produces:** an Organizations section inside admin Users, without another primary navigation item.
 
-- [ ] Add tests for no representative, current representative, expired assignment, replacement, revoke, and stale-dialog conflict states.
-- [ ] Build organization rows/cards showing name/code, representative, academic year, expiry, and status. Assign and Replace are distinct actions. Show historical grants on demand.
-- [ ] Assignment dialog requires a verified eligible account, academic-year label, and expiry. State clearly that replacing the representative transfers responsibility for existing work and ends the previous person's organization access.
-- [ ] Show the actual outgoing/incoming names before confirmation. Disable duplicate submit, retain inputs on failure, and reload the current grant on a `40001` conflict.
-- [ ] Link Student Organization role management to assignment without relaxing existing admin/super-admin controls. On profile deactivation/demotion, effective access must stop even if an old grant row remains for history; make that state visible to admins.
-- [ ] Check 320px width, desktop, keyboard, focus return, and readable errors. Commit the admin assignment UI.
+- [x] Add tests for no representative, current representative, expired assignment, replacement, revoke, and stale-dialog conflict states.
+- [x] Build organization rows/cards showing name/code, representative, academic year, expiry, and status. Assign and Replace are distinct actions. Show historical grants on demand.
+- [x] Assignment dialog requires a verified eligible account, academic-year label, and expiry. State clearly that replacing the representative transfers responsibility for existing work and ends the previous person's organization access.
+- [x] Show the actual outgoing/incoming names before confirmation. Disable duplicate submit, retain inputs on failure, and reload the current grant on a `40001` conflict.
+- [x] Link Student Organization role management to assignment without relaxing existing admin/super-admin controls. On profile deactivation/demotion, effective access must stop even if an old grant row remains for history; make that state visible to admins.
+- [x] Check 320px width, desktop, keyboard, focus return, and readable errors. Commit the admin assignment UI.
 
 ## Task 4: Organization Events and inherited editor access
 
@@ -125,13 +125,13 @@ export interface ReplaceRepresentativeInput {
 
 **Consumes:** organization context + protected event service. **Produces:** organization-scoped workspace and inheritance without changing original authorship.
 
-- [ ] Test successor access to an old creator's draft and pending/approved records; test outgoing account denial while an editor is mounted. Keep actor-switch and late-response regression tests.
-- [ ] Add explicit organization context above Current work / History. If multiple organizations are assigned to one account, require selecting the destination; never infer from a display name. If none, show an actionable admin-assignment message.
-- [ ] Replace creator equality guards with server-validated organization access. Scope caches/autosave/drafts by actor, organization, grant, and event. Invalidate on access changes and reject late read/save completions from a prior grant.
-- [ ] Current work includes unfinished drafts/disapproved/pending records and approved events with relevant upcoming/ongoing activity or outstanding feedback. History is inspectable across academic years. An old term alone never locks an unfinished draft. Archived records use a protected history read path rather than removing `archived_at` filters from public queries.
-- [ ] Show academic year, original creator, creation time, event dates, status, and current responsible representative. Use Unknown for unmapped historical academic year. Use Manila dates consistently.
-- [ ] Revalidate on focus/reconnect and periodic refresh using existing polling patterns. On revoked/expired access, stop autosave and clear the protected workspace; display an access-changed message. Server rejection is authoritative even before the refresh interval.
-- [ ] Test revoked stale-tab saves, cached offline records, login as another organization, history pagination/filter reset, long labels, and keyboard/touch access. Commit this workspace deliverable.
+- [x] Test successor access to an old creator's draft and pending/approved records; test outgoing account denial while an editor is mounted. Keep actor-switch and late-response regression tests.
+- [x] Add explicit organization context above Current work / History. If multiple organizations are assigned to one account, require selecting the destination; never infer from a display name. If none, show an actionable admin-assignment message.
+- [x] Replace creator equality guards with server-validated organization access. Scope caches/autosave/drafts by actor, organization, grant, and event. Invalidate on access changes and reject late read/save completions from a prior grant.
+- [x] Current work includes unfinished drafts/disapproved/pending records and approved events with relevant upcoming/ongoing activity or outstanding feedback. History is inspectable across academic years. An old term alone never locks an unfinished draft. Archived records use a protected history read path rather than removing `archived_at` filters from public queries.
+- [x] Show academic year, original creator, creation time, event dates, status, and current responsible representative. Use Unknown for unmapped historical academic year. Use Manila dates consistently.
+- [x] Revalidate on focus/reconnect and periodic refresh using existing polling patterns. On revoked/expired access, stop autosave and clear the protected workspace; display an access-changed message. Server rejection is authoritative even before the refresh interval.
+- [x] Test revoked stale-tab saves, cached offline records, login as another organization, history pagination/filter reset, long labels, and keyboard/touch access. Commit this workspace deliverable.
 
 ## Task 5: Reuse history safely and preserve media
 
@@ -142,12 +142,12 @@ export interface ReplaceRepresentativeInput {
 
 **Contract:** `reuse_organization_event(p_source_id uuid, p_expected_source_updated_at timestamptz, p_organization_id uuid, p_expected_grant_id uuid, p_title text, p_academic_year text, p_request_id uuid)` returns the created overlay. Add indexed relational `reused_from_event_id` provenance with deletion protection. Store idempotency receipts privately, scoped to actor/grant/request and exact payload; do not expose them in public event metadata.
 
-- [ ] Write an allowlist-copy unit test and SQL tests: same-org successor succeeds; other-org source fails; revoked grant fails; source changed returns conflict; repeating the same request returns one draft; reusing a request ID with a different payload fails.
-- [ ] Build metadata from approved reusable fields only, using server-read source data. Assign the actual caller as new creator and retain source ID/academic year for provenance. Reset review, schedule, publication, submission, feedback/resolutions, receipts, and revision identifiers.
-- [ ] Validate current published campus/floor references and placement constraints. If a location was removed or unpublished, stop and identify it. If placement is recoverable, show visible issues and require correction before submit. Never silently omit a location or reuse old approval.
-- [ ] Dialog shows source title/year, new title/year, destination organization, and the fresh-approval requirement. Show success only after server confirmation and navigate to the new draft. Retry with the same request ID after uncertain network completion.
-- [ ] Add reference-aware poster protection: historical/reused references cannot be deleted by the original uploader. Use fresh upload paths for replacements. Authorize organization uploads and listing through current grants; preserve existing public poster URL behavior and disclose that this is not private media storage. Test outgoing deletion attempts and source reuse after replacement.
-- [ ] Verify historical originals remain byte-for-byte unchanged except deliberate new reference/audit records. Commit after reuse and media checks pass.
+- [x] Write an allowlist-copy unit test and SQL tests: same-org successor succeeds; other-org source fails; revoked grant fails; source changed returns conflict; repeating the same request returns one draft; reusing a request ID with a different payload fails.
+- [x] Build metadata from approved reusable fields only, using server-read source data. Assign the actual caller as new creator and retain source ID/academic year for provenance. Reset review, schedule, publication, submission, feedback/resolutions, receipts, and revision identifiers.
+- [x] Validate current published campus/floor references and placement constraints. If a location was removed or unpublished, stop and identify it. If placement is recoverable, show visible issues and require correction before submit. Never silently omit a location or reuse old approval.
+- [x] Dialog shows source title/year, new title/year, destination organization, and the fresh-approval requirement. Show success only after server confirmation and navigate to the new draft. Retry with the same request ID after uncertain network completion.
+- [x] Add reference-aware poster protection: historical/reused references cannot be deleted by the original uploader. Use fresh upload paths for replacements. Authorize organization uploads and listing through current grants; preserve existing public poster URL behavior and disclose that this is not private media storage. Test outgoing deletion attempts and source reuse after replacement.
+- [x] Verify historical originals remain byte-for-byte unchanged except deliberate new reference/audit records. Commit after reuse and media checks pass.
 
 ## Task 6: Organization notifications and per-person read receipts
 
@@ -156,11 +156,11 @@ export interface ReplaceRepresentativeInput {
 - Modify `src/hooks/useStudentOrgEventUpdates.ts`, `src/services/eventNotificationService.ts`, their tests, and `src/lib/studentEventUpdates.ts`.
 - Modify `src/components/layout/StudentNotificationBell.tsx`, existing organization badges, and `src/components/layout/AdminLayout.tsx` only where recipient/routing contracts change.
 
-- [ ] Extend receipt RLS and `get_event_notification_states` / `ack_event_notification` to authorize the current organization representative for bound events. Keep actor validation, exact semantic fingerprint checks, and stale-event protection.
-- [ ] Scope frontend subscriptions/store invalidation to actor + organization + grant. Original creator attribution must no longer filter successors out of the event list.
-- [ ] Keep individual read receipts. Add a handover summary derived from the new grant and unresolved work; store its acknowledgement per grant so a returning representative still sees the new handover. Do not mark all historical approvals as new submissions.
-- [ ] Test B reading on desktop/mobile, A being denied after replacement, a later feedback update appearing unread, and admin pending totals staying accurate after receipt acknowledgement.
-- [ ] Check the recently merged StudentNotificationBell integration: one review update should have one intended notification action, and public student events must not expose private organization feedback. Commit this notification deliverable.
+- [x] Extend receipt RLS and `get_event_notification_states` / `ack_event_notification` to authorize the current organization representative for bound events. Keep actor validation, exact semantic fingerprint checks, and stale-event protection.
+- [x] Scope frontend subscriptions/store invalidation to actor + organization + grant. Original creator attribution must no longer filter successors out of the event list.
+- [x] Keep individual read receipts. Add a handover summary derived from the new grant and unresolved work; store its acknowledgement per grant so a returning representative still sees the new handover. Do not mark all historical approvals as new submissions.
+- [x] Test B reading on desktop/mobile, A being denied after replacement, a later feedback update appearing unread, and admin pending totals staying accurate after receipt acknowledgement.
+- [x] Check the recently merged StudentNotificationBell integration: one review update should have one intended notification action, and public student events must not expose private organization feedback. Commit this notification deliverable.
 
 ## Task 7: Consolidate admin navigation without losing legacy events
 
@@ -169,12 +169,12 @@ export interface ReplaceRepresentativeInput {
 - Modify `src/app/routes.tsx`, `src/components/layout/AdminSidebar.tsx`, `AdminLayout.tsx`, `src/pages/AdminEventLayoutsPage.tsx`, `AdminEventsPage.tsx`, and relevant existing tests.
 - Retain `src/services/eventService.ts` and its consumers unless a separately verified adapter is required.
 
-- [ ] Inventory `events`, `event_locations`, overlays, student feeds, notification sources, dashboard links, and old deep links. Preserve a count/source report before changing routing; no live migration or deletion of legacy events is implied.
-- [ ] Extract reusable page content from the existing admin pages into the workspace rather than nesting complete layouts. Canonical route: `/admin-dashboard/events` with `view=review`, `publication`, `history`, or `listings`.
-- [ ] Use one Events navigation item and one pending-submission badge. Show Needs review, Approved & publication, and History; expose Campus listings when legacy records exist, preserving its existing management controls and source identity.
-- [ ] Redirect `/admin-dashboard/event-layouts` while preserving `review` and other supported query parameters. Keep `/admin-dashboard/event-layouts/:id/preview` as a compatible alias to the existing preview. Preserve student event links and browser back behavior.
-- [ ] Distinguish approval status from publication and date phase. Add organization/year filters to layout views. Do not show a Campus listing as an approved layout or create duplicate public entries automatically.
-- [ ] Test old notification links, direct legacy listing edits, preview close/return, pending badges, mobile navigation, and empty legacy data. Commit the unified workspace.
+- [x] Inventory `events`, `event_locations`, overlays, student feeds, notification sources, dashboard links, and old deep links. Preserve a count/source report before changing routing; no live migration or deletion of legacy events is implied.
+- [x] Extract reusable page content from the existing admin pages into the workspace rather than nesting complete layouts. Canonical route: `/admin-dashboard/events` with `view=review`, `publication`, `history`, or `listings`.
+- [x] Use one Events navigation item and one pending-submission badge. Show Needs review, Approved & publication, and History; expose Campus listings when legacy records exist, preserving its existing management controls and source identity.
+- [x] Redirect `/admin-dashboard/event-layouts` while preserving `review` and other supported query parameters. Keep `/admin-dashboard/event-layouts/:id/preview` as a compatible alias to the existing preview. Preserve student event links and browser back behavior.
+- [x] Distinguish approval status from publication and date phase. Add organization/year filters to layout views. Do not show a Campus listing as an approved layout or create duplicate public entries automatically.
+- [x] Test old notification links, direct legacy listing edits, preview close/return, pending badges, mobile navigation, and empty legacy data. Commit the unified workspace.
 
 ## Task 8: Verification, migration handoff, and release preparation
 
@@ -182,15 +182,19 @@ export interface ReplaceRepresentativeInput {
 - Create `docs/verification/organization-event-continuity/README.md`, `checklist.md`, and `run-ui.mjs`.
 - Add a disposable SQL/concurrency harness alongside the existing `supabase/tests` workflow; record exact commands and outcomes in the README.
 
-- [ ] Run the targeted Vitest files added/changed in Tasks 1–7, plus existing event proposal/editor, feedback, publication, receipt, campus structure isolation, and route-link regressions. Capture failures rather than excluding failing assertions to obtain a pass.
-- [ ] Run `node node_modules/vite/bin/vite.js build`. Compare TypeScript diagnostics against a fresh baseline from the execution starting commit; report pre-existing errors separately and reject newly introduced errors.
+- [x] Run the targeted Vitest files added/changed in Tasks 1–7, plus existing event proposal/editor, feedback, publication, receipt, campus structure isolation, and route-link regressions. Capture failures rather than excluding failing assertions to obtain a pass.
+- [x] Run `node node_modules/vite/bin/vite.js build`. Compare TypeScript diagnostics against a fresh baseline from the execution starting commit; report pre-existing errors separately and reject newly introduced errors.
 - [ ] Verify full flow with controlled Org A, Org B, outgoing/incoming representatives, ordinary student, and admin: grant → create → save → submit → feedback → handover while pending → successor feedback action → approval/publication → historical reuse → fresh submission.
-- [ ] Exercise simultaneous replacement, expiry, stale save after handover, offline/reconnect, missing RPC, profile deactivation, soft-archived history, unknown legacy year, lost source venue, and poster reference preservation. SQL tests use real roles and RLS, not solely UI mocks.
-- [ ] Browser matrix: 320x568, 390x844, 740x390 landscape, 768x1024 tablet, 1440x900 desktop, and actual 200% browser zoom. Check long names, keyboard focus, nested dialogs, validation visibility, reduced motion, and reachable actions with reduced viewport height. Record physical-device/screen-reader checks as unverified unless actually performed.
+- [x] Exercise simultaneous replacement, expiry, stale save after handover, offline/reconnect, missing RPC, profile deactivation, soft-archived history, unknown legacy year, lost source venue, and poster reference preservation. SQL tests use real roles and RLS, not solely UI mocks.
+- [x] Browser matrix: 320x568, 390x844, 740x390 landscape, 768x1024 tablet, 1440x900 desktop, and actual 200% browser zoom. Check long names, keyboard focus, nested dialogs, validation visibility, reduced motion, and reachable actions with reduced viewport height. Record physical-device/screen-reader checks as unverified unless actually performed.
 - [ ] Prepare validated SQL in dependency order, dry-run reconciliation counts, affected-policy inventory, and a user-run preflight/postflight checklist. Confirm required functions/tables before enabling organization assignment in the UI; never silently fall back to creator access for a bound organization event.
-- [ ] Recovery plan: revoke/pause new grants if needed while retaining data/audit records; restore compatible frontend/access functions deliberately. Do not roll back to creator-only code while organization-bound events exist, delete ownership fields, or reverse mapping without an audited reconciliation review.
+- [x] Recovery plan: revoke/pause new grants if needed while retaining data/audit records; restore compatible frontend/access functions deliberately. Do not roll back to creator-only code while organization-bound events exist, delete ownership fields, or reverse mapping without an audited reconciliation review.
 - [ ] Check originals, drafts, revision counts, legacy event counts, public visibility, and representative mappings after migration. Use controlled fixtures first; no retained live QA event without user approval.
-- [ ] Deliver the completed verification report with remaining limitations. Only then prepare the final integration/release commit and perform remote actions authorized for that execution session.
+- [x] Deliver the completed verification report with remaining limitations. Only then prepare the final integration/release commit and perform remote actions authorized for that execution session.
+
+## Local completion evidence
+
+Local contracts/UI are implemented and validated (624 regression tests, 85 real PostgreSQL checks, 81 PGlite checks, 39 controlled browser checks, production build, unchanged TypeScript diagnostic baseline). The full live frontend-to-Supabase flow, live SQL/reconciliation/postflight, and physical-device/screen-reader acceptance remain release gates for the user. No push or retained live QA record was created.
 
 ## Completion criteria
 

@@ -48,5 +48,5 @@ export const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/routes":         "Routes",
   "/admin-dashboard/locations":      "Campus Locations",
   "/admin-dashboard/accessibility":  "Accessibility",
-  "/admin-dashboard/events":         "Event Maps",
+  "/admin-dashboard/events":         "Events",
 };

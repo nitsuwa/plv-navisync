@@ -9,7 +9,8 @@ import net from 'node:net';
 import assert from 'node:assert/strict';
 import {continuityFixtureSql} from './sql-fixture.mjs';
 import {eventFixtureSql,baselineEventMigrations,eventPreOwnershipHistorySql} from './event-fixture.mjs';
-const eventMode=process.argv.includes('--events');
+const allMode=process.argv.includes('--all');
+const eventMode=allMode||process.argv.includes('--events');
 const root=path.resolve('.tmp'),dir=path.join(root,`continuity-pg-${randomUUID()}`);
 mkdirSync(dir,{recursive:true});
 const listener=net.createServer();await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));
@@ -28,6 +29,12 @@ try{
   if(eventMode){
     await observer.query(readFileSync('supabase/migrations/20261009130000_event_organization_ownership.sql','utf8'));
     await observer.query(readFileSync('supabase/tests/event_organization_handover_assertions.sql','utf8'));
+    if(allMode){
+      await observer.query(readFileSync('supabase/migrations/20261009140000_event_organization_reuse.sql','utf8'));
+      await observer.query(readFileSync('supabase/tests/event_organization_reuse_assertions.sql','utf8'));
+      await observer.query(readFileSync('supabase/migrations/20261009150000_event_organization_notifications.sql','utf8'));
+      await observer.query(readFileSync('supabase/tests/event_organization_notification_assertions.sql','utf8'));
+    }
   }else await observer.query(readFileSync('supabase/tests/event_organization_access_assertions.sql','utf8'));
   checks.push(...(await observer.query('select name from continuity_test.results')).rows.map(row=>row.name));
   const a=await connect(admin),b=await connect(admin);
@@ -76,7 +83,14 @@ try{
     checks.push('handover winning the organization lock rejects the outgoing in-flight save');
   }
   const version=(await observer.query('select version()')).rows[0].version;
-  writeFileSync(`docs/verification/organization-event-continuity/${eventMode?'sql-event-concurrency-results':'sql-concurrency-results'}.json`,JSON.stringify({status:'PASS',engine:version,checks},null,2));
+  if(allMode){
+    const postflight=await observer.query(readFileSync('docs/verification/organization-event-continuity/postflight.sql','utf8'));
+    assert(postflight[0].rows.every(row=>row.present)&&postflight[1].rows.every(row=>row.present),'SQL handoff contracts must exist');
+    assert(postflight[2].rows.every(row=>row.rls_enabled),'Protected continuity tables must retain RLS');
+    assert.equal(postflight.at(-1).rows.length,0,'No duplicate open assignments');
+    checks.push('SQL handoff postflight queries and readiness checks');
+  }
+  writeFileSync(`docs/verification/organization-event-continuity/${allMode?'sql-continuity-postgres-results':eventMode?'sql-event-concurrency-results':'sql-concurrency-results'}.json`,JSON.stringify({status:'PASS',engine:version,checks},null,2));
   console.log(`${checks.length} real PostgreSQL access/concurrency checks PASS`);
 }catch(error){console.error(JSON.stringify({status:'FAIL',code:error.code,message:error.message}));process.exitCode=1;}
 finally{

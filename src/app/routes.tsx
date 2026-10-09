@@ -80,8 +80,8 @@ const AdminFloorPlansPage  = lazyPage(() => import("../pages/AdminFloorPlansPage
 const AdminRoutesPage      = lazyPage(() => import("../pages/AdminRoutesPage").then(m => ({ default: m.AdminRoutesPage })));
 const AdminReportsPage     = lazyPage(() => import("../pages/AdminReportsPage").then(m => ({ default: m.AdminReportsPage })));
 const AdminAccessibilityPage = lazyPage(() => import("../pages/AdminAccessibilityPage").then(m => ({ default: m.AdminAccessibilityPage })));
-const AdminEventsPage      = lazyPage(() => import("../pages/AdminEventsPage").then(m => ({ default: m.AdminEventsPage })));
-const AdminEventLayoutsPage = lazyPage(() => import("../pages/AdminEventLayoutsPage").then(m => ({ default: m.AdminEventLayoutsPage })));
+const AdminEventsWorkspacePage = lazyPage(() => import("../pages/AdminEventsWorkspacePage").then(m => ({ default: m.AdminEventsWorkspacePage })));
+const LegacyAdminEventLayoutsRedirect = lazyPage(() => import("../pages/AdminEventsWorkspacePage").then(m => ({ default: m.LegacyAdminEventLayoutsRedirect })));
 const AdminEventLayoutPreviewPage = lazyPage(() => import("../pages/AdminEventLayoutPreviewPage").then(m => ({ default: m.AdminEventLayoutPreviewPage })));
 const AdminAnnouncementsPage = lazyPage(() => import("../pages/AdminAnnouncementsPage").then(m => ({ default: m.AdminAnnouncementsPage })));
 const AdminActivityLogsPage = lazyPage(() => import("../pages/AdminActivityLogsPage").then(m => ({ default: m.AdminActivityLogsPage })));
@@ -240,9 +240,9 @@ export const router = createBrowserRouter([
       { path: "routes", element: <SuspensePage><AdminRoutesPage /></SuspensePage> },
       { path: "reports", element: <SuspensePage><AdminReportsPage /></SuspensePage> },
       { path: "accessibility", element: <SuspensePage><AdminAccessibilityPage /></SuspensePage> },
-      { path: "events", element: <SuspensePage><AdminEventsPage /></SuspensePage> },
-      { path: "event-layouts", element: <SuspensePage><AdminEventLayoutsPage /></SuspensePage> },
+      { path: "events", element: <SuspensePage><AdminEventsWorkspacePage /></SuspensePage> },
       { path: "event-layouts/:id/preview", element: <SuspensePage><AdminEventLayoutPreviewPage /></SuspensePage> },
+      { path: "event-layouts", element: <SuspensePage><LegacyAdminEventLayoutsRedirect /></SuspensePage> },
       { path: "announcements", element: <SuspensePage><AdminAnnouncementsPage /></SuspensePage> },
       { path: "activity-logs", element: <SuspensePage><AdminActivityLogsPage /></SuspensePage> },
     ],

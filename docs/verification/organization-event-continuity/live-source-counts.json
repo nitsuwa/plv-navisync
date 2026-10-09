@@ -1,0 +1,29 @@
+{
+  "capturedAt": "2026-10-09T16:07:45.542Z",
+  "mode": "Authenticated administrator RLS view; read-only exact API counts before continuity SQL installation",
+  "sources": [
+    {
+      "source": "events",
+      "count": 2,
+      "status": "PASS"
+    },
+    {
+      "source": "event_locations",
+      "count": 0,
+      "status": "PASS"
+    },
+    {
+      "source": "event_overlays",
+      "count": 8,
+      "status": "PASS"
+    },
+    {
+      "source": "event_layout_revisions",
+      "count": 419,
+      "status": "PASS"
+    }
+  ],
+  "retainedEventQaRecords": 0,
+  "status": "PASS",
+  "limitations": "API counts follow existing administrator RLS. Complete owner-level poster/receipt counts and the post-migration comparison still require the user-run SQL checklist."
+}

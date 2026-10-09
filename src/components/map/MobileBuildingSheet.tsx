@@ -299,26 +299,6 @@ export function MobileBuildingSheet({
           </div>
         </header>
 
-        <div className={`shrink-0 px-3 ${sheetState === "peek" ? "pb-3" : "pb-2"}`}>
-          <BuildingDetailsActions
-            building={selected}
-            campusId={campusId}
-            hasFloorPlans={hasFloorPlans}
-            saved={saved}
-            savedStateLoading={savedStateLoading}
-            savedStateUnavailable={savedStateUnavailable}
-            studentAuth={studentAuth}
-            showQR={showQR}
-            showSecondaryActions={sheetState !== "peek"}
-            onDirections={onDirections}
-            onEnterBuilding={onEnterBuilding}
-            onSave={onSave}
-            onReport={onReport}
-            onSignInPrompt={onSignInPrompt}
-            onToggleQR={onToggleQR}
-          />
-        </div>
-
         {sheetState === "default" && (
           <div className="shrink-0 px-4 pb-1">
             <BuildingDetailsSections building={selected} facilities={facilities} accessibility={accessibility} floorCount={floorPlanCount} variant="compact" />
@@ -344,6 +324,8 @@ export function MobileBuildingSheet({
           campusId={campusId}
           hasFloorPlans={hasFloorPlans}
           saved={saved}
+          savedStateLoading={savedStateLoading}
+          savedStateUnavailable={savedStateUnavailable}
           studentAuth={studentAuth}
           showQR={showQR}
           showSecondaryActions={sheetState !== "peek"}

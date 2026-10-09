@@ -10,12 +10,18 @@ const mocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), markRead: vi
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: {
   listEventOverlays: vi.fn(), listEventSubmitterNames: vi.fn(), reviewEventOverlay: vi.fn(), manageEventPublication: vi.fn(), getEventOverlay: vi.fn(),
 } }));
+vi.mock("../../services/eventOrganizationService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../services/eventOrganizationService")>();
+  return { ...actual, eventOrganizationService: { ...actual.eventOrganizationService, listOrganizations: vi.fn().mockResolvedValue([
+    { id: "org-a", name: "Alpha Organization" }, { id: "org-b", name: "Beta Organization" },
+  ]) } };
+});
 vi.mock("../../hooks/useToast", () => ({ useToast: () => ({ success: mocks.success, error: mocks.error }) }));
 vi.mock("../../hooks/useAdminAuth", () => ({ useAdminAuth: () => ({ profile: { id: "admin-reviewer" }, isAdmin: true, loading: false }) }));
 vi.mock('../../hooks/useAdminEventSubmissions', () => ({ useAdminEventSubmissions: () => ({ events: [pending], unreadIds: new Set(['pending-event']), pendingCount: 1, unreadCount: 1, markRead: mocks.markRead, refresh: mocks.refresh }) }));
 
-const pending = { ...eventPreviewFixture(), id: "pending-event", createdByUserId: "org-demo", updatedAt: "2026-10-02T00:00:00.000Z", status: "pending", submittedAt: "2026-10-01T00:00:00Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
-const approved = { ...eventPreviewFixture(), id: "approved-event", updatedAt: "2026-10-02T00:00:00.000Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
+const pending = { ...eventPreviewFixture(), id: "pending-event", title: "Alpha submitted layout", organizationId: "org-a", academicYear: "2026–2027", createdAt: "2026-09-20T00:00:00Z", createdByUserId: "org-demo", updatedAt: "2026-10-02T00:00:00.000Z", status: "pending", submittedAt: "2026-10-01T00:00:00Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
+const approved = { ...eventPreviewFixture(), id: "approved-event", title: "Beta past layout", organizationId: "org-b", academicYear: "2025–2026", createdAt: "2025-09-20T00:00:00Z", status: "approved", updatedAt: "2026-10-02T00:00:00.000Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
 
 beforeEach(() => {
   localStorage.clear();
@@ -36,6 +42,19 @@ async function openPendingReview() {
 }
 
 describe("AdminEventLayoutsPage publication controls", () => {
+  it("filters layout history by verified organization and academic year", async () => {
+    render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
+    await screen.findByText("Beta past layout");
+    const organization = screen.getByRole("combobox", { name: "Filter by organization" });
+    fireEvent.change(organization, { target: { value: "org-a" } });
+    expect(await screen.findByText("Alpha submitted layout")).toBeInTheDocument();
+    expect(screen.queryByText("Beta past layout")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by academic year" }), { target: { value: "2026–2027" } });
+    const alphaCard = screen.getByTestId("event-layout-card-pending-event");
+    expect(within(alphaCard).getByText("2026–2027")).toBeInTheDocument();
+    expect(within(alphaCard).queryByText("2025–2026")).not.toBeInTheDocument();
+  });
+
   it('retains a loaded queue with visible retry when a foreground refresh fails',async()=>{
     render(<MemoryRouter><AdminEventLayoutsPage/></MemoryRouter>);
     await screen.findByRole('button',{name:/Review submission/i});

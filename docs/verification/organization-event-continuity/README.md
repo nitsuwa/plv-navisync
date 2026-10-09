@@ -9,13 +9,16 @@ User requested implementation in the current checkout. The initially created man
 ## Current progress
 
 - Task 1 database grants/access: committed locally as `ea3c893`.
-- Task 2 ownership/reconciliation: implementation and validation complete; checkpoint commit is pending final review.
-- Tasks 3–8: pending.
+- Task 2 ownership/reconciliation: committed locally as `b27150e`.
+- Tasks 3–6: committed in local checkpoints `351cbc2` (reuse/notification contracts) and `021d309` (representative/workspace UI). Task 7 and verification records are the final local checkpoint.
+- Task 8: local SQL/UI/test/build validation and user-run SQL handoff are prepared. Live installation/acceptance remain the user's release gates.
 - Original approved plan/spec are preserved.
 - No GitHub push or live database writes are authorized for this execution.
 - User runs validated SQL in Supabase; no retained live QA fixtures.
 
-## Evidence
+See [the completed implementation report](./implementation-report.md) and [SQL/release checklist](./checklist.md) for current outcomes and limitations.
+
+## Task 1–2 checkpoint evidence (historical)
 
 Record baseline tests and TypeScript diagnostics before production changes.
 Separate PostgreSQL sessions are required to validate concurrency; PGlite checks alone do not prove that guarantee.
@@ -28,7 +31,7 @@ Separate PostgreSQL sessions are required to validate concurrency; PGlite checks
 - Production Vite build PASS: 3,028 modules transformed; known chunk-size warning remains.
 - Original baseline had one date-sensitive publication assertion fail after its fixed October 9 end time. Added a fixed `Date.now` fixture; production publication logic was unchanged.
 - Restored local ignored dependencies with `pnpm install --frozen-lockfile --force`; package/lockfile contents are unchanged. Temporary test dependencies live only under `.tmp/event-sql-runtime`.
-- Starting-commit TypeScript baseline: 2,300 diagnostics; current: 2,300; no introduced diagnostics by file/code multiplicity. Full messages are retained; this is not a clean typecheck.
+- The initial restricted TypeScript run overreported dependency errors. The valid host-access comparison now records 1,022 starting-commit diagnostics / 1,022 current diagnostics, with no introduced diagnostics by file/code multiplicity. Full messages are retained; this is not a clean typecheck.
 
 Commands: `node docs/verification/organization-event-continuity/run-sql.mjs`, `run-concurrency.mjs`, `compare-types.mjs`; targeted Vitest command is recorded in execution progress.
 
@@ -42,4 +45,4 @@ Commands: `node docs/verification/organization-event-continuity/run-sql.mjs`, `r
 
 ## Limitations
 
-Task 2 SQL and service work are verified locally. No live SQL has been applied; the organization features are not ready to deploy until the remaining UI, notifications, reuse, routing, and release tasks are complete.
+Local implementation/verification is recorded in the implementation report. No live continuity SQL has been applied. The user must run the complete SQL package and live acceptance checks before deployment. No remote push or retained live QA records were created.

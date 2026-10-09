@@ -50,6 +50,8 @@ import { useSearchParams } from 'react-router';
 import { useAdminEventSubmissions } from '../hooks/useAdminEventSubmissions';
 import { submissionUpdateLabel } from '../lib/adminEventSubmissions';
 import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
+import { eventOrganizationService } from '../services/eventOrganizationService';
+import type { EventOrganization } from '../types/eventOrganization';
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -420,7 +422,7 @@ function ReviewModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 
-export function AdminEventLayoutsPage() {
+export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView?: "review" | "publication" | "history" | "all" }) {
   const { profile, isAdmin, loading: authLoading } = useAdminAuth();
   const submissions = useAdminEventSubmissions(profile?.id, isAdmin && !authLoading);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -431,11 +433,14 @@ export function AdminEventLayoutsPage() {
   const reviewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [overlays, setOverlays] = useState<CampusEventOverlay[]>([]);
   const [submitterNames, setSubmitterNames] = useState<Record<string, string>>({});
+  const [organizations, setOrganizations] = useState<EventOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [organizationFilter, setOrganizationFilter] = useState("all");
+  const [academicYearFilter, setAcademicYearFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<EventOverlayStatus | "all">(
-    "all"
+    workspaceView === "review" ? "pending" : workspaceView === "publication" ? "approved" : "all"
   );
   const [reviewTarget, setReviewTarget] = useState<CampusEventOverlay | null>(
     null
@@ -445,6 +450,15 @@ export function AdminEventLayoutsPage() {
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAdmin || authLoading) return;
+    void eventOrganizationService.listOrganizations()
+      .then(rows => { if (!cancelled) setOrganizations(rows); })
+      .catch(() => { if (!cancelled) setOrganizations([]); });
+    return () => { cancelled = true; };
+  }, [isAdmin, authLoading]);
 
   useEffect(() => {
     if (!requestedReviewId || !isAdmin || authLoading) return;
@@ -480,7 +494,9 @@ export function AdminEventLayoutsPage() {
         strict: true,
       });
       if (requestId !== requestRef.current) return;
-      const submitted = data.filter((item) => item.status !== "draft");
+      const submitted = data.filter((item) => item.status !== "draft" && (
+        workspaceView !== "history" || item.status === "approved" || item.status === "disapproved"
+      ));
       setOverlays(submitted);
       const visibleIds = new Set(submitted.map(item => item.id));
       setReviewTarget(current => current && !visibleIds.has(current.id) ? null : current);
@@ -497,7 +513,7 @@ export function AdminEventLayoutsPage() {
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, [statusFilter, search]);
+  }, [statusFilter, search, workspaceView]);
 
   useEffect(() => {
     void loadOverlays();
@@ -534,29 +550,49 @@ export function AdminEventLayoutsPage() {
 
   if (loading) return <TablePageSkeleton rows={4} />;
 
-  const tabs: { key: EventOverlayStatus | "all"; label: string }[] = [
-    { key: "all", label: "All" },
-    { key: "pending", label: "Pending" },
-    { key: "approved", label: "Approved" },
-    { key: "disapproved", label: "Disapproved" },
-  ];
+  const tabs: { key: EventOverlayStatus | "all"; label: string }[] = workspaceView === "history"
+    ? [
+        { key: "all", label: "All decisions" },
+        { key: "approved", label: "Approved" },
+        { key: "disapproved", label: "Disapproved" },
+      ]
+    : [
+        { key: "all", label: "All" },
+        { key: "pending", label: "Pending" },
+        { key: "approved", label: "Approved" },
+        { key: "disapproved", label: "Disapproved" },
+      ];
 
+  const organizationById = new Map(organizations.map(item => [item.id, item]));
+  const organizationIds = [...new Set(overlays.flatMap(item => item.organizationId ? [item.organizationId] : []))].sort();
+  const academicYears = [...new Set(overlays.map(item => item.academicYear?.trim() || "Unknown year"))].sort((a, b) => a.localeCompare(b));
+  const scopedOverlays = overlays.filter(item => {
+    const year = item.academicYear?.trim() || "Unknown year";
+    return (organizationFilter === "all" || (organizationFilter === "unassigned" ? !item.organizationId : item.organizationId === organizationFilter))
+      && (academicYearFilter === "all" || academicYearFilter === year);
+  });
   const counts: Record<string, number> = {
-    all: overlays.length,
-    pending: overlays.filter((o) => o.status === "pending").length,
-    approved: overlays.filter((o) => o.status === "approved").length,
-    disapproved: overlays.filter((o) => o.status === "disapproved").length,
+    all: scopedOverlays.filter(item => workspaceView !== "history" || item.status === "approved" || item.status === "disapproved").length,
+    pending: scopedOverlays.filter((o) => o.status === "pending").length,
+    approved: scopedOverlays.filter((o) => o.status === "approved").length,
+    disapproved: scopedOverlays.filter((o) => o.status === "disapproved").length,
   };
 
   if (error && overlays.length === 0) {
     return (
       <div className="space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground">
-            Event Layouts
-          </h1>
+          <h2 className="text-xl font-extrabold text-foreground">
+            {workspaceView === "review" ? "Needs review" : workspaceView === "publication" ? "Approved & publication" : workspaceView === "history" ? "Layout history" : "Event layouts"}
+          </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Review and approve student organization event map layouts.
+            {workspaceView === "review"
+              ? "Check submitted layouts and record the GSO decision."
+              : workspaceView === "publication"
+                ? "Manage student publication for approved organization layouts."
+                : workspaceView === "history"
+                  ? "Browse past approved and disapproved submissions by organization and academic year."
+                  : "Review and approve student organization event map layouts."}
           </p>
         </div>
         <EmptyState
@@ -581,11 +617,17 @@ export function AdminEventLayoutsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground">
-            Event Layouts
-          </h1>
+          <h2 className="text-xl font-extrabold text-foreground">
+            {workspaceView === "review" ? "Needs review" : workspaceView === "publication" ? "Approved & publication" : workspaceView === "history" ? "Layout history" : "Event layouts"}
+          </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Review and approve student organization event map layouts.
+            {workspaceView === "review"
+              ? "Check submitted layouts and record the GSO decision."
+              : workspaceView === "publication"
+                ? "Manage student publication for approved organization layouts."
+                : workspaceView === "history"
+                  ? "Browse past approved and disapproved submissions by organization and academic year."
+                  : "Review and approve student organization event map layouts."}
           </p>
         </div>
       </div>
@@ -610,8 +652,8 @@ export function AdminEventLayoutsPage() {
       )}
 
       {/* Search + Filter tabs */}
-      <div className="flex flex-col xl:flex-row xl:items-center gap-3 rounded-2xl border border-border bg-card p-3">
-        <div className="max-w-sm w-full">
+      <div className="flex flex-col xl:flex-row xl:items-end gap-3 rounded-2xl border border-border bg-card p-3">
+        <div className="w-full xl:max-w-sm">
           <SearchBar
             placeholder="Search event layouts..."
             value={search}
@@ -621,6 +663,21 @@ export function AdminEventLayoutsPage() {
             size="md"
           />
         </div>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10px] font-semibold text-muted-foreground">
+          <span>Organization</span>
+          <select aria-label="Filter by organization" value={organizationFilter} onChange={event => setOrganizationFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <option value="all">All organizations</option>
+            {organizationIds.map(id => <option key={id} value={id}>{organizationById.get(id)?.name ?? `Organization ${id.slice(0, 8)}`}</option>)}
+            {overlays.some(item => !item.organizationId) && <option value="unassigned">Unassigned legacy events</option>}
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10px] font-semibold text-muted-foreground">
+          <span>Academic year</span>
+          <select aria-label="Filter by academic year" value={academicYearFilter} onChange={event => setAcademicYearFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <option value="all">All academic years</option>
+            {academicYears.map(year => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </label>
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           {tabs.map((t) => (
             <button
@@ -651,7 +708,7 @@ export function AdminEventLayoutsPage() {
 
       {/* Event Layout Cards */}
       <div className="grid gap-4">
-        {overlays.map((overlay) => {
+        {scopedOverlays.map((overlay) => {
           const status = overlay.status || "pending";
           const cfg = STATUS_CONFIG[status];
           const StatusIcon = cfg.icon;
@@ -661,6 +718,7 @@ export function AdminEventLayoutsPage() {
           return (
             <div
               key={overlay.id}
+              data-testid={`event-layout-card-${overlay.id}`}
               className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-md transition-shadow"
             >
               <div className="flex items-start gap-3 p-4 sm:p-5">
@@ -691,6 +749,12 @@ export function AdminEventLayoutsPage() {
                   {status === 'pending' && submissions.unreadIds.has(overlay.id) && <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300"><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />{submissionUpdateLabel(overlay) === 'Maps updated' ? 'Updated submission' : 'New submission'}</p>}
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">Organization:</span> {overlay.organizationId ? organizationById.get(overlay.organizationId)?.name ?? `Organization ${overlay.organizationId.slice(0, 8)}` : "Unassigned legacy event"}
+                    </span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">Academic year:</span> {overlay.academicYear?.trim() || "Unknown year"}
+                    </span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <MapPin className="h-3 w-3 text-primary" />{" "}
                       {locations.length} requested location{locations.length === 1 ? "" : "s"}
                     </span>
@@ -703,6 +767,7 @@ export function AdminEventLayoutsPage() {
                     {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}
                   </p>
                   <dl className="mt-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
+                    <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Created</dt><dd className="mt-1 text-xs text-foreground">{overlay.createdAt ? formatEventSubmissionTime(overlay.createdAt) : "Not recorded"}</dd></div>
                     <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Submitted to GSO</dt><dd className="mt-1 text-xs text-foreground">{formatEventSubmissionTime(overlay.submittedAt)}</dd></div>
                     <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Latest content edit</dt><dd className="mt-1 text-xs text-foreground">{overlay.lastEditedAt ? formatEventSubmissionTime(overlay.lastEditedAt) : "Not recorded"}{overlay.revision ? ` · Revision ${overlay.revision}` : ""}</dd></div>
                   </dl>
@@ -749,21 +814,19 @@ export function AdminEventLayoutsPage() {
           );
         })}
 
-        {overlays.length === 0 && (
+        {scopedOverlays.length === 0 && (
           <EmptyState
-            icon={
-              search || statusFilter !== "all" ? Search : CalendarDays
-            }
+            icon={search || statusFilter !== "all" || organizationFilter !== "all" || academicYearFilter !== "all" ? Search : CalendarDays}
             title={
-              search
+              search || organizationFilter !== "all" || academicYearFilter !== "all"
                 ? "No matching layouts"
                 : statusFilter !== "all"
                 ? "No layouts in this category"
                 : "No event layouts yet"
             }
             description={
-              search
-                ? "No event layouts match your search criteria."
+              search || organizationFilter !== "all" || academicYearFilter !== "all"
+                ? "No event layouts match these organization, academic year, or search filters."
                 : statusFilter !== "all"
                 ? "There are no event layouts matching the current filter."
                 : "Student organizations haven't submitted any event layouts for review yet."

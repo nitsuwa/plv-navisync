@@ -62,3 +62,6 @@ LPT9
 # Local dependency store and temporary visual-planning state
 .pnpm-store/
 .superpowers/
+
+# Disposable local verification runtimes, browser profiles, and raw test output
+/.tmp/

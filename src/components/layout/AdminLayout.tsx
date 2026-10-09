@@ -50,7 +50,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/map-builder":    "Map Builder",
   "/admin-dashboard/announcements":  "Announcements",
   "/admin-dashboard/reports":        "Reports",
-  "/admin-dashboard/event-layouts":  "Event Layouts",
+  "/admin-dashboard/event-layouts":  "Events",
   "/admin-dashboard/users":          "Users",
   "/admin-dashboard/settings":       "Settings",
   // Legacy pages still reachable by URL but not in sidebar
@@ -59,7 +59,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin-dashboard/routes":         "Routes",
   "/admin-dashboard/locations":      "Campus Locations",
   "/admin-dashboard/accessibility":  "Accessibility",
-  "/admin-dashboard/events":         "Event Maps",
+  "/admin-dashboard/events":         "Events",
 };
 
 export function AdminLayout() {
@@ -266,7 +266,7 @@ export function AdminLayout() {
                       {submissions.events.slice(0, 6).map(event => {
                         const isUnread = submissions.unreadIds.has(event.id);
                         const count = normalizeEventOverlayLocations(event).length;
-                        return <AdminNotificationAction key={event.id} to={`/admin-dashboard/event-layouts?review=${encodeURIComponent(event.id)}`} ariaLabel={`Review ${event.title}`} onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full gap-3 px-4 py-3 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+                        return <AdminNotificationAction key={event.id} to={`/admin-dashboard/events?view=review&review=${encodeURIComponent(event.id)}`} ariaLabel={`Review ${event.title}`} onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full gap-3 px-4 py-3 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
                           <span className="relative mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><History className="h-4 w-4" />{isUnread && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-600 ring-2 ring-card" />}</span>
                           <span className="min-w-0 flex-1"><span className="block break-words text-xs font-bold">{event.title}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{event.organizer || 'Student organization'} · {count} map{count === 1 ? '' : 's'}</span><span className="mt-1 block text-[11px] text-muted-foreground">{submissionUpdateLabel(event)} · {formatEventSubmissionTime(event.lastEditedAt && Date.parse(event.lastEditedAt) > Date.parse(event.submittedAt ?? '') ? event.lastEditedAt : event.submittedAt)}</span><span className="mt-2 block text-xs font-bold text-primary">Review submission <span aria-hidden="true">→</span></span></span>
                         </AdminNotificationAction>;
@@ -275,7 +275,7 @@ export function AdminLayout() {
                       {submissions.error && <div className="px-4 pb-3"><p role="alert" className="text-xs text-destructive">{submissions.error}</p><button type="button" onClick={() => void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry submissions</button></div>}
                       {submissions.receiptError && <div className="px-4 pb-3"><p role="status" className="text-xs text-muted-foreground">{submissions.receiptError}</p><button type="button" onClick={()=>void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry read sync</button></div>}
                       {!submissions.loading && !submissions.error && submissions.pendingCount === 0 && <p className="px-4 pb-3 text-xs text-muted-foreground">No submissions waiting for review.</p>}
-                      {submissions.pendingCount > 0 && <AdminNotificationAction to="/admin-dashboard/event-layouts" onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full items-center justify-center border-t border-border text-xs font-bold text-primary hover:bg-muted">View all {submissions.pendingCount} pending submissions</AdminNotificationAction>}
+                      {submissions.pendingCount > 0 && <AdminNotificationAction to="/admin-dashboard/events?view=review" onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full items-center justify-center border-t border-border text-xs font-bold text-primary hover:bg-muted">View all {submissions.pendingCount} pending submissions</AdminNotificationAction>}
                     </div>}
                     <div className="divide-y divide-border">
                     {logs.length > 0 ? (
