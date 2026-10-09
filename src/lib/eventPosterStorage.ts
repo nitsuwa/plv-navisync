@@ -1,13 +1,14 @@
 import { getSupabase } from './supabase';
 export const EVENT_POSTER_BUCKET = 'event_posters';
 const posterExtensions: Record<string,string> = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp'};
-export async function removeUnusedEventPoster(poster: {url:string;path:string}, eventId: string): Promise<void> {
+export async function removeUnusedEventPoster(poster: {url:string;path:string}, _eventId: string): Promise<void> {
   const client = getSupabase();
-  const {data,error} = await client.from('map_elements').select('metadata').eq('id',eventId).maybeSingle();
-  // A failed response does not prove that the preceding save failed to commit.
-  // Leave the image intact if we cannot confirm whether it is still referenced.
+  const {data,error} = await client.rpc('is_event_poster_referenced', { p_path: poster.path });
+  // Check every event, including historical layouts and reused drafts, rather
+  // than only the current event. Uncertainty must preserve the public object.
   if (error) throw error;
-  if ((data?.metadata as Record<string,unknown> | undefined)?.posterUrl === poster.url) return;
+  if (typeof data !== 'boolean') throw new Error('Poster usage could not be confirmed. The image was kept; retry after refreshing.');
+  if (data) return;
   const removed = await client.storage.from(EVENT_POSTER_BUCKET).remove([poster.path]);
   if (removed.error) throw removed.error;
 }

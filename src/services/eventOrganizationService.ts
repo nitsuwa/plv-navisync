@@ -1,11 +1,14 @@
 import { getSupabase } from '../lib/supabase';
-import type { EventOrganizationContext, EventOrganization, EventRepresentativeGrant, ReplaceRepresentativeInput, SaveEventOrganizationInput } from '../types/eventOrganization';
+import type { EventOrganizationContext, EventOrganizationHandoverSummary, EventOrganization, EventRepresentativeGrant, ReplaceRepresentativeInput, SaveEventOrganizationInput } from '../types/eventOrganization';
 
 export class OrganizationAccessUnavailable extends Error {
   constructor() { super('Organization access is not configured yet. Ask an administrator to apply the organization database update.'); this.name='OrganizationAccessUnavailable'; }
 }
 export class OrganizationAssignmentChanged extends Error {
   constructor() { super('This assignment changed. Refresh and review the current representative before trying again.'); this.name='OrganizationAssignmentChanged'; }
+}
+export class OrganizationRecordChanged extends Error {
+  constructor() { super('This organization changed in another session. Refresh its current details before editing again.'); this.name='OrganizationRecordChanged'; }
 }
 function record(value: unknown): Record<string,unknown> {
   if (!value || typeof value!=='object' || Array.isArray(value)) throw new Error('Invalid organization response. Please refresh.');
@@ -21,11 +24,11 @@ function instant(row: Record<string,unknown>,key:string): string {
   if(!Number.isFinite(Date.parse(value))) throw new Error('Invalid organization timestamp. Please refresh.');
   return value;
 }
-function unwrap(result:{data:unknown;error:unknown}): unknown {
+function unwrap(result:{data:unknown;error:unknown}, conflict: "assignment" | "organization" = "assignment"): unknown {
   if(result.error){
     const error=record(result.error); const code=error.code;
     if(['PGRST202','PGRST205','42883','42P01'].includes(String(code))) throw new OrganizationAccessUnavailable();
-    if(code==='40001') throw new OrganizationAssignmentChanged();
+    if(code==='40001') throw conflict === "organization" ? new OrganizationRecordChanged() : new OrganizationAssignmentChanged();
     if(code==='42501') throw new Error('Your organization access changed or this action requires administrator permission.');
     if(code==='23505') throw new Error('This organization code already exists. Choose a different code.');
     throw new Error(typeof error.message==='string'?error.message:'Organization access could not be loaded. Reconnect and retry.');
@@ -62,6 +65,15 @@ async function listOrganizations():Promise<EventOrganization[]> {
   return data.map(organization);
 }
 async function saveOrganization(input:SaveEventOrganizationInput):Promise<EventOrganization> {
-  return organization(unwrap(await getSupabase().rpc('admin_save_event_organization',{p_id:input.id,p_code:input.code,p_name:input.name,p_is_active:input.isActive,p_expected_updated_at:input.expectedUpdatedAt})));
+  return organization(unwrap(await getSupabase().rpc('admin_save_event_organization',{p_id:input.id,p_code:input.code,p_name:input.name,p_is_active:input.isActive,p_expected_updated_at:input.expectedUpdatedAt}), "organization"));
 }
-export const eventOrganizationService={listMyEventOrganizations,replaceRepresentative,revokeRepresentative,listOrganizations,saveOrganization};
+async function getHandoverSummary(expectedGrantId:string):Promise<EventOrganizationHandoverSummary> {
+  const row=record(unwrap(await getSupabase().rpc('get_event_organization_handover',{p_expected_grant_id:expectedGrantId})));
+  const count=(key:string)=>{const value=row[key];return typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:0;};
+  if(typeof row.is_read!=='boolean') throw new Error('Invalid handover notification response. Please retry.');
+  return {...context(row),startsAt:instant(row,'starts_at'),pendingCount:count('pending_count'),unfinishedCount:count('unfinished_count'),openFeedbackCount:count('open_feedback_count'),isRead:row.is_read};
+}
+async function acknowledgeHandover(expectedGrantId:string):Promise<void> {
+  unwrap(await getSupabase().rpc('ack_event_organization_handover',{p_expected_grant_id:expectedGrantId}));
+}
+export const eventOrganizationService={listMyEventOrganizations,replaceRepresentative,revokeRepresentative,listOrganizations,saveOrganization,getHandoverSummary,acknowledgeHandover};

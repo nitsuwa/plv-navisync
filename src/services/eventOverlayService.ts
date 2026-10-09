@@ -28,6 +28,8 @@ import {
   normalizeEventOverlayLocations,
 } from "../lib/eventOverlayModel";
 import { floorLookupId, publishedEventBuildingOptions } from "../lib/eventLocationData";
+import { prepareEventReuseRequest } from "../lib/eventOrganizationReuse";
+import type { EventOrganizationContext } from "../types/eventOrganization";
 
 import { getStudentEventPhase, isValidEventInstant, validateEventDates } from "../lib/eventPublication";
 
@@ -999,6 +1001,37 @@ export async function listOrganizationEvents(organizationId:string,options:{acad
   return {events:data.events.map(overlayFromAdminResult),total:data.total};
 }
 
+export async function reuseOrganizationEvent(
+  source: CampusEventOverlay,
+  organization: EventOrganizationContext,
+  title: string,
+  requestId: string,
+): Promise<CampusEventOverlay> {
+  const request = prepareEventReuseRequest(source, organization, title, requestId);
+  const client = getSupabase();
+  const { data: authData, error: authError } = await client.auth.getUser();
+  if (authError || !authData.user) throw new Error("Sign in again before reusing this event layout.");
+  const { data, error } = await client.rpc("reuse_organization_event", {
+    p_source_id: request.sourceId,
+    p_expected_source_updated_at: request.expectedSourceUpdatedAt,
+    p_organization_id: request.organizationId,
+    p_expected_grant_id: request.expectedGrantId,
+    p_title: request.title,
+    p_academic_year: request.academicYear,
+    p_request_id: request.requestId,
+  });
+  if (error) throw eventCommandError(error);
+  const created = overlayFromAdminResult(data);
+  if (created.organizationId !== organization.organizationId || created.createdByUserId !== authData.user.id ||
+      created.reusedFromEventId !== source.id || created.status !== "draft" || created.title !== request.title ||
+      created.academicYear !== request.academicYear || created.campusId !== source.campusId ||
+      created.dateStart || created.dateEnd || created.publicationAt || created.submittedAt || created.adminComment ||
+      created.locationFeedback || created.feedbackResolutions) {
+    throw new Error("The new draft could not be confirmed. Retry this same request safely.");
+  }
+  return created;
+}
+
 export async function manageEventPublication(
   overlayId: string,
   expectedUpdatedAt: string,
@@ -1128,6 +1161,7 @@ export async function getActiveApprovedOverlays(): Promise<
 export const eventOverlayService = {
   getEventEditAccess,
   listOrganizationEvents,
+  reuseOrganizationEvent,
   listLegacyEventReconciliation,
   bindLegacyEventOrganization,
   correctEventOrganization,

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSupabase } from '../../lib/supabase';
-import { eventOrganizationService, OrganizationAccessUnavailable, OrganizationAssignmentChanged } from '../eventOrganizationService';
+import { eventOrganizationService, OrganizationAccessUnavailable, OrganizationAssignmentChanged, OrganizationRecordChanged } from '../eventOrganizationService';
 vi.mock('../../lib/supabase', () => ({getSupabase:vi.fn()}));
 let rpc: ReturnType<typeof vi.fn>;
 beforeEach(()=>{rpc=vi.fn().mockResolvedValue({data:[],error:null});vi.mocked(getSupabase).mockReturnValue({rpc} as never);});
@@ -27,5 +27,9 @@ describe('verified organization access service',()=>{
   it('rejects malformed successful responses instead of granting phantom access',async()=>{
     rpc.mockResolvedValue({data:[{organization_id:'org-a'}],error:null});
     await expect(eventOrganizationService.listMyEventOrganizations()).rejects.toThrow(/invalid|incomplete/i);
+  });
+  it('distinguishes a stale organization edit from a representative handover conflict',async()=>{
+    rpc.mockResolvedValue({data:null,error:{code:'40001',message:'Organization changed'}});
+    await expect(eventOrganizationService.saveOrganization({id:'org-a',code:'IT',name:'IT Org',isActive:true,expectedUpdatedAt:'2026-01-01T00:00:00Z'})).rejects.toBeInstanceOf(OrganizationRecordChanged);
   });
 });

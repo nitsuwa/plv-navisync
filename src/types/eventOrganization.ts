@@ -5,6 +5,13 @@ export interface EventOrganizationContext {
   academicYear: string;
   expiresAt: string;
 }
+export interface EventOrganizationHandoverSummary extends EventOrganizationContext {
+  startsAt: string;
+  pendingCount: number;
+  unfinishedCount: number;
+  openFeedbackCount: number;
+  isRead: boolean;
+}
 export interface ReplaceRepresentativeInput {
   organizationId: string;
   representativeId: string;

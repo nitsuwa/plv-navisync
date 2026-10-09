@@ -3,6 +3,7 @@ import { getSupabase } from "../../lib/supabase";
 import { campusService, resolveActiveCampusId } from "../campusService";
 import { eventOverlayService } from "../eventOverlayService";
 import { writeEventFeedback } from "../../lib/eventFeedbackPins";
+import type { CampusEventOverlay } from "../../components/map-builder/types";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 vi.mock("../campusService", () => ({
@@ -69,6 +70,32 @@ function publishedCampus(id: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("event overlay service", () => {
+  it("reuses a layout through the server and confirms fresh draft provenance", async () => {
+    const { client } = makeClient();
+    const source = { id: "10000000-0000-4000-8000-000000000001", organizationId: "org-1", updatedAt: "2026-10-08T12:00:00Z", campusId: "campus-1", title: "Past fair", description: "Original", organizer: "IT", status: "approved", dateStart: "2025-03-15T01:00:00Z", posterUrl: "https://example.test/old.png", locations: [{ id: "ground", locationRef: campusLocation, eventFurniture: [{ id: "booth", x: 1, y: 2 }], eventLabels: [] }] } as unknown as CampusEventOverlay;
+    const organization = { organizationId: "org-1", organizationName: "IT Organization", grantId: "30000000-0000-4000-8000-000000000001", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z" };
+    client.rpc.mockResolvedValue({ data: { id: "40000000-0000-4000-8000-000000000001", campusId: "campus-1", organizationId: "org-1", creatorName: "New Rep", createdAt: "2026-10-09T00:00:00Z", updatedAt: "2026-10-09T00:00:00Z", reusedFromEventId: source.id, metadata: { createdByUserId: "org-1", status: "draft", title: "New fair", academicYear: "2026–2027", locations: [] } }, error: null } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    const result = await eventOverlayService.reuseOrganizationEvent(source, organization, "New fair", "50000000-0000-4000-8000-000000000001");
+    expect(result).toMatchObject({ id: "40000000-0000-4000-8000-000000000001", status: "draft", reusedFromEventId: source.id });
+    expect(client.rpc).toHaveBeenCalledWith("reuse_organization_event", {
+      p_source_id: source.id, p_expected_source_updated_at: source.updatedAt, p_organization_id: "org-1",
+      p_expected_grant_id: organization.grantId, p_title: "New fair", p_academic_year: "2026–2027",
+      p_request_id: "50000000-0000-4000-8000-000000000001",
+    });
+    expect(JSON.stringify(client.rpc.mock.calls[0][1])).not.toContain("dateStart");
+    expect(JSON.stringify(client.rpc.mock.calls[0][1])).not.toContain("posterUrl");
+  });
+
+  it("shows stale source and handover conflicts as actionable reuse errors", async () => {
+    const { client } = makeClient();
+    const source = { id: "10000000-0000-4000-8000-000000000001", organizationId: "org-1", updatedAt: "2026-10-08T12:00:00Z", campusId: "campus-1", title: "Past fair" } as never;
+    const organization = { organizationId: "org-1", organizationName: "IT Organization", grantId: "30000000-0000-4000-8000-000000000001", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z" };
+    client.rpc.mockResolvedValue({ data: null, error: { code: "40001", message: "The source layout changed. Refresh before reusing it." } } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.reuseOrganizationEvent(source, organization, "New fair", "50000000-0000-4000-8000-000000000001")).rejects.toThrow(/source layout changed/i);
+  });
+
   it('reports an expired-session read instead of pretending the event was deleted',async()=>{
     const {client,mapElements}=makeClient();
     mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);

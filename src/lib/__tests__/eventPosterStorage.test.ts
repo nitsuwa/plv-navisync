@@ -5,9 +5,25 @@ vi.mock('../supabase', () => ({ getSupabase: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
 it('does not delete a poster already referenced by an event after a lost save response', async () => {
   const remove=vi.fn();
-  vi.mocked(getSupabase).mockReturnValue({from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{metadata:{posterUrl:'https://example.test/used.png'}},error:null})})})}),storage:{from:()=>({remove})}} as never);
+  const rpc=vi.fn().mockResolvedValue({data:true,error:null});
+  vi.mocked(getSupabase).mockReturnValue({rpc,storage:{from:()=>({remove})}} as never);
   await removeUnusedEventPoster({url:'https://example.test/used.png',path:'org/file.png'},'event-id');
+  expect(rpc).toHaveBeenCalledWith('is_event_poster_referenced',{p_path:'org/file.png'});
   expect(remove).not.toHaveBeenCalled();
+});
+it('preserves a poster when the reference check is unavailable or malformed', async () => {
+  const remove=vi.fn();
+  vi.mocked(getSupabase).mockReturnValue({rpc:vi.fn().mockResolvedValue({data:null,error:{message:'RPC unavailable'}}),storage:{from:()=>({remove})}} as never);
+  await expect(removeUnusedEventPoster({url:'https://example.test/used.png',path:'org/file.png'},'event-id')).rejects.toThrow('RPC unavailable');
+  vi.mocked(getSupabase).mockReturnValue({rpc:vi.fn().mockResolvedValue({data:null,error:null}),storage:{from:()=>({remove})}} as never);
+  await expect(removeUnusedEventPoster({url:'https://example.test/used.png',path:'org/file.png'},'event-id')).rejects.toThrow(/could not be confirmed/i);
+  expect(remove).not.toHaveBeenCalled();
+});
+it('removes only after the server confirms no event references the poster', async () => {
+  const remove=vi.fn().mockResolvedValue({error:null});
+  vi.mocked(getSupabase).mockReturnValue({rpc:vi.fn().mockResolvedValue({data:false,error:null}),storage:{from:()=>({remove})}} as never);
+  await removeUnusedEventPoster({url:'https://example.test/unused.png',path:'org/file.png'},'event-id');
+  expect(remove).toHaveBeenCalledWith(['org/file.png']);
 });
 it('rejects unsupported and oversized files before calling storage', () => {
   expect(validateEventPoster(new File(['svg'], 'poster.svg', {type:'image/svg+xml'}))).toMatch(/JPEG, PNG or WebP/);
