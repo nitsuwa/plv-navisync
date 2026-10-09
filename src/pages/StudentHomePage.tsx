@@ -246,6 +246,8 @@ export function StudentHomePage() {
               markEventRead={eventUpdates.markRead}
               eventUpdatesError={eventUpdates.error}
               refreshEventUpdates={eventUpdates.refresh}
+              handoverUpdates={eventUpdates.handoverUpdates}
+              markHandoverRead={eventUpdates.markHandoverRead}
               campusId={activeCampus?.id ?? null}
               reportsSnapshot={reports}
               reportsSnapshotLoading={reportsLoading}

@@ -25,7 +25,7 @@ function getStudentNavLinks(isStudentOrg: boolean) {
   return [
     { label: "Home", path: "/home", icon: Home },
     { label: "Map", path: "/map", icon: Compass },
-    ...(isStudentOrg ? [{ label: "My Events", path: "/student/events", icon: CalendarDays }] : []),
+    ...(isStudentOrg ? [{ label: "Organization Events", path: "/student/events", icon: CalendarDays }] : []),
   ];
 }
 
@@ -48,6 +48,8 @@ export function Navbar() {
     error: eventUpdatesError,
     refresh: refreshEventUpdates,
     markRead: markEventRead,
+    handoverUpdates,
+    markHandoverRead,
   } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
   const toast = useToast();
   const studentNotificationRef = useRef<HTMLDivElement>(null);
@@ -166,7 +168,7 @@ export function Navbar() {
               const active = isActive(path);
               return (
                 <Link key={path} to={path}
-                  aria-label={path === "/student/events" && eventUnreadCount ? `My Events, ${eventUnreadCount} unread layout updates` : undefined}
+                  aria-label={path === "/student/events" && eventUnreadCount ? `Organization Events, ${eventUnreadCount} unread layout updates` : undefined}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex items-center gap-1.5 rounded-xl transition-colors duration-150 select-none",
@@ -208,6 +210,8 @@ export function Navbar() {
                 markEventRead={markEventRead}
                 eventUpdatesError={eventUpdatesError}
                 refreshEventUpdates={refreshEventUpdates}
+                handoverUpdates={handoverUpdates}
+                markHandoverRead={markHandoverRead}
               />
             )}
 

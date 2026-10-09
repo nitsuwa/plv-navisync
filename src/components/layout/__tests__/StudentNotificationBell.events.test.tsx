@@ -80,4 +80,41 @@ describe("student event notifications", () => {
     const readIds = JSON.parse(localStorage.getItem("plv-student-notification-read:v1:student-a") ?? "[]") as string[];
     expect(readIds.some((id) => id.includes("campus-event:campus-a:ongoing"))).toBe(true);
   });
+
+  it("shows a successor handover summary and opens the matching organization workspace", async () => {
+    const markHandoverRead = vi.fn();
+    render(
+      <MemoryRouter>
+        <StudentNotificationBell
+          ownerId="successor"
+          isStudentOrg
+          eventUpdates={[]}
+          unreadEventIds={new Set()}
+          markEventRead={vi.fn()}
+          refreshEventUpdates={vi.fn().mockResolvedValue(undefined)}
+          handoverUpdates={[{
+            organizationId: "org-it", organizationName: "IT Organization", grantId: "grant-2026",
+            academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z", startsAt: "2026-10-09T00:00:00Z",
+            pendingCount: 1, unfinishedCount: 2, openFeedbackCount: 1, isRead: false,
+          }]}
+          markHandoverRead={markHandoverRead}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /notifications/i }));
+    const notice = await screen.findByRole("link", { name: /IT Organization event handover/i });
+    expect(notice).toHaveAttribute("href", "/student/events?organizationId=org-it&handover=grant-2026");
+    expect(screen.getByText(/2 unfinished events \(1 pending submission\) · 1 open feedback pin/i)).toBeInTheDocument();
+    fireEvent.click(notice);
+    expect(markHandoverRead).toHaveBeenCalledWith("grant-2026");
+  });
+
+  it("shows the handover action when only pending submissions remain", async () => {
+    render(<MemoryRouter><StudentNotificationBell ownerId="pending-successor" isStudentOrg eventUpdates={[]} unreadEventIds={new Set()} markEventRead={vi.fn()} refreshEventUpdates={vi.fn().mockResolvedValue(undefined)} handoverUpdates={[{
+      organizationId: "org-it", organizationName: "IT Organization", grantId: "grant-pending", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z", startsAt: "2026-10-09T00:00:00Z", pendingCount: 2, unfinishedCount: 0, openFeedbackCount: 0, isRead: false,
+    }]} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: /notifications/i }));
+    expect(await screen.findByRole("link", { name: /IT Organization event handover/i })).toHaveAttribute("href", "/student/events?organizationId=org-it&handover=grant-pending");
+    expect(screen.getByText(/2 pending submissions/i)).toBeInTheDocument();
+  });
 });

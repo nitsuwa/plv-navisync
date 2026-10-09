@@ -9,6 +9,7 @@ import type { CampusEventOverlay, FloorPlan } from "../../components/map-builder
 const fixture = vi.hoisted(() => ({
   service: {
     getEventOverlay: vi.fn(),
+    getEventEditAccess: vi.fn(),
     updateEventOverlayLayout: vi.fn(),
     submitEventOverlayLayout: vi.fn(),
     setEventFeedbackPinAddressed: vi.fn(),
@@ -56,6 +57,7 @@ const authState = vi.hoisted(() => ({
   profile: {id:'org-a'} as {id:string}|null,
   signOut: vi.fn(),
 }));
+const organizationAccess = vi.hoisted(() => ({ organizations: [{ organizationId: "org-a", organizationName: "Demo Org", grantId: "grant-a", academicYear: "2026–2027", expiresAt: "2027-06-30T15:59:59.000Z" }] }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => {
   useSyncExternalStore(listener=>{authState.listeners.add(listener);return()=>authState.listeners.delete(listener);},()=>`${authState.profile?.id}:${authState.loading}:${authState.isStudentOrg}`);
@@ -68,6 +70,7 @@ vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => {
   }, () => publishedCampusState.loading);
   return publishedCampusState;
 } }));
+vi.mock("../../hooks/useEventOrganizationAccess", () => ({ useEventOrganizationAccess: () => ({ organizations: organizationAccess.organizations, loading: false, error: null }) }));
 vi.mock("../../hooks/useToast", () => ({ useToast: () => fixture.toast }));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: fixture.service }));
 vi.mock("../../lib/eventLocationData", async (importOriginal) => {
@@ -141,11 +144,11 @@ const overlay: CampusEventOverlay = {
   ],
 };
 
-function renderPage() {
+function renderPage(initialPath = "/student/events/event-1/edit") {
   const router = createMemoryRouter([
     { path: "/student/events/:id/edit", element: <StudentEventEditPage /> },
     { path: "/student/events", element: <div>My Events landing</div> },
-  ], { initialEntries: ["/student/events/event-1/edit"] });
+  ], { initialEntries: [initialPath] });
   return { ...render(<RouterProvider router={router} />), router };
 }
 
@@ -169,6 +172,7 @@ beforeEach(() => {
   publishedCampusState.loading = false;
   publishedCampusState.error = null;
   fixture.service.getEventOverlay.mockResolvedValue(overlay);
+  fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: null, grantId: null, isArchived: false, canEditContent: true, canAddressFeedback: true });
   fixture.service.updateEventOverlayLayout.mockResolvedValue(undefined);
   fixture.service.submitEventOverlayLayout.mockResolvedValue(undefined);
 });
@@ -203,6 +207,16 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     expect(screen.queryByRole('button',{name:'Save Draft'})).not.toBeInTheDocument();
     expect(screen.queryByTestId('event-furniture-a-chair')).not.toBeInTheDocument();
   });
+  it("lets the current representative edit an inherited draft and sends the server grant on save", async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, status: "draft", createdByUserId: "former-representative", organizationId: "org-a" });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    startPendingChairMove();
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalledWith("event-1", expect.any(Array), overlay.updatedAt, "grant-a"));
+    expect(screen.queryByText(/belongs to another student organization/i)).not.toBeInTheDocument();
+  });
   it('keeps edits and blocks a competing save while acknowledgement is in flight', async () => {
     const feedback = '@event-feedback/v1:' + JSON.stringify({text:'',pins:[{id:'pin',x:24,y:24,comment:'Move this chair'}]});
     const source = { ...overlay, locationFeedback: { 'location-a': feedback } };
@@ -224,10 +238,20 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
   });
   it('opens approved maps for inspection without save or submit controls', async () => {
     fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, status: 'approved' });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: null, grantId: null, isArchived: false, canEditContent: false, canAddressFeedback: true });
     renderPage();
     await screen.findByTestId('event-furniture-a-chair');
     expect(screen.queryByRole('button', { name: 'Save Draft' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Review & submit/ })).not.toBeInTheDocument();
+  });
+  it("opens an archived organization layout through the protected history route as read-only", async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, status: "approved", organizationId: "org-a", createdByUserId: "former-representative", archivedAt: "2026-09-01T00:00:00Z" });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: true, canEditContent: false, canAddressFeedback: false });
+    renderPage("/student/events/event-1/edit?history=1");
+    await screen.findByTestId("event-furniture-a-chair");
+    expect(fixture.service.getEventOverlay).toHaveBeenCalledWith("event-1", true);
+    expect(screen.getByText("Archived organization layout · read-only history")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("button", { name: "Save Draft" })).not.toBeInTheDocument();
   });
   it("confirms Back even with a saved draft and lets the user keep editing", async () => {
     renderPage();

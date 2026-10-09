@@ -1,7 +1,7 @@
 /** Student Org event proposals and map submission dashboard. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Edit2, Loader2, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Save, Trash2, X, XCircle } from "lucide-react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../lib/utils";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -18,6 +18,11 @@ import { eventFeedbackText } from "../lib/eventFeedbackPins";
 import type { CampusEventOverlay, EventLocationRef } from "../components/map-builder/types";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
+import { useEventOrganizationAccess } from "../hooks/useEventOrganizationAccess";
+import { useOrganizationEventWorkspace } from "../hooks/useOrganizationEventWorkspace";
+import { OrganizationEventHistory } from "../components/events/OrganizationEventHistory";
+import { getStudentEventPhase } from "../lib/eventPublication";
+import { countOpenFeedbackPins } from "../lib/eventFeedbackPins";
 
 const STATUS_CONFIG: Record<EventOverlayStatus, { label: string; color: string; bg: string; icon: React.ElementType }> = {
   draft: { label: "Draft", color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800/30", icon: Save },
@@ -35,7 +40,8 @@ const NEXT_STEP: Record<EventOverlayStatus, string> = {
 
 export function StudentMyEventsPage() {
   const navigate = useNavigate();
-  const { isStudentOrg, profile, loading: authLoading } = useStudentAuth();
+  const [searchParams] = useSearchParams();
+  const { isStudentOrg, profile, username, loading: authLoading } = useStudentAuth();
   const {
     campuses,
     activeCampus,
@@ -45,7 +51,21 @@ export function StudentMyEventsPage() {
     refetch: refetchCampus,
   } = usePublishedCampus();
   const toast = useToast();
-  const { events: overlays, loading, error: loadError, receiptError, refresh: loadOverlays, unreadIds, markRead } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
+  const { receiptError, unreadIds, markRead } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !authLoading);
+  const access = useEventOrganizationAccess(profile?.id, isStudentOrg && !authLoading);
+  const requestedOrganizationId = searchParams.get("organizationId");
+  useEffect(() => {
+    if (requestedOrganizationId && access.organizations.some(item => item.organizationId === requestedOrganizationId)) {
+      access.selectOrganization(requestedOrganizationId);
+    }
+  }, [access.organizations, access.selectOrganization, requestedOrganizationId]);
+  const organization = access.organization;
+  const workspace = useOrganizationEventWorkspace(profile?.id, organization, isStudentOrg && !authLoading);
+  const overlays = workspace.events;
+  const loadError = access.error ?? workspace.error;
+  const loading = access.loading || (Boolean(organization) && workspace.loading);
+  const actionsDisabled = Boolean(access.error || access.refreshing || workspace.error);
+  const loadOverlays = async () => { await Promise.all([access.refresh(), workspace.refresh()]); };
   const reducedMotion = useReducedMotion();
   const [readingIds,setReadingIds] = useState<ReadonlySet<string>>(new Set());
   const navigationRequest = useRef(0);
@@ -79,15 +99,15 @@ export function StudentMyEventsPage() {
     [activeCampus],
   );
   const canCreateProposal = Boolean(
-    publishedCampuses.length > 0 && !campusLoading && !campusError && !isCached,
+    organization && !actionsDisabled && publishedCampuses.length > 0 && !campusLoading && !campusError && !isCached,
   );
   const handleCreate = async (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string }) => {
-    if (!canCreateProposal || !activeCampus) {
+    if (!canCreateProposal || !activeCampus || !organization || !profile?.id) {
       throw new Error("A fresh published campus map is required before creating an event proposal.");
     }
     const overlay = await eventOverlayService.createEventOverlay(
-      data,
-      profile?.id || "unknown",
+      { ...data, organization },
+      profile.id,
       data.campusId ?? activeCampus.id,
     );
     await loadOverlays();
@@ -96,7 +116,8 @@ export function StudentMyEventsPage() {
 
   const handleEdit = async (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string }) => {
     if (!editTarget) return;
-    await eventOverlayService.updateEventOverlayDetails(editTarget.id, data, editTarget.updatedAt);
+    const expectedGrantId = organization && editTarget.organizationId === organization.organizationId ? organization.grantId : undefined;
+    await eventOverlayService.updateEventOverlayDetails(editTarget.id, data, editTarget.updatedAt, expectedGrantId);
     toast.success("Draft saved", `"${data.title}" is a draft. Submit to GSO when it is ready for review.`);
     setEditTarget(null);
     await loadOverlays();
@@ -106,7 +127,8 @@ export function StudentMyEventsPage() {
     if (!deleteTarget) return;
     setBusy(true);
     try {
-      await eventOverlayService.deleteEventOverlay(deleteTarget.id);
+      const expectedGrantId = organization && deleteTarget.organizationId === organization.organizationId ? organization.grantId : undefined;
+      await eventOverlayService.deleteEventOverlay(deleteTarget.id, expectedGrantId);
       toast.success("Event deleted", `"${deleteTarget.title}" has been removed.`);
       setDeleteTarget(null);
       await loadOverlays();
@@ -118,11 +140,11 @@ export function StudentMyEventsPage() {
   };
 
   const handleDuplicate = async (source: CampusEventOverlay) => {
-    if (busy || !profile?.id || !source.campusId) return;
+    if (busy || !profile?.id || !source.campusId || !organization) return;
     setBusy(true);
     try {
-      const copy = await eventOverlayService.createEventOverlay({ title: `${source.title} (copy)`, description: source.description, organizer: source.organizer, posterUrl: source.posterUrl, locations: normalizeEventOverlayLocations(source).map((location) => ({ locationRef: location.locationRef, eventFurniture: location.eventFurniture, eventLabels: location.eventLabels })) }, profile.id, source.campusId);
-      toast.success("Layout copied", "Review the locations before submitting this draft. The administrator will set its schedule.");
+      const copy = await eventOverlayService.createEventOverlay({ title: `${source.title} (copy)`, description: source.description, organizer: source.organizer, posterUrl: source.posterUrl, organization, locations: normalizeEventOverlayLocations(source).map((location) => ({ locationRef: location.locationRef, eventFurniture: location.eventFurniture, eventLabels: location.eventLabels })) }, profile.id, source.campusId);
+      toast.success("Layout copied", "This is a new draft for your organization. Review it and request fresh admin approval.");
       navigate(`/student/events/${copy.id}/edit`);
     } catch (err) {
       toast.error("Copy failed", err instanceof Error ? err.message : "Unable to copy this layout.");
@@ -144,19 +166,29 @@ export function StudentMyEventsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6">
+        <div className="max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <Link to="/home" className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground mb-2">
               <ArrowLeft className="h-3 w-3" /> Back to Home
             </Link>
-            <h1 className="text-2xl font-extrabold text-foreground">My Events</h1>
+            <h1 className="text-2xl font-extrabold text-foreground">Organization Events</h1>
             <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-              Request one or more campus locations, design each map on top of the published base map, and send the complete proposal for one GSO decision.
+              Manage your organization’s current event work and inspect layouts created by past representatives.
             </p>
           </div>
-          {overlays.length > 0 && canCreateProposal && <button type="button" onClick={() => setShowCreate(true)} className="shrink-0 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground">Create event</button>}
+          {organization && overlays.length > 0 && <button type="button" disabled={!canCreateProposal} onClick={() => setShowCreate(true)} className="shrink-0 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground disabled:opacity-50">Create event</button>}
         </div>
+
+        {access.organizations.length > 1 && <label className="block max-w-xl space-y-1.5 text-sm font-semibold" htmlFor="event-organization-context"><span>Organization workspace</span><select id="event-organization-context" aria-label="Organization workspace" value={organization?.organizationId ?? ""} onChange={(event) => access.selectOrganization(event.target.value)} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><option value="">Choose an organization</option>{access.organizations.map((item) => <option key={item.organizationId} value={item.organizationId}>{item.organizationName} · {item.academicYear}</option>)}</select></label>}
+
+        {organization && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3"><div className="min-w-0 flex-1 break-words"><p className="text-sm font-bold text-foreground">{organization.organizationName}</p><p className="mt-0.5 text-xs text-muted-foreground">Current representative: {username || "You"} · Academic year {organization.academicYear}</p></div><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">Active assignment</span></div>}
+
+        {access.error && <div role="alert" className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-50/70 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>Could not verify current organization access. {access.error}</span><button type="button" onClick={() => void access.refresh()} className="min-h-10 shrink-0 rounded-lg px-3 font-bold text-primary hover:bg-card">Retry access check</button></div>}
+
+        {!access.loading && !access.error && access.organizations.length === 0 && <div role="status" className="rounded-2xl border border-amber-500/20 bg-amber-50/60 p-5 dark:bg-amber-950/15"><h2 className="font-bold text-foreground">No active organization assignment</h2><p className="mt-1 text-sm leading-relaxed text-muted-foreground">An administrator must appoint you as the organization’s representative before you can manage event work. Ask your admin to check the Student Organizations section in Users.</p></div>}
+
+        {!access.loading && !access.error && access.organizations.length > 1 && !organization && <div role="status" className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">Choose an organization to see its drafts, submissions, feedback, and event history.</div>}
 
         {campusNotice && (
           <div
@@ -187,11 +219,11 @@ export function StudentMyEventsPage() {
           </div>
         ) : loadError && overlays.length === 0 ? (
           <div role="alert" className="rounded-2xl border border-border bg-card p-5"><h2 className="font-bold">Could not load your events</h2><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><button type="button" onClick={() => void loadOverlays()} className="mt-4 min-h-11 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Retry events</button></div>
-        ) : overlays.length === 0 ? (
+        ) : !organization ? null : overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).length === 0 ? (
           <EmptyState
             icon={CalendarDays}
-            title="No event proposals yet"
-            description="Start with your event details, request every needed location, then design each map."
+            title="No current event work"
+            description="Create a draft or review organization history to inspect earlier layouts."
             action={canCreateProposal ? (
               <button
                 type="button"
@@ -203,8 +235,9 @@ export function StudentMyEventsPage() {
             ) : undefined}
           />
         ) : (
-          <div className="space-y-3">
-            {overlays.map((overlay) => {
+          <section aria-labelledby="organization-current-work-title" className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="organization-current-work-title" className="text-lg font-extrabold text-foreground">Current work</h2><span className="text-xs text-muted-foreground">{overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).length} active item(s)</span></div>
+            {overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).map((overlay) => {
               const status = overlay.status || "draft";
               const config = STATUS_CONFIG[status];
               const StatusIcon = config.icon;
@@ -215,7 +248,7 @@ export function StudentMyEventsPage() {
                 <motion.article key={overlay.id} data-testid={`org-event-card-${overlay.id}`} data-unread={unread ? "true" : "false"} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{duration:reducedMotion ? 0 : 0.16}} className={cn("bg-card rounded-2xl border shadow-sm overflow-hidden", unread ? "border-red-300 dark:border-red-800" : "border-border")}>
                   <div className="p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <h2 className="font-extrabold text-foreground text-sm">{overlay.title}</h2>
+                      <h2 className="min-w-0 flex-1 break-words font-extrabold text-foreground text-sm">{overlay.title}</h2>
                       <span className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0", config.bg, config.color)}>
                         <StatusIcon className="h-3 w-3" /> {config.label}
                       </span>
@@ -226,6 +259,11 @@ export function StudentMyEventsPage() {
                       <p className="text-xs font-bold text-foreground">Next step</p>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{NEXT_STEP[status]}</p>
                     </div>
+                    <dl className="mt-3 grid gap-x-4 gap-y-1.5 border-t border-border/60 pt-3 text-[11px] text-muted-foreground sm:grid-cols-2">
+                      <div className="min-w-0 break-words"><dt className="inline font-semibold text-foreground">Event academic year: </dt><dd className="inline">{overlay.academicYear || "Unknown academic year"}</dd></div>
+                      <div className="min-w-0 break-words"><dt className="inline font-semibold text-foreground">Original creator: </dt><dd className="inline">{overlay.creatorName || "Name unavailable"}</dd></div>
+                      <div className="min-w-0 break-words sm:col-span-2"><dt className="inline font-semibold text-foreground">Created: </dt><dd className="inline">{overlay.createdAt && Number.isFinite(Date.parse(overlay.createdAt)) ? `${new Date(overlay.createdAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" })} PHT` : "Creation date unavailable"}</dd></div>
+                    </dl>
                     <p className="mt-2 text-xs font-semibold text-muted-foreground">{campuses?.find((campus) => campus.id === overlay.campusId)?.name ?? "Campus"}{status === "approved" && overlay.dateStart && ` · ${new Date(overlay.dateStart).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short", hour12: true })}`}</p>
                     {status === 'approved' && <EventStudentVisibility overlay={overlay} />}
                     <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
@@ -246,9 +284,9 @@ export function StudentMyEventsPage() {
                   {Object.entries(overlay.locationFeedback ?? {}).map(([locationId, feedback]) => <div key={locationId} className="border-t border-border bg-amber-50/50 px-5 py-3 text-xs dark:bg-amber-900/10"><p className="font-bold">GSO feedback · {locations.find((location) => location.id === locationId)?.locationRef.label ?? "Location"}</p><p className="mt-1 text-muted-foreground">{eventFeedbackText(feedback)}</p></div>)}
                   <div className="px-5 py-3"><EventRevisionHistory overlay={overlay} /></div>
                   <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
-                    {status === "pending" && <button type="button" disabled={busy || !overlay.updatedAt} onClick={() => { setWithdrawError(""); setWithdrawTarget(overlay); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><ArrowLeft aria-hidden className="h-3.5 w-3.5" />Withdraw submission</button>}
-                    <button type="button" disabled={busy || isCached || Boolean(campusError)} onClick={() => void handleDuplicate(overlay)} className="min-h-10 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">Duplicate layout</button>
-                    {status !== "pending" && status !== "approved" && <button type="button" onClick={() => setEditTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"><Pencil className="h-3.5 w-3.5" /> Edit details</button>}
+                    {status === "pending" && <button type="button" disabled={busy || actionsDisabled || !overlay.updatedAt} onClick={() => { setWithdrawError(""); setWithdrawTarget(overlay); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><ArrowLeft aria-hidden className="h-3.5 w-3.5" />Withdraw submission</button>}
+                    <button type="button" disabled={busy || actionsDisabled || isCached || Boolean(campusError)} onClick={() => void handleDuplicate(overlay)} className="min-h-10 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">Duplicate layout</button>
+                    {status !== "pending" && status !== "approved" && <button type="button" disabled={actionsDisabled} onClick={() => setEditTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted disabled:opacity-40"><Pencil className="h-3.5 w-3.5" /> Edit details</button>}
                     <Link to={`/student/events/${overlay.id}/edit`} aria-busy={readingIds.has(overlay.id)} onClick={event => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                       if (readingIds.has(overlay.id)) {event.preventDefault();return;}
@@ -257,18 +295,20 @@ export function StudentMyEventsPage() {
                         void acknowledge(overlay).then(()=>{if(mounted.current && currentActor.current===actor && request===navigationRequest.current) navigate(`/student/events/${overlay.id}/edit`);});
                       }
                     }} className="order-first flex min-h-11 items-center gap-2 px-4 rounded-xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary">{readingIds.has(overlay.id) ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin"/> : <Edit2 className="h-3.5 w-3.5"/>} {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : status === "approved" ? "View maps" : "Edit maps"}</Link>
-                    {status !== "pending" && status !== "approved" && <button type="button" onClick={() => setDeleteTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
+                    {status !== "pending" && status !== "approved" && <button type="button" disabled={actionsDisabled} onClick={() => setDeleteTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
                   </div>
                 </motion.article>
               );
             })}
-          </div>
+          </section>
         )}
+        {organization && !access.error && <OrganizationEventHistory key={`${organization.organizationId}:${organization.grantId}`} organization={organization} />}
+        {workspace.events.length < workspace.total && organization && <button type="button" disabled={workspace.loadingMore || actionsDisabled} onClick={() => void workspace.loadMore()} className="min-h-11 w-full rounded-xl border border-border bg-card text-sm font-bold text-primary disabled:opacity-50">{workspace.loadingMore ? "Loading more current work…" : `Load more organization events (${workspace.events.length} of ${workspace.total})`}</button>}
       </div>
 
-      {showCreate && <EventProposalModal buildings={buildings} campuses={publishedCampuses.map((campus) => ({ id: campus.id, name: campus.name, buildings: publishedEventBuildingOptions(campus) }))} initialCampusId={activeCampus?.id} onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+      {showCreate && organization && <EventProposalModal organization={organization} buildings={buildings} campuses={publishedCampuses.map((campus) => ({ id: campus.id, name: campus.name, buildings: publishedEventBuildingOptions(campus) }))} initialCampusId={activeCampus?.id} onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {editTarget && <EventDetailsModal overlay={editTarget} buildings={(() => { const campus = campuses?.find((item) => item.id === editTarget.campusId) ?? (activeCampus?.id === editTarget.campusId ? activeCampus : null); return campus ? publishedEventBuildingOptions(campus) : []; })()} onClose={() => setEditTarget(null)} onSave={handleEdit} />}
-      <AlertDialog.Root open={Boolean(withdrawTarget)} onOpenChange={(open) => { if (!open && !busy) setWithdrawTarget(null); }}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-2xl"><AlertDialog.Title className="font-extrabold">Withdraw submission?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm text-muted-foreground">This returns the event to Draft and removes it from the review queue. All saved locations, furniture, and labels stay. You can submit it again later.</AlertDialog.Description>{withdrawError && <p role="alert" className="mt-3 text-sm text-destructive">{withdrawError}</p>}<div className="mt-5 flex gap-2"><AlertDialog.Cancel asChild><button disabled={busy} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold">Keep submitted</button></AlertDialog.Cancel><button type="button" disabled={busy} className="min-h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-40" onClick={async () => { if (!withdrawTarget?.updatedAt) return; setBusy(true); setWithdrawError(""); try { await eventOverlayService.withdrawEventSubmission(withdrawTarget.id, withdrawTarget.updatedAt); setWithdrawTarget(null); toast.success("Submission withdrawn", "Your saved maps are now a draft."); await loadOverlays(); } catch (error) { setWithdrawError(error instanceof Error ? error.message : "Could not withdraw submission."); } finally { setBusy(false); } }}>{busy ? "Withdrawing…" : "Withdraw to draft"}</button></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
+      <AlertDialog.Root open={Boolean(withdrawTarget)} onOpenChange={(open) => { if (!open && !busy) setWithdrawTarget(null); }}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-2xl"><AlertDialog.Title className="font-extrabold">Withdraw submission?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm text-muted-foreground">This returns the event to Draft and removes it from the review queue. All saved locations, furniture, and labels stay. You can submit it again later.</AlertDialog.Description>{withdrawError && <p role="alert" className="mt-3 text-sm text-destructive">{withdrawError}</p>}<div className="mt-5 flex gap-2"><AlertDialog.Cancel asChild><button disabled={busy} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold">Keep submitted</button></AlertDialog.Cancel><button type="button" disabled={busy || actionsDisabled} className="min-h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-40" onClick={async () => { if (!withdrawTarget?.updatedAt) return; setBusy(true); setWithdrawError(""); try { const grantId = organization && withdrawTarget.organizationId === organization.organizationId ? organization.grantId : undefined; await eventOverlayService.withdrawEventSubmission(withdrawTarget.id, withdrawTarget.updatedAt, grantId); setWithdrawTarget(null); toast.success("Submission withdrawn", "Your saved maps are now a draft."); await loadOverlays(); } catch (error) { setWithdrawError(error instanceof Error ? error.message : "Could not withdraw submission."); } finally { setBusy(false); } }}>{busy ? "Withdrawing…" : "Withdraw to draft"}</button></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6">

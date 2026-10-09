@@ -56,26 +56,26 @@ function RouteProbe() {
 }
 
 describe("Navbar student navigation", () => {
-  it("shows Home, Map, and My Events to Student Org users", () => {
+  it("shows Home, Map, and Organization Events to Student Org users", () => {
     authState.isStudent = true;
     authState.isStudentOrg = true;
     renderNavbar();
 
     expect(screen.getByRole("link", { name: /Home/ })).toHaveAttribute("href", "/home");
     expect(screen.getByRole("link", { name: /Map/ })).toHaveAttribute("href", "/map");
-    expect(screen.getByRole("link", { name: /My Events/ })).toHaveAttribute("href", "/student/events");
+    expect(screen.getByRole("link", { name: /Organization Events/ })).toHaveAttribute("href", "/student/events");
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
   });
 
-  it("does not expose My Events to regular students", () => {
+  it("does not expose Organization Events to regular students", () => {
     authState.isStudent = true;
     authState.isStudentOrg = false;
     renderNavbar();
 
     expect(screen.getByRole("link", { name: /Home/ })).toHaveAttribute("href", "/home");
     expect(screen.getByRole("link", { name: /Map/ })).toHaveAttribute("href", "/map");
-    expect(screen.queryByRole("link", { name: /My Events/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Organization Events/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
   });

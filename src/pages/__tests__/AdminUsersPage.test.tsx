@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   inviteManagedUser: vi.fn(),
   updateManagedProfile: vi.fn(),
   resendManagedInvitation: vi.fn(),
+  listOrganizations: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -17,12 +18,18 @@ vi.mock("../../services/adminUserService", async () => {
   const actual = await vi.importActual<typeof import("../../services/adminUserService")>("../../services/adminUserService");
   return { ...actual, listManagedProfiles: mocks.listManagedProfiles, inviteManagedUser: mocks.inviteManagedUser, updateManagedProfile: mocks.updateManagedProfile, resendManagedInvitation: mocks.resendManagedInvitation };
 });
+vi.mock("../../services/eventOrganizationService", () => ({
+  eventOrganizationService: { listOrganizations: mocks.listOrganizations, replaceRepresentative: vi.fn(), revokeRepresentative: vi.fn(), saveOrganization: vi.fn() },
+  OrganizationAccessUnavailable: class OrganizationAccessUnavailable extends Error {},
+  OrganizationAssignmentChanged: class OrganizationAssignmentChanged extends Error {},
+}));
 
 describe("AdminUsersPage role-aware account forms", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     mocks.listManagedProfiles.mockResolvedValue({ profiles: [], invitationMetadataAvailable: true });
+    mocks.listOrganizations.mockResolvedValue([]);
     mocks.useAdminAuth.mockReturnValue({ profile: { id: "caller", role: "admin", is_active: true }, refreshProfile: vi.fn().mockResolvedValue(undefined) });
   });
   afterEach(cleanup);

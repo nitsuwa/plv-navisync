@@ -26,6 +26,7 @@ import {
 } from "../services/adminUserService";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../app/components/ui/dropdown-menu";
+import { AdminOrganizationsPanel } from "../components/events/AdminOrganizationsPanel";
 
 type FilterRole = ManagedRole | "all";
 type FilterStatus = ManagedAccountStatus | "all";
@@ -363,6 +364,8 @@ export function AdminUsersPage() {
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <div><p className="font-bold">Backend setup required</p><p className="mt-0.5 text-xs leading-relaxed">Existing profiles are loaded. Invitation tracking and invitations require the latest database update; account status currently uses Active / Inactive only.</p></div>
       </div>}
+
+      <AdminOrganizationsPanel profiles={users} />
 
       <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.06 } } }} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
