@@ -795,6 +795,7 @@ export type Database = {
       }
       map_elements: {
         Row: {
+          organization_id: string | null
           archived_at: string | null
           building_id: string | null
           campus_id: string
@@ -823,6 +824,7 @@ export type Database = {
           z_index: number
         }
         Insert: {
+          organization_id?: string | null
           archived_at?: string | null
           building_id?: string | null
           campus_id: string
@@ -851,6 +853,7 @@ export type Database = {
           z_index?: number
         }
         Update: {
+          organization_id?: string | null
           archived_at?: string | null
           building_id?: string | null
           campus_id?: string
@@ -1540,6 +1543,15 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: { organization_id: string; organization_name: string; grant_id: string; academic_year: string; expires_at: string }[]
       }
+      get_event_edit_access: { Args: { p_event_id: string }; Returns: Json }
+      get_organization_event: { Args: { p_event_id: string }; Returns: Json }
+      list_organization_events: { Args: { p_organization_id: string; p_academic_year?: string | null; p_search?: string; p_limit?: number; p_offset?: number; p_include_archived?: boolean }; Returns: Json }
+      create_organization_event: { Args: { p_event_id: string; p_organization_id: string; p_expected_grant_id: string; p_campus_id: string; p_academic_year: string; p_metadata: Json }; Returns: Json }
+      mutate_organization_event: { Args: { p_event_id: string; p_expected_updated_at: string; p_expected_grant_id: string; p_command: string; p_changes: Json }; Returns: Json }
+      set_organization_event_feedback_pin_addressed: { Args: { p_overlay_id: string; p_expected_updated_at: string; p_expected_grant_id: string; p_location_id: string; p_pin_id: string; p_addressed: boolean; p_note: string }; Returns: Json }
+      admin_bind_event_organization: { Args: { p_event_id: string; p_organization_id: string; p_academic_year: string; p_expected_updated_at: string }; Returns: Json }
+      admin_correct_event_organization: { Args: { p_event_id: string; p_organization_id: string; p_academic_year: string; p_expected_organization_id: string; p_expected_updated_at: string; p_reason: string }; Returns: Json }
+      admin_preview_event_organization_reconciliation: { Args: Record<PropertyKey, never>; Returns: Json }
       has_event_organization_access: { Args: { p_organization_id: string }; Returns: boolean }
       admin_list_event_organizations: { Args: Record<PropertyKey, never>; Returns: Json }
       admin_save_event_organization: { Args: { p_id: string | null; p_code: string; p_name: string; p_is_active: boolean; p_expected_updated_at: string | null }; Returns: Json }

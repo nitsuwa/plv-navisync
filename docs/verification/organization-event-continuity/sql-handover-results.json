@@ -1,0 +1,165 @@
+{
+  "status": "PASS",
+  "engine": "PGlite PostgreSQL; real baseline migrations; single session",
+  "checks": [
+    {
+      "name": "active representative cannot mutate a legacy event with no creator attribution"
+    },
+    {
+      "name": "admin correction preserves original author and status"
+    },
+    {
+      "name": "admin review result retains organization and original creator context"
+    },
+    {
+      "name": "approved layout remains locked"
+    },
+    {
+      "name": "approved organization event cannot be deleted"
+    },
+    {
+      "name": "archived record has a protected read-only history path"
+    },
+    {
+      "name": "archived records are excluded from current work"
+    },
+    {
+      "name": "binding is relational"
+    },
+    {
+      "name": "binding keeps historical original creators"
+    },
+    {
+      "name": "binding keeps original revision history and adds no fake edit rows"
+    },
+    {
+      "name": "binding preserves all four approval states"
+    },
+    {
+      "name": "binding preserves existing content revision numbers"
+    },
+    {
+      "name": "correction stores an explicit audit reason"
+    },
+    {
+      "name": "edit access reports actual successor grant"
+    },
+    {
+      "name": "explicit archived history filter includes its row"
+    },
+    {
+      "name": "generic campus save leaves bound event records unchanged"
+    },
+    {
+      "name": "generic campus save still updates non-event map elements"
+    },
+    {
+      "name": "history search returns matching event"
+    },
+    {
+      "name": "legacy feedback RPC cannot skip the current representative token"
+    },
+    {
+      "name": "legacy pending-save RPC cannot skip the current representative token"
+    },
+    {
+      "name": "legacy reconciliation suggests a match but never binds the event"
+    },
+    {
+      "name": "legacy withdrawal RPC cannot skip the current representative token"
+    },
+    {
+      "name": "new event rejects a non-text description before insertion"
+    },
+    {
+      "name": "non-event elements cannot carry organization ownership"
+    },
+    {
+      "name": "non-event published structure remains visible"
+    },
+    {
+      "name": "ordinary student cannot preview legacy organization mappings"
+    },
+    {
+      "name": "ordinary student cannot read private event content"
+    },
+    {
+      "name": "other organization cannot see inherited events"
+    },
+    {
+      "name": "other organization history RPC denied"
+    },
+    {
+      "name": "other organization private event RPC denied"
+    },
+    {
+      "name": "outgoing cannot directly read bound private events"
+    },
+    {
+      "name": "outgoing cannot directly read revision history"
+    },
+    {
+      "name": "outgoing pending save denied"
+    },
+    {
+      "name": "outgoing revision RPC denied"
+    },
+    {
+      "name": "outgoing withdrawal denied"
+    },
+    {
+      "name": "ownership correction does not fabricate a layout revision"
+    },
+    {
+      "name": "pending organization event cannot be deleted"
+    },
+    {
+      "name": "previous organization loses corrected event"
+    },
+    {
+      "name": "public approved event stays visible without private feedback or owner fields"
+    },
+    {
+      "name": "publication result retains organization and original creator context"
+    },
+    {
+      "name": "rebinding an assigned event rejected"
+    },
+    {
+      "name": "retry creates one fresh date-free draft"
+    },
+    {
+      "name": "stale assignment cannot mutate current work"
+    },
+    {
+      "name": "successor can delete a fresh organization-owned draft"
+    },
+    {
+      "name": "successor can withdraw inherited pending proposal"
+    },
+    {
+      "name": "successor cannot bypass RPC using direct update"
+    },
+    {
+      "name": "successor cannot change historical academic year"
+    },
+    {
+      "name": "successor cannot change original creator"
+    },
+    {
+      "name": "successor edit preserves original creator"
+    },
+    {
+      "name": "successor feedback action records actual actor"
+    },
+    {
+      "name": "successor pending save retains pending status"
+    },
+    {
+      "name": "successor sees all inherited event states"
+    },
+    {
+      "name": "successor sees existing revision history"
+    }
+  ]
+}

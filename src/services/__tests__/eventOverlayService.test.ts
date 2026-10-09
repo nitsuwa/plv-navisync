@@ -239,7 +239,7 @@ describe("event overlay service", () => {
   });
 
   it("withdraws through a revision checked command and does not delete the layout", async () => {
-    const { client, mapElements } = makeClient();
+    const { client, mapElements } = makeClient([{id:"event-1",element_type:"event_overlay",organization_id:null,updated_at:"2026-10-03T00:00:00Z",metadata:{status:"pending"}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await eventOverlayService.withdrawEventSubmission("event-1", "2026-10-03T00:00:00Z");
     expect(client.rpc).toHaveBeenCalledWith("withdraw_event_submission", { p_overlay_id: "event-1", p_expected_updated_at: "2026-10-03T00:00:00Z" });

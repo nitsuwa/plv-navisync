@@ -5,7 +5,7 @@
 - Approved plan: `docs/superpowers/plans/2026-10-09-organization-event-continuity.md`.
 - Approved design: `docs/superpowers/specs/2026-10-09-organization-event-continuity-design.md`.
 - Work in the current checkout on `codex/organization-event-continuity-local` per user instruction; no separate worktree.
-- Task 1: validated; commit checkpoint. Task 2: next. Tasks 3–8: pending. Starting commit: `0679fa0`.
+- Task 1: complete, local commit `ea3c893`. Task 2: implementation and verification complete; final review/commit pending. Tasks 3–8: pending. Starting commit: `0679fa0`.
 - Preserve original authorship and legacy records; exactly one effective representative per organization; atomic handover.
 - User runs validated SQL in Supabase. No live SQL, retained QA fixtures, or GitHub push.
 - Verification details: `docs/verification/organization-event-continuity/README.md`.

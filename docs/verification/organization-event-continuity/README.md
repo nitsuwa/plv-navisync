@@ -8,8 +8,9 @@ User requested implementation in the current checkout. The initially created man
 
 ## Current progress
 
-- Task 1 database grants/access: validated locally; commit checkpoint in progress.
-- Tasks 2–8: pending.
+- Task 1 database grants/access: committed locally as `ea3c893`.
+- Task 2 ownership/reconciliation: implementation and validation complete; checkpoint commit is pending final review.
+- Tasks 3–8: pending.
 - Original approved plan/spec are preserved.
 - No GitHub push or live database writes are authorized for this execution.
 - User runs validated SQL in Supabase; no retained live QA fixtures.
@@ -21,12 +22,13 @@ Separate PostgreSQL sessions are required to validate concurrency; PGlite checks
 
 - SQL feature-missing RED: `42883`, organization creation RPC absent before implementation.
 - Service feature-missing RED: new service module absent before implementation.
-- 28 PGlite SQL checks PASS, including migration replay preserving grant history.
-- 29 real PostgreSQL checks PASS, including concurrent replacement serialization (`40001` for the loser) and full handover rollback.
-- Targeted baseline plus new service: 4 test files / 62 tests PASS.
+- 53 PGlite SQL checks PASS across the actual baseline event policies/functions, ownership/reconciliation migration, expected-grant write guards, revision preservation, read-only archived history, and campus-structure save isolation fixture.
+- 57 real PostgreSQL checks PASS, including concurrent representative replacement, write-vs-handover lock ordering, stale outgoing write rejection (`42501`), and rollback.
+- Focused event service tests: 2 files / 45 tests PASS.
+- Production Vite build PASS: 3,028 modules transformed; known chunk-size warning remains.
 - Original baseline had one date-sensitive publication assertion fail after its fixed October 9 end time. Added a fixed `Date.now` fixture; production publication logic was unchanged.
 - Restored local ignored dependencies with `pnpm install --frozen-lockfile --force`; package/lockfile contents are unchanged. Temporary test dependencies live only under `.tmp/event-sql-runtime`.
-- Fresh starting-commit TypeScript baseline: 1022 diagnostics; current: 1022; no introduced diagnostics by file/code multiplicity. Full messages are retained; this is not a clean typecheck.
+- Starting-commit TypeScript baseline: 2,300 diagnostics; current: 2,300; no introduced diagnostics by file/code multiplicity. Full messages are retained; this is not a clean typecheck.
 
 Commands: `node docs/verification/organization-event-continuity/run-sql.mjs`, `run-concurrency.mjs`, `compare-types.mjs`; targeted Vitest command is recorded in execution progress.
 
@@ -40,4 +42,4 @@ Commands: `node docs/verification/organization-event-continuity/run-sql.mjs`, `r
 
 ## Limitations
 
-Implementation and verification are in progress. No live SQL has been applied.
+Task 2 SQL and service work are verified locally. No live SQL has been applied; the organization features are not ready to deploy until the remaining UI, notifications, reuse, routing, and release tasks are complete.
