@@ -1,0 +1,90 @@
+{
+  "status": "PASS",
+  "engine": "PGlite PostgreSQL; single session",
+  "checks": [
+    {
+      "name": "admin creates verified organization"
+    },
+    {
+      "name": "admin list exposes both organizations"
+    },
+    {
+      "name": "anonymous contexts denied"
+    },
+    {
+      "name": "direct grant mutation denied"
+    },
+    {
+      "name": "duplicate organization code rejected"
+    },
+    {
+      "name": "expired open grant replaced safely"
+    },
+    {
+      "name": "expiry must be future"
+    },
+    {
+      "name": "explicit revoke closes assignment"
+    },
+    {
+      "name": "failed replacement leaves original representative"
+    },
+    {
+      "name": "inactive profile cannot be representative"
+    },
+    {
+      "name": "invalid handover preserves original grant"
+    },
+    {
+      "name": "migration replay preserves assignment history"
+    },
+    {
+      "name": "old representative sees own context"
+    },
+    {
+      "name": "only one open assignment"
+    },
+    {
+      "name": "ordinary student cannot be representative"
+    },
+    {
+      "name": "ordinary student receives no private contexts"
+    },
+    {
+      "name": "organization edits reject stale timestamp"
+    },
+    {
+      "name": "outgoing representative cannot read grants"
+    },
+    {
+      "name": "outgoing representative loses context"
+    },
+    {
+      "name": "private access helper is not callable by client"
+    },
+    {
+      "name": "profile deactivation removes effective access"
+    },
+    {
+      "name": "replacement closes outgoing assignment"
+    },
+    {
+      "name": "replacement preserves closed grant history"
+    },
+    {
+      "name": "representative cannot see other organization"
+    },
+    {
+      "name": "representative cannot self-grant"
+    },
+    {
+      "name": "server expiry removes effective access"
+    },
+    {
+      "name": "stale empty assignment rejected"
+    },
+    {
+      "name": "successor receives organization"
+    }
+  ]
+}

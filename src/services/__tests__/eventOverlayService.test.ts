@@ -363,6 +363,7 @@ describe("event overlay service", () => {
   });
 
   it("rejects publication at or after the event end", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-07T00:00:00Z"));
     const {client, mapElements} = makeClient([{id:"event-1",metadata:{status:"pending",dateStart:"2026-10-01T01:00:00Z",dateEnd:"2026-10-01T03:00:00Z"}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await expect(eventOverlayService.reviewEventOverlay("event-1", "approved", undefined, {expectedUpdatedAt:"2026-10-02T00:00:00.000Z",dateStart:"2026-10-08T01:00:00Z",dateEnd:"2026-10-09T01:00:00Z",publicationMode:"schedule",publicationAt:"2026-10-09T01:00:00Z"})).rejects.toThrow(/before the event ends/i);

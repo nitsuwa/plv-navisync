@@ -1,5 +1,11 @@
 # Findings & Decisions
 
+## October 9 — Organization Event Continuity
+
+Current owner checks span frontend, SQL policies, triggers, feedback/revision RPCs, and notification receipts. Replacing only a UI creator filter would leave successors denied and original creators authorized. History/reuse and media references must move together with database authorization. PGlite runs real PostgreSQL SQL/RLS but does not establish separate-session concurrency guarantees; a separate PostgreSQL runtime is being investigated for race tests.
+
+Native PostgreSQL 18.4 temporary runtime is available and separate-session grant/rollback race tests passed. Bound-event writes need RPC-based organization-first locking; direct browser UPDATE obtains row locks before a row trigger could lock the organization, risking inverse lock ordering. Keep unbound legacy behavior restricted to the original creator, but disallow that fallback for bound records. Browser active-grant checks remain advisory; database checks are authoritative.
+
 ## Create Event follow-up findings
 
 - A fresh service read is insufficient concurrency protection if the layout originated from an older browser version. Forward the version displayed to the editor/details/submission caller; reject newer rows before merging and retain CAS on writes. Actual two-tab test reproduced this defect and passed after correction.

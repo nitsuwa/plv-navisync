@@ -14,6 +14,32 @@ export type Database = {
   }
   public: {
     Tables: {
+      event_organizations: {
+        Row: { id: string; code: string; name: string; is_active: boolean; created_at: string; updated_at: string }
+        Insert: { id?: string; code: string; name: string; is_active?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; code?: string; name?: string; is_active?: boolean; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      event_organization_grants: {
+        Row: { id: string; organization_id: string; representative_id: string; academic_year: string; starts_at: string; expires_at: string; granted_by: string; ended_at: string | null; ended_by: string | null; end_reason: string | null }
+        Insert: { id?: string; organization_id: string; representative_id: string; academic_year: string; starts_at?: string; expires_at: string; granted_by: string; ended_at?: string | null; ended_by?: string | null; end_reason?: string | null }
+        Update: { id?: string; organization_id?: string; representative_id?: string; academic_year?: string; starts_at?: string; expires_at?: string; granted_by?: string; ended_at?: string | null; ended_by?: string | null; end_reason?: string | null }
+        Relationships: [
+          { foreignKeyName: 'event_organization_grants_organization_id_fkey'; columns: ['organization_id']; isOneToOne: false; referencedRelation: 'event_organizations'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_representative_id_fkey'; columns: ['representative_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_granted_by_fkey'; columns: ['granted_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_ended_by_fkey'; columns: ['ended_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+        ]
+      }
+      event_organization_audit: {
+        Row: { id: string; organization_id: string; actor_id: string; action: string; before_data: Json | null; after_data: Json | null; created_at: string }
+        Insert: { id?: string; organization_id: string; actor_id: string; action: string; before_data?: Json | null; after_data?: Json | null; created_at?: string }
+        Update: { id?: string; organization_id?: string; actor_id?: string; action?: string; before_data?: Json | null; after_data?: Json | null; created_at?: string }
+        Relationships: [
+          { foreignKeyName: 'event_organization_audit_organization_id_fkey'; columns: ['organization_id']; isOneToOne: false; referencedRelation: 'event_organizations'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_audit_actor_id_fkey'; columns: ['actor_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+        ]
+      }
       activity_logs: {
         Row: {
           action: string
@@ -1510,6 +1536,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_my_event_organizations: {
+        Args: Record<PropertyKey, never>
+        Returns: { organization_id: string; organization_name: string; grant_id: string; academic_year: string; expires_at: string }[]
+      }
+      has_event_organization_access: { Args: { p_organization_id: string }; Returns: boolean }
+      admin_list_event_organizations: { Args: Record<PropertyKey, never>; Returns: Json }
+      admin_save_event_organization: { Args: { p_id: string | null; p_code: string; p_name: string; p_is_active: boolean; p_expected_updated_at: string | null }; Returns: Json }
+      admin_set_event_representative: { Args: { p_organization_id: string; p_profile_id: string; p_academic_year: string; p_expires_at: string; p_expected_grant_id: string | null }; Returns: Json }
+      admin_revoke_event_representative: { Args: { p_organization_id: string; p_expected_grant_id: string; p_reason: string }; Returns: undefined }
       save_pending_event_layout: {
         Args: { p_overlay_id: string; p_expected_updated_at: string; p_locations: Json }
         Returns: Json
