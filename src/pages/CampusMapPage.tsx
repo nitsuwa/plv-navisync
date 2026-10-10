@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useReducer, type CSSProperties } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useReducer, lazy, Suspense, type CSSProperties } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -28,6 +28,7 @@ import {
 import { hasNavigableRoute, planBuildingRoute, planDestinationRoute, planPointToDestinationRoute, planRouteFromPoint, type PlannedRoute, type RouteIndoorSegment, type RouteStep, type StandardRoutePreference } from "../lib/routePlanner";
 import type { CampusPlaceDest, RoomDest } from "../lib/combinedPathfinding";
 import { pointAlongPolyline, snapToNearest } from "../lib/geo";
+import { createRoutePointSampler } from "../lib/studentRoute3dPresentation";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
 import {
@@ -63,7 +64,7 @@ import {
   type MobileBuildingSheetState,
   StudentMapControls,
 } from "../components/map";
-import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
+import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
 import { studentAccountService } from "../services/studentAccountService";
 import { studentMobilePanelAvailableHeight } from "../lib/studentMobilePanels";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
@@ -86,6 +87,12 @@ import { useEventMapPreviews } from "../hooks/useEventMapPreviews";
 import { buildEventVenues, eventLocationOnMap, eventVenueCandidates, resolveEventLocation, selectedEventLocation, toEventOverlayPreview, visibleEventCards } from "../lib/eventMapView";
 import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
+
+const LazyStudentCampus3DRenderer = lazy(() => import("../components/map/StudentCampus3DRenderer"));
+const LazyIndoorFloor3DRenderer = lazy(() => import("../components/map/IndoorFloor3DRenderer"));
+const EMPTY_MAP_POINTS: Pt[] = [];
+const EMPTY_FLOOR_FURNITURE: FloorPlan["furniture"] = [];
+const EMPTY_FLOOR_LABELS: FloorPlan["labels"] = [];
 
 type CampusLocationQrPayload = {
   locationId: string;
@@ -852,6 +859,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   // Core map state
   const [selected,     setSelected]     = useState<Building|null>(null);
+  const [campusViewMode, setCampusViewMode] = useState<"2d" | "3d">("2d");
+  const [campus3DLoaded, setCampus3DLoaded] = useState(false);
+  const [indoor3DLoaded, setIndoor3DLoaded] = useState(false);
+  const [campus3DFallback, setCampus3DFallback] = useState(false);
+  const [campus3DRecenterNonce, setCampus3DRecenterNonce] = useState(0);
+  const pending2DRendererReframeRef = useRef<null | { kind: "route"; point: Pt; floor: boolean }
+    | { kind: "room"; buildingId: string; roomId: string; floorNumber: number }
+    | { kind: "building"; buildingId: string }
+    | { kind: "place"; campusPlaceId: string }
+    | { kind: "overview"; floor: boolean }>(null);
   const [selectedCampusPlaceId, setSelectedCampusPlaceId] = useState<string | null>(null);
   const selectedCampusPlace = useMemo(() => activeCampus?.markers.find((marker) => marker.id === selectedCampusPlaceId) ?? null, [activeCampus, selectedCampusPlaceId]);
   const [mobileBuildingSheetState, setMobileBuildingSheetState] = useState<MobileBuildingSheetState>("default");
@@ -915,6 +932,14 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   // Floor plan state (replaces buildingView — floor plans now render in the main SVG)
   const [floorView,       setFloorView]       = useState<{ building: Building; floor: number }|null>(null);
   const isFloorMode = floorView !== null;
+  const campus3DActive = Boolean(activeCampus && !isFloorMode && campusViewMode === "3d" && campus3DLoaded && !campus3DFallback);
+  const indoor3DActive = Boolean(activeCampus && isFloorMode && campusViewMode === "3d" && indoor3DLoaded && !campus3DFallback);
+  const student3DActive = campus3DActive || indoor3DActive;
+  useEffect(() => {
+    if (campusViewMode !== "3d" || campus3DFallback || !activeCampus) return;
+    if (isFloorMode) setIndoor3DLoaded(true);
+    else setCampus3DLoaded(true);
+  }, [activeCampus, campus3DFallback, campusViewMode, isFloorMode]);
   const doorwayDiscoveryHintShownRef = useRef(false);
   useEffect(() => {
     if (previewCampus || isFloorMode || !readonlyOutdoorCampus?.entrances.some(canEnterOutdoorBuilding)
@@ -987,6 +1012,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   // Route Preview owns an inspection cursor separate from Follow playback.
   const [routePreviewStepIndex, setRoutePreviewStepIndex] = useState(0);
   const [followCameraDetached, setFollowCameraDetached] = useState(false);
+  const [navigationPauseReason, setNavigationPauseReason] = useState<"manual" | "transition" | "pan" | null>(null);
+  const recenterCurrentRouteStepRef = useRef<() => void>(() => {});
   const [playbackSpeed, setPlaybackSpeed] = useState<1 | 1.5 | 2>(1);
   const playbackCursorRef = useRef(0);
   const [playbackCursor, setPlaybackCursor] = useState(0);
@@ -1188,6 +1215,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const markerWorldUnitsPerCssPixelRef = useRef(1);
   const cameraViewportRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const cameraAnimationFrameRef = useRef<number | null>(null);
+  const cameraGenerationRef = useRef(0);
   const cameraAnimationModeRef = useRef<"programmatic" | "manual-wheel">("programmatic");
   const targetLogZoomRef = useRef(0);
   const manualWheelAnchorRef = useRef<{ viewPoint: Pt; worldPoint: Pt } | null>(null);
@@ -1196,6 +1224,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const lastRoomFocusKeyRef = useRef<string | null>(null);
   const lastDestinationBuildingFocusKeyRef = useRef<string | null>(null);
   const targetCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
+  const followZoomTargetRef = useRef(DEFAULT_OUTDOOR_ZOOM);
+  const followHumanWorldPointRef = useRef<Pt | null>(null);
   const overviewCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const fittedCampusIdRef = useRef<string | null>(null);
   const fittedFloorIdRef = useRef<string | null>(null);
@@ -1229,28 +1259,45 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   /** Resolve the zoom anchor: last known cursor position over the map, falling
    *  back to the container center when the pointer never touched the map. */
   const zoomAtCursor = useCallback((nextZoom: number) => {
-    detachFollowCamera();
     const anchor = zoomAnchorRef.current;
     const el = mapContainerRef.current;
+    const followCameraOwns = studentRouteUi.phase === "navigating"
+      && studentRouteUi.camera === "follow" && !followCameraDetached;
     if (anchor) {
-      animateZoomAtRef.current(anchor.clientX, anchor.clientY, nextZoom);
+      if (followCameraOwns) applyZoomAtRef.current(anchor.clientX, anchor.clientY, nextZoom, true);
+      else animateZoomAtRef.current(anchor.clientX, anchor.clientY, nextZoom);
     } else if (el) {
       const r = el.getBoundingClientRect();
-      animateZoomAtRef.current(r.left + r.width / 2, r.top + r.height / 2, nextZoom);
+      if (followCameraOwns) applyZoomAtRef.current(r.left + r.width / 2, r.top + r.height / 2, nextZoom, true);
+      else animateZoomAtRef.current(r.left + r.width / 2, r.top + r.height / 2, nextZoom);
     } else {
       setZoom(clampActiveStudentZoom(nextZoom));
     }
-  }, [detachFollowCamera]);
+  }, [clampActiveStudentZoom, followCameraDetached, studentRouteUi.camera, studentRouteUi.phase]);
 
   const resetMapCamera = useCallback(() => {
+    if (campusViewMode === "3d") {
+      setCampus3DRecenterNonce((nonce) => nonce + 1);
+      setFollowCameraDetached(false);
+      return;
+    }
     detachFollowCamera();
     const overview = overviewCameraRef.current;
     animateCameraToRef.current(overview.pan, overview.zoom);
-  }, [detachFollowCamera]);
+  }, [animateCameraToRef, campusViewMode, detachFollowCamera]);
 
-  // Keep the latest target zoom readable by stable listeners.
+  // React values mirror controls/layout. Follow's live transform refs remain
+  // authoritative while its RAF owns the camera, preventing a render snapshot
+  // from replacing the in-flight pan/zoom.
   useEffect(() => { zoomStateRef.current = zoom; }, [zoom]);
-  useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => {
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && !followCameraDetached) return;
+    zoomRef.current = zoom;
+  }, [followCameraDetached, studentRouteUi.camera, studentRouteUi.phase, zoom]);
+  useEffect(() => {
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && !followCameraDetached) return;
+    panRef.current = pan;
+  }, [followCameraDetached, pan, studentRouteUi.camera, studentRouteUi.phase]);
 
   const floorViewRef    = useRef(floorView);
   useEffect(() => { floorViewRef.current = floorView; }, [floorView]);
@@ -1261,6 +1308,25 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     [panFrameRef.current, zoomFrameRef.current, inertiaRef.current, cameraAnimationFrameRef.current]
       .forEach((frame) => { if (frame !== null && frame !== 0) cancelAnimationFrame(frame); });
   }, []);
+
+  // Renderer handoff stops only 2D camera/gesture work. The route progress
+  // clocks remain above both renderers and continue to feed the active view.
+  useEffect(() => {
+    if (!student3DActive) return;
+    cameraGenerationRef.current += 1;
+    [panFrameRef.current, zoomFrameRef.current, inertiaRef.current, cameraAnimationFrameRef.current]
+      .forEach((frame) => { if (frame !== null && frame !== 0) cancelAnimationFrame(frame); });
+    panFrameRef.current = null;
+    zoomFrameRef.current = null;
+    inertiaRef.current = 0;
+    cameraAnimationFrameRef.current = null;
+    pendingPanRef.current = null;
+    pendingZoomRef.current = null;
+    dragRef.current = null;
+    timedCameraMotionRef.current = null;
+    manualWheelAnchorRef.current = null;
+    roomFocusAnimationRef.current = false;
+  }, [student3DActive]);
 
   // Sync search input with campusSearch query
   useEffect(() => {
@@ -1359,11 +1425,11 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
         ? Math.max(0, searchHeaderRect.bottom - surfaceRect.top)
         : Math.max(52, viewportTop + 52 - surfaceRect.top);
       const safeTop = headerBottom + 16;
-      const searchSafeTop = `${Math.max(0, searchHeaderRect?.bottom ?? surfaceRect.top + headerBottom)}px`;
-      const controlsSafeTop = `${Math.max(0, surfaceRect.top + safeTop)}px`;
+      const searchSafeTop = `${Math.round(Math.max(0, searchHeaderRect?.bottom ?? surfaceRect.top + headerBottom))}px`;
+      const controlsSafeTop = `${Math.round(Math.max(0, surfaceRect.top + safeTop))}px`;
       const panelTop = Math.max(0, Math.max(viewportTop + 48, (searchHeaderRect?.bottom ?? surfaceRect.top + headerBottom) + 12) - viewportTop);
       const safeAreaBottom = Number.parseFloat(window.getComputedStyle(surface).getPropertyValue("--student-map-safe-area-bottom")) || 0;
-      const panelMaxHeight = `${studentMobilePanelAvailableHeight(viewportHeight, panelTop, safeAreaBottom)}px`;
+      const panelMaxHeight = `${Math.round(studentMobilePanelAvailableHeight(viewportHeight, panelTop, safeAreaBottom))}px`;
       const setStyleIfChanged = (name: string, value: string) => {
         if (surface.style.getPropertyValue(name) !== value) surface.style.setProperty(name, value);
       };
@@ -1371,23 +1437,106 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setStyleIfChanged("--student-map-controls-safe-top", controlsSafeTop);
       setStyleIfChanged("--student-map-mobile-panel-max-height", panelMaxHeight);
 
+      // Keep the 2D/3D switch and utility rail at the bottom-right of the
+      // exposed map area. On phones, lift the whole cluster above the highest
+      // visible bottom sheet instead of jumping it to an unrelated top corner.
+      let utilityBottomInset = surfaceRect.width >= 768 ? 24 : Math.max(12, safeAreaBottom + 12);
+      if (surfaceRect.width < 768) {
+        const bottomSheetSelectors = [
+          "[data-testid='student-selected-place-card']",
+          "[data-testid='mobile-building-sheet']",
+          "[data-testid='route-planner-dialog']",
+          "[data-testid='collapsed-route-card']",
+          "[data-testid='mobile-active-route-dock']",
+          "[data-testid='event-map-panel']",
+        ];
+        const sheetTop = bottomSheetSelectors
+          .flatMap((selector) => Array.from(surface.querySelectorAll<HTMLElement>(selector)))
+          .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+          .filter(({ element, rect }) => {
+            const style = getComputedStyle(element);
+            return style.display !== "none" && style.visibility !== "hidden"
+              && rect.width >= surfaceRect.width * 0.58
+              && rect.height > 0 && rect.top > surfaceRect.top + surfaceRect.height * 0.36
+              && rect.bottom > surfaceRect.top;
+          })
+          .reduce((top, { rect }) => Math.min(top, rect.top), surfaceRect.bottom);
+        if (sheetTop < surfaceRect.bottom) {
+          utilityBottomInset = Math.max(utilityBottomInset, Math.round(surfaceRect.bottom - sheetTop + 12));
+        }
+      }
+      setStyleIfChanged("--student-map-utility-bottom-inset", `${Math.round(utilityBottomInset)}px`);
+
+      // The desktop utility stack is anchored to the exposed map canvas, not
+      // the viewport edge behind a right-side building/place information rail.
+      // Mobile sheets dock vertically, so keep the normal safe-area inset there.
+      let utilityRightInset = "calc(0.75rem + env(safe-area-inset-right, 0px))";
+      if (surfaceRect.width >= 768) {
+        const rightRailSelectors = [
+          "[data-testid='student-selected-place-card']",
+          "[data-testid='event-map-panel']",
+          "[data-testid='route-planner-dialog']",
+          "[aria-label$=' building details']",
+          "[aria-label$=' place details']",
+        ];
+        const rightRailLeft = rightRailSelectors
+          .flatMap((selector) => Array.from(surface.querySelectorAll<HTMLElement>(selector)))
+          .map((element) => element.getBoundingClientRect())
+          .filter((rect) => rect.width > 0 && rect.height > 0
+            && rect.left > surfaceRect.left + surfaceRect.width * 0.52
+            && rect.right >= surfaceRect.right - 24
+            && rect.bottom > surfaceRect.top && rect.top < surfaceRect.bottom)
+          .reduce((left, rect) => Math.min(left, rect.left), surfaceRect.right);
+        if (rightRailLeft < surfaceRect.right) {
+          utilityRightInset = `${Math.round(Math.max(12, surfaceRect.right - rightRailLeft + 12))}px`;
+        }
+      }
+      setStyleIfChanged("--student-map-utility-right-inset", utilityRightInset);
+
     };
 
+    let layoutFrame = 0;
+    const scheduleOverlayLayout = () => {
+      if (layoutFrame) return;
+      layoutFrame = requestAnimationFrame(() => {
+        layoutFrame = 0;
+        updateOverlayLayout();
+      });
+    };
+    // The initial layout values need to be ready before the first paint. Later
+    // ResizeObserver notifications (including card/sheet transitions) are
+    // coalesced into one read/write pass per frame.
     updateOverlayLayout();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateOverlayLayout);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleOverlayLayout);
     observer?.observe(surface);
     const searchHeader = surface.querySelector<HTMLElement>("[data-map-search-header='true']");
     if (searchHeader) observer?.observe(searchHeader);
-    window.addEventListener("resize", updateOverlayLayout);
-    window.visualViewport?.addEventListener("resize", updateOverlayLayout);
-    window.visualViewport?.addEventListener("scroll", updateOverlayLayout);
+    const rightRailSelectors = [
+      "[data-testid='student-selected-place-card']",
+      "[data-testid='event-map-panel']",
+      "[data-testid='route-planner-dialog']",
+      "[aria-label$=' building details']",
+      "[aria-label$=' place details']",
+    ];
+    const overlaySelectors = [...rightRailSelectors,
+      "[data-testid='mobile-building-sheet']",
+      "[data-testid='collapsed-route-card']",
+      "[data-testid='mobile-active-route-dock']",
+    ];
+    overlaySelectors.forEach((selector) => {
+      surface.querySelectorAll<HTMLElement>(selector).forEach((element) => observer?.observe(element));
+    });
+    window.addEventListener("resize", scheduleOverlayLayout);
+    window.visualViewport?.addEventListener("resize", scheduleOverlayLayout);
+    window.visualViewport?.addEventListener("scroll", scheduleOverlayLayout);
     return () => {
+      if (layoutFrame) cancelAnimationFrame(layoutFrame);
       observer?.disconnect();
-      window.removeEventListener("resize", updateOverlayLayout);
-      window.visualViewport?.removeEventListener("resize", updateOverlayLayout);
-      window.visualViewport?.removeEventListener("scroll", updateOverlayLayout);
+      window.removeEventListener("resize", scheduleOverlayLayout);
+      window.visualViewport?.removeEventListener("resize", scheduleOverlayLayout);
+      window.visualViewport?.removeEventListener("scroll", scheduleOverlayLayout);
     };
-  }, [floorPickerFallbackActive, isFloorMode, navigationPhase, navigationTransitioning, selectedRoomContext?.roomId, searchFocused]);
+  }, [directionsMode, floorPickerFallbackActive, isFloorMode, navigationPhase, navigationTransitioning, searchFocused, selected?.id, selectedCampusPlaceId, selectedRoomContext?.roomId, showEventMaps, studentRouteUi.phase]);
   const mapSurface: MapSurface = directionsMode
     ? "route-planner"
     : (studentRouteUi.phase !== "idle" || navigationPhase !== "idle" || navigationTransitioning)
@@ -1593,6 +1742,15 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     (!isFloorMode && selectedEventLocationData.location.locationRef.type === "campus") ||
     (isFloorMode && selectedEventLocationData.location.locationRef.floorId === floorLookupId)
   ));
+  const indoor3DEventMarker = useMemo(() => {
+    const roomId = selectedEventLocationData?.location.locationRef.roomId;
+    if (!showEventMaps || !selectedLocationIsVisible || !activeFloorPlan || !roomId) return null;
+    const room = activeFloorPlan.rooms.find((candidate) => candidate.id === roomId);
+    if (!room) return null;
+    const points = roomOutlinePoints(room);
+    const point = points.reduce((sum, item) => ({ x: sum.x + item.x / points.length, y: sum.y + item.y / points.length }), { x: 0, y: 0 });
+    return { point, label: selectedEventLocationData.event.title };
+  }, [activeFloorPlan, selectedEventLocationData, selectedLocationIsVisible, showEventMaps]);
 
   // SVG center shifts with mode (floor plan uses authored canvas, campus uses campus canvas)
   const outdoorCanvasW = activeCampus?.canvasW || SVG_W;
@@ -1644,6 +1802,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   }, [settleCameraTransform]);
 
   const cancelCameraAnimation = useCallback((commitCurrent = true) => {
+    cameraGenerationRef.current += 1;
     const frame = cameraAnimationFrameRef.current;
     const wasAnimating = frame !== null;
     if (frame !== null) {
@@ -1721,9 +1880,31 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   writeCameraTransformRef.current = writeCameraTransform;
 
+  const commitCameraFrame = useCallback((nextPan: Pt, nextZoom: number) => {
+    if (student3DActive) return false;
+    const currentPan = panRef.current;
+    const currentZoom = displayZoomRef.current;
+    if (Math.abs(nextPan.x - currentPan.x) < 0.25
+      && Math.abs(nextPan.y - currentPan.y) < 0.25
+      && Math.abs(nextZoom - currentZoom) < 0.0005) return false;
+    panRef.current = nextPan;
+    displayZoomRef.current = nextZoom;
+    zoomRef.current = nextZoom;
+    targetCameraRef.current = { pan: { ...nextPan }, zoom: nextZoom };
+    writeCameraTransformRef.current(nextPan, nextZoom);
+    return true;
+  }, [student3DActive]);
+  const commitCameraFrameRef = useRef(commitCameraFrame);
+  commitCameraFrameRef.current = commitCameraFrame;
+
   /** One retargetable, time-based RAF loop for every animated camera move. */
   const animateCameraTo = useCallback((targetPan: Pt, targetZoom = zoomStateRef.current, source?: "room-focus" | "manual-wheel") => {
+    if (student3DActive) return;
+    if (cameraAnimationFrameRef.current !== null) cancelAnimationFrame(cameraAnimationFrameRef.current);
+    cameraAnimationFrameRef.current = null;
+    const generation = ++cameraGenerationRef.current;
     const toZoom = clampActiveStudentZoom(targetZoom);
+    followZoomTargetRef.current = toZoom;
     // Every camera move settles inside the active map pan bounds. Destination
     // bounds include inspection slack on mobile while a building route is open.
     const toPan = clampMapPan(targetPan, toZoom);
@@ -1757,10 +1938,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       finishAtTarget();
       return;
     }
-    if (cameraAnimationFrameRef.current !== null) return;
-
     let previousTime = performance.now();
     const tick = (now: number) => {
+      if (generation !== cameraGenerationRef.current) return;
       const target = targetCameraRef.current;
       const timedMotion = timedCameraMotionRef.current;
       if (timedMotion) {
@@ -1846,10 +2026,12 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       cameraAnimationFrameRef.current = requestAnimationFrame(tick);
     };
     cameraAnimationFrameRef.current = requestAnimationFrame(tick);
-  }, [clampActiveStudentZoom, clampMapPan, commitCameraState, reducedMotion, viewCX, viewCY]);
+  }, [clampActiveStudentZoom, clampMapPan, commitCameraState, reducedMotion, student3DActive, viewCX, viewCY]);
 
   useEffect(() => { animateCameraToRef.current = animateCameraTo; }, [animateCameraTo]);
   const applyOverviewCamera = useCallback((camera: { pan: Pt; zoom: number }) => {
+    if (student3DActive) return;
+    cancelCameraAnimation(false);
     const nextZoom = clampActiveStudentZoom(camera.zoom);
     const nextPan = clampMapPan(camera.pan, nextZoom);
     overviewCameraRef.current = { pan: nextPan, zoom: nextZoom };
@@ -1858,6 +2040,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     displayZoomRef.current = nextZoom;
     zoomRef.current = nextZoom;
     zoomStateRef.current = nextZoom;
+    followZoomTargetRef.current = nextZoom;
     targetCameraRef.current = { pan: { ...nextPan }, zoom: nextZoom };
     targetLogZoomRef.current = Math.log(nextZoom);
     manualWheelAnchorRef.current = null;
@@ -1866,7 +2049,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setDisplayZoom(nextZoom);
     setZoom(nextZoom);
     settleCameraTransform(nextPan, nextZoom);
-  }, [clampActiveStudentZoom, clampMapPan, settleCameraTransform]);
+  }, [cancelCameraAnimation, clampActiveStudentZoom, clampMapPan, settleCameraTransform, student3DActive]);
 
   const fitEventMap = useCallback(() => {
     const surface = mapContainerRef.current;
@@ -1905,23 +2088,29 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   fitEventMapRef.current = fitEventMap;
   const eventFitFrameRef = useRef<number | null>(null);
   const requestEventMapFit = useCallback(() => {
+    if (student3DActive) return;
     if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
     eventFitFrameRef.current = requestAnimationFrame(() => {
       eventFitFrameRef.current = null;
       fitEventMapRef.current();
     });
-  }, []);
+  }, [student3DActive]);
   useEffect(() => {
     if (showEventMaps) requestEventMapFit();
     return () => {
       if (eventFitFrameRef.current !== null) cancelAnimationFrame(eventFitFrameRef.current);
     };
-  }, [showEventMaps, selectedEventId, floorLookupId, activeCampus?.id, requestEventMapFit]);
+  }, [showEventMaps, selectedEventId, floorLookupId, activeCampus?.id, requestEventMapFit, student3DActive]);
 
   useLayoutEffect(() => {
-    if (!activeCampus || isFloorMode) return;
+    if (!activeCampus || isFloorMode || student3DActive) return;
     const contextKey = `campus:${activeCampus.id}`;
     if (lastFittedCameraContextRef.current === contextKey) return;
+    if (pendingRouteRecenterRef.current?.contextKey === "campus") {
+      lastFittedCameraContextRef.current = contextKey;
+      fittedCampusIdRef.current = activeCampus.id;
+      return;
+    }
     const remembered = cameraStatesByContextRef.current.get(contextKey);
     if (remembered) {
       applyOverviewCamera(remembered);
@@ -1964,9 +2153,14 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   }, [activeCampus?.id, applyOverviewCamera, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW]);
 
   useLayoutEffect(() => {
-    if (!isFloorMode || !activeFloorPlan) return;
+    if (!isFloorMode || !activeFloorPlan || student3DActive) return;
     const contextKey = `floor:${floorView?.building.id ?? activeFloorPlan.id}:${floorView?.floor ?? 0}`;
     if (lastFittedCameraContextRef.current === contextKey) return;
+    if (pendingRouteRecenterRef.current?.contextKey === `${floorView?.building.id ?? activeFloorPlan.id}:${floorView?.floor ?? 0}`) {
+      lastFittedCameraContextRef.current = contextKey;
+      fittedFloorIdRef.current = activeFloorPlan.id;
+      return;
+    }
     const remembered = cameraStatesByContextRef.current.get(contextKey);
     if (remembered) {
       applyOverviewCamera(remembered);
@@ -2007,31 +2201,32 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       : "var(--map-bg)";
 
   // ── Smooth zoom lerp ───────────────────────────────────────────────────
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => {
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && !followCameraDetached) return;
     const targetPan = clampMapPan(panRef.current, zoom);
     if (Math.abs(displayZoomRef.current - zoom) < 0.005
       && Math.abs(panRef.current.x - targetPan.x) < 0.1
       && Math.abs(panRef.current.y - targetPan.y) < 0.1) return;
     animateCameraTo(targetPan, zoom);
-  }, [animateCameraTo, clampMapPan, zoom]);
+  }, [animateCameraTo, clampMapPan, followCameraDetached, studentRouteUi.camera, studentRouteUi.phase, zoom]);
 
   // ── Smooth pan lerp ───────────────────────────────────────────────────
   // Reconcile the current camera whenever the authored surface, viewport, or
   // zoom changes. This also catches a resize from desktop to mobile without
   // letting the map remain stranded beyond its new edge.
   useEffect(() => {
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && !followCameraDetached) return;
     const current = panRef.current;
     const clamped = clampMapPan(current, zoom);
     if (clamped.x !== current.x || clamped.y !== current.y) {
       panRef.current = clamped;
       setPan(clamped);
     }
-  }, [clampMapPan, zoom]);
+  }, [clampMapPan, followCameraDetached, studentRouteUi.camera, studentRouteUi.phase, zoom]);
 
   useEffect(() => {
     const element = mapContainerRef.current;
-    if (!element) return;
+    if (!element || student3DActive) return;
 
     const reconcileViewport = () => {
       const rect = element.getBoundingClientRect();
@@ -2073,12 +2268,12 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       window.removeEventListener("resize", reconcileViewport);
       window.removeEventListener("scroll", reconcileViewport, true);
     };
-  }, [clampMapPan, viewportCanvasW, viewportCanvasH]);
+  }, [clampMapPan, viewportCanvasW, viewportCanvasH, student3DActive]);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────
   useEffect(() => {
     const el = mapContainerRef.current;
-    if (!el) return;
+    if (!el || student3DActive) return;
     const onWheel = (e: WheelEvent) => {
       // Floating controls own their scrolling; only the map surface zooms.
       if (e.target instanceof Element && e.target.closest("[data-no-drag], input, textarea, select, button, [role='dialog'], [role='listbox']")) return;
@@ -2097,17 +2292,21 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       const continuingWheel = !interruptsProgrammaticMove
         && cameraAnimationFrameRef.current !== null
         && cameraAnimationModeRef.current === "manual-wheel";
-      const baseLogZoom = continuingWheel ? targetLogZoomRef.current : Math.log(displayZoomRef.current);
+      const followCameraOwns = studentRouteUi.phase === "navigating"
+        && studentRouteUi.camera === "follow" && !followCameraDetached;
+      const baseLogZoom = followCameraOwns
+        ? Math.log(followZoomTargetRef.current)
+        : continuingWheel ? targetLogZoomRef.current : Math.log(displayZoomRef.current);
       const nextZoom = clampActiveStudentZoom(Math.exp(baseLogZoom - step));
       if (Math.abs(Math.log(nextZoom) - baseLogZoom) < 1e-9) return;
-      detachFollowCamera();
-      animateZoomAtRef.current(e.clientX, e.clientY, nextZoom, "manual-wheel");
+      if (followCameraOwns) applyZoomAtRef.current(e.clientX, e.clientY, nextZoom, true);
+      else animateZoomAtRef.current(e.clientX, e.clientY, nextZoom, "manual-wheel");
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [activeCampus?.id, cancelCameraAnimation, clampActiveStudentZoom, detachFollowCamera, isCampusLoading]);
+  }, [activeCampus?.id, cancelCameraAnimation, clampActiveStudentZoom, followCameraDetached, isCampusLoading, student3DActive, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -2328,10 +2527,46 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   /** Cursor-anchored zoom with the same center-origin transform as the map. */
   const applyZoomAt = useCallback((clientX: number, clientY: number, nextZoom: number, commitState = true) => {
+    const followCameraOwns = studentRouteUi.phase === "navigating"
+      && studentRouteUi.camera === "follow" && !followCameraDetached;
+    if (followCameraOwns) {
+      // During Follow, zoom input changes only the desired scale. The active
+      // Follow frame computes its pan against the same next scale and human
+      // point, so cursor anchoring cannot fight avatar tracking.
+      if (cameraAnimationFrameRef.current !== null) cancelCameraAnimation(false);
+      const clamped = clampActiveStudentZoom(nextZoom);
+      const followFrameOwnsTransform = studentRouteUi.playback === "playing"
+        && !navigationTransitioning && !roomFocusAnimationRef.current;
+      const humanPoint = followHumanWorldPointRef.current;
+      const nextPan = humanPoint
+        ? clampMapPan(panForRouteFocusPoint(humanPoint, followCameraFocusRef.current, { x: viewCX, y: viewCY }, clamped), clamped)
+        : clampMapPan(panRef.current, clamped);
+      followZoomTargetRef.current = clamped;
+      zoomStateRef.current = clamped;
+      targetCameraRef.current = { pan: nextPan, zoom: clamped };
+      targetLogZoomRef.current = Math.log(clamped);
+      if (commitState) {
+        setZoom(clamped);
+        // Changing the React `displayZoom` prop during active Follow makes
+        // React rewrite the SVG transform with its last rendered pan. That
+        // stale center then fights the Follow RAF for a frame on every wheel
+        // or pinch event. The Follow frame owns the live DOM transform; React
+        // only mirrors camera state once playback is paused/settled.
+        if (!followFrameOwnsTransform && !navigationTransitioning && !roomFocusAnimationRef.current) {
+          setDisplayZoom(clamped);
+        }
+      }
+      if (!followFrameOwnsTransform && !navigationTransitioning && !roomFocusAnimationRef.current) {
+        commitCameraFrameRef.current(nextPan, clamped);
+        if (commitState) commitCameraState();
+      }
+      return;
+    }
     // User zoom takes over from scripted movement without an intermediate
     // React-state commit. The final camera is committed once the gesture ends.
     cancelCameraAnimation(false);
     const clamped = clampActiveStudentZoom(nextZoom);
+    followZoomTargetRef.current = clamped;
     cancelAnimationFrame(inertiaRef.current);
     inertiaRef.current = 0;
     zoomStateRef.current = clamped;
@@ -2366,7 +2601,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     targetLogZoomRef.current = Math.log(clamped);
     writeCameraTransform(nextPan, clamped);
     if (commitState) commitCameraState();
-  }, [cancelCameraAnimation, clampActiveStudentZoom, clampMapPan, commitCameraState, svgPointFromClient, viewportCanvasW, viewportCanvasH, writeCameraTransform]);
+  }, [cancelCameraAnimation, clampActiveStudentZoom, clampMapPan, commitCameraState, followCameraDetached, navigationTransitioning, panForRouteFocusPoint, roomFocusAnimationRef, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback, viewCX, viewCY, svgPointFromClient, viewportCanvasW, viewportCanvasH, writeCameraTransform]);
 
   // Keep stable listeners (wheel, keys, pinch) anchored against the latest zoom/pan.
   useEffect(() => {
@@ -2636,6 +2871,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setInspectedRouteStepIndex(null);
     routeTransitionActivationRef.current = null;
     transitionResumePlaybackRef.current = false;
+    setNavigationPauseReason(null);
     routeEntryTransitionCompleteRef.current = false;
     setDirectionsMode(false);
     enteredRoomRef.current = null;
@@ -2644,7 +2880,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   // Stop every playback clock synchronously with the Pause action. Effect
   // cleanup also cancels them after commit, but cancelling here prevents an
   // already queued RAF/transition timeout from advancing one more frame.
-  const pauseNavigation = useCallback(() => {
+  const pauseNavigation = useCallback((reason: "manual" | "pan" = "manual") => {
     // Transition handoffs are atomic. Their controls are disabled until the
     // brief Floor/Building change settles, so Pause cannot cancel half a handoff.
     if (navigationTransitioning || stairLoading) return;
@@ -2666,16 +2902,37 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     destinationIndoorTransitionRef.current = null;
     setStairLoading(null);
     transitionResumePlaybackRef.current = false;
+    setNavigationPauseReason(reason);
     dispatchStudentRouteUi({ type: "PAUSE" });
   }, [navigationTransitioning, stairLoading]);
 
+  const beginFollowPan = useCallback(() => {
+    detachFollowCamera();
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow"
+      && studentRouteUi.playback === "playing") pauseNavigation("pan");
+  }, [detachFollowCamera, pauseNavigation, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
+
   const resumeNavigation = useCallback(() => {
     if (studentRouteUi.phase !== "navigating" || navigationTransitioning || stairLoading) return;
+    // Explore pauses Follow but retains the playback state it should restore.
+    // Return to the canonical live cursor/context first; RECENTER restores that
+    // remembered playback state without seeking or advancing the route.
+    if (studentRouteUi.camera === "explore") {
+      recenterCurrentRouteStepRef.current();
+      return;
+    }
     const activeRoute = routeRef.current;
     const currentSteps = activeRoute ? studentFacingRouteSteps(activeRoute) : [];
     if (activeRoute && routeTransitionForStep(activeRoute, currentSteps, Math.floor(playbackCursorRef.current + 0.000001))) return;
+    // Resume is also the explicit return from Explore/free-look. Restore the
+    // camera from the canonical live cursor before playback continues, even
+    // when the user has panned far away and no longer sees the avatar.
+    if (navigationPauseReason === "pan" || followCameraDetached) {
+      recenterCurrentRouteStepRef.current();
+    }
+    setNavigationPauseReason(null);
     dispatchStudentRouteUi({ type: "RESUME" });
-  }, [navigationTransitioning, stairLoading, studentRouteUi.phase]);
+  }, [followCameraDetached, navigationPauseReason, navigationTransitioning, stairLoading, studentRouteUi.camera, studentRouteUi.phase]);
 
   const clearStudentRoute = useCallback(() => {
     cancelAnimationFrame(stepSeekAnimRef.current ?? 0);
@@ -2721,6 +2978,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setOriginIndoorSegmentIndex(-1);
     routeTransitionActivationRef.current = null;
     transitionResumePlaybackRef.current = false;
+    setNavigationPauseReason(null);
     routeEntryTransitionCompleteRef.current = false;
     setFromBuilding(null);
     setToBuilding(null);
@@ -2834,16 +3092,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const drag = dragRef.current;
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
-    detachFollowCamera();
+    beginFollowPan();
     if (mapContainerRef.current) mapContainerRef.current.style.cursor = "grabbing";
     queuePanUpdate(e.clientX, e.clientY, drag);
     // Per-frame velocity from last cursor position
     trackVelocity(drag, e.clientX - drag.lx, e.clientY - drag.ly, 0.5);
     drag.lx = e.clientX;
     drag.ly = e.clientY;
-  }, [detachFollowCamera, queuePanUpdate, trackVelocity]);
+  }, [beginFollowPan, queuePanUpdate, trackVelocity]);
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
     const drag = dragRef.current;
@@ -2897,7 +3155,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     if (pointerGestureActiveRef.current) return;
     // Pinch-to-zoom: 2 fingers
     if (e.touches.length === 2 && pinchRef.current) {
-      detachFollowCamera();
       const t1 = e.touches[0], t2 = e.touches[1];
       const curDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const ratio = curDist / pinchRef.current.dist;
@@ -2912,16 +3169,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     if (!drag) return;
     const t = e.touches[0];
     const dx = t.clientX - drag.sx, dy = t.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
-    detachFollowCamera();
+    beginFollowPan();
     if (mapContainerRef.current) mapContainerRef.current.style.cursor = "grabbing";
     queuePanUpdate(t.clientX, t.clientY, drag);
     // Per-frame velocity with EMA smoothing (lower alpha = smoother)
     trackVelocity(drag, t.clientX - drag.lx, t.clientY - drag.ly, 0.35);
     drag.lx = t.clientX;
     drag.ly = t.clientY;
-  }, [clampActiveStudentZoom, detachFollowCamera, queuePanUpdate, queueZoomUpdate, trackVelocity]);
+  }, [beginFollowPan, clampActiveStudentZoom, queuePanUpdate, queueZoomUpdate, trackVelocity]);
 
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
     if (pointerGestureActiveRef.current) return;
@@ -3028,7 +3285,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     pointerPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointerPointsRef.current.size === 2 && pointerPinchRef.current) {
       e.preventDefault();
-      detachFollowCamera();
       const [first, second] = [...pointerPointsRef.current.values()];
       const distance = Math.hypot(first.x - second.x, first.y - second.y);
       const ratio = distance / Math.max(1, pointerPinchRef.current.dist);
@@ -3043,15 +3299,15 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     e.preventDefault();
     const dx = e.clientX - drag.sx;
     const dy = e.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
     drag.moved = true;
-    detachFollowCamera();
+    beginFollowPan();
     if (mapContainerRef.current) mapContainerRef.current.style.cursor = "grabbing";
     queuePanUpdate(e.clientX, e.clientY, drag);
     trackVelocity(drag, e.clientX - drag.lx, e.clientY - drag.ly, 0.35);
     drag.lx = e.clientX;
     drag.ly = e.clientY;
-  }, [clampActiveStudentZoom, detachFollowCamera, queuePanUpdate, queueZoomUpdate, trackVelocity]);
+  }, [beginFollowPan, clampActiveStudentZoom, queuePanUpdate, queueZoomUpdate, trackVelocity]);
 
   const onPointerEnd = useCallback((e: React.PointerEvent) => {
     if (!pointerGestureActiveRef.current || e.pointerType === "mouse") return;
@@ -3578,15 +3834,18 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     if (pendingTransitionSeekRef.current) return;
 
     const initialProgress = Math.max(0, Math.min(0.999, walkProgressRef.current));
+    const steps = studentFacingRouteSteps(activeRoute);
+    const outdoorPoints = activeRoute.campusPoints?.length ? activeRoute.campusPoints : activeRoute.points;
+    const sampleOutdoorPoint = createRoutePointSampler(outdoorPoints);
     if (reducedMotion) {
       walkProgressRef.current = 1;
       setWalkProgress(1);
-      const steps = studentFacingRouteSteps(activeRoute);
       const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, 1);
       playbackCursorRef.current = cursor;
       setPlaybackCursor(cursor);
       if (studentRouteUi.camera === "follow" && routeTransitionForStep(activeRoute, steps, Math.floor(cursor + 0.000001))) {
         transitionResumePlaybackRef.current = true;
+        setNavigationPauseReason("transition");
         dispatchStudentRouteUi({ type: "PAUSE" });
       }
       return;
@@ -3599,31 +3858,36 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const tick = (now: number) => {
       const t = Math.min(1, initialProgress + (now - start) / remainingDuration * (1 - initialProgress));
       walkProgressRef.current = t;
-      setWalkProgress(t);
-      const steps = studentFacingRouteSteps(activeRoute);
+      // The 3D renderer reads visual progress from the stable ref inside its
+      // frame loop. Keep React updates to canonical step boundaries while 3D
+      // is active so each animation frame does not rerender the whole map UI.
+      if (!student3DActive || t >= 1) setWalkProgress(t);
       const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, t);
+      const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
-      setPlaybackCursor(cursor);
-      if (studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
-        const points = activeRoute.campusPoints?.length ? activeRoute.campusPoints : activeRoute.points;
-        const point = pointAlongPolyline(points, t);
-        const currentZoom = zoomRef.current;
-        const targetPan = panForRouteFocusPoint(point, followCameraFocusRef.current, { x: viewCX, y: viewCY }, currentZoom);
+      if (!student3DActive || Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001) || t >= 1) setPlaybackCursor(cursor);
+      if (!student3DActive && studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
+        const point = sampleOutdoorPoint(t);
+        if (!point) return;
+        followHumanWorldPointRef.current = point;
+        const currentZoom = displayZoomRef.current;
+        const nextZoom = currentZoom + (followZoomTargetRef.current - currentZoom) * 0.2;
+        const targetPan = panForRouteFocusPoint(point, followCameraFocusRef.current, { x: viewCX, y: viewCY }, nextZoom);
         const currentPan = panRef.current;
-        const nextPan = clampMapPan({ x: currentPan.x + (targetPan.x - currentPan.x) * 0.2, y: currentPan.y + (targetPan.y - currentPan.y) * 0.2 }, currentZoom);
-        panRef.current = nextPan;
-        writeCameraTransformRef.current(nextPan, currentZoom);
+        const nextPan = clampMapPan({ x: currentPan.x + (targetPan.x - currentPan.x) * 0.2, y: currentPan.y + (targetPan.y - currentPan.y) * 0.2 }, nextZoom);
+        commitCameraFrameRef.current(nextPan, nextZoom);
       }
       if (t >= 1 && studentRouteUi.camera === "follow"
         && routeTransitionForStep(activeRoute, steps, Math.floor(cursor + 0.000001))) {
         transitionResumePlaybackRef.current = true;
+        setNavigationPauseReason("transition");
         dispatchStudentRouteUi({ type: "PAUSE" });
       }
       if (t < 1) walkAnimRef.current = requestAnimationFrame(tick);
     };
     walkAnimRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(walkAnimRef.current ?? 0);
-  }, [walkAnimationKey, walkNonce, reducedMotion, directionsMode, navigationTransitioning, navigationPhase, playbackSpeed, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback, followCameraDetached, clampMapPan, viewCX, viewCY]);
+  }, [walkAnimationKey, walkNonce, reducedMotion, directionsMode, navigationTransitioning, navigationPhase, playbackSpeed, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback, followCameraDetached, clampMapPan, student3DActive, viewCX, viewCY]);
   useEffect(() => {
     if (fromBuilding && toBuilding && route) {
       setRouteFading(true);
@@ -3645,6 +3909,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
    * the canvas center: pan = z·(center − p).
    */
   const frameRouteView = useCallback((routeToFrame: PlannedRoute | null = route) => {
+    if (student3DActive) return;
     if (!routeToFrame || routeToFrame.points.length === 0) return;
     const xs = routeToFrame.points.map(p => p.x);
     const ys = routeToFrame.points.map(p => p.y);
@@ -3674,65 +3939,19 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       y: z * (centerY - midY),
     }, z);
     animateCameraTo(targetPan, z);
-  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, focusViewPointFromScreen, route, outdoorCanvasW, outdoorCanvasH]);
-  const frameCampusRoutePreview = useCallback(() => {
-    const surface = mapContainerRef.current;
-    const viewport = surface?.getBoundingClientRect();
-    if (!surface || !viewport || viewport.width <= 0 || viewport.height <= 0) return;
-    const visible = studentMapFocusViewport(surface);
-    const buildings = Object.values(B_POS).filter((building) =>
-      [building.x, building.y, building.w, building.h].every(Number.isFinite)
-      && building.w > 0 && building.h > 0,
-    );
-    if (buildings.length === 0) return;
-    const content = {
-      x: Math.min(...buildings.map((building) => building.x)),
-      y: Math.min(...buildings.map((building) => building.y)),
-      width: Math.max(...buildings.map((building) => building.x + building.w))
-        - Math.min(...buildings.map((building) => building.x)),
-      height: Math.max(...buildings.map((building) => building.y + building.h))
-        - Math.min(...buildings.map((building) => building.y)),
-    };
-    const camera = getStudentOverviewCamera({
-      mapWidth: outdoorCanvasW,
-      mapHeight: outdoorCanvasH,
-      viewportWidth: viewport.width,
-      viewportHeight: viewport.height,
-      content,
-      insets: {
-        left: Math.max(0, visible.left - viewport.left),
-        right: Math.max(0, viewport.right - visible.right),
-        top: Math.max(0, visible.top - viewport.top),
-        bottom: Math.max(0, viewport.bottom - visible.bottom),
-      },
-      fillRatio: 0.78,
-    });
-    animateCameraTo(camera.pan, camera.zoom);
-  }, [B_POS, animateCameraTo, mapContainerRef, outdoorCanvasH, outdoorCanvasW]);
-  useEffect(() => {
-    if (directionsMode || isFloorMode || studentRouteUi.phase !== "preview" || !route) return;
-    // Find Route swaps the tall planner for the compact preview sheet. Wait
-    // until that layout is committed, then frame the campus in the newly
-    // uncovered map viewport so the route and active entrance are tappable.
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(frameCampusRoutePreview);
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame) cancelAnimationFrame(secondFrame);
-    };
-  }, [directionsMode, frameCampusRoutePreview, isFloorMode, route, studentRouteUi.phase]);
+  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, focusViewPointFromScreen, route, outdoorCanvasW, outdoorCanvasH, student3DActive]);
   const frameCurrentRouteView = useCallback(() => {
+    if (student3DActive) return;
     if (isFloorMode) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
     }
     frameRouteView();
-  }, [frameRouteView, isFloorMode]);
+  }, [frameRouteView, isFloorMode, student3DActive]);
 
   const focusRouteStartView = useCallback((point: { x: number; y: number }, floorContext: boolean) => {
+    if (student3DActive) return;
     const surface = mapContainerRef.current;
     const safe = surface ? studentMapFocusViewport(surface) : null;
     const target = safe ? focusViewPointFromScreen({
@@ -3742,10 +3961,11 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const worldPoint = floorContext
       ? { x: point.x + floorViewport.offsetX, y: point.y + floorViewport.offsetY }
       : point;
+    followHumanWorldPointRef.current = worldPoint;
     const nextZoom = clampActiveStudentZoom(Math.max(1.05, displayZoomRef.current));
     const nextPan = clampMapPan(panForRouteFocusPoint(worldPoint, target, { x: viewCX, y: viewCY }, nextZoom), nextZoom);
     animateCameraTo(nextPan, nextZoom, "room-focus");
-  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, floorViewport.offsetX, floorViewport.offsetY, focusViewPointFromScreen, viewCX, viewCY]);
+  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, floorViewport.offsetX, floorViewport.offsetY, focusViewPointFromScreen, student3DActive, viewCX, viewCY]);
 
   // A room can be selected while its floor plan is still on screen. When the
   // user confirms a route whose origin is inside a building, zoom the floor
@@ -3759,6 +3979,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       || (studentRouteUi.phase === "navigating" && studentRouteUi.playback !== "playing")) return;
 
     cancelCameraAnimation();
+    const cameraGeneration = cameraGenerationRef.current;
     const startZoom = zoomRef.current;
     const startPan = panRef.current;
     const targetZoom = 1;
@@ -3782,6 +4003,13 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setNavigationTransitioning(false);
     };
 
+    // This animation only frames the SVG renderer. In 3D, complete the shared
+    // context handoff immediately and leave camera ownership to the renderer.
+    if (student3DActive) {
+      finish();
+      return;
+    }
+
     if (duration === 0) {
       finish();
       return;
@@ -3797,10 +4025,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       };
       // Apply the context-transition camera on the existing transform layer;
       // React only commits once when the floor/campus context changes.
-      panRef.current = nextPan;
-      displayZoomRef.current = nextZoom;
-      zoomRef.current = nextZoom;
-      writeCameraTransformRef.current(nextPan, nextZoom);
+      if (cameraGeneration === cameraGenerationRef.current) {
+        commitCameraFrameRef.current(nextPan, nextZoom);
+      }
 
       if (progress < 1) {
         navigationTransitionAnimRef.current = requestAnimationFrame(tick);
@@ -3812,12 +4039,17 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
     navigationTransitionAnimRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(navigationTransitionAnimRef.current ?? 0);
-  }, [cancelCameraAnimation, navigationTransitioning, isFloorMode, route, frameRouteView, reducedMotion, platformSettingsReady, platformSettings.autoFocusRoute, studentRouteUi.phase, studentRouteUi.playback]);
+  }, [cancelCameraAnimation, navigationTransitioning, isFloorMode, route, frameRouteView, reducedMotion, platformSettingsReady, platformSettings.autoFocusRoute, student3DActive, studentRouteUi.phase, studentRouteUi.playback]);
 
   // When a route is computed (navigation starts), zoom in so BOTH the
   // starting point and the end point are in focus — the viewport centers
   // on the route midpoint and the whole route stays on screen.
   useEffect(() => {
+    if (student3DActive) {
+      setShowArrival(false);
+      return;
+    }
+    if (studentRouteUi.phase === "navigating") return;
     // Keep route preparation from pulling the camera away from the endpoint
     // the student just selected. On Start Navigation, the origin focus is
     // applied first and this flag prevents the generic full-route frame from
@@ -3831,7 +4063,10 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setShowArrival(false);
       const pendingFocus = pendingRouteStartFocusRef.current;
       pendingRouteStartFocusRef.current = null;
-      if (pendingFocus) requestAnimationFrame(() => focusRouteStartView(pendingFocus.point, pendingFocus.floor));
+      if (pendingFocus) {
+        const focusTimer = setTimeout(() => focusRouteStartView(pendingFocus.point, pendingFocus.floor), reducedMotion ? 0 : 180);
+        return () => clearTimeout(focusTimer);
+      }
       return;
     }
     // Room routes are previewed in the planner. Their campus framing is
@@ -3842,14 +4077,14 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     } else {
       setShowArrival(false);
     }
-  }, [directionsMode, route, routeStartFocusPendingRef, frameRouteView, focusRouteStartView, platformSettingsReady, platformSettings.autoFocusRoute]);
+  }, [directionsMode, route, routeStartFocusPendingRef, frameRouteView, focusRouteStartView, platformSettingsReady, platformSettings.autoFocusRoute, reducedMotion, student3DActive, studentRouteUi.phase]);
 
   // ── Pan to selected building on click (smooth animated lerp) ──────
   useEffect(() => {
     const isSearchFocus = Boolean(selected && searchFocusRef.current
       && searchFocusRef.current.buildingId === selected.id
       && !searchFocusRef.current.roomId);
-    if (selected && !isFloorMode && isSearchFocus) {
+    if (!student3DActive && selected && !isFloorMode && isSearchFocus) {
       const pos = B_POS[selected.id];
       if (!pos) return;
       const cx = pos.x + pos.w / 2;
@@ -3873,7 +4108,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       animateCameraTo(targetPan, targetZoom);
       searchFocusRef.current = null;
     }
-  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, selected?.id, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce]);
+  }, [animateCameraTo, clampActiveStudentZoom, clampMapPan, selected?.id, B_POS, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce, student3DActive]);
 
   useLayoutEffect(() => {
     const target = searchFocusRef.current;
@@ -3882,7 +4117,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       && target?.buildingId
       && !target.roomId
       && (fromBuilding?.id === target.buildingId || toBuilding?.id === target.buildingId));
-    if (!isRouteEndpointFocus || !target?.buildingId) return;
+    if (student3DActive || !isRouteEndpointFocus || !target?.buildingId) return;
     const position = B_POS[target.buildingId];
     const surface = mapContainerRef.current;
     const svg = svgRef.current;
@@ -3924,7 +4159,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     });
     if (focus.shouldMove) animateCameraTo(focus.pan, focus.zoom, "room-focus");
     searchFocusRef.current = null;
-  }, [activeCampus, animateCameraTo, B_POS, directionsMode, fromBuilding?.id, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce, toBuilding?.id]);
+  }, [activeCampus, animateCameraTo, B_POS, directionsMode, fromBuilding?.id, isFloorMode, outdoorCanvasH, outdoorCanvasW, searchFocusNonce, student3DActive, toBuilding?.id]);
 
   // Keep mobile building destinations in the usable area above the route
   // planner, just as indoor room destinations are focused above the sheet.
@@ -3936,7 +4171,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       && !navigationTransitioning
       && !isFloorMode
       && !roomDestination
-      && Boolean(toBuilding);
+      && Boolean(toBuilding)
+      && !student3DActive;
     if (!shouldFocusDestination || !toBuilding) {
       lastDestinationBuildingFocusKeyRef.current = null;
       if (roomFocusAnimationRef.current) cancelCameraAnimation();
@@ -3996,11 +4232,11 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     } else if (roomFocusAnimationRef.current) {
       cancelCameraAnimation();
     }
-  }, [animateCameraTo, B_POS, cancelCameraAnimation, clampMapPan, directionsMode, isFloorMode, navigationPhase, navigationTransitioning, outdoorCanvasH, outdoorCanvasW, roomDestination, toBuilding]);
+  }, [animateCameraTo, B_POS, cancelCameraAnimation, clampMapPan, directionsMode, isFloorMode, navigationPhase, navigationTransitioning, outdoorCanvasH, outdoorCanvasW, roomDestination, student3DActive, toBuilding]);
 
   useEffect(() => {
     const target = searchFocusRef.current;
-    if (!target?.campusPlaceId || isFloorMode) return;
+    if (!target?.campusPlaceId || isFloorMode || student3DActive) return;
     const place = selectedCampusPlace?.id === target.campusPlaceId
       ? selectedCampusPlace
       : directionsMode && (fromCampusPlace?.campusPlaceId === target.campusPlaceId || toCampusPlace?.campusPlaceId === target.campusPlaceId)
@@ -4031,13 +4267,13 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }, currentZoom);
     animateCameraTo(nextPan, currentZoom);
     searchFocusRef.current = null;
-  }, [activeCampus, directionsMode, fromCampusPlace?.campusPlaceId, selectedCampusPlace, searchFocusNonce, isFloorMode, toCampusPlace?.campusPlaceId, viewCX, viewCY, clampMapPan, animateCameraTo]);
+  }, [activeCampus, directionsMode, fromCampusPlace?.campusPlaceId, selectedCampusPlace, searchFocusNonce, isFloorMode, student3DActive, toCampusPlace?.campusPlaceId, viewCX, viewCY, clampMapPan, animateCameraTo]);
 
   // Room focus is shared by direct taps and search selection. Measure the
   // visible overlays after they commit, then pan only if the actual room shape
   // is outside that safe viewport. Keep current zoom and soft floor bounds.
   useLayoutEffect(() => {
-    if (!isFloorMode || !floorView || !activeFloorPlan) return;
+    if (!isFloorMode || !floorView || !activeFloorPlan || student3DActive) return;
     const searchTarget = searchFocusRef.current;
     const searchMatchesFloor = Boolean(searchTarget?.roomId
       && searchTarget.buildingId === floorView.building.id
@@ -4182,13 +4418,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       cancelCameraAnimation();
     }
     if (searchMatchesFloor) searchFocusRef.current = null;
-  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, interactiveFloorRoomIds, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, viewportCanvasH, viewportCanvasW]);
+  }, [activeFloorPlan, animateCameraTo, cancelCameraAnimation, clampMapPan, directionsMode, floorView, floorViewport, interactiveFloorRoomIds, isFloorMode, navigationPhase, navigationTransitioning, roomDestination?.buildingId, roomDestination?.floorNumber, roomDestination?.roomId, searchFocusNonce, selectedRoomContext?.buildingId, selectedRoomContext?.floorNumber, selectedRoomContext?.roomId, student3DActive, viewportCanvasH, viewportCanvasW]);
 
   const selectBuilding = useCallback((b: Building|null) => {
     cancelCameraAnimation();
     setMobileBuildingSheetState("default");
     setSelectedCampusPlaceId(null);
     setSelected(b);
+    // A closed building card clears the selection; do not leave its previous
+    // search result as a hidden 3D camera target for the next Recenter.
+    if (!b) searchFocusRef.current = null;
     setSearchFocused(false); setSearch(""); setShowQR(false);
     if (b) {
       if (!recentSearches.includes(b.name))
@@ -4261,6 +4500,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       }
     } else {
       const isRoomResult = item.kind === "room" || item.kind === "office" || item.kind === "laboratory" || item.kind === "facility";
+      let selectedRoom: RoomDest | null = null;
       if (isRoomResult) {
         const campusBuilding = activeCampus?.buildings.find((candidate) => candidate.id === item.buildingId);
         const publishedFloor = campusBuilding?.floors.find((floor) =>
@@ -4275,29 +4515,51 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
           dismissSearch();
           return;
         }
+        const publishedRoom = publishedFloor.rooms.find((room) => room.id === item.id);
+        const roomBuilding = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
+        if (publishedRoom && roomBuilding) {
+          selectedRoom = {
+            type: "room",
+            buildingId: campusBuilding.id,
+            floorNumber: publishedFloor.number,
+            roomId: publishedRoom.id,
+            roomName: publishedRoom.name || item.name,
+            buildingLabel: roomBuilding.name,
+            buildingCode: roomBuilding.code,
+            floorLabel: publishedFloor.label,
+            accessNodeId: publishedRoom.accessNodeId,
+            accessDoorId: publishedRoom.accessDoorId,
+            accessDoorIds: publishedRoom.accessDoorIds,
+          };
+        }
       }
       const b = MOCK_BUILDINGS.find((building) => building.id === item.buildingId);
       if (b) {
-        searchFocusRef.current = { buildingId: b.id, roomId: item.id, floorNumber: item.floorNumber ?? 1 };
-        lastRoomFocusKeyRef.current = null;
-        // Selecting a fresh room target cancels any previous room destination
-        // (the floor plan opens with the room highlighted; the "Directions to
-        // room" chip offers full navigation).
-        setRoomDestination(null);
-        setIndoorRoute(null);
+        searchFocusRef.current = selectedRoom
+          ? { buildingId: b.id, roomId: selectedRoom.roomId, floorNumber: selectedRoom.floorNumber }
+          : { buildingId: b.id };
+        if (selectedRoom) lastRoomFocusKeyRef.current = null;
+        // Inspecting a search result during Preview/Follow must not discard the
+        // canonical route or its endpoint. Outside navigation, a room search
+        // remains a passive selection and clears only the stale room preview.
+        if (!route || studentRouteUi.phase === "idle") {
+          setRoomDestination(null);
+          setIndoorRoute(null);
+        }
         selectBuilding(b);
         if (item.floorNumber !== undefined) {
           setFloorView({ building: b, floor: item.floorNumber });
         } else {
           setFloorView({ building: b, floor: 1 });
         }
-        setHighlightedRoom(item.id);
+        setSelectedRoomContext(selectedRoom);
+        setHighlightedRoom(selectedRoom?.roomId ?? null);
         setSearchFocusNonce((nonce) => nonce + 1);
       }
     }
     setSearch(item.name);
     dismissSearch();
-  }, [activeCampus, MOCK_BUILDINGS, dismissSearch, navigableRoomKeys, selectBuilding, selectCampusPlace]);
+  }, [activeCampus, MOCK_BUILDINGS, dismissSearch, navigableRoomKeys, route, selectBuilding, selectCampusPlace, studentRouteUi.phase]);
 
   const startDirectionsTo = useCallback((b: Building) => {
     setToBuilding(b); setFromBuilding(null);
@@ -4454,27 +4716,35 @@ const buildingFill = (id: string) =>
     if (pendingTransitionSeekRef.current) return;
     if (studentRouteUi.phase !== "navigating" || studentRouteUi.playback !== "playing") return;
 
+    const activePlaybackSteps = route ? studentFacingRouteSteps(route) : [];
+    const sampleIndoorPoint = createRoutePointSampler(indoorRoute.waypoints);
+    const sampledIndoorPoint = { x: 0, y: 0 };
+
     const syncRouteCursor = (progress: number) => {
       const activeSegment = navigationPhase === "origin-indoor"
         ? originIndoorSegments[originIndoorSegmentIndex]
         : destinationIndoorSegments[destinationIndoorSegmentIndex];
       if (!route || !activeSegment) return null;
-      const cursor = studentRoutePositionForLeg(route, studentFacingRouteSteps(route), navigationPhase, activeSegment, progress);
+      const cursor = studentRoutePositionForLeg(route, activePlaybackSteps, navigationPhase, activeSegment, progress, playbackCursorRef.current);
+      const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
-      setPlaybackCursor(cursor);
-      if (studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
-        const point = pointAlongPolyline(activeSegment.waypoints, progress);
+      if (!student3DActive || Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001) || progress >= 1) setPlaybackCursor(cursor);
+      if (!student3DActive && studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
+        const point = sampleIndoorPoint(progress, sampledIndoorPoint);
+        if (!point) return null;
         const worldPoint = { x: point.x + floorViewport.offsetX, y: point.y + floorViewport.offsetY };
-        const currentZoom = zoomRef.current;
-        const targetPan = panForRouteFocusPoint(worldPoint, followCameraFocusRef.current, { x: viewCX, y: viewCY }, currentZoom);
+        followHumanWorldPointRef.current = worldPoint;
+        const currentZoom = displayZoomRef.current;
+        const nextZoom = currentZoom + (followZoomTargetRef.current - currentZoom) * 0.2;
+        const targetPan = panForRouteFocusPoint(worldPoint, followCameraFocusRef.current, { x: viewCX, y: viewCY }, nextZoom);
         const currentPan = panRef.current;
-        const nextPan = clampMapPan({ x: currentPan.x + (targetPan.x - currentPan.x) * 0.2, y: currentPan.y + (targetPan.y - currentPan.y) * 0.2 }, currentZoom);
-        panRef.current = nextPan;
-        writeCameraTransformRef.current(nextPan, currentZoom);
+        const nextPan = clampMapPan({ x: currentPan.x + (targetPan.x - currentPan.x) * 0.2, y: currentPan.y + (targetPan.y - currentPan.y) * 0.2 }, nextZoom);
+        commitCameraFrameRef.current(nextPan, nextZoom);
       }
       if (progress >= 1 && studentRouteUi.camera === "follow"
-        && routeTransitionForStep(route, studentFacingRouteSteps(route), Math.floor(cursor + 0.000001))) {
+        && routeTransitionForStep(route, activePlaybackSteps, Math.floor(cursor + 0.000001))) {
         transitionResumePlaybackRef.current = true;
+        setNavigationPauseReason("transition");
         dispatchStudentRouteUi({ type: "PAUSE" });
       }
       return cursor;
@@ -4489,20 +4759,20 @@ const buildingFill = (id: string) =>
 
     const initialProgress = Math.max(0, Math.min(0.999, indoorWalkProgressRef.current));
     syncRouteCursor(initialProgress);
-    const duration = guidedRouteProgressDuration(indoorRoute.steps.length || (route ? studentFacingRouteSteps(route).length : 1)) / playbackSpeed;
+    const duration = guidedRouteProgressDuration(indoorRoute.steps.length || activePlaybackSteps.length || 1) / playbackSpeed;
     const start = performance.now();
     const remainingDuration = Math.max(1, duration * (1 - initialProgress));
     const tick = (now: number) => {
       const progress = Math.min(1, initialProgress + (now - start) / remainingDuration * (1 - initialProgress));
       indoorWalkProgressRef.current = progress;
-      setIndoorWalkProgress(progress);
+      if (!student3DActive || progress >= 1) setIndoorWalkProgress(progress);
       syncRouteCursor(progress);
       if (progress < 1) indoorWalkAnimRef.current = requestAnimationFrame(tick);
     };
     indoorWalkAnimRef.current = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(indoorWalkAnimRef.current ?? 0);
-  }, [isFloorMode, indoorRoute, indoorWalkNonce, reducedMotion, route, navigationPhase, originIndoorSegments, originIndoorSegmentIndex, destinationIndoorSegments, destinationIndoorSegmentIndex, playbackSpeed, studentRouteUi.phase, studentRouteUi.playback, studentRouteUi.camera, followCameraDetached, floorViewport.offsetX, floorViewport.offsetY, clampMapPan, viewCX, viewCY]);
+  }, [isFloorMode, indoorRoute, indoorWalkNonce, reducedMotion, route, navigationPhase, originIndoorSegments, originIndoorSegmentIndex, destinationIndoorSegments, destinationIndoorSegmentIndex, playbackSpeed, studentRouteUi.phase, studentRouteUi.playback, studentRouteUi.camera, followCameraDetached, floorViewport.offsetX, floorViewport.offsetY, clampMapPan, student3DActive, viewCX, viewCY]);
 
   // Finish every authored source-building floor leg before handing off to the
   // campus. Otherwise an upper-floor origin jumps outdoors after its first leg.
@@ -4563,6 +4833,7 @@ const buildingFill = (id: string) =>
         setNavigationTransitioning(false);
         if (transitionResumePlaybackRef.current) {
           transitionResumePlaybackRef.current = false;
+          setNavigationPauseReason(null);
           dispatchStudentRouteUi({ type: "RESUME" });
         }
       };
@@ -4608,6 +4879,7 @@ const buildingFill = (id: string) =>
       setStairLoading(null);
       if (transitionResumePlaybackRef.current) {
         transitionResumePlaybackRef.current = false;
+        setNavigationPauseReason(null);
         dispatchStudentRouteUi({ type: "RESUME" });
       }
     };
@@ -4696,6 +4968,7 @@ const buildingFill = (id: string) =>
       setNavigationTransitioning(false);
       if (transitionResumePlaybackRef.current) {
         transitionResumePlaybackRef.current = false;
+        setNavigationPauseReason(null);
         dispatchStudentRouteUi({ type: "RESUME" });
       }
     };
@@ -5089,6 +5362,7 @@ const buildingFill = (id: string) =>
     lastRoomFocusKeyRef.current = null;
     setHighlightedRoom(roomId);
     setSelectedRoomContext(room);
+    setSearchFocusNonce((nonce) => nonce + 1);
   }, [applyRoutePlannerEndpoint, MOCK_BUILDINGS, roomEndpointFromFloor, routePlannerMapPick]);
 
   const enterDestinationRouteFloor = useCallback((destination: NonNullable<PlannedRoute["destinationRoom"]>) => {
@@ -5313,6 +5587,7 @@ const buildingFill = (id: string) =>
   const routePanelVisible = directionsMode
     || (studentRouteUi.phase !== "idle" && !studentRouteUi.collapsed);
   useLayoutEffect(() => {
+    if (student3DActive) return;
     const surface = mapContainerRef.current;
     if (!surface) return;
     const updateFocus = () => {
@@ -5323,18 +5598,30 @@ const buildingFill = (id: string) =>
       }, { x: viewCX, y: viewCY });
     };
     updateFocus();
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateFocus) : null;
+    // Sheet animations emit many ResizeObserver notifications. Coalesce them
+    // so Follow sees one stable safe viewport after the panel settles instead
+    // of chasing a moving midpoint frame-by-frame.
+    let focusUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFocusUpdate = () => {
+      if (focusUpdateTimer) clearTimeout(focusUpdateTimer);
+      focusUpdateTimer = setTimeout(() => {
+        focusUpdateTimer = null;
+        updateFocus();
+      }, 140);
+    };
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleFocusUpdate) : null;
     resizeObserver?.observe(surface);
     const overlays = surface.querySelectorAll<HTMLElement>("[data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='mobile-building-sheet'], [data-testid='student-selected-place-card']");
     overlays.forEach((overlay) => resizeObserver?.observe(overlay));
-    window.addEventListener("resize", updateFocus);
-    window.visualViewport?.addEventListener("resize", updateFocus);
+    window.addEventListener("resize", scheduleFocusUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleFocusUpdate);
     return () => {
+      if (focusUpdateTimer) clearTimeout(focusUpdateTimer);
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateFocus);
-      window.visualViewport?.removeEventListener("resize", updateFocus);
+      window.removeEventListener("resize", scheduleFocusUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleFocusUpdate);
     };
-  }, [directionsMode, floorPickerFallbackActive, focusViewPointFromScreen, isFloorMode, mobileBuildingSheetState, routePanelVisible, selected?.id, studentRouteUi.collapsed, studentRouteUi.phase, viewCX, viewCY]);
+  }, [directionsMode, floorPickerFallbackActive, focusViewPointFromScreen, isFloorMode, mobileBuildingSheetState, routePanelVisible, selected?.id, student3DActive, studentRouteUi.collapsed, studentRouteUi.phase, viewCX, viewCY]);
   const routeTransitionBusy = navigationTransitioning || Boolean(stairLoading);
   const routeNavigationSteps = useMemo(() => route ? studentFacingRouteSteps(route) : [], [route]);
   const studentRouteTransitionCues = useMemo(() => {
@@ -5391,7 +5678,16 @@ const buildingFill = (id: string) =>
   const campusShowsStartMarker = !routeStartsIndoors;
   const campusShowsEndMarker = !routeEndsIndoors;
   const indoorShowsStartMarker = routeStartsIndoors && waypointsMatchRoute(routeIndoorSegments.find((segment) => !segment.afterOutdoor));
-  const indoorShowsEndMarker = routeEndsIndoors && waypointsMatchRoute([...routeIndoorSegments].reverse().find((segment) => segment.afterOutdoor));
+  // The final indoor leg of a same-building multi-floor route may not be
+  // tagged afterOutdoor. Resolve the endpoint from its authored destination
+  // Floor first, then use the final post-campus leg for building-to-building.
+  const indoorDestinationSegment = route?.destinationRoom
+    ? [...routeIndoorSegments].reverse().find((segment) => segment.buildingId === route.destinationRoom?.buildingId
+      && segment.floorNumber === route.destinationRoom?.floorNumber)
+    : undefined;
+  const finalIndoorSegment = indoorDestinationSegment
+    ?? [...routeIndoorSegments].reverse().find((segment) => segment.afterOutdoor);
+  const indoorShowsEndMarker = routeEndsIndoors && waypointsMatchRoute(finalIndoorSegment);
   const activeRouteProgress = isFloorMode && route && activeIndoorSegment
     ? studentRouteProgressForIndoorSegment(route, routeNavigationSteps, activeIndoorSegment, indoorWalkProgress)
     : walkProgress;
@@ -5451,25 +5747,6 @@ const buildingFill = (id: string) =>
       })
       .sort((left, right) => left.stepIndex - right.stepIndex)[0] ?? null;
   }, [activeFloorPlan?.id, floorView, isFloorMode, route, routeNavigationSteps, routePreviewStepIndex, studentRouteTransitionCues, studentRouteUi.phase]);
-  // Keep the currently actionable Preview transition in the uncovered map
-  // viewport. The route planner is an HTML sheet above the SVG, so a perfectly
-  // interactive SVG marker can otherwise sit underneath it (especially on
-  // mobile where the sheet covers the lower map, or desktop where the planner
-  // owns the left column). Focus once per cue/context change; manual pan stays
-  // free until the student inspects another route transition.
-  useEffect(() => {
-    if (!route || studentRouteUi.phase !== "preview" || !previewActiveTransitionCue) return;
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
-        focusRouteStartView(previewActiveTransitionCue.cue.point, isFloorMode);
-      });
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame) cancelAnimationFrame(secondFrame);
-    };
-  }, [focusRouteStartView, isFloorMode, previewActiveTransitionCue, route, studentRouteUi.phase]);
   const activeTransitionStepIndex = studentRouteUi.phase === "preview"
     ? previewActiveTransitionCue?.stepIndex ?? -1
     : studentRouteUi.phase === "navigating" ? activeRouteStepIndex : -1;
@@ -5479,8 +5756,32 @@ const buildingFill = (id: string) =>
   const transitionAwaitingAction = Boolean(studentRouteUi.phase === "navigating"
     && studentRouteUi.camera === "follow"
     && studentRouteUi.playback === "paused"
+    && navigationPauseReason === "transition"
     && activeRouteTransition
     && !routeTransitionBusy);
+  const transitionPrompt = useMemo(() => {
+    if (!transitionAwaitingAction || !route || !activeRouteTransition) return null;
+    const detail = activeRouteTransition.detail;
+    const transitionName = detail?.label?.trim();
+    const nextTarget = studentRouteSeekTarget(route, routeNavigationSteps, activeRouteStepIndex + 1);
+    const targetFloor = nextTarget.segment?.floorNumber;
+    const floorLabel = targetFloor === undefined ? "the next Floor" : targetFloor === 1 ? "Ground Floor" : `Floor ${targetFloor}`;
+    switch (activeRouteTransition.kind) {
+      case "enter_building": {
+        const name = activeCampus?.buildings.find((building) => building.id === nextTarget.segment?.buildingId)?.code
+          ?? "the building";
+        return `You’re at the ${name} entrance. Tap Enter ${name} on the map or press Continue.`;
+      }
+      case "exit_building":
+        return "You’re at the building exit. Tap Exit to Campus on the map or press Continue.";
+      case "elevator":
+        return `You’re at ${transitionName || "the elevator"}. Tap the Elevator marker or press Continue to ${floorLabel}.`;
+      case "stairs":
+        return `You’re at ${transitionName || "the stairs"}. Tap the Stairs marker or press Continue to ${floorLabel}.`;
+      default:
+        return "You’re at the route transition. Tap its marker or press Continue.";
+    }
+  }, [activeCampus?.buildings, activeRouteStepIndex, activeRouteTransition, route, routeNavigationSteps, transitionAwaitingAction]);
   const activeRouteSegmentBuilding = activeIndoorSegment
     ? activeCampus?.buildings.find((building) => building.id === activeIndoorSegment.buildingId)
     : undefined;
@@ -5712,6 +6013,7 @@ const buildingFill = (id: string) =>
         setNavigationTransitioning(false);
         if (transitionResumePlaybackRef.current) {
           transitionResumePlaybackRef.current = false;
+          setNavigationPauseReason(null);
           dispatchStudentRouteUi({ type: "RESUME" });
         }
       }, reducedMotion ? 0 : 420);
@@ -5747,19 +6049,34 @@ const buildingFill = (id: string) =>
     }
   }, [activeCampus?.buildings, activeRouteStepIndex, activeRouteTransition, activeOutdoorEntranceBuildingId, enterDestinationRouteFloor, navigationPhase, openFloorPlan, reducedMotion, roomDestination?.floorNumber, route, routeNavigationSteps, routeTransitionBusy, studentRouteUi.camera, studentRouteUi.phase]);
   const handleStudentFloorDoorClick = useCallback((doorId: string) => {
+    // In 3D Explore, an authored exit changes only the inspected renderer
+    // context. The canonical Follow Floor/segment refs must remain available
+    // so Resume can return to the real player position.
+    if (campusViewMode === "3d" && studentRouteUi.phase === "navigating" && studentRouteUi.camera === "explore") {
+      setFloorView(null);
+      setIndoorRoute(null);
+      return;
+    }
     if (doorId === activeExitDoorId && activeRouteTransition?.kind === "exit_building") {
       activateCurrentRouteTransition();
     } else {
       handleFloorDoorClick(doorId);
     }
-  }, [activeExitDoorId, activeRouteTransition?.kind, activateCurrentRouteTransition, handleFloorDoorClick]);
+  }, [activeExitDoorId, activeRouteTransition?.kind, activateCurrentRouteTransition, campusViewMode, handleFloorDoorClick, studentRouteUi.camera, studentRouteUi.phase]);
   const handleStudentOutdoorEntranceClick = useCallback((buildingId: string) => {
+    // Entrance cues are authored building connections. During 3D Explore they
+    // open that building for inspection; the route's active transition marker
+    // below handles route-step inspection separately without committing Follow.
+    if (campusViewMode === "3d" && studentRouteUi.phase === "navigating" && studentRouteUi.camera === "explore") {
+      handleOutdoorEntranceClick(buildingId);
+      return;
+    }
     if (buildingId === activeOutdoorEntranceBuildingId && activeRouteTransition?.kind === "enter_building") {
       activateCurrentRouteTransition();
     } else {
       handleOutdoorEntranceClick(buildingId);
     }
-  }, [activeOutdoorEntranceBuildingId, activeRouteTransition?.kind, activateCurrentRouteTransition, handleOutdoorEntranceClick]);
+  }, [activeOutdoorEntranceBuildingId, activeRouteTransition?.kind, activateCurrentRouteTransition, campusViewMode, handleOutdoorEntranceClick, studentRouteUi.camera, studentRouteUi.phase]);
   const routeContextIsElsewhere = navigationPhase === "outdoor" && isFloorMode
     || Boolean(activeIndoorSegment && (!floorView
       || floorView.building.id !== activeIndoorSegment.buildingId || floorView.floor !== activeRouteSegmentFloor));
@@ -5777,6 +6094,10 @@ const buildingFill = (id: string) =>
 
   const recenterCurrentRouteStep = useCallback(() => {
     if (!route || studentRouteUi.phase !== "navigating") return;
+    // The 3D renderer owns camera framing in both campus and indoor contexts.
+    // Advance the same request token before projecting the canonical route
+    // context so a floor Follow recenter restores the full pose too.
+    if (campusViewMode === "3d") setCampus3DRecenterNonce((nonce) => nonce + 1);
     // Recenter changes only camera/context state. Playback and both progress
     // refs remain untouched, so Pause/Resume continues from this exact point.
     setInspectedRouteStepIndex(null);
@@ -5822,7 +6143,8 @@ const buildingFill = (id: string) =>
     } else {
       focusRouteStartView(point, false);
     }
-  }, [activeCampus, activeIndoorSegment, dispatchStudentRouteUi, focusRouteStartView, indoorWalkProgressRef, navigationPhase, route, routeContextKey, roomDestination?.floorNumber, roomOrigin?.floorNumber, studentRouteUi.phase, walkProgressRef]);
+  }, [activeCampus, activeIndoorSegment, campusViewMode, dispatchStudentRouteUi, focusRouteStartView, indoorWalkProgressRef, isFloorMode, navigationPhase, route, routeContextKey, roomDestination?.floorNumber, roomOrigin?.floorNumber, studentRouteUi.phase, walkProgressRef]);
+  recenterCurrentRouteStepRef.current = recenterCurrentRouteStep;
 
   const seekRouteStep = useCallback((stepIndex: number) => {
     if (!route || routeNavigationSteps.length === 0) return;
@@ -5898,6 +6220,9 @@ const buildingFill = (id: string) =>
       const points = target.segment?.waypoints ?? (route.campusPoints?.length ? route.campusPoints : route.points);
       const point = pointAlongPolyline(points, target.segment ? target.segmentProgress : target.routeProgress);
       const isFloorTarget = target.context === "floor" && target.segment;
+      followHumanWorldPointRef.current = isFloorTarget
+        ? { x: point.x + floorViewport.offsetX, y: point.y + floorViewport.offsetY }
+        : point;
       if (isFloorTarget && target.segment) {
         const segments = (route.indoorSegments ?? []).filter((segment) => Boolean(segment.afterOutdoor) === Boolean(target.segment?.afterOutdoor));
         const segmentIndex = segments.indexOf(target.segment);
@@ -5969,7 +6294,7 @@ const buildingFill = (id: string) =>
       setPlaybackCursor(position);
       previousTarget = target;
 
-      if (studentRouteUi.camera === "follow" && !followCameraDetached) {
+      if (!student3DActive && studentRouteUi.camera === "follow" && !followCameraDetached) {
         const worldPoint = isFloorTarget ? { x: point.x + floorViewport.offsetX, y: point.y + floorViewport.offsetY } : point;
         const zoom = zoomRef.current;
         const nextPan = clampMapPan(panForRouteFocusPoint(worldPoint, followCameraFocusRef.current, { x: viewCX, y: viewCY }, zoom), zoom);
@@ -6007,8 +6332,35 @@ const buildingFill = (id: string) =>
       };
       stepSeekAnimRef.current = requestAnimationFrame(tick);
     }
-  }, [activeCampus?.buildings, clampMapPan, floorViewport.offsetX, floorViewport.offsetY, followCameraDetached, focusRouteStartView, indoorWalkNonce, mapContainerRef, navigationTransitioning, panForRouteFocusPoint, playbackSpeed, reducedMotion, route, routeContextKey, routeNavigationSteps, roomDestination?.floorNumber, roomDestination?.roomId, roomOrigin?.floorNumber, roomOrigin?.roomId, stairLoading, studentRouteUi.camera, studentRouteUi.playback, viewCX, viewCY]);
+  }, [activeCampus?.buildings, clampMapPan, floorViewport.offsetX, floorViewport.offsetY, followCameraDetached, focusRouteStartView, indoorWalkNonce, mapContainerRef, navigationTransitioning, panForRouteFocusPoint, playbackSpeed, reducedMotion, route, routeContextKey, routeNavigationSteps, roomDestination?.floorNumber, roomDestination?.roomId, roomOrigin?.floorNumber, roomOrigin?.roomId, stairLoading, student3DActive, studentRouteUi.camera, studentRouteUi.playback, viewCX, viewCY]);
   seekRouteStepRef.current = seekRouteStep;
+
+  const inspectGuidedRouteTransition = useCallback(() => {
+    if (!route || studentRouteUi.phase !== "navigating" || studentRouteUi.camera !== "explore") return;
+    const inspection = studentRouteExploreTransitionTarget(route, routeNavigationSteps, activeRouteStepIndex);
+    if (!inspection) return;
+    const { transition, targetStepIndex, target } = inspection;
+
+    // A Building-only destination can end on an Enter instruction without an
+    // indoor route segment. Still inspect its authored Building/Floor context.
+    if (transition.kind === "enter_building" && !target.segment) {
+      const buildingId = route.destinationRoom?.buildingId
+        ?? route.indoorSegments?.find((segment) => segment.afterOutdoor)?.buildingId
+        ?? activeOutdoorEntranceBuildingId;
+      const building = MOCK_BUILDINGS.find((candidate) => candidate.id === buildingId);
+      if (building) {
+        setInspectedRouteStepIndex(targetStepIndex);
+        setIndoorRoute(null);
+        openFloorPlan(building);
+      }
+      return;
+    }
+
+    // seekRouteStep uses studentRouteSeekTarget, the same canonical route
+    // transition resolver as Follow, but its Explore branch only changes the
+    // inspected context; cursor, player position and playback refs stay fixed.
+    seekRouteStep(targetStepIndex);
+  }, [activeOutdoorEntranceBuildingId, activeRouteStepIndex, openFloorPlan, route, routeNavigationSteps, seekRouteStep, studentRouteUi.camera, studentRouteUi.phase]);
 
   const followContextSwitchRef = useRef<string | null>(null);
   // FOLLOW must actually follow: when playback moves the route into another
@@ -6073,6 +6425,173 @@ const buildingFill = (id: string) =>
     const nextIndex = studentRouteStepSeekIndex(baseIndex, delta, routeNavigationSteps.length);
     seekRouteStep(nextIndex);
   };
+  const continueGuidedNavigation = () => {
+    // A forward action at a system transition wait means "take this authored
+    // transition", exactly like activating its map marker. Manual pauses and
+    // Explore inspections still use ordinary canonical step seeking.
+    if (transitionAwaitingAction) {
+      activateCurrentRouteTransition();
+      return;
+    }
+    moveGuidedStep(1);
+  };
+  const campus3DRoutePoints = route?.campusPoints?.length ? route.campusPoints : route?.points ?? EMPTY_MAP_POINTS;
+  const campus3DHumanPoint = studentRouteUi.phase === "navigating"
+    && studentRouteUi.camera === "follow"
+    && navigationPhase === "outdoor"
+    && campus3DRoutePoints.length > 0
+    ? pointAlongPolyline(campus3DRoutePoints, walkProgress)
+    : null;
+  const campus3DFocusPoint = useMemo(() => {
+    const buildingId = selected?.id ?? searchFocusRef.current?.buildingId;
+    const building = activeCampus?.buildings.find((item) => item.id === buildingId);
+    if (building) return { x: building.x + building.width / 2, y: building.y + building.height / 2 };
+    const placeId = selectedCampusPlaceId ?? searchFocusRef.current?.campusPlaceId;
+    const place = activeCampus?.markers.find((item) => item.id === placeId);
+    if (place) return { x: place.x, y: place.y };
+    return null;
+  }, [activeCampus, campus3DRoutePoints, route, searchFocusNonce, selected?.id, selectedCampusPlaceId, studentRouteUi.phase]);
+  const campus3DActiveTransition = useMemo(() => {
+    if (!campus3DActive || !activeRouteTransitionPoint) return null;
+    if (studentRouteUi.phase === "preview" && previewActiveTransitionCue?.cue.kind === "enter_building") {
+      return {
+        point: activeRouteTransitionPoint,
+        label: previewActiveTransitionCue.cue.label,
+        buildingId: activeOutdoorEntranceBuildingId,
+        entranceId: activeOutdoorEntranceId,
+        onActivate: () => inspectRoutePreviewTransition(previewActiveTransitionCue.cue.id),
+      };
+    }
+    // Mirror the 2D route marker whenever this authored transition is the
+    // canonical Follow step. The system-wait state still controls Continue /
+    // auto-resume; the map cue itself remains available while manually paused.
+    if (studentRouteUi.phase === "navigating"
+      && studentRouteUi.camera === "explore"
+      && navigationPhase === "outdoor"
+      && activeRouteTransition?.kind === "enter_building") {
+      return {
+        point: activeRouteTransitionPoint,
+        label: routeNavigationSteps[activeRouteStepIndex]?.instruction ?? "Inspect building entrance",
+        buildingId: activeOutdoorEntranceBuildingId,
+        entranceId: activeOutdoorEntranceId,
+        onActivate: inspectGuidedRouteTransition,
+      };
+    }
+    if (studentRouteUi.phase === "navigating"
+      && studentRouteUi.camera === "follow"
+      && navigationPhase === "outdoor"
+      && activeRouteTransition?.kind === "enter_building") {
+      return {
+        point: activeRouteTransitionPoint,
+        label: routeNavigationSteps[activeRouteStepIndex]?.instruction ?? "Enter building",
+        buildingId: activeOutdoorEntranceBuildingId,
+        entranceId: activeOutdoorEntranceId,
+        onActivate: activateCurrentRouteTransition,
+      };
+    }
+    return null;
+  }, [activateCurrentRouteTransition, activeOutdoorEntranceBuildingId, activeOutdoorEntranceId, activeRouteStepIndex, activeRouteTransition?.kind, activeRouteTransitionPoint, campus3DActive, inspectGuidedRouteTransition, inspectRoutePreviewTransition, navigationPhase, previewActiveTransitionCue, routeNavigationSteps, studentRouteUi.camera, studentRouteUi.phase]);
+  const indoor3DActiveTransition = useMemo(() => {
+    if (!indoor3DActive || !isFloorMode || !activeRouteTransitionPoint) return null;
+    if (studentRouteUi.phase === "preview" && previewActiveTransitionCue) {
+      return {
+        point: activeRouteTransitionPoint,
+        label: previewActiveTransitionCue.cue.label,
+        onActivate: () => inspectRoutePreviewTransition(previewActiveTransitionCue.cue.id),
+      };
+    }
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "explore") {
+      return {
+        point: activeRouteTransitionPoint,
+        label: routeNavigationSteps[activeRouteStepIndex]?.instruction ?? "Inspect route transition",
+        onActivate: inspectGuidedRouteTransition,
+      };
+    }
+    // Keep the visual transition affordance in sync with the 2D renderer at
+    // the active canonical step, including a user-paused Follow session.
+    if (studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow") {
+      return {
+        point: activeRouteTransitionPoint,
+        label: routeNavigationSteps[activeRouteStepIndex]?.instruction ?? "Continue route",
+        onActivate: activateCurrentRouteTransition,
+      };
+    }
+    return null;
+  }, [activateCurrentRouteTransition, activeRouteStepIndex, activeRouteTransitionPoint, indoor3DActive, inspectGuidedRouteTransition, inspectRoutePreviewTransition, isFloorMode, previewActiveTransitionCue, routeNavigationSteps, studentRouteUi.camera, studentRouteUi.phase]);
+  const campus3DEventVenues = useMemo(() => activeCampus ? buildEventVenues(activeCampus, venueEvents) : [], [activeCampus, venueEvents]);
+  const handleCampus3DFallback = useCallback(() => {
+    setCampus3DFallback(true);
+    setCampusViewMode("2d");
+    showInfo("3D view isn't available on this device. Using 2D map.");
+  }, [showInfo]);
+  const toggleStudentMapView = useCallback(() => {
+    if (campusViewMode === "3d") {
+      const activeRoute = routeRef.current;
+      if (activeRoute && studentRouteUi.phase === "navigating") {
+        const target = studentRouteFocusAtProgress(
+          navigationPhase,
+          activeRoute.points,
+          walkProgressRef.current,
+          activeIndoorSegment,
+          indoorWalkProgressRef.current,
+        );
+        pending2DRendererReframeRef.current = { kind: "route", point: target.point, floor: target.context === "floor" };
+      } else if (activeRoute && studentRouteUi.phase === "preview") {
+        const inspectedIndex = inspectedRouteStepIndex ?? routePreviewStepIndex;
+        const target = studentRouteSeekTarget(activeRoute, routeNavigationSteps, inspectedIndex);
+        const point = target.segment
+          ? pointAlongPolyline(target.segment.waypoints, target.segmentProgress)
+          : pointAlongPolyline(activeRoute.campusPoints?.length ? activeRoute.campusPoints : activeRoute.points, target.routeProgress);
+        pending2DRendererReframeRef.current = { kind: "route", point, floor: target.context === "floor" };
+      } else if (selectedRoomContext) {
+        pending2DRendererReframeRef.current = {
+          kind: "room", buildingId: selectedRoomContext.buildingId,
+          roomId: selectedRoomContext.roomId, floorNumber: selectedRoomContext.floorNumber,
+        };
+      } else if (selected) {
+        pending2DRendererReframeRef.current = { kind: "building", buildingId: selected.id };
+      } else if (selectedCampusPlaceId) {
+        pending2DRendererReframeRef.current = { kind: "place", campusPlaceId: selectedCampusPlaceId };
+      } else {
+        pending2DRendererReframeRef.current = { kind: "overview", floor: isFloorMode };
+      }
+      setCampusViewMode("2d");
+      return;
+    }
+    // One display preference applies across campus and indoor contexts. Only
+    // the renderer changes here; the canonical route/cursor/floor state stays.
+    setCampus3DFallback(false);
+    if (isFloorMode) setIndoor3DLoaded(true);
+    else setCampus3DLoaded(true);
+    setCampusViewMode("3d");
+  }, [activeIndoorSegment, campusViewMode, inspectedRouteStepIndex, indoorWalkProgressRef, isFloorMode, navigationPhase, routeNavigationSteps, routePreviewStepIndex, selected, selectedCampusPlaceId, selectedRoomContext, studentRouteUi.phase, walkProgressRef]);
+
+  useLayoutEffect(() => {
+    if (student3DActive) return;
+    const pending = pending2DRendererReframeRef.current;
+    if (!pending) return;
+    pending2DRendererReframeRef.current = null;
+    if (pending.kind === "route") {
+      focusRouteStartView(pending.point, pending.floor);
+    } else if (pending.kind === "room") {
+      searchFocusRef.current = { buildingId: pending.buildingId, roomId: pending.roomId, floorNumber: pending.floorNumber };
+      lastRoomFocusKeyRef.current = null;
+      setSearchFocusNonce((nonce) => nonce + 1);
+    } else if (pending.kind === "building") {
+      searchFocusRef.current = { buildingId: pending.buildingId };
+      setSearchFocusNonce((nonce) => nonce + 1);
+    } else if (pending.kind === "place") {
+      searchFocusRef.current = { campusPlaceId: pending.campusPlaceId };
+      setSearchFocusNonce((nonce) => nonce + 1);
+    } else if (pending.floor) {
+      setPan({ x: 0, y: 0 });
+      setZoom(1);
+    } else {
+      const overview = overviewCameraRef.current;
+      setPan(overview.pan);
+      setZoom(overview.zoom);
+    }
+  }, [focusRouteStartView, student3DActive]);
   const enterRouteExplore = () => {
     cancelAnimationFrame(stepSeekAnimRef.current ?? 0);
     cancelAnimationFrame(walkAnimRef.current ?? 0);
@@ -6094,6 +6613,10 @@ const buildingFill = (id: string) =>
   };
   const startGuidedFromCollapsedPreview = () => {
     if (!route) return;
+    // End Preview ownership before Follow starts. Follow's RAF will take over
+    // from the rendered transform and converge on the human; starting a
+    // second focus animation here would compete with that first Follow frame.
+    cancelCameraAnimation(false);
     const sourceSegments = roomOrigin ? indoorSegmentsForBuilding(route, roomOrigin.buildingId, "before-outdoor") : [];
     const indoorOnlyDestination = !roomOrigin && route.destinationRoom && route.points.length < 2;
     const startSegments = sourceSegments.length > 0
@@ -6116,6 +6639,8 @@ const buildingFill = (id: string) =>
     indoorWalkProgressRef.current = 0;
     setWalkProgress(0);
     setIndoorWalkProgress(0);
+    transitionResumePlaybackRef.current = false;
+    setNavigationPauseReason(null);
     dispatchStudentRouteUi({ type: "START_NAVIGATION" });
     routeTransitionActivationRef.current = null;
     routeEntryTransitionCompleteRef.current = false;
@@ -6139,7 +6664,6 @@ const buildingFill = (id: string) =>
         setFloorView({ building, floor });
         setIndoorRoute(indoorRouteFromSegment(firstSegment));
         setIndoorWalkNonce((nonce) => nonce + 1);
-        focusRouteStartView(firstSegment.waypoints[0], true);
         return;
       }
     }
@@ -6147,7 +6671,6 @@ const buildingFill = (id: string) =>
     setIndoorRoute(null);
     setActiveRouteRoom(null);
     setFloorView(null);
-    if (route.points[0]) focusRouteStartView(route.campusPoints?.[0] ?? route.points[0], false);
     setWalkNonce((nonce) => nonce + 1);
   };
 
@@ -6178,14 +6701,93 @@ const buildingFill = (id: string) =>
         background: viewportBackground,
         animationDuration: reducedMotion ? "0ms" : "200ms",
         cursor: "grab",
-        touchAction: "none"
+        touchAction: "none",
+        ...(student3DActive ? { cursor: "default" } : {}),
       } as CSSProperties}
-      onMouseDown={onMouseDown} onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-      onTouchStart={onTouchStart} onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}>
+      onMouseDown={student3DActive ? undefined : onMouseDown} onMouseMove={student3DActive ? undefined : onMouseMove}
+      onMouseUp={student3DActive ? undefined : onMouseUp} onMouseLeave={student3DActive ? undefined : onMouseUp}
+      onTouchStart={student3DActive ? undefined : onTouchStart} onTouchMove={student3DActive ? undefined : onTouchMove}
+      onTouchEnd={student3DActive ? undefined : onTouchEnd}
+      onPointerDown={student3DActive ? undefined : onPointerDown} onPointerMove={student3DActive ? undefined : onPointerMove}
+      onPointerUp={student3DActive ? undefined : onPointerEnd} onPointerCancel={student3DActive ? undefined : onPointerEnd}>
+
+      {activeCampus && readonlyOutdoorCampus && campus3DActive && (
+        <div className="student-map-renderer-crossfade absolute inset-0 z-0" style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }}>
+          <Suspense fallback={null}>
+            <LazyStudentCampus3DRenderer
+              campus={readonlyOutdoorCampus}
+              routePoints={campus3DRoutePoints}
+              routePreview={Boolean(route && studentRouteUi.phase === "preview")}
+              startPoint={campus3DRoutePoints[0] ?? null}
+              destinationPoint={campus3DRoutePoints.at(-1) ?? null}
+              showStartMarker={campusShowsStartMarker}
+              showDestinationMarker={campusShowsEndMarker}
+              humanPoint={campus3DHumanPoint}
+              walkProgressRef={walkProgressRef}
+              activeTransition={campus3DActiveTransition}
+              focusPoint={campus3DFocusPoint}
+              focusNonce={searchFocusNonce}
+              recenterNonce={campus3DRecenterNonce}
+              selectedBuildingId={selected?.id}
+              selectedPlaceId={selectedCampusPlaceId}
+              showEvents={showEventMaps}
+              eventVenues={campus3DEventVenues}
+              selectedEventLocationId={currentEventLocationId}
+              darkMode={typeof document !== "undefined" && document.documentElement.classList.contains("dark")}
+              reducedMotion={reducedMotion}
+              followPlaying={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && studentRouteUi.playback === "playing" && !followCameraDetached && navigationPhase === "outdoor"}
+              followMode={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && navigationPhase === "outdoor"}
+              freeLook={followCameraDetached}
+              exploreTransitionsEnabled={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "explore"}
+              followSessionKey={route ? `${route.fromCode}:${route.toCode}:${route.mode}` : "idle"}
+              onSelectBuilding={handleOutdoorBuildingSelect}
+              onSelectPlace={handleOutdoorCampusPlaceSelect}
+              onEnterBuilding={handleStudentOutdoorEntranceClick}
+              onInspectEventVenue={setInspectedEventVenueId}
+              onIntentionalPan={beginFollowPan}
+              onFallback={handleCampus3DFallback}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {isFloorMode && activeFloorPlan && indoor3DActive && (
+        <div className="student-map-renderer-crossfade absolute inset-0 z-0" style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }} aria-label={`${floorView?.building.name ?? "Building"} ${currentFloor?.label ?? "Floor"} 3D map`}>
+          <Suspense fallback={null}>
+            <LazyIndoorFloor3DRenderer
+              floor={activeFloorPlan}
+              floorLabel={`${floorView?.building.name ?? "Building"} · ${currentFloor?.label ?? "Floor"}`}
+              viewport={floorViewport}
+              routePoints={indoorRouteMatchesVisibleFloor ? visibleIndoorRoute?.waypoints ?? EMPTY_MAP_POINTS : EMPTY_MAP_POINTS}
+              walkProgress={studentRouteUi.phase === "navigating" && visibleIndoorRouteIsActive ? displayedIndoorWalkProgress : undefined}
+              walkProgressRef={indoorWalkProgressRef}
+              showStartMarker={indoorShowsStartMarker && indoorRouteMatchesVisibleFloor}
+              showDestinationMarker={indoorShowsEndMarker && indoorRouteMatchesVisibleFloor}
+              humanVisible={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && visibleIndoorRouteIsActive}
+              selectedRoomId={selectedRoomContext?.roomId ?? highlightedRoom}
+              interactiveExitDoorIds={interactiveExitDoorIds}
+              routeRelevantExitDoorIds={routeRelevantExitDoorIds}
+              activeExitDoorId={activeExitDoorId}
+              onExitDoorClick={handleStudentFloorDoorClick}
+              focusRoomId={selectedRoomContext?.buildingId === floorView?.building.id && selectedRoomContext.floorNumber === floorView.floor ? selectedRoomContext.roomId : null}
+              focusNonce={searchFocusNonce}
+              destinationRoomId={route?.destinationRoom && route.destinationRoom.buildingId === floorView?.building.id && route.destinationRoom.floorNumber === floorView.floor ? route.destinationRoom.roomId : null}
+              eventFurniture={showEventMaps && selectedLocationIsVisible ? selectedEventLocationData?.location.eventFurniture ?? EMPTY_FLOOR_FURNITURE : EMPTY_FLOOR_FURNITURE}
+              eventLabels={showEventMaps && selectedLocationIsVisible ? selectedEventLocationData?.location.eventLabels ?? EMPTY_FLOOR_LABELS : EMPTY_FLOOR_LABELS}
+              eventMarker={indoor3DEventMarker}
+              activeTransition={indoor3DActiveTransition}
+              followMode={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && visibleIndoorRouteIsActive}
+              followPlaying={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && studentRouteUi.playback === "playing" && visibleIndoorRouteIsActive}
+              freeLook={followCameraDetached}
+              recenterNonce={campus3DRecenterNonce}
+              reducedMotion={reducedMotion}
+              onRoomClick={selectIndoorRoom}
+              onIntentionalPan={beginFollowPan}
+              onFallback={handleCampus3DFallback}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {/* Pinning hint (tap-on-map mode) */}
       {pinning && !isFloorMode && (
@@ -6251,25 +6853,18 @@ const buildingFill = (id: string) =>
       )}
       </AnimatePresence>
 
-      {navigationPhase === "origin-indoor" && isFloorMode && roomOrigin && !navigationTransitioning
-        && routeNavigationSteps.some((step) => step.icon === "enter" && /^\s*exit\b/i.test(step.instruction)) && (
-        <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-foreground/90 text-background text-[11px] font-bold shadow-xl animate-fade-in">
-          <Footprints className="h-3.5 w-3.5 animate-pulse" />
-          <span>Walking from {roomOrigin.roomName} to the building exit…</span>
-        </div>
-      )}
-
       {navigationTransitioning && isFloorMode && !stairLoading && (
-        <div data-no-drag className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-foreground/90 text-background text-[11px] font-bold shadow-xl animate-fade-in">
+        <div data-no-drag className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+8rem)] z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground/90 px-3 py-1.5 text-[11px] font-bold text-background shadow-xl animate-fade-in md:top-16">
           <Navigation className="h-3.5 w-3.5 animate-pulse" />
           <span>{stairLoading?.label ?? "Changing route context…"}</span>
         </div>
       )}
 
       {/* ══════════════════════════ MAP SVG ══════════════════════════ */}
-      <svg ref={svgRef}
+      {!student3DActive && <svg ref={svgRef}
         viewBox={`0 0 ${viewportCanvasW} ${viewportCanvasH}`}
-        className="absolute inset-0 w-full h-full select-none"
+        className="student-map-renderer-crossfade absolute inset-0 w-full h-full select-none"
+        style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }}
         preserveAspectRatio="xMidYMid meet"
         onDoubleClick={e => {
           e.preventDefault();
@@ -6310,10 +6905,10 @@ const buildingFill = (id: string) =>
                   className="student-floor-scene-transition"
                   style={reducedMotion ? undefined : {
                     animation: floorShiftDirectionRef.current === "up"
-                      ? "student-floor-scene-enter-up 700ms ease-out both"
+                      ? "student-floor-scene-enter-up 140ms ease-out both"
                       : floorShiftDirectionRef.current === "down"
-                        ? "student-floor-scene-enter-down 700ms ease-out both"
-                        : "student-floor-scene-enter 320ms ease-out both",
+                        ? "student-floor-scene-enter-down 140ms ease-out both"
+                        : "student-floor-scene-enter 140ms ease-out both",
                     transformBox: "fill-box",
                     transformOrigin: "center",
                   }}
@@ -6475,6 +7070,7 @@ const buildingFill = (id: string) =>
                 suppressActiveEntranceBuildingId={!isFloorMode ? activeRouteEnterBuildingId : null}
                 reducedMotion={reducedMotion}
                 mapPickActive={Boolean(routePlannerMapPick)}
+                studentSuhayHusayLandmark
                 emergencyMode={mapMode === "emergency"}
                 selectedBuildingId={selected?.id ?? (routePlannerMapPickCandidate?.endpoint.kind === "building" || routePlannerMapPickCandidate?.endpoint.kind === "room" ? routePlannerMapPickCandidate.endpoint.building.id : null)}
                 selectedCampusPlaceId={selectedCampusPlaceId ?? (routePlannerMapPickCandidate?.endpoint.kind === "campus-place" ? routePlannerMapPickCandidate.endpoint.place.campusPlaceId : null)}
@@ -6546,7 +7142,7 @@ const buildingFill = (id: string) =>
           </>
           )}
         </g>
-      </svg>
+      </svg>}
 
       {/* ══════════════ FLOATING SEARCH / DIRECTIONS — same for both modes ══════════════ */}
       <AnimatePresence initial={false} mode="sync">
@@ -6643,6 +7239,8 @@ const buildingFill = (id: string) =>
               playbackPaused={studentRouteUi.playback === "paused"}
               transitionBusy={routeTransitionBusy}
               transitionAwaitingAction={transitionAwaitingAction}
+              transitionPrompt={transitionPrompt}
+              onContinueTransition={activateCurrentRouteTransition}
               playbackSpeed={playbackSpeed}
               onPlaybackSpeedChange={setPlaybackSpeed}
               navigationSteps={route ? studentFacingRouteSteps(route).map((step) => step.instruction) : []}
@@ -6661,6 +7259,7 @@ const buildingFill = (id: string) =>
                 if (!endpointsSet) return false;
                 const planned = calculateRoute();
                 if (!hasNavigableRoute(planned)) return false;
+                cancelCameraAnimation(false);
                 const startIndoorSegment = planned.indoorSegments?.find((segment) => !segment.afterOutdoor)
                   ?? (planned.points.length < 2 ? planned.indoorSegments?.[0] : undefined);
                 // HARD REQUIREMENT: Find Route returns to the TRUE selected
@@ -6683,11 +7282,17 @@ const buildingFill = (id: string) =>
                   ? `${startBuilding.id}:${startFloor}`
                   : "campus";
                 if (routeStartPoint) {
-                  // Keep the generic full-route framing from replacing Start focus.
+                  // Route Preview focus is applied once after its panel has
+                  // reached its final layout. Do not focus now and then let
+                  // Preview/layout effects retarget the camera a second time.
                   routeStartFocusPendingRef.current = true;
                   if (startContextKey === routeContextKey) {
-                    focusRouteStartView(routeStartPoint, startContextKey !== "campus");
+                    pendingRouteStartFocusRef.current = {
+                      point: routeStartPoint,
+                      floor: startContextKey !== "campus",
+                    };
                   } else {
+                    pendingRouteStartFocusRef.current = null;
                     // Switch context first; focus when the new context commits
                     // (same pending machinery as Return to Follow).
                     pendingRouteRecenterRef.current = {
@@ -6730,7 +7335,7 @@ const buildingFill = (id: string) =>
               onPause={pauseNavigation}
               onResume={resumeNavigation}
               onPreviousStep={() => moveGuidedStep(-1)}
-              onNextStep={() => moveGuidedStep(1)}
+              onNextStep={continueGuidedNavigation}
               onEndNavigation={endNavigation}
               onDone={clearStudentRoute}
               onCollapse={() => dispatchStudentRouteUi({ type: "COLLAPSE" })}
@@ -6817,18 +7422,20 @@ const buildingFill = (id: string) =>
                   else clearStudentRoute();
                 } else dispatchStudentRouteUi({ type: "COLLAPSE" });
               }}
-              headerUtility={isFloorMode && availableFloorOptions.length > 1 ? (
-                <StudentFloorPicker
-                  embedded
-                  buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
-                  buildingCode={activeFloorBuilding?.code ?? floorView?.building.code}
-                  floors={availableFloorOptions}
-                  activeFloor={floorView?.floor ?? availableFloorOptions[0].number}
-                  routeFloors={routeFloorsInCurrentBuilding}
-                  routePanelOpen
-                  onFallbackOpenChange={setFloorPickerFallbackActive}
-                  onSelect={changeStudentFloor}
-                />
+              headerUtility={activeCampus && isFloorMode && availableFloorOptions.length > 1 ? (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <StudentFloorPicker
+                    embedded
+                    buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
+                    buildingCode={activeFloorBuilding?.code ?? floorView?.building.code}
+                    floors={availableFloorOptions}
+                    activeFloor={floorView?.floor ?? availableFloorOptions[0].number}
+                    routeFloors={routeFloorsInCurrentBuilding}
+                    routePanelOpen
+                    onFallbackOpenChange={setFloorPickerFallbackActive}
+                    onSelect={changeStudentFloor}
+                  />
+                </div>
               ) : undefined}
               onClear={clearStudentRoute}
               onStartNavigation={() => {
@@ -6848,6 +7455,7 @@ const buildingFill = (id: string) =>
               pendingTransitionSeekRef.current = false;
               routeTransitionActivationRef.current = null;
               transitionResumePlaybackRef.current = false;
+              setNavigationPauseReason(null);
               routeEntryTransitionCompleteRef.current = false;
               cancelAnimationFrame(stepSeekAnimRef.current ?? 0);
               stepSeekAnimRef.current = null;
@@ -7042,27 +7650,6 @@ const buildingFill = (id: string) =>
           transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
         >
         <>
-          <StudentMapControls
-            isFloorMode={isFloorMode}
-            eventMode={showEventMaps}
-            notificationBellVisible={studentAuth.isStudent && !studentAuth.loading && Boolean(studentAuth.profile?.id)}
-            floorLabel={floorView ? `${floorView.building.code} · ${currentFloor?.label ?? `Floor ${floorView.floor}`}` : undefined}
-            search={search}
-            searchFocused={searchFocused}
-            directionsMode={directionsMode}
-            navigationActive={navigationTransitioning || navigationPhase !== "idle"}
-            profileOpen={profileMenuOpen}
-            searchResults={campusSearch.results}
-            onSearchChange={setSearch}
-            onSearchFocus={() => { searchFocusedRef.current = true; setProfileMenuOpen(false); setSearchFocused(true); }}
-            onSearchBlur={dismissSearch}
-            onClearSearch={() => setSearch("")}
-            onSelectSearchResult={handleSelectSearchResult}
-            onOpenDirections={openDirections}
-            onScanLocation={openLocationScanner}
-            onResetView={resetMapCamera}
-            onBackToCampus={closeFloorPlan}
-          />
           <div hidden aria-hidden="true">
           /* ── Search bar ── */
           <>
@@ -7189,6 +7776,41 @@ const buildingFill = (id: string) =>
       )}
       </AnimatePresence>
 
+      {/* Keep the shared map controls mounted while the planner/navigation
+          panel changes presence. The single mode toggle stays in the utility
+          stack, so the switcher never duplicates or disappears mid-transition. */}
+      <div
+        className={cn("absolute inset-0 map-layer-controls pointer-events-none", searchFocused && "map-layer-transient")}
+        data-map-layer={searchFocused ? "transient" : "controls"}
+      >
+        <StudentMapControls
+          isFloorMode={isFloorMode}
+          campusViewMode={campusViewMode}
+          campusViewToggleVisible={Boolean(activeCampus && !searchFocused)}
+          mapOverlayOpen={Boolean(selected || selectedCampusPlace || directionsMode || routePanelVisible || showEventMaps)}
+          keepUtilityActionsVisible={Boolean(selected || selectedCampusPlace)}
+          onToggleCampusViewMode={toggleStudentMapView}
+          eventMode={showEventMaps}
+          notificationBellVisible={studentAuth.isStudent && !studentAuth.loading && Boolean(studentAuth.profile?.id)}
+          floorLabel={floorView ? `${floorView.building.code} · ${currentFloor?.label ?? `Floor ${floorView.floor}`}` : undefined}
+          search={search}
+          searchFocused={searchFocused}
+          directionsMode={directionsMode || routePanelVisible}
+          navigationActive={navigationTransitioning || navigationPhase !== "idle"}
+          profileOpen={profileMenuOpen}
+          searchResults={campusSearch.results}
+          onSearchChange={setSearch}
+          onSearchFocus={() => { searchFocusedRef.current = true; setProfileMenuOpen(false); setSearchFocused(true); }}
+          onSearchBlur={dismissSearch}
+          onClearSearch={() => setSearch("")}
+          onSelectSearchResult={handleSelectSearchResult}
+          onOpenDirections={openDirections}
+          onScanLocation={openLocationScanner}
+          onResetView={resetMapCamera}
+          onBackToCampus={closeFloorPlan}
+        />
+      </div>
+
       <div
         data-no-drag
         data-map-layer="account-trigger"
@@ -7222,7 +7844,7 @@ const buildingFill = (id: string) =>
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
 
       {/* ══════════════ MAP ZOOM / RESET CONTROLS ══════════════ */}
-      {isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && (
+      {isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && !routePanelVisible && (
         <div>
           <StudentFloorPicker
             buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
@@ -7247,7 +7869,7 @@ const buildingFill = (id: string) =>
           onClick={recenterCurrentRouteStep}
           className={cn(
             "absolute right-3 z-[60] flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-card/95 text-[11px] font-extrabold text-primary shadow-lg backdrop-blur-xl hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:right-4 md:h-11 md:w-auto md:max-w-[calc(100vw-1.5rem)] md:gap-2 md:px-3",
-            isFloorMode ? "top-[calc(env(safe-area-inset-top,0px)+9.25rem)] md:top-4" : "top-[calc(env(safe-area-inset-top,0px)+4.5rem)] md:top-4",
+            isFloorMode ? "top-[calc(env(safe-area-inset-top,0px)+13.75rem)] md:top-4" : "top-[calc(env(safe-area-inset-top,0px)+7.25rem)] md:top-4",
           )}
         >
           <Navigation className="h-4 w-4 shrink-0" />
@@ -7280,6 +7902,7 @@ const buildingFill = (id: string) =>
             </div>}
           </div>
           {navigating && <p data-testid="collapsed-current-instruction" className="line-clamp-2 text-[12px] font-bold leading-snug">{currentInstruction}</p>}
+          {navigating && transitionAwaitingAction && transitionPrompt && <p data-testid="collapsed-transition-prompt" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[11px] font-semibold leading-snug">{transitionPrompt}</p>}
           <div className="flex items-center gap-1.5">
             {arrived ? (
               <>
@@ -7291,9 +7914,9 @@ const buildingFill = (id: string) =>
             ) : navigating && <>
               <button type="button" onClick={() => moveGuidedStep(-1)} disabled={routeTransitionBusy || activeRouteStepIndex <= 0} aria-label="Previous step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
               {!exploring && (transitionAwaitingAction
-                ? <span role="status" className="flex h-10 flex-1 items-center justify-center rounded-xl bg-muted px-1 text-center text-[9px] font-extrabold text-muted-foreground">Tap map marker</span>
+                ? <button type="button" onClick={activateCurrentRouteTransition} disabled={routeTransitionBusy} aria-label="Continue through the active route transition" className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button>
                 : <button type="button" onClick={studentRouteUi.playback === "paused" ? resumeNavigation : pauseNavigation} disabled={routeTransitionBusy} aria-label={studentRouteUi.playback === "paused" ? "Resume navigation" : "Pause navigation"} className="flex h-10 min-w-16 flex-1 items-center justify-center gap-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{studentRouteUi.playback === "paused" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>)}
-              <button type="button" onClick={() => moveGuidedStep(1)} disabled={routeTransitionBusy || activeRouteStepIndex >= routeNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+              {!transitionAwaitingAction && <button type="button" onClick={continueGuidedNavigation} disabled={routeTransitionBusy || activeRouteStepIndex >= routeNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
               {!exploring && <button type="button" data-testid="collapsed-playback-speed" aria-label={`Playback speed ${playbackSpeed} times. Change speed`} title="Change playback speed" onClick={() => setPlaybackSpeed((speed) => speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1)} className="h-10 min-w-11 shrink-0 rounded-xl border border-border bg-card px-2 text-[10px] font-extrabold text-primary">{playbackSpeed}×</button>}
             </>}
             <button type="button" onClick={() => dispatchStudentRouteUi({ type: "EXPAND" })} aria-label={arrived ? "Expand arrival details" : "Expand route panel"} className="min-h-10 shrink-0 rounded-xl border border-primary/20 bg-primary/5 px-3 text-[10px] font-extrabold text-primary">Expand</button>
@@ -7406,7 +8029,7 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ STAIR LOADING OVERLAY ══════════════ */}
       {stairLoading && (
-        <div data-testid="route-floor-transition-status" data-no-drag className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+4.5rem)] z-[65] -translate-x-1/2 rounded-xl border border-primary/20 bg-card/95 px-3 py-2 text-center shadow-md backdrop-blur md:top-4">
+        <div data-testid="route-floor-transition-status" data-no-drag className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+8rem)] z-[65] -translate-x-1/2 rounded-xl border border-primary/20 bg-card/95 px-3 py-2 text-center shadow-md backdrop-blur md:top-16">
           <p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">{stairLoading.dir === "up" ? "Going up" : "Going down"}</p>
           <p className="text-[11px] font-bold text-foreground">{stairLoading.label}</p>
         </div>

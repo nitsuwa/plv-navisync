@@ -240,14 +240,13 @@ export function MobileBuildingSheet({
       exit={reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 }}
       transition={reducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="grid h-11 shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b border-border/50 bg-card/95 px-2 backdrop-blur-xl">
-        <span aria-hidden="true" />
+      <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-border/50 bg-card/95 px-2 backdrop-blur-xl">
         <button
           type="button"
           aria-expanded={sheetState === "expanded"}
           aria-disabled={interactionPaused}
           aria-label={sheetState === "expanded" ? "Collapse building details" : sheetState === "peek" ? "Show building details" : "Expand building details"}
-          className="flex h-11 min-w-0 touch-none cursor-grab items-center justify-center active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          className="absolute inset-y-0 left-1/2 flex h-11 w-12 min-w-0 -translate-x-1/2 touch-none cursor-grab items-center justify-center active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={(event) => finishGesture(false, event.pointerId, event.clientY)}
@@ -264,7 +263,7 @@ export function MobileBuildingSheet({
         >
           <span className="h-1 w-9 rounded-full bg-muted-foreground/25" />
         </button>
-        <button type="button" onClick={onClose} aria-label="Close building details" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"><X className="h-4 w-4" /></button>
+        <button type="button" onClick={onClose} aria-label="Close building details" className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground active:scale-95 before:absolute before:inset-[3px] before:rounded-full before:bg-muted/65 before:transition-colors hover:before:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"><X className="relative z-[1] h-4 w-4" /></button>
       </div>
 
         {onBackToRoutePlanner && (
@@ -298,26 +297,6 @@ export function MobileBuildingSheet({
             <h2 className="line-clamp-2 pr-1 text-[15px] font-extrabold leading-[1.1] tracking-tight text-foreground">{selected.name}</h2>
           </div>
         </header>
-
-        <div className={`shrink-0 px-3 ${sheetState === "peek" ? "pb-3" : "pb-2"}`}>
-          <BuildingDetailsActions
-            building={selected}
-            campusId={campusId}
-            hasFloorPlans={hasFloorPlans}
-            saved={saved}
-            savedStateLoading={savedStateLoading}
-            savedStateUnavailable={savedStateUnavailable}
-            studentAuth={studentAuth}
-            showQR={showQR}
-            showSecondaryActions={sheetState !== "peek"}
-            onDirections={onDirections}
-            onEnterBuilding={onEnterBuilding}
-            onSave={onSave}
-            onReport={onReport}
-            onSignInPrompt={onSignInPrompt}
-            onToggleQR={onToggleQR}
-          />
-        </div>
 
         {sheetState === "default" && (
           <div className="shrink-0 px-4 pb-1">

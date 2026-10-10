@@ -13,7 +13,7 @@ export { RouteMapOverlay } from "./RouteMapOverlay";
 export { RouteErrorState } from "./RouteErrorState";
 export { EventInfoPanel } from "./EventInfoPanel";
 export { ActiveEventsList } from "./ActiveEventsList";
-export { StudentMapControls, type StudentMapControlsProps } from "./StudentMapControls";
+export { StudentMapControls, StudentMapModeToggle, type StudentMapControlsProps } from "./StudentMapControls";
 export { StudentFloorPicker, type StudentFloorOption } from "./StudentFloorPicker";
 export { StudentSelectedPlaceCard } from "./StudentSelectedPlaceCard";
 export { CampusPlaceDetails } from "./CampusPlaceDetails";

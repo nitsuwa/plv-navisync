@@ -468,6 +468,22 @@
   transform-origin: 0 0;
 }
 
+.student-map-renderer-crossfade {
+  animation: student-map-renderer-crossfade 150ms ease-out both;
+}
+@keyframes student-map-renderer-crossfade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.student-destination-pin {
+  animation: student-destination-pin-arrive 480ms ease-out both;
+}
+@keyframes student-destination-pin-arrive {
+  0% { opacity: 0.7; filter: drop-shadow(0 0 0 rgba(225, 29, 72, 0)); }
+  48% { opacity: 1; filter: drop-shadow(0 0 5px rgba(225, 29, 72, 0.58)); }
+  100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(225, 29, 72, 0)); }
+}
+
 .student-overview-duplicate {
   opacity: var(--student-map-overview-duplicate-opacity, 1);
   pointer-events: var(--student-map-overview-duplicate-pointer-events, auto);
@@ -487,7 +503,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .student-route-start-reveal { animation: none !important; }
+  .student-route-start-reveal,
+  .student-map-renderer-crossfade,
+  .student-destination-pin { animation: none !important; }
 }
 
 .student-transition-normal-pulse {
@@ -734,18 +752,17 @@
 }
 
 @keyframes student-floor-scene-enter {
-  from { opacity: 0; transform: translateY(3px) scale(0.995); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-/* Elevator / stairs floor changes: short directional vertical motion for the
-   new floor scene (~700ms). prefers-reduced-motion skips these entirely. */
+/* Floor changes use a short renderer fade; the floor geometry stays in place. */
 @keyframes student-floor-scene-enter-up {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes student-floor-scene-enter-down {
-  from { opacity: 0; transform: translateY(-16px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes student-selection-halo-in {
   from { opacity: 0.16; transform: scale(0.985); }
@@ -1209,13 +1226,11 @@
       top: calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem);
       bottom: auto;
     }
+    .student-map-utility-stack[data-floor-mode="true"][data-event-mode="true"] {
+      top: calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 7rem);
+    }
     .student-map-surface [data-testid="event-map-panel"] {
       max-height: min(var(--event-sheet-max-height), calc(100% - 8.5rem));
-    }
-  }
-  @media (max-width: 767px) and (max-height: 500px) {
-    .student-map-utility-stack[data-event-mode="true"] {
-      flex-direction: row;
     }
   }
   @media (min-width: 768px) and (max-width: 1023px) {
@@ -1286,19 +1301,19 @@
     transform-box: fill-box;
     transform-origin: center;
     filter: drop-shadow(0 0 7px rgba(37, 99, 235, 0.22));
-    animation: student-selection-halo-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: student-selection-halo-in 160ms ease-out both;
   }
   .student-room-selection-halo {
-    animation: student-room-selection-in 360ms ease-out both;
+    animation: student-room-selection-in 160ms ease-out both;
   }
   .student-room-selection-outline {
-    animation: student-room-selection-outline-in 180ms ease-out both;
+    animation: student-room-selection-outline-in 160ms ease-out both;
   }
   .student-room-selection-trace {
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
     opacity: 0;
-    animation: student-room-selection-trace-in 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: student-room-selection-trace-in 180ms ease-out both;
   }
   @keyframes student-room-selection-outline-in {
     from { stroke-width: 1.5; stroke-opacity: 0.7; }
@@ -1782,7 +1797,7 @@
   font-size: 12px;
   line-height: 20px;
 }
-[data-map-feedback] > button {
+  [data-map-feedback] > button {
   min-height: 44px;
   font-size: 12px;
   line-height: 18px;
@@ -1792,4 +1807,43 @@
 @media (max-width: 480px) {
   .event-feedback-checklist > summary { font-size: 12px; }
   .event-feedback-checklist .feedback-progress { margin-left: 4px; font-size: 11px; }
+}
+
+/* Keep mobile toast dismiss controls within their notification card. Sonner's
+   default close button floats beyond the toast corner; global mobile button
+   minimums can then inflate its hit area and make it look detached. */
+@media (max-width: 768px) {
+  [data-sonner-toaster][data-y-position="top"] {
+    top: calc(env(safe-area-inset-top, 0px) + 12px) !important;
+  }
+
+  [data-sonner-toast][data-styled="true"] {
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+  }
+
+  [data-sonner-toast][data-styled="true"][data-type="success"] {
+    width: min(356px, calc(100vw - 24px));
+    min-height: 56px;
+    padding: 12px 54px 12px 14px;
+  }
+
+  [data-sonner-toast][data-styled="true"] [data-close-button] {
+    left: auto !important;
+    right: 8px !important;
+    top: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    transform: translateY(-50%) !important;
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast] { animation: none !important; transition: none !important; }
 }

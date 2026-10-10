@@ -151,7 +151,7 @@ describe("CampusMapPage event overlays", () => {
     renderCampusMap({ previewCampus });
     const toggle = await screen.findByRole("button", { name: "Open event map" }, { timeout: 5000 });
     expect(toggle).toHaveAttribute("data-dock", "event-map-bottom-left");
-    expect(screen.getByTestId("student-map-recenter-button")).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(screen.getByTestId("student-map-recenter-button")).toHaveAttribute("data-dock", "map-control-bottom-right");
     const svg = screen.getByTestId("student-map-surface").querySelector("svg");
     const camera = svg?.querySelector("g[transform]")?.getAttribute("transform");
     fireEvent.click(toggle);
@@ -284,7 +284,8 @@ describe("CampusMapPage event overlays", () => {
     expect(sheetActions.getByRole("button", { name: /Report/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "More building actions" })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "Report map issue" })).toBeVisible();
-    expect(utilityControls).toHaveClass("right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
+    expect(utilityControls).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-start");
+    expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-utility-bottom-inset")).toMatch(/px$/);
     expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-controls-safe-top")).toMatch(/px$/);
 
     fireEvent.click(sheetActions.getByRole("button", { name: "Expand building details" }));
@@ -405,7 +406,7 @@ describe("CampusMapPage event overlays", () => {
     await screen.findByRole("searchbox", { name: "Search campus map" });
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Recenter map" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Recenter map" })).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(screen.getByRole("button", { name: "Recenter map" })).toHaveAttribute("data-dock", "map-control-bottom-right");
   });
 
   it("dismisses search outside without passing the same tap to a building", async () => {
@@ -465,7 +466,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(await screen.findByRole("button", { name: /user menu/i }));
     expect(await screen.findByRole("menu", { name: "Student account menu" })).toBeInTheDocument();
     expect(stack).toHaveAttribute("data-profile-open", "true");
-    expect(stack).toHaveClass("right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
+    expect(stack).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-start");
     expect(screen.getByRole("button", { name: "Open event map" })).toBe(eventMap);
     expect(eventMap).toHaveAttribute("data-dock", "event-map-bottom-left");
     expect(surface.querySelector("svg > g[transform]")?.getAttribute("transform")).toBe(cameraBefore);
@@ -555,7 +556,7 @@ describe("CampusMapPage event overlays", () => {
     expect(await screen.findByRole("option", { name: /Comfort Room/ })).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Back to route planner" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Close directions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel route planning" }));
     await waitFor(() => expect(screen.queryByTestId("route-planner-dialog")).not.toBeInTheDocument());
     const currentNavigableRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
     fireEvent.click(currentNavigableRoom!);
@@ -591,7 +592,7 @@ describe("CampusMapPage event overlays", () => {
     expect(await screen.findByTestId("student-selected-place-card")).toBeInTheDocument();
     expect(screen.getByTestId("student-floor-picker")).toHaveAttribute("data-dock", "floor-control-top");
     expect(screen.queryByTestId("student-campus-selector")).not.toBeInTheDocument();
-    expect(screen.getByTestId("student-map-recenter-button")).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(screen.getByTestId("student-map-recenter-button")).toHaveAttribute("data-dock", "map-control-bottom-right");
     expect(screen.getByTestId("student-map-recenter-button")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
     fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Floor 2/ }));
@@ -736,7 +737,7 @@ describe("CampusMapPage event overlays", () => {
     const readScale = () => readStudentMapCameraScale(surface);
     const recenter = screen.getByRole("button", { name: "Recenter map" });
     expect(recenter).toHaveAttribute("data-testid", "student-map-recenter-button");
-    expect(recenter).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(recenter).toHaveAttribute("data-dock", "map-control-bottom-right");
     expect(screen.getByTestId("student-map-utility-controls").contains(recenter)).toBe(true);
     expect(screen.queryAllByTestId("student-map-recenter-button")).toHaveLength(1);
     expect(screen.queryByTestId("student-map-zoom-controls")).not.toBeInTheDocument();
@@ -850,6 +851,8 @@ describe("CampusMapPage event overlays", () => {
 
     await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toBeInTheDocument());
     expect(screen.getByTestId("collapsed-route-card")).toHaveTextContent("Guided navigation");
+    expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/\S/);
+    expect(screen.queryByText(/Walking from CABA-103 to the building exit/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("indoor-route-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Directions to room")).not.toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 150));

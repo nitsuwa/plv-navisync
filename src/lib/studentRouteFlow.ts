@@ -695,6 +695,26 @@ export function studentRouteSeekTarget(
 }
 
 /**
+ * Resolve the presentation context after inspecting a planned transition in
+ * Explore. This deliberately reuses the canonical transition/step resolvers;
+ * callers may display the returned target without writing the Follow cursor.
+ */
+export function studentRouteExploreTransitionTarget(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  transitionStepIndex: number,
+): { transition: NonNullable<ReturnType<typeof routeTransitionForStep>>; targetStepIndex: number; target: StudentRouteSeekTarget } | null {
+  const transition = routeTransitionForStep(route, steps, transitionStepIndex);
+  if (!transition || steps.length === 0) return null;
+  const targetStepIndex = Math.min(steps.length - 1, Math.max(0, transitionStepIndex) + 1);
+  return {
+    transition,
+    targetStepIndex,
+    target: studentRouteSeekTarget(route, steps, targetStepIndex),
+  };
+}
+
+/**
  * Resolve a fractional cursor between canonical route-step boundaries. Within
  * one authored leg, progress interpolates along that leg's existing geometry.
  * At a Building/Floor handoff, the cursor stays at the source boundary, then
@@ -732,22 +752,31 @@ export function studentRoutePositionForLeg(
   phase: StudentRouteSeekTarget["phase"],
   segment: RouteIndoorSegment | null,
   progress: number,
+  currentPosition = 0,
 ): number {
   const walkIndices = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
+  const matchingWalks: number[] = [];
   for (const stepIndex of walkIndices) {
     const target = studentRouteSeekTarget(route, steps, stepIndex);
     if (target.phase === phase && target.segmentIndex === (segment ? (route.indoorSegments ?? []).indexOf(segment) : -1)) {
-      // The current walk owns every position strictly before its endpoint.
-      // At the endpoint the next canonical step becomes active exactly once.
-      // Capping at .999 kept the walk highlighted forever and led the UI to
-      // compensate by showing the next transition early using a loose .78
-      // progress threshold.
-      const boundedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-      const cursor = boundedProgress >= 1 ? stepIndex + 1 : stepIndex + boundedProgress;
-      return Math.min(Math.max(0, steps.length - 1), cursor);
+      matchingWalks.push(stepIndex);
     }
   }
-  return 0;
+
+  // Some published routes contain authored indoor segments that have no
+  // matching student-facing instruction (for example, a connector segment
+  // emitted by the graph). When that happens, resetting to step zero makes
+  // the player, instruction, and visible Floor disagree at a context handoff.
+  // Keep the canonical cursor already established by the route transition.
+  const boundedCurrent = Math.max(0, Math.min(Math.max(0, steps.length - 1), Number.isFinite(currentPosition) ? currentPosition : 0));
+  const stepIndex = matchingWalks.find((candidate) => candidate >= Math.floor(boundedCurrent));
+  if (stepIndex === undefined) return boundedCurrent;
+
+  // The current walk owns every position strictly before its endpoint. At
+  // the endpoint the next canonical step becomes active exactly once.
+  const boundedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+  const cursor = boundedProgress >= 1 ? stepIndex + 1 : stepIndex + boundedProgress;
+  return Math.min(Math.max(0, steps.length - 1), cursor);
 }
 
 /** Put a seek at the beginning of the selected instruction. A tiny interior

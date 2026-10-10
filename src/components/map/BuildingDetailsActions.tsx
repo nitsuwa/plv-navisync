@@ -42,7 +42,7 @@ export function BuildingDetailsActions({
         buildingName: building.name,
         url: buildingMapDeepLink(campusId, building.id),
       });
-      if (result === "copied") toast.success("Link copied.");
+      if (result === "copied") toast.success("Link copied.", { duration: 3000, position: "top-center" });
     } catch {
       toast.error("Couldn’t share this building", "Please try again.");
     }
@@ -50,7 +50,7 @@ export function BuildingDetailsActions({
   const copyLink = async () => {
     try {
       await copyBuildingLink(buildingMapDeepLink(campusId, building.id));
-      toast.success("Link copied.");
+      toast.success("Link copied.", { duration: 3000, position: "top-center" });
     } catch {
       toast.error("Link could not be copied", "Please try again.");
     }

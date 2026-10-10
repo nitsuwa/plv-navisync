@@ -11,6 +11,33 @@ const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
 const RESUME_REFRESH_INTERVAL_MS = 15_000;
 const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try again.";
 
+function sameCampusListingRevision(left: readonly Campus[], right: readonly Campus[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((campus, index) => {
+    const next = right[index];
+    return campus.id === next.id
+      && campus.name === next.name
+      && campus.code === next.code
+      && campus.description === next.description
+      && campus.address === next.address
+      && campus.city === next.city
+      && campus.province === next.province
+      && campus.themeColor === next.themeColor
+      && campus.isDefault === next.isDefault
+      && campus.status === next.status
+      && campus.lifecycleStatus === next.lifecycleStatus
+      && campus.publishStatus === next.publishStatus
+      && campus.visibleToStudents === next.visibleToStudents
+      && campus.publishedAt === next.publishedAt
+      && campus.updatedAt === next.updatedAt;
+  });
+}
+
+function samePublicSettings(left: PublicPlatformSettings, right: PublicPlatformSettings): boolean {
+  const keys = Object.keys(left) as Array<keyof PublicPlatformSettings>;
+  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
+}
+
 function isMissingPublishedSnapshotSchema(error: unknown): boolean {
   if (!error || typeof error !== "object" || !("code" in error)) return false;
   const code = String((error as { code?: unknown }).code ?? "");
@@ -79,6 +106,8 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
   const auth = useAuth();
   const userId = auth.session?.user.id ?? auth.profile?.id ?? "guest";
   const [campuses, setCampuses] = useState<Campus[]>(readCachedCampuses);
+  const campusesRef = useRef(campuses);
+  campusesRef.current = campuses;
   const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
   const [loading, setLoading] = useState<boolean>(() => campuses.length === 0);
@@ -102,7 +131,7 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     const request = (async () => {
       try {
         const studentSettings = await settingsService.getPublicPlatformSettings();
-        setPlatformSettings(studentSettings);
+        setPlatformSettings((current) => samePublicSettings(current, studentSettings) ? current : studentSettings);
         // Prefer immutable published snapshots. This keeps draft/editor edits
         // out of the public map until the database publication RPC succeeds.
         let published: Campus[] = [];
@@ -138,9 +167,17 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
         // announcement metadata only. Their authored map structure remains
         // protected by the existing published-only RLS policies.
         const comingSoon = await campusService.listComingSoon().catch(() => []);
-        published = studentCampusListing(published, comingSoon);
-
-        setCampuses(published);
+        const refreshedListing = studentCampusListing(published, comingSoon);
+        // A resume refresh often returns the exact same immutable publication
+        // revisions. Keep the existing object graph in that case so the active
+        // map renderer/camera do not rebuild just because a tab became visible.
+        published = sameCampusListingRevision(campusesRef.current, refreshedListing)
+          ? campusesRef.current
+          : refreshedListing;
+        if (published !== campusesRef.current) {
+          campusesRef.current = published;
+          setCampuses(published);
+        }
         hasCampusDataRef.current = published.length > 0;
         lastGoodCampusesRef.current = published;
         setSelectedCampusId((currentId) => currentId && published.some((campus) => campus.id === currentId)
