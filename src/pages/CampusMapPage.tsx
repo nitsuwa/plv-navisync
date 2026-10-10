@@ -64,7 +64,7 @@ import {
   type MobileBuildingSheetState,
   StudentMapControls,
 } from "../components/map";
-import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
+import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
 import { studentAccountService } from "../services/studentAccountService";
 import { studentMobilePanelAvailableHeight } from "../lib/studentMobilePanels";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
@@ -1044,6 +1044,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   // Explore-mode step inspection index. Presentation only: playback progress
   // refs are never mutated by it, so Return to Follow resumes real progress.
   const [inspectedRouteStepIndex, setInspectedRouteStepIndex] = useState<number | null>(null);
+  const inspectedRouteStepIndexRef = useRef<number | null>(null);
+  inspectedRouteStepIndexRef.current = inspectedRouteStepIndex;
   // Direction of the last authored elevator/stairs floor change so the next
   // floor scene can slide in with matching vertical motion.
   const floorShiftDirectionRef = useRef<"up" | "down" | null>(null);
@@ -1068,6 +1070,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   // Walk animation progress 0..1
   const [walkProgress,  setWalkProgress]  = useState(0);
   const walkProgressRef = useRef(0);
+  const outdoorRouteLineProgressWriterRef = useRef<((progress: number) => void) | null>(null);
+  const outdoorRouteMarkerProgressWriterRef = useRef<((progress: number) => void) | null>(null);
   const [walkNonce,     setWalkNonce]     = useState(0);
   const walkAnimRef = useRef<number | null>(null);
   const indoorWalkAnimRef = useRef<number | null>(null);
@@ -1225,6 +1229,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const lastDestinationBuildingFocusKeyRef = useRef<string | null>(null);
   const targetCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const followZoomTargetRef = useRef(DEFAULT_OUTDOOR_ZOOM);
+  const followZoomStateTimerRef = useRef<number | null>(null);
+  const followCameraWasActiveRef = useRef(false);
   const followHumanWorldPointRef = useRef<Pt | null>(null);
   const overviewCameraRef = useRef<{ pan: Pt; zoom: number }>({ pan: { x: 0, y: 0 }, zoom: 1 });
   const fittedCampusIdRef = useRef<string | null>(null);
@@ -1307,6 +1313,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   useEffect(() => () => {
     [panFrameRef.current, zoomFrameRef.current, inertiaRef.current, cameraAnimationFrameRef.current]
       .forEach((frame) => { if (frame !== null && frame !== 0) cancelAnimationFrame(frame); });
+    if (followZoomStateTimerRef.current !== null) window.clearTimeout(followZoomStateTimerRef.current);
   }, []);
 
   // Renderer handoff stops only 2D camera/gesture work. The route progress
@@ -1786,6 +1793,28 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       applyStudentMarkerPresentation(nextZoom);
     }
   }, [applyStudentMarkerPresentation, viewCX, viewCY]);
+
+  // Follow owns a renderer-ref zoom while playback runs. Mirror it into React
+  // once when that ownership ends, rather than on each high-frequency wheel
+  // event; this keeps the next paused/Explore camera commit in sync.
+  useEffect(() => {
+    const ownsFollowCamera = studentRouteUi.phase === "navigating"
+      && studentRouteUi.camera === "follow" && !followCameraDetached;
+    if (followCameraWasActiveRef.current && !ownsFollowCamera) {
+      if (followZoomStateTimerRef.current !== null) {
+        window.clearTimeout(followZoomStateTimerRef.current);
+        followZoomStateTimerRef.current = null;
+      }
+      const settledZoom = followZoomTargetRef.current;
+      zoomRef.current = settledZoom;
+      zoomStateRef.current = settledZoom;
+      displayZoomRef.current = settledZoom;
+      setZoom(settledZoom);
+      setDisplayZoom(settledZoom);
+      settleCameraTransform(panRef.current, settledZoom);
+    }
+    followCameraWasActiveRef.current = ownsFollowCamera;
+  }, [followCameraDetached, settleCameraTransform, studentRouteUi.camera, studentRouteUi.phase]);
 
   const commitCameraState = useCallback(() => {
     const currentPan = panRef.current;
@@ -2270,6 +2299,25 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     };
   }, [clampMapPan, viewportCanvasW, viewportCanvasH, student3DActive]);
 
+  const queueZoomUpdate = useCallback((clientX: number, clientY: number, nextZoom: number) => {
+    pendingZoomRef.current = { x: clientX, y: clientY, zoom: nextZoom };
+    if (zoomFrameRef.current !== null) return;
+    zoomFrameRef.current = requestAnimationFrame(() => {
+      zoomFrameRef.current = null;
+      const pending = pendingZoomRef.current;
+      pendingZoomRef.current = null;
+      if (pending) applyZoomAtRef.current(pending.x, pending.y, pending.zoom, false);
+    });
+  }, []);
+
+  const scheduleFollowZoomStateCommit = useCallback(() => {
+    if (followZoomStateTimerRef.current !== null) window.clearTimeout(followZoomStateTimerRef.current);
+    followZoomStateTimerRef.current = window.setTimeout(() => {
+      followZoomStateTimerRef.current = null;
+      setZoom(followZoomTargetRef.current);
+    }, 140);
+  }, []);
+
   // ── Wheel zoom ─────────────────────────────────────────────────────────
   useEffect(() => {
     const el = mapContainerRef.current;
@@ -2299,14 +2347,20 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
         : continuingWheel ? targetLogZoomRef.current : Math.log(displayZoomRef.current);
       const nextZoom = clampActiveStudentZoom(Math.exp(baseLogZoom - step));
       if (Math.abs(Math.log(nextZoom) - baseLogZoom) < 1e-9) return;
-      if (followCameraOwns) applyZoomAtRef.current(e.clientX, e.clientY, nextZoom, true);
+      const followPlaybackOwnsFrame = followCameraOwns && studentRouteUi.playback === "playing" && !navigationTransitioning;
+      if (followPlaybackOwnsFrame) {
+        // Coalesce trackpad/wheel bursts to one visual write per frame. Keep
+        // the camera immediate; mirror its React state once the burst settles.
+        queueZoomUpdate(e.clientX, e.clientY, nextZoom);
+        scheduleFollowZoomStateCommit();
+      } else if (followCameraOwns) applyZoomAtRef.current(e.clientX, e.clientY, nextZoom, true);
       else animateZoomAtRef.current(e.clientX, e.clientY, nextZoom, "manual-wheel");
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [activeCampus?.id, cancelCameraAnimation, clampActiveStudentZoom, followCameraDetached, isCampusLoading, student3DActive, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
+  }, [activeCampus?.id, cancelCameraAnimation, clampActiveStudentZoom, followCameraDetached, isCampusLoading, navigationTransitioning, queueZoomUpdate, scheduleFollowZoomStateCommit, student3DActive, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -2422,17 +2476,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     panFrameRef.current = null;
     applyPanDelta(clientX - drag.sx, clientY - drag.sy, drag);
   }, [applyPanDelta]);
-
-  const queueZoomUpdate = useCallback((clientX: number, clientY: number, nextZoom: number) => {
-    pendingZoomRef.current = { x: clientX, y: clientY, zoom: nextZoom };
-    if (zoomFrameRef.current !== null) return;
-    zoomFrameRef.current = requestAnimationFrame(() => {
-      zoomFrameRef.current = null;
-      const pending = pendingZoomRef.current;
-      pendingZoomRef.current = null;
-      if (pending) applyZoomAtRef.current(pending.x, pending.y, pending.zoom, false);
-    });
-  }, []);
 
   const flushZoomUpdate = useCallback(() => {
     if (zoomFrameRef.current !== null) cancelAnimationFrame(zoomFrameRef.current);
@@ -3858,14 +3901,24 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const tick = (now: number) => {
       const t = Math.min(1, initialProgress + (now - start) / remainingDuration * (1 - initialProgress));
       walkProgressRef.current = t;
-      // The 3D renderer reads visual progress from the stable ref inside its
-      // frame loop. Keep React updates to canonical step boundaries while 3D
-      // is active so each animation frame does not rerender the whole map UI.
-      if (!student3DActive || t >= 1) setWalkProgress(t);
       const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, t);
       const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
-      if (!student3DActive || Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001) || t >= 1) setPlaybackCursor(cursor);
+      const crossedStepBoundary = Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001);
+      // Canonical React state changes only when the human-facing step changes
+      // or the leg finishes. The moving avatar/route segment is written into
+      // stable SVG nodes below, so 2D Follow does not reconcile the full map
+      // tree on every frame (the 3D renderer has always read this stable ref).
+      if (crossedStepBoundary || t >= 1) {
+        setWalkProgress(t);
+        setPlaybackCursor(cursor);
+      }
+      const inspectedIndex = inspectedRouteStepIndexRef.current;
+      const visualRouteProgress = studentRouteUi.camera === "explore" && inspectedIndex !== null
+        ? routeProgressForStepIndex(steps, inspectedIndex)
+        : t;
+      outdoorRouteLineProgressWriterRef.current?.(visualRouteProgress);
+      outdoorRouteMarkerProgressWriterRef.current?.(visualRouteProgress);
       if (!student3DActive && studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
         const point = sampleOutdoorPoint(t);
         if (!point) return;
@@ -4693,6 +4746,8 @@ const buildingFill = (id: string) =>
   // the same animated avatar style from RouteMapOverlay.
   const [indoorWalkProgress, setIndoorWalkProgress] = useState(0);
   const indoorWalkProgressRef = useRef(0);
+  const indoorRouteLineProgressWriterRef = useRef<((progress: number) => void) | null>(null);
+  const indoorRouteMarkerProgressWriterRef = useRef<((progress: number) => void) | null>(null);
   const [indoorWalkNonce, setIndoorWalkNonce] = useState(0);
   const indoorWalkSegmentKeyRef = useRef<string | null>(null);
   // Continue the journey inside the destination floor after the outdoor
@@ -4728,7 +4783,15 @@ const buildingFill = (id: string) =>
       const cursor = studentRoutePositionForLeg(route, activePlaybackSteps, navigationPhase, activeSegment, progress, playbackCursorRef.current);
       const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
-      if (!student3DActive || Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001) || progress >= 1) setPlaybackCursor(cursor);
+      const crossedStepBoundary = Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001);
+      if (crossedStepBoundary || progress >= 1) {
+        setPlaybackCursor(cursor);
+        if (!student3DActive) setIndoorWalkProgress(progress);
+      }
+      if (studentRouteUi.camera !== "explore") {
+        indoorRouteLineProgressWriterRef.current?.(progress);
+        indoorRouteMarkerProgressWriterRef.current?.(progress);
+      }
       if (!student3DActive && studentRouteUi.camera === "follow" && !followCameraDetached && !roomFocusAnimationRef.current) {
         const point = sampleIndoorPoint(progress, sampledIndoorPoint);
         if (!point) return null;
@@ -4765,7 +4828,6 @@ const buildingFill = (id: string) =>
     const tick = (now: number) => {
       const progress = Math.min(1, initialProgress + (now - start) / remainingDuration * (1 - initialProgress));
       indoorWalkProgressRef.current = progress;
-      if (!student3DActive || progress >= 1) setIndoorWalkProgress(progress);
       syncRouteCursor(progress);
       if (progress < 1) indoorWalkAnimRef.current = requestAnimationFrame(tick);
     };
@@ -6400,6 +6462,7 @@ const buildingFill = (id: string) =>
       walkProgress={studentRouteUi.phase === "navigating" ? displayedWalkProgress : undefined}
       animated={routeFlowAnimated}
       layer="line"
+      progressFrameWriterRef={outdoorRouteLineProgressWriterRef}
     />
   ) : null, [displayedWalkProgress, mapMode, route, routeFading, routeFlowAnimated, studentRouteUi.phase]);
   const indoorRouteLineOverlay = useMemo(() => visibleIndoorRoute && visibleIndoorRoute.waypoints.length >= 2 && indoorRouteMatchesVisibleFloor ? (
@@ -6410,6 +6473,7 @@ const buildingFill = (id: string) =>
         animated={routeFlowAnimated}
         walkProgress={studentRouteUi.phase === "navigating" && visibleIndoorRouteIsActive ? displayedIndoorWalkProgress : undefined}
         layer="line"
+        progressFrameWriterRef={indoorRouteLineProgressWriterRef}
       />
     </g>
   ) : null, [displayedIndoorWalkProgress, indoorRouteMatchesVisibleFloor, mapMode, routeFlowAnimated, studentRouteUi.phase, visibleIndoorRoute, visibleIndoorRouteIsActive]);
@@ -6949,6 +7013,7 @@ const buildingFill = (id: string) =>
                       layer="markers"
                       showStartMarker={indoorShowsStartMarker}
                       showEndMarker={indoorShowsEndMarker}
+                      progressFrameWriterRef={indoorRouteMarkerProgressWriterRef}
                     />
                   </g>
                 )}
@@ -7084,7 +7149,7 @@ const buildingFill = (id: string) =>
             {showEventMaps && !isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
             {/* Route */}
             {route && (
-              <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={studentRouteUi.phase === "navigating" ? displayedWalkProgress : undefined} animated={routeFlowAnimated} layer="markers" showStartMarker={campusShowsStartMarker} showEndMarker={campusShowsEndMarker} />
+              <RouteMapOverlay points={route.points} mode={mapMode} fading={routeFading} walkProgress={studentRouteUi.phase === "navigating" ? displayedWalkProgress : undefined} animated={routeFlowAnimated} layer="markers" showStartMarker={campusShowsStartMarker} showEndMarker={campusShowsEndMarker} progressFrameWriterRef={outdoorRouteMarkerProgressWriterRef} />
             )}
             {studentRouteUi.phase === "preview" && studentRouteTransitionCues.filter((cue) => cue.id === previewActiveTransitionCue?.cue.id).map((cue) => {
               const active = previewActiveTransitionCue?.cue.id === cue.id;
