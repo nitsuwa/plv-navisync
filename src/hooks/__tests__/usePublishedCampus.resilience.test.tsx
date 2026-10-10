@@ -69,6 +69,18 @@ describe("published campus refresh resilience", () => {
     expect(mocks.list).not.toHaveBeenCalled();
   });
 
+  it("keeps the active published campus object graph stable when a resume refresh has no newer revision", async () => {
+    const { result } = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+    const existingListing = result.current.campuses;
+    mocks.listPublishedSnapshots.mockResolvedValueOnce([{ ...campus } as Campus]);
+
+    await act(async () => { await result.current.refetch(); });
+
+    expect(result.current.campuses).toBe(existingListing);
+    expect(result.current.activeCampus).toBe(existingListing[0]);
+  });
+
   it("shows a retryable generic error when the first campus load times out", async () => {
     mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "canceling statement due to statement timeout" });
 

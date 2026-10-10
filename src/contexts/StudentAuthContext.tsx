@@ -81,6 +81,7 @@ export interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 const PROFILE_RETRY_MESSAGE = "NaviSync could not verify your login/profile right now. Check your connection and retry; the saved login has not been cleared.";
+const AUTH_REVALIDATION_COALESCE_MS = 5_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -298,17 +299,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void restoreSession();
 
-    const revalidate = async () => {
-      if (!mountedRef.current || !sessionRef.current || !supabase) return;
+    let lastRevalidationAt = 0;
+    let revalidationInFlight: Promise<void> | null = null;
+    const revalidate = (): Promise<void> => {
+      if (!mountedRef.current || !sessionRef.current || !supabase) return Promise.resolve();
+      if (revalidationInFlight) return revalidationInFlight;
+      const now = Date.now();
+      // Browsers commonly emit both `visibilitychange` and `focus` when a tab
+      // returns. Coalesce that pair so the current map/profile is not subjected
+      // to duplicate background reads and state updates on resume.
+      if (now - lastRevalidationAt < AUTH_REVALIDATION_COALESCE_MS) return Promise.resolve();
+      lastRevalidationAt = now;
       const generation = generationRef.current;
-      try {
-        const { data, error: userError } = await supabase.auth.getUser();
-        if (!mountedRef.current || generation !== generationRef.current || userError || !data.user) return;
-        if (data.user.id !== sessionRef.current?.user.id) return;
-        await loadProfile(data.user.id, generation);
-      } catch {
-        // A temporary network failure never clears a verified in-memory role.
-      }
+      const request = (async () => {
+        try {
+          const { data, error: userError } = await supabase.auth.getUser();
+          if (!mountedRef.current || generation !== generationRef.current || userError || !data.user) return;
+          if (data.user.id !== sessionRef.current?.user.id) return;
+          await loadProfile(data.user.id, generation);
+        } catch {
+          // A temporary network failure never clears a verified in-memory role.
+        }
+      })();
+      revalidationInFlight = request;
+      void request.finally(() => {
+        if (revalidationInFlight === request) revalidationInFlight = null;
+      });
+      return request;
     };
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void revalidate();

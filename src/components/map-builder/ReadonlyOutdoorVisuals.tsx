@@ -9,7 +9,7 @@ import type {
   ExteriorEmergencyStairVisualSize,
 } from "./types";
 import { MARKER_STYLES } from "../../data/mapData";
-import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType } from "./constants";
+import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType, type DecorAssetDescriptor } from "./constants";
 import { DecorAssetArt } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
 import { effectiveStackKey, sortOutdoorGroundAssets } from "../../lib/campusStack";
@@ -26,6 +26,7 @@ import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
 import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
+import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
@@ -683,10 +684,95 @@ export const OutdoorEmergencyStairVisual = memo(function OutdoorEmergencyStairVi
   );
 });
 
-export function OutdoorDecorVisual({ asset, gridSize }: { asset: CampusDecorAsset; gridSize?: number }) {
+function StudentSuhayHusayDecorVisualLegacy({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  return <g data-testid="student-suhay-husay-2d-symbol" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+    style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.09)" stroke="#2563eb" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />}
+      <path d="M3 23.5 L29 23.5 L26.2 28.5 L5.8 28.5 Z" fill="#a8a29e" stroke="#625f5a" strokeWidth="0.8" strokeLinejoin="round" />
+      <path d="M5 22 L27 22 L29 24 L3 24 Z" fill="#d6d3d1" stroke="#78716c" strokeWidth="0.65" strokeLinejoin="round" />
+      {/* Taller standing figure, left: separated legs and an inward-leaning torso. */}
+      <path d="M10.2 17.7 L8.2 23 M11.5 17.6 L14.1 23 M10.9 17.9 L11.9 12.1 L13.1 9.4" fill="none" stroke="#51483e" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="13.7" cy="7.7" r="1.75" fill="#6a5a48" />
+      <path d="M12.4 11.9 L15.3 10.8 L17.1 12.1 M11.5 12.4 L14.4 13.6 L17.1 12.4" fill="none" stroke="#51483e" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Lower seated/kneeling figure: low torso, folded leg, face turned left. */}
+      <path d="M21.5 17.4 L19.3 19.3 L23.2 20.3 L25.8 23.1 M19.6 19.3 L17.5 21.4 L20.5 23.1 M20.4 17.6 L18.7 14.8 L17.1 12.4" fill="none" stroke="#51483e" strokeWidth="2.0" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="21.9" cy="15.1" r="1.7" fill="#6a5a48" />
+      <path d="M20.7 17.1 L18.7 14.8 L17.1 12.4 M22.2 17.7 L19.4 15.2 L17.1 12.4" fill="none" stroke="#51483e" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="17.1" cy="12.4" r="1.05" fill="#806b52" stroke="#403a34" strokeWidth="0.45" />
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V2 is a compact top-down landmark pictogram. Filled angular body shapes
+ * distinguish the upright figure from the seated figure; one joined reach
+ * links them across the shared faceted stone base. */
+function StudentSuhayHusayDecorVisualV2({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v2" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+    style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.09)" stroke="#2563eb" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />}
+      {/* The faceted stone is a substantial base, not a decorative ground
+          line. The second plane gives the low figure a visible seat. */}
+      <path d="M3.4 23.2 L28.6 23.2 L25.3 28.3 L6.4 28.3 Z" fill="#565550" stroke="#393a39" strokeWidth="0.7" strokeLinejoin="round" />
+      <path d="M5.3 21.9 L26.9 21.9 L28.6 23.4 L3.4 23.4 Z" fill="#99968d" stroke="#5d5b55" strokeWidth="0.65" strokeLinejoin="round" />
+      <path d="M19.1 19.2 L22.8 18.4 L25.9 21.9 L19.3 21.9 Z" fill="#b1aca0" stroke="#726f67" strokeWidth="0.55" strokeLinejoin="round" />
+
+      {/* Upright person at left: broad tapered trunk, two planted legs and a
+          head high above the seated person's head. */}
+      <path data-testid="student-suhay-standing-silhouette" d="M9.2 18.3 L8.2 22.7 L10.3 22.7 L11.5 19.8 L12.5 22.7 L14.6 22.7 L13.6 18 L14.4 13.1 L13.1 10.8 L10.7 11.5 L10.3 15.6 Z" fill="#51483d" stroke="#3d382f" strokeWidth="0.55" strokeLinejoin="round" />
+      <path d="M10.6 12 L12.7 10.9 L14.3 11.8 L14.8 14.2 L12.8 14.9 L10.2 14 Z" fill="#756047" stroke="#51483d" strokeWidth="0.45" strokeLinejoin="round" />
+      <path d="M11.8 10.8 L12.5 9.7 L14.3 9.3 L14.5 10.4 L13.3 11.5 Z" fill="#5f503e" />
+      <path d="M13.5 9.2 L14.8 9.7 L14.2 11 L12.9 10.5 Z" fill="#806b52" stroke="#51483d" strokeWidth="0.4" />
+
+      {/* Seated/kneeling person at right: low raised torso, visible folded
+          thigh across the stone and tucked shin, so this cannot read as a
+          second standing figure. */}
+      <path data-testid="student-suhay-seated-silhouette" d="M18.6 18.9 L17.7 16.6 L18.5 14.8 L20.1 14.4 L21.5 16.2 L21.9 18.2 L25.8 20.9 L24.9 22.2 L20.7 21.1 L18.9 20.1 Z" fill="#51483d" stroke="#3d382f" strokeWidth="0.55" strokeLinejoin="round" />
+      <path d="M18.5 17.1 L19.2 15.2 L20.8 14.8 L21.6 16.6 L21.2 18.8 L19.7 19.2 Z" fill="#756047" stroke="#51483d" strokeWidth="0.45" strokeLinejoin="round" />
+      <path d="M17.8 14.7 L18.2 13.5 L19.6 13 L20.4 13.8 L19.6 15.2 L18.5 15.4 Z" fill="#806b52" stroke="#51483d" strokeWidth="0.4" strokeLinejoin="round" />
+      <path d="M18.8 19.3 L16.9 20.2 L18.2 21.6 L21.1 21.8 L22 21.1 L20 20.1 Z" fill="#5c5041" stroke="#40392f" strokeWidth="0.45" strokeLinejoin="round" />
+
+      {/* The reaching arms converge in one visible supportive hand clasp.
+          A filled link is intentional: thin crossing strokes looked combative
+          at this scale. */}
+      <path d="M12.8 12.8 L14.6 12.5 L16.2 13.7 L17.4 14.3 L18.4 14.5 L18.1 15.5 L16.7 15.1 L15.3 14.3 L13.7 14.4 Z" fill="#66533e" stroke="#403a32" strokeWidth="0.55" strokeLinejoin="round" />
+      <path d="M17.2 14.1 L18.5 14.4 L18.9 15.2 L18.2 15.8 L17.4 15.3 L16.8 14.7 Z" fill="#b09168" stroke="#51483d" strokeWidth="0.45" strokeLinejoin="round" />
+      <path d="M18.25 14.85 L18.65 15.02" stroke="#ded0b6" strokeWidth="0.6" strokeLinecap="round" />
+
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+const STUDENT_SUHAY_HUSAY_2D_VERSION: "legacy" | "v2" = "v2";
+
+function StudentSuhayHusayDecorVisual(props: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  return STUDENT_SUHAY_HUSAY_2D_VERSION === "v2"
+    ? <StudentSuhayHusayDecorVisualV2 {...props} />
+    : <StudentSuhayHusayDecorVisualLegacy {...props} />;
+}
+
+export function OutdoorDecorVisual({ asset, gridSize, studentSuhayHusayLandmark = false, selectedLandmark = false }: { asset: CampusDecorAsset; gridSize?: number; studentSuhayHusayLandmark?: boolean; selectedLandmark?: boolean }) {
   if (isDecorAreaType(asset.type)) return <OutdoorGroundAreaVisual asset={asset} gridSize={gridSize} />;
   const descriptor = DECOR_ASSET_MAP[asset.type];
   if (!descriptor) return null;
+  if (studentSuhayHusayLandmark && asset.type === "monument") return <StudentSuhayHusayDecorVisual asset={asset} descriptor={descriptor} selected={selectedLandmark} />;
   // Admin's Canvas uses decorWorldSize/decorRenderScale for every regular
   // outdoor asset.  Reusing that calculation here preserves the published
   // authored footprint exactly; the previous native-size fallback made the
@@ -789,11 +875,13 @@ export interface ReadonlyOutdoorCampusSceneProps {
   reducedMotion?: boolean;
   /** Preview routable map-pick targets without exposing editor handles. */
   mapPickActive?: boolean;
+  /** Student-only landmark artwork override; Admin/Preview keep generic authored artwork. */
+  studentSuhayHusayLandmark?: boolean;
   emergencyMode?: boolean;
 }
 
 interface ReadonlyOutdoorArtworkLayerProps extends Pick<ReadonlyOutdoorCampusSceneProps,
-  "campus" | "zoom" | "showBuildings" | "showLabels" | "selectedBuildingId" | "onSelectBuilding" | "onDoubleClickBuilding" | "mapPickActive"> {}
+  "campus" | "zoom" | "showBuildings" | "showLabels" | "selectedBuildingId" | "selectedCampusPlaceId" | "onSelectBuilding" | "onDoubleClickBuilding" | "mapPickActive" | "studentSuhayHusayLandmark"> {}
 
 /** Heavy authored artwork is isolated from route progress and transition UI. */
 export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkLayer({
@@ -802,12 +890,17 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
   showBuildings = true,
   showLabels = true,
   selectedBuildingId,
+  selectedCampusPlaceId,
   mapPickActive = false,
+  studentSuhayHusayLandmark = false,
   onSelectBuilding,
   onDoubleClickBuilding,
 }: ReadonlyOutdoorArtworkLayerProps) {
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
   const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
+  const suhayHusayAssetId = studentSuhayHusayLandmark ? resolveSuhayHusayDecorAssetId(campus.decorAssets) : null;
+  const selectedPlace = campus.markers.find((marker) => marker.id === selectedCampusPlaceId);
+  const suhayHusaySelected = Boolean(selectedPlace && /suhay\s*(?:ng\s*)?husay/i.test(`${selectedPlace.id} ${selectedPlace.name} ${selectedPlace.type}`));
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
   if (showBuildings) {
     campus.buildings.forEach((building, index) => stack.push({ zOrder: effectiveStackKey("building", building.zOrder, index), order: index, node: <OutdoorBuildingVisual key={`building-${building.id}`} building={building} selected={selectedBuildingId === building.id} pickTarget={mapPickActive && Boolean(onSelectBuilding)} onSelect={onSelectBuilding} onDoubleClick={onDoubleClickBuilding} showName={zoom > 0.7 && building.name !== "New Building"} showFloorCount labelLayout="editor" showLabels={showLabels} bodyOpacity={0.82} /> }));
@@ -826,7 +919,7 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
     stack.push({
       zOrder: effectiveStackKey("decorAsset", asset.zOrder, index),
       order: index,
-      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} />,
+      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} studentSuhayHusayLandmark={asset.id === suhayHusayAssetId} selectedLandmark={asset.id === suhayHusayAssetId && suhayHusaySelected} />,
     });
   });
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);
@@ -923,6 +1016,8 @@ export const ReadonlyOutdoorCampusScene = memo(function ReadonlyOutdoorCampusSce
       showBuildings={props.showBuildings}
       showLabels={props.showLabels}
       selectedBuildingId={props.selectedBuildingId}
+      selectedCampusPlaceId={props.selectedCampusPlaceId}
+      studentSuhayHusayLandmark={props.studentSuhayHusayLandmark}
       mapPickActive={props.mapPickActive}
       onSelectBuilding={props.onSelectBuilding}
       onDoubleClickBuilding={props.onDoubleClickBuilding}

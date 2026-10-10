@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMocks = vi.hoisted(() => ({
@@ -70,5 +70,20 @@ describe("shared auth logout", () => {
     await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("unauthenticated:guest"));
     expect(authMocks.client.auth.signOut).toHaveBeenCalledTimes(1);
     expect(await authMocks.client.auth.getSession()).toEqual({ data: { session: null }, error: null });
+  });
+
+  it("coalesces the focus and visibility revalidation emitted when returning to a tab", async () => {
+    render(<AuthProvider><LogoutProbe /></AuthProvider>);
+    expect(await screen.findByText("authenticated:admin")).toBeInTheDocument();
+    authMocks.client.auth.getUser.mockResolvedValue({ data: { user: { id: "demo-admin-id" } }, error: null });
+
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(authMocks.client.auth.getUser).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("auth-state")).toHaveTextContent("authenticated:admin");
   });
 });

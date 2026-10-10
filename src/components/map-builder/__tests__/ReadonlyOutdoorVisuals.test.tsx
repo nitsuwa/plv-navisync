@@ -58,6 +58,28 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(treeArtwork).toHaveAttribute("height", "84");
   });
 
+  it("uses the dedicated Suhay Husay symbol only when Student landmark presentation is enabled", () => {
+    const landmarkCampus = {
+      ...campus,
+      markers: [{ id: "suhay-place", name: "Suhay Husay", type: "landmark", x: 460, y: 290, color: "#7c3aed" }],
+      decorAssets: [{ id: "suhay-statue", type: "monument", name: "Suhay Husay", x: 460, y: 290, scale: 1 }],
+    } as unknown as Campus;
+    const projected = projectReadonlyOutdoorCampus(landmarkCampus);
+
+    const admin = render(<svg><ReadonlyOutdoorCampusScene campus={projected} /></svg>);
+    expect(admin.getByTestId("readonly-decor")).toHaveAttribute("data-asset-id", "suhay-statue");
+    expect(admin.queryByTestId("student-suhay-husay-2d-symbol")).not.toBeInTheDocument();
+
+    admin.unmount();
+    render(<svg><ReadonlyOutdoorCampusScene campus={projected} studentSuhayHusayLandmark selectedCampusPlaceId="suhay-place" /></svg>);
+    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "suhay-statue");
+    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-version", "v2");
+    expect(screen.getByTestId("student-suhay-standing-silhouette")).toBeInTheDocument();
+    expect(screen.getByTestId("student-suhay-seated-silhouette")).toBeInTheDocument();
+    expect(screen.getByTestId("student-suhay-husay-selection-ring")).toBeInTheDocument();
+    expect(screen.queryByTestId("readonly-decor")).not.toBeInTheDocument();
+  });
+
   it("honors Admin ground-area stacking order in the read-only scene", () => {
     const parking = { id: "parking", type: "parking-lot" as const, groundType: "parking" as const, x: 200, y: 100, width: 220, height: 90, zOrder: 20 };
     const plaza = { id: "plaza", type: "plaza-area" as const, groundType: "plaza" as const, x: 200, y: 100, width: 220, height: 90, zOrder: 10 };

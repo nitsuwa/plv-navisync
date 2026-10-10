@@ -193,6 +193,24 @@ describe("ReadonlyFloorPlanScene", () => {
     expect(screen.getByTestId("readonly-floor-path").querySelector("polyline")).toHaveAttribute("stroke", "#c2410c");
   });
 
+  it("renders Admin-style renderer-only caps at student map wall junctions", () => {
+    const junctionFloor = {
+      ...floor,
+      showWallJunctions: true,
+      walls: [
+        { id: "horizontal", x1: 20, y1: 40, x2: 100, y2: 40, thickness: 6, color: "#334155" },
+        { id: "vertical", x1: 100, y1: 40, x2: 100, y2: 110, thickness: 6, color: "#334155" },
+      ],
+    } as FloorPlan;
+    render(<svg><ReadonlyFloorPlanScene floor={junctionFloor} /></svg>);
+
+    const joint = screen.getByTestId("readonly-wall-joint-cap");
+    expect(joint).toHaveAttribute("data-wall-joint-key", "100,40");
+    expect(joint).toHaveAttribute("data-wall-joint-wall-ids", "horizontal vertical");
+    expect(joint.querySelectorAll("rect")).toHaveLength(2);
+    expect(joint).toHaveAttribute("pointer-events", "none");
+  });
+
   it("highlights a selected irregular room above neighboring fills while preserving map details", () => {
     const view = render(<svg><ReadonlyFloorPlanScene floor={sharedVisualFloor} highlightedRoomId="lab-room" showLabels onRoomClick={() => undefined} /></svg>);
 

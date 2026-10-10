@@ -273,7 +273,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onExpand).toHaveBeenCalledOnce();
   });
 
-  it("starts guided navigation with a collapsed mobile sheet and expands on request", async () => {
+  it("starts guided navigation compact and opens the full panel in one tap", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
@@ -282,14 +282,16 @@ describe("RoutePlannerDialog student accessibility", () => {
         to: building("canteen", "CANT", "Canteen"),
         route: route(),
         phase: "navigating",
+        collapsed: true,
         navigationSteps: ["Start at Campus Gate.", "Follow the campus path toward the Canteen."],
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "collapsed"));
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
       await waitFor(() => expect(screen.getByTestId("mobile-route-collapsed-summary")).toBeInTheDocument());
       expect(screen.queryByTestId("guided-navigation-summary")).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Expand navigation panel" }));
       await waitFor(() => expect(screen.getByTestId("guided-navigation-summary")).toBeInTheDocument());
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -309,7 +311,7 @@ describe("RoutePlannerDialog student accessibility", () => {
         onStartNavigation,
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "collapsed"));
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
       await waitFor(() => expect(screen.getByTestId("mobile-route-preview-collapsed-summary")).toBeInTheDocument());
       expect(dialog.style.height).toBe("208px");
       expect(screen.queryByTestId("route-summary")).not.toBeInTheDocument();
@@ -317,6 +319,53 @@ describe("RoutePlannerDialog student accessibility", () => {
       expect(startNavigation).toBeVisible();
       fireEvent.click(startNavigation);
       expect(onStartNavigation).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("opens the content-sized mobile Route Preview in one tap", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: room("caba-101", "CABA-101", "caba"),
+        route: route(),
+        phase: "preview",
+      })} />);
+      const dialog = screen.getByTestId("route-planner-dialog");
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
+      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(screen.getByTestId("route-summary")).toBeInTheDocument();
+      expect(dialog.style.height).toBe("fit-content");
+      expect(screen.getByRole("button", { name: "Start Navigation" })).toBeVisible();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("shows contextual transition instructions and routes Continue to canonical activation", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onContinueTransition = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: room("caba-101", "CABA-101", "caba"),
+        route: route(),
+        phase: "navigating",
+        playbackPaused: true,
+        transitionAwaitingAction: true,
+        transitionPrompt: "You’re at Elevator 1. Tap the Elevator marker or press Continue to Floor 4.",
+        onContinueTransition,
+      })} />);
+      expect(screen.getByTestId("transition-wait-prompt")).toHaveTextContent("You’re at Elevator 1");
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(onContinueTransition).toHaveBeenCalledOnce();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -334,14 +383,14 @@ describe("RoutePlannerDialog student accessibility", () => {
       });
       const view = render(<RoutePlannerDialog {...props} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "normal"));
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
       view.rerender(<RoutePlannerDialog {...props} suspendedForFloorPicker />);
       await waitFor(() => expect(dialog).toHaveAttribute("data-suspended-for-floor-picker", "true"));
       expect(screen.getByTestId("route-planner-floor-picker-suspended")).toBeInTheDocument();
       expect(dialog).toHaveStyle({ height: "140px" });
       view.rerender(<RoutePlannerDialog {...props} suspendedForFloorPicker={false} />);
       await waitFor(() => expect(dialog).toHaveAttribute("data-suspended-for-floor-picker", "false"));
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "normal"));
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
       expect(screen.getByTestId("route-endpoint-card-start")).toBeInTheDocument();
       expect(screen.getByTestId("route-endpoint-card-destination")).toBeInTheDocument();
     } finally {
@@ -560,26 +609,26 @@ describe("RoutePlannerDialog student accessibility", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   });
 
-  it("snaps the mobile sheet between collapsed, normal, and expanded states", async () => {
+  it("snaps the mobile sheet between compact and expanded states", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     render(<RoutePlannerDialog {...plannerProps()} />);
     fireEvent(window, new Event("resize"));
 
     const handle = screen.getByRole("slider", { name: "Resize route planner" });
     const dialog = screen.getByRole("dialog", { name: "Route planner" });
-    expect(handle).toHaveAttribute("aria-valuenow", "374");
-    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "normal");
+    expect(handle).toHaveAttribute("aria-valuenow", "736");
+    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
 
     fireEvent.keyDown(handle, { key: "ArrowUp" });
     expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
     expect(handle).toHaveAttribute("aria-valuenow", "736");
 
     fireEvent.keyDown(handle, { key: "Home" });
-    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "collapsed");
+    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
     expect(handle).toHaveAttribute("aria-valuenow", "140");
     await waitFor(() => expect(screen.queryByTestId("route-planner-scroll-region")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "normal");
+    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
     fireEvent(window, new Event("resize"));
   });

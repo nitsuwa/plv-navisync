@@ -5,6 +5,7 @@ type ToastVariant = "success" | "error" | "warning" | "info" | "loading";
 interface ToastOptions {
   description?: string;
   duration?: number;
+  position?: "top-left" | "top-right" | "top-center" | "bottom-left" | "bottom-right" | "bottom-center";
   action?: {
     label: string;
     onClick: () => void;
@@ -17,13 +18,14 @@ export function useToast() {
     variant: ToastVariant = "info",
     options?: ToastOptions
   ) => {
-    const { description, duration = 4000, action } = options || {};
+    const { description, duration = 4000, action, position } = options || {};
 
     switch (variant) {
       case "success":
         toast.success(message, {
           description,
           duration,
+          position,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
           className: "font-semibold",
         });
@@ -32,6 +34,7 @@ export function useToast() {
         toast.error(message, {
           description,
           duration,
+          position,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
           className: "font-semibold",
         });
@@ -40,6 +43,7 @@ export function useToast() {
         toast.warning(message, {
           description,
           duration,
+          position,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
           className: "font-semibold",
         });
@@ -48,6 +52,7 @@ export function useToast() {
         toast.info(message, {
           description,
           duration,
+          position,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
           className: "font-semibold",
         });
@@ -56,6 +61,7 @@ export function useToast() {
         toast.loading(message, {
           description,
           duration,
+          position,
           className: "font-semibold",
         });
         break;
@@ -63,6 +69,7 @@ export function useToast() {
         toast(message, {
           description,
           duration,
+          position,
           action: action ? { label: action.label, onClick: action.onClick } : undefined,
           className: "font-semibold",
         });
