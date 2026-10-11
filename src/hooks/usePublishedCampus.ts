@@ -9,6 +9,9 @@ import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformS
 const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
 const RESUME_REFRESH_INTERVAL_MS = 15_000;
+const MIN_RESUME_REFRESH_ATTEMPT_MS = 60_000;
+const MAX_RESUME_REFRESH_BACKOFF_MS = 5 * 60_000;
+const MAX_AUTOMATIC_RESUME_RETRIES = 3;
 const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try again.";
 
 function sameCampusListingRevision(left: readonly Campus[], right: readonly Campus[]): boolean {
@@ -118,16 +121,20 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
   const hasCampusDataRef = useRef(campuses.length > 0);
   const lastGoodCampusesRef = useRef<Campus[]>(campuses);
   const fetchInFlightRef = useRef<Promise<void> | null>(null);
+  const lastResumeRefreshAtRef = useRef(0);
+  const resumeRefreshNotBeforeRef = useRef(0);
+  const consecutiveRefreshFailuresRef = useRef(0);
   const userIdRef = useRef(userId);
   const previousUserIdRef = useRef(userId);
   userIdRef.current = userId;
 
-  const fetchPublishedCampuses = useCallback((): Promise<void> => {
+  const fetchPublishedCampuses = useCallback((source: "initial" | "manual" | "resume" = "manual"): Promise<void> => {
     if (fetchInFlightRef.current) return fetchInFlightRef.current;
     // Keep a usable map on screen during background revalidation. The full
-    // loading state is reserved for the initial load or an empty map retry.
-    if (!hasCampusDataRef.current) setLoading(true);
-    setError(null);
+    // loading state is reserved for the initial load or an explicit retry.
+    // A resume refresh is silent if the previous attempt already failed.
+    if (!hasCampusDataRef.current && source !== "resume") setLoading(true);
+    if (source !== "resume") setError(null);
     const request = (async () => {
       try {
         const studentSettings = await settingsService.getPublicPlatformSettings();
@@ -184,6 +191,10 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           ? currentId
           : chooseInitialCampus(published, studentSettings, userIdRef.current)?.id ?? null);
         setIsCached(false);
+        setError(null);
+        consecutiveRefreshFailuresRef.current = 0;
+        resumeRefreshNotBeforeRef.current = 0;
+        lastResumeRefreshAtRef.current = Date.now();
 
         // Save to sessionStorage cache for offline / fallback
         if (published.length > 0) {
@@ -204,9 +215,17 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           hasCampusDataRef.current = true;
           setIsCached(true);
           setError(null);
-        } else {
+        } else if (source !== "resume") {
+          // Keep a prior finite error visible during silent resume retries,
+          // rather than swapping the error screen back to a fake loading state.
           setError(CAMPUS_LOAD_ERROR);
         }
+        consecutiveRefreshFailuresRef.current += 1;
+        const retryDelay = Math.min(
+          MIN_RESUME_REFRESH_ATTEMPT_MS * 2 ** (consecutiveRefreshFailuresRef.current - 1),
+          MAX_RESUME_REFRESH_BACKOFF_MS,
+        );
+        resumeRefreshNotBeforeRef.current = Date.now() + retryDelay;
       } finally {
         setLoading(false);
       }
@@ -231,7 +250,7 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       setIsCached(false);
       return;
     }
-    fetchPublishedCampuses();
+    fetchPublishedCampuses("initial");
   }, [fetchPublishedCampuses, previewCampus]);
 
   // Auth bootstrap may resolve after the public campus list is already visible.
@@ -255,7 +274,14 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       if (document.visibilityState === "visible") {
         const wasHiddenLongEnough = hiddenAt > 0 && Date.now() - hiddenAt >= RESUME_REFRESH_INTERVAL_MS;
         hiddenAt = 0;
-        if (wasHiddenLongEnough) void fetchPublishedCampuses();
+        const now = Date.now();
+        const resumeRefreshIsDue = now - lastResumeRefreshAtRef.current >= MIN_RESUME_REFRESH_ATTEMPT_MS
+          && now >= resumeRefreshNotBeforeRef.current
+          && consecutiveRefreshFailuresRef.current < MAX_AUTOMATIC_RESUME_RETRIES;
+        if (wasHiddenLongEnough && resumeRefreshIsDue) {
+          lastResumeRefreshAtRef.current = now;
+          void fetchPublishedCampuses("resume");
+        }
       } else {
         hiddenAt = Date.now();
       }
@@ -310,6 +336,6 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     error,
     isEmpty,
     isCached,
-    refetch: fetchPublishedCampuses,
+    refetch: () => fetchPublishedCampuses("manual"),
   };
 }

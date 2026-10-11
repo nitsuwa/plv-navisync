@@ -22,6 +22,7 @@ import {
   studentTransitionMarkerLodScale,
   studentIndoorSegmentForFloor,
   studentRouteStepInstruction,
+  studentRouteFloorLabel,
   studentRouteProgressForIndoorSegment,
   routeTransitionForStep,
   studentFacingRouteSteps,
@@ -284,6 +285,36 @@ describe("student route state flow", () => {
       kind: "elevator",
       detail: { fromFloorId: "coed-1", toFloorId: "coed-4" },
     });
+  });
+
+  it("uses published Floor labels instead of internal graph numbers in elevator guidance and route facts", () => {
+    const route: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: [
+        { buildingId: "coed", floorId: "coed-ground", floorNumber: 1, floorLabel: "Ground Floor", afterOutdoor: true, waypoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }], distanceM: 12, seconds: 8, steps: [{ id: "ground", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 12 }] },
+        { buildingId: "coed", floorId: "coed-stop", floorNumber: 3, floorLabel: "Floor 2", afterOutdoor: true, waypoints: [{ x: 1, y: 1 }], distanceM: 0, seconds: 0, steps: [{ id: "stop", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 0 }] },
+        { buildingId: "coed", floorId: "coed-destination", floorNumber: 4, floorLabel: "Floor 3", afterOutdoor: true, waypoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }], distanceM: 15, seconds: 9, steps: [{ id: "destination", icon: "walk", instruction: "Follow the indoor path to the door of COED 301.", distanceM: 15 }] },
+      ],
+      transitionDetails: [
+        { kind: "elevator", nodeId: "elevator-ground", label: "Elevator 1", fromFloorId: "coed-ground", toFloorId: "coed-stop", transitionSharedId: "coed-elevator", buildingId: "coed" },
+        { kind: "elevator", nodeId: "elevator-stop", label: "Elevator 1", fromFloorId: "coed-stop", toFloorId: "coed-destination", transitionSharedId: "coed-elevator", buildingId: "coed" },
+      ],
+      steps: [
+        { id: "start", icon: "start", instruction: "Start at COED 101." },
+        { id: "walk", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 12 },
+        { id: "elevator-ground", icon: "elevator", instruction: "Take Elevator 1 to Floor 2." },
+        { id: "walk-stop", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 0 },
+        { id: "elevator-stop", icon: "elevator", instruction: "Take Elevator 1 to Floor 4." },
+        { id: "destination-walk", icon: "walk", instruction: "Follow the indoor path to the door of COED 301.", distanceM: 15 },
+        { id: "arrive", icon: "arrive", instruction: "Arrive at COED 301." },
+      ],
+    };
+    const steps = studentFacingRouteSteps(route);
+
+    expect(steps.map((step) => step.instruction)).toContain("Take the Elevator 1 to Floor 3.");
+    expect(steps.map((step) => step.instruction)).not.toContain("Take the Elevator 1 to Floor 4.");
+    expect(studentRouteFacts(route, "best")).toContain("Ground Floor → Floor 3");
+    expect(studentRouteFloorLabel(route.indoorSegments?.[2])).toBe("Floor 3");
   });
 
   it("turns an emergency stair-to-Campus boundary into one actionable exit Step", () => {

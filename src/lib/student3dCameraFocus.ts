@@ -5,12 +5,12 @@ export interface Student3dFocusRect {
   height: number;
 }
 
-/** Find the center of the map area that remains visible around docked UI. */
-export function student3dSafeFocusCenter(
+/** Find the part of the map area that remains visible around docked UI. */
+export function student3dSafeFocusRect(
   map: Student3dFocusRect,
   overlays: readonly Student3dFocusRect[],
   margin = 12,
-): { x: number; y: number } {
+): Student3dFocusRect {
   let left = map.left + margin;
   let right = map.left + map.width - margin;
   let top = map.top + margin;
@@ -30,6 +30,14 @@ export function student3dSafeFocusCenter(
     // Mobile sheets and route cards take the bottom part of the map. Resolve
     // these first so a wide bottom sheet is not mistaken for a side rail.
     const mobileMap = map.width < 768;
+    // The compact utility rail is narrow, but still occupies the right edge.
+    // Classify it before the bottom-sheet rule when its last button reaches
+    // the canvas edge.
+    if (mobileMap && overlayRight >= map.left + map.width - edgeTolerance
+      && overlay.left > middleX && overlay.width < map.width * 0.2) {
+      right = Math.min(right, overlay.left - margin);
+      continue;
+    }
     if (mobileMap && overlayBottom >= map.top + map.height - edgeTolerance
       && overlay.top > middleY && overlay.height >= 96) {
       bottom = Math.min(bottom, overlay.top - margin);
@@ -66,7 +74,17 @@ export function student3dSafeFocusCenter(
     top = map.top + margin;
     bottom = map.top + map.height - margin;
   }
-  return { x: (left + right) / 2, y: (top + bottom) / 2 };
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+/** Find the center of the map area that remains visible around docked UI. */
+export function student3dSafeFocusCenter(
+  map: Student3dFocusRect,
+  overlays: readonly Student3dFocusRect[],
+  margin = 12,
+): { x: number; y: number } {
+  const safe = student3dSafeFocusRect(map, overlays, margin);
+  return { x: safe.left + safe.width / 2, y: safe.top + safe.height / 2 };
 }
 
 /** Perspective-camera distance that frames a world-space box with padding. */
@@ -88,4 +106,23 @@ export function student3dFocusDistance(
     Math.max(0.1, height) / (2 * halfVertical),
   ) * padding;
   return Math.max(min, Math.min(max, required));
+}
+
+/** Fit a world-space box inside an exposed pixel rectangle within the canvas. */
+export function student3dFocusDistanceForViewport(
+  width: number,
+  depth: number,
+  height: number,
+  verticalFovDegrees: number,
+  canvasHeight: number,
+  safeWidth: number,
+  safeHeight: number,
+  options: { padding?: number; min?: number; max?: number } = {},
+): number {
+  const safeCanvasHeight = Math.max(1, canvasHeight);
+  const heightRatio = Math.max(0.05, Math.min(1, safeHeight / safeCanvasHeight));
+  const halfFov = Math.tan((Math.max(1, Math.min(150, verticalFovDegrees)) * Math.PI / 180) / 2);
+  const safeFov = 2 * Math.atan(halfFov * heightRatio) * 180 / Math.PI;
+  const safeAspect = Math.max(1, safeWidth) / Math.max(1, safeHeight);
+  return student3dFocusDistance(width, depth, height, safeFov, safeAspect, options);
 }

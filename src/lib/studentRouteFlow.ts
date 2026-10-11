@@ -1,4 +1,4 @@
-import type { PlannedRoute, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
+import type { PlannedRoute, RouteContextHandoff, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
 import type { FloorPlan, NavigationNode } from "../components/map-builder/types";
 import { pointAlongPolyline } from "./geo";
 
@@ -9,6 +9,16 @@ export type StudentCameraMode = "follow" | "explore";
 export interface StudentRouteFocusTarget {
   context: "campus" | "floor";
   point: { x: number; y: number };
+}
+
+/** User-facing Floor name, preferring the published label over graph indices. */
+export function studentRouteFloorLabel(
+  segment?: Pick<RouteIndoorSegment, "floorNumber" | "floorLabel"> | null,
+  fallback = "the next Floor",
+): string {
+  if (!segment) return fallback;
+  return segment.floorLabel
+    || (segment.floorNumber === undefined ? fallback : segment.floorNumber === 1 ? "Ground Floor" : `Floor ${segment.floorNumber}`);
 }
 
 /** Resolve Recenter from the same route progress used by the moving marker. */
@@ -132,9 +142,7 @@ export function studentFacingRouteSteps(route: PlannedRoute): RouteStep[] {
       : -1;
     if (targetWalkIndex <= index + 1) return;
     for (let skipped = index + 1; skipped < targetWalkIndex; skipped += 1) hidden.add(skipped);
-    const targetFloor = targetSegment.floorNumber === undefined
-      ? "the connected Floor"
-      : targetSegment.floorNumber === 1 ? "Ground Floor" : `Floor ${targetSegment.floorNumber}`;
+    const targetFloor = studentRouteFloorLabel(targetSegment, "the connected Floor");
     const label = resolved.label.trim() || "elevator";
     authoredSteps[index] = {
       ...step,
@@ -322,11 +330,17 @@ export function routeTransitionForStep(
   route: PlannedRoute,
   steps: readonly RouteStep[],
   stepIndex: number,
-): { kind: StudentRouteTransitionKind; detail?: RouteTransitionDetail } | null {
+): { kind: StudentRouteTransitionKind; detail?: RouteTransitionDetail; handoff?: RouteContextHandoff } | null {
   const step = steps[stepIndex];
   if (!step) return null;
+  const handoff = step.contextHandoffIndex === undefined
+    ? undefined
+    : route.contextHandoffs?.[step.contextHandoffIndex];
   if (step.icon === "enter") {
-    return { kind: /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building" };
+    return {
+      kind: /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building",
+      ...(handoff ? { handoff } : {}),
+    };
   }
   if (step.icon !== "stairs" && step.icon !== "elevator") return null;
 
@@ -344,16 +358,16 @@ export function routeTransitionForStep(
   // Stair" on several Floors). Keep each one associated with its route-order
   // occurrence instead of repeatedly resolving the first identical label.
   if (orderedMatch && instruction.includes(orderedMatch.label.trim().toLocaleLowerCase())) {
-    return { kind, detail: resolveDirectElevatorTarget(route, orderedMatch) };
+    return { kind, detail: resolveDirectElevatorTarget(route, orderedMatch), ...(handoff ? { handoff } : {}) };
   }
-  if (namedMatches.length === 1) return { kind, detail: resolveDirectElevatorTarget(route, namedMatches[0]) };
+  if (namedMatches.length === 1) return { kind, detail: resolveDirectElevatorTarget(route, namedMatches[0]), ...(handoff ? { handoff } : {}) };
   if (namedMatches.length > 1) {
     const orderedNamedMatch = namedMatches.find((detail) => detail.nodeId === orderedMatch?.nodeId);
-    if (orderedNamedMatch) return { kind, detail: resolveDirectElevatorTarget(route, orderedNamedMatch) };
+    if (orderedNamedMatch) return { kind, detail: resolveDirectElevatorTarget(route, orderedNamedMatch), ...(handoff ? { handoff } : {}) };
   }
   // Legacy instructions may omit an authored marker label. Preserve route
   // order so repeated stairs/elevators still resolve to their correct shaft.
-  return { kind, ...(orderedMatch ? { detail: resolveDirectElevatorTarget(route, orderedMatch) } : {}) };
+  return { kind, ...(orderedMatch ? { detail: resolveDirectElevatorTarget(route, orderedMatch) } : {}), ...(handoff ? { handoff } : {}) };
 }
 
 /** Collapse zero-walk intermediate stops when the same authored elevator
@@ -556,9 +570,13 @@ export function studentRouteTransitionCues(
       const isExit = transition.kind === "exit_building";
       let point: { x: number; y: number } | undefined;
       if (!isExit && context.kind === "campus") {
-        point = campusPoints.at(-1);
+        point = transition.handoff?.sourcePoint
+          ?? (source.contextLegIndex === undefined ? undefined : route.contextLegs?.[source.contextLegIndex]?.waypoints.at(-1))
+          ?? campusPoints.at(-1);
       } else {
-        point = isExit && context.kind === "floor" ? source.segment?.waypoints.at(-1) : undefined;
+        point = isExit && context.kind === "floor"
+          ? transition.handoff?.sourcePoint ?? source.segment?.waypoints.at(-1)
+          : undefined;
       }
       if (point) cues.push({ id: step.id, kind: transition.kind, label: step.instruction, point });
       return;
@@ -591,6 +609,7 @@ export interface StudentRouteSeekTarget {
   phase: "outdoor" | "origin-indoor" | "destination-indoor";
   segment: RouteIndoorSegment | null;
   segmentIndex: number;
+  contextLegIndex?: number;
   /** Progress within the selected authored segment; walking steps begin at 0. */
   segmentProgress: number;
   /** Canonical progress on the outdoor route, used when the selected context is Campus. */
@@ -619,6 +638,27 @@ export function studentRouteSeekTarget(
 ): StudentRouteSeekTarget {
   const safeIndex = Math.max(0, Math.min(steps.length - 1, stepIndex));
   const indoorSegments = route.indoorSegments ?? [];
+  const authoredLegs = route.contextLegs;
+  const authoredLegIndex = steps[safeIndex]?.contextLegIndex;
+  if (authoredLegs && authoredLegIndex !== undefined) {
+    const leg = authoredLegs[authoredLegIndex];
+    if (leg) {
+      const segment = leg.kind === "floor" && leg.segmentIndex !== undefined
+        ? indoorSegments[leg.segmentIndex] ?? null
+        : null;
+      const step = steps[safeIndex];
+      const atEnd = step.icon !== "walk" && step.icon !== "start";
+      return {
+        context: leg.kind,
+        phase: leg.kind === "campus" ? "outdoor" : segment?.afterOutdoor ? "destination-indoor" : "origin-indoor",
+        segment,
+        segmentIndex: segment ? leg.segmentIndex! : -1,
+        contextLegIndex: authoredLegIndex,
+        segmentProgress: atEnd ? 1 : 0,
+        routeProgress: atEnd ? 1 : 0,
+      };
+    }
+  }
   const walkStepIndexes = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
   const explicitCampusWalkOrdinal = walkStepIndexes.findIndex((index) => /\bcampus path\b/i.test(steps[index]?.instruction ?? ""));
   // Authored itinerary order is the order in which the planner emitted the
@@ -735,7 +775,8 @@ export function studentRoutePlaybackTarget(
   const to = studentRouteSeekTarget(route, steps, toIndex);
   const sameLeg = from.context === to.context
     && from.phase === to.phase
-    && from.segmentIndex === to.segmentIndex;
+    && from.segmentIndex === to.segmentIndex
+    && from.contextLegIndex === to.contextLegIndex;
   if (!sameLeg) return { ...(fraction < 0.5 ? from : to), position: bounded };
   return {
     ...from,
@@ -753,12 +794,15 @@ export function studentRoutePositionForLeg(
   segment: RouteIndoorSegment | null,
   progress: number,
   currentPosition = 0,
+  contextLegIndex?: number,
 ): number {
   const walkIndices = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
   const matchingWalks: number[] = [];
   for (const stepIndex of walkIndices) {
     const target = studentRouteSeekTarget(route, steps, stepIndex);
-    if (target.phase === phase && target.segmentIndex === (segment ? (route.indoorSegments ?? []).indexOf(segment) : -1)) {
+    if (target.phase === phase
+      && target.segmentIndex === (segment ? (route.indoorSegments ?? []).indexOf(segment) : -1)
+      && (contextLegIndex === undefined || target.contextLegIndex === contextLegIndex)) {
       matchingWalks.push(stepIndex);
     }
   }
@@ -806,10 +850,12 @@ export function studentRouteFacts(route: PlannedRoute, preference: "best" | "sta
   if (transitions.length === 0 && route.transitions.some((label) => /elevator/i.test(label))) facts.push("Elevator");
   if (transitions.length === 0 && route.transitions.some((label) => /stairs?/i.test(label))) facts.push("Stairs");
 
-  const entries = route.steps.filter((step) => step.icon === "enter").length;
+  const entries = route.steps.filter((step) => step.icon === "enter" && !/^\s*exit\b/i.test(step.instruction)).length;
   if (entries > 0) facts.push(`${entries} building ${entries === 1 ? "entry" : "entries"}`);
-  const floors = [...new Set(indoorSegments.map((segment) => segment.floorNumber).filter((value): value is number => Number.isFinite(value)))];
-  if (floors.length > 1) facts.push(`Floor ${floors[0]} → Floor ${floors[floors.length - 1]}`);
+  const floors = [...new Set(indoorSegments.map((segment) => segment.floorLabel
+    || (segment.floorNumber === undefined ? undefined : `Floor ${segment.floorNumber}`))
+    .filter((value): value is string => Boolean(value)))];
+  if (floors.length > 1) facts.push(`${floors[0]} → ${floors[floors.length - 1]}`);
   if (route.mode === "accessible") facts.push("Accessible");
   else if (route.mode === "emergency") facts.push("Emergency route");
   else if (preference !== "best") facts.push(preference === "stairs" ? "Prefers stairs" : "Prefers elevator");

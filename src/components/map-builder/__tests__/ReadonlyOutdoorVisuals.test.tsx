@@ -73,9 +73,14 @@ describe("ReadonlyOutdoorCampusScene", () => {
     admin.unmount();
     render(<svg><ReadonlyOutdoorCampusScene campus={projected} studentSuhayHusayLandmark selectedCampusPlaceId="suhay-place" /></svg>);
     expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "suhay-statue");
-    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-version", "v2");
+      expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-version", "v13");
     expect(screen.getByTestId("student-suhay-standing-silhouette")).toBeInTheDocument();
     expect(screen.getByTestId("student-suhay-seated-silhouette")).toBeInTheDocument();
+    expect(screen.getByTestId("student-suhay-standing-silhouette").querySelector("path")).toBeInTheDocument();
+    expect(screen.getByTestId("student-suhay-seated-silhouette").querySelector("path")).toBeInTheDocument();
+    const suhaySymbol = screen.getByTestId("student-suhay-husay-2d-symbol");
+      expect(suhaySymbol.querySelectorAll("path")).toHaveLength(12);
+    expect(suhaySymbol.querySelectorAll("circle")).toHaveLength(0);
     expect(screen.getByTestId("student-suhay-husay-selection-ring")).toBeInTheDocument();
     expect(screen.queryByTestId("readonly-decor")).not.toBeInTheDocument();
   });

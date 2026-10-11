@@ -27,6 +27,7 @@ import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
 import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
 import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
+import { SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, suhayHusaySymbolPath, suhayHusaySymbolPoint, suhayHusayV6SymbolPoint, suhayHusayV7SymbolPoint, suhayHusayV8SymbolPoint, suhayHusayV9SymbolPoint, suhayHusayV10SymbolPoint, suhayHusayV11SymbolPoint, type SuhayPointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
@@ -760,12 +761,577 @@ function StudentSuhayHusayDecorVisualV2({ asset, descriptor, selected = false }:
   </g>;
 }
 
-const STUDENT_SUHAY_HUSAY_2D_VERSION: "legacy" | "v2" = "v2";
+function suhayHusaySymbolLimbPath(from: readonly number[], to: readonly number[], radius: number): string {
+  const [ax, ay] = suhayHusaySymbolPoint(from);
+  const [bx, by] = suhayHusaySymbolPoint(to);
+  const dx = bx - ax;
+  const dy = by - ay;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  const nx = (-dy / length) * radius * 20;
+  const ny = (dx / length) * radius * 15;
+  return suhayHusaySymbolPath([
+    [(ax - 16 + nx) / 20, (28 - (ay + ny)) / 15],
+    [(bx - 16 + nx) / 20, (28 - (by + ny)) / 15],
+    [(bx - 16 - nx) / 20, (28 - (by - ny)) / 15],
+    [(ax - 16 - nx) / 20, (28 - (ay - ny)) / 15],
+  ]);
+}
+
+/** V3 uses the same joint anchors as the 3D sculpture, projected into a small
+ * filled-polygon emblem. No line-and-circle stick-figure construction. */
+function StudentSuhayHusayDecorVisualV3({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const p = (name: SuhayPointName) => SUHAY_HUSAY_V3_POINTS[name];
+  const offset = (name: SuhayPointName, dx: number, dy: number): number[] => [p(name)[0] + dx, p(name)[1] + dy];
+  const shape = (points: readonly (readonly number[])[]) => suhayHusaySymbolPath(points);
+  const limbPath = (from: SuhayPointName, to: SuhayPointName, radius: number) => suhayHusaySymbolLimbPath(p(from), p(to), radius);
+  const rockTones: Record<string, string> = { dark: "#414442", mid: "#575851", light: "#777269" };
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v3" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+    style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.09)" stroke="#2563eb" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />}
+
+      {/* Faceted rising outcrop: the planted feet and seated body grow from
+          one irregular stone silhouette rather than a flat box pedestal. */}
+      <path d={suhayHusaySymbolPath([[-0.64, 0.04], [-0.56, 0.2], [-0.45, 0.18], [-0.35, 0.45], [-0.17, 0.34], [0.03, 0.59], [0.27, 0.35], [0.43, 0.48], [0.58, 0.16], [0.65, 0.04]])} fill="#494b48" stroke="#343735" strokeWidth="0.65" strokeLinejoin="round" />
+      {SUHAY_HUSAY_V3_ROCKS.map((rock, index) => {
+        const [cx, cy] = suhayHusaySymbolPoint(rock.position);
+        const rx = rock.scale[0] * 20;
+        const ry = rock.scale[1] * 15;
+        const points = [
+          [cx - rx * 0.88, cy + ry * 0.34], [cx - rx * 0.72, cy - ry * 0.42],
+          [cx - rx * 0.14, cy - ry * 0.95], [cx + rx * 0.62, cy - ry * 0.38],
+          [cx + rx * 0.9, cy + ry * 0.52], [cx + rx * 0.08, cy + ry * 0.88],
+        ].map(([x, y]) => [(x - 16) / 20, (28 - y) / 15]);
+        return <path key={rock.id} d={suhayHusaySymbolPath(points)} fill={rockTones[rock.tone]} stroke="#383a38" strokeWidth="0.35" strokeLinejoin="round" opacity={index === 3 ? 0.88 : 1} />;
+      })}
+
+      {/* Upper figure: two separated, substantial legs enclose the lower
+          person. The long torso leans back and the angular head tips skyward. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        <path d={shape([offset("upperFootLeft", -0.1, -0.035), offset("upperFootLeft", 0.09, -0.03), offset("upperKneeLeft", 0.075, 0.02), offset("upperHipLeft", 0.07, 0.02), offset("upperPelvis", -0.13, -0.02), offset("upperHipLeft", -0.075, -0.03), offset("upperKneeLeft", -0.075, -0.025)])} fill="#414442" stroke="#2f3231" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape([offset("upperFootRight", -0.09, -0.03), offset("upperFootRight", 0.1, -0.035), offset("upperKneeRight", 0.075, -0.025), offset("upperHipRight", 0.07, -0.03), offset("upperPelvis", 0.15, -0.02), offset("upperHipRight", -0.07, 0.02), offset("upperKneeRight", -0.075, 0.02)])} fill="#4b4b47" stroke="#2f3231" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape([offset("upperPelvis", -0.14, -0.04), offset("upperPelvis", 0.13, -0.04), offset("upperShoulderRight", 0.08, 0.025), offset("upperShoulderRight", 0.035, 0.095), offset("upperShoulderLeft", -0.045, 0.095), offset("upperShoulderLeft", -0.055, 0.025)])} fill="#55534d" stroke="#383a38" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d={shape([offset("upperNeck", -0.08, -0.02), offset("upperNeck", 0.06, -0.03), offset("upperHead", 0.07, -0.035), offset("upperHead", 0.08, 0.025), offset("upperHead", 0.02, 0.095), offset("upperHead", -0.055, 0.06), offset("upperHead", -0.09, 0.01)])} fill="#484947" stroke="#343735" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape([offset("upperHead", -0.09, 0.01), offset("upperHead", -0.055, 0.06), offset("upperHead", 0.02, 0.095), offset("upperHead", 0.08, 0.025), offset("upperHead", 0.035, -0.045), offset("upperHead", -0.035, -0.08)])} fill="#5c5a52" stroke="#343735" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape([offset("upperShoulderLeft", -0.04, 0.01), offset("upperShoulderLeft", 0.07, -0.025), offset("upperElbowLeft", 0.05, 0.015), offset("upperElbowLeft", -0.04, -0.02)])} fill="#55534d" stroke="#383a38" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape([offset("upperShoulderRight", -0.04, 0.015), offset("upperShoulderRight", 0.04, -0.02), offset("upperElbowRight", 0.045, 0.02), offset("upperElbowRight", -0.04, -0.015)])} fill="#4b4b47" stroke="#383a38" strokeWidth="0.38" strokeLinejoin="round" />
+      </g>
+
+      {/* Lower figure is layered in front of the standing legs: folded thighs
+          and shins rest on stone while the torso and face rise toward the clasp. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        <path d={shape([offset("lowerHipRight", -0.06, 0.01), offset("lowerKneeRight", -0.055, 0.035), offset("lowerFootRight", 0.055, 0.025), offset("lowerFootRight", 0.075, 0.105), offset("lowerKneeRight", 0.035, 0.1), offset("lowerPelvis", 0.07, 0.045)])} fill="#4a4b47" stroke="#303332" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape([offset("lowerPelvis", -0.07, 0.05), offset("lowerHipLeft", -0.05, 0.01), offset("lowerKneeLeft", 0.045, 0.02), offset("lowerFootLeft", 0.07, 0.025), offset("lowerFootLeft", -0.05, 0.1), offset("lowerKneeLeft", -0.04, 0.08)])} fill="#414442" stroke="#303332" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape([offset("lowerPelvis", -0.14, -0.04), offset("lowerPelvis", 0.14, -0.04), offset("lowerChest", 0.1, 0.02), offset("lowerShoulderRight", 0.05, 0.055), offset("lowerShoulderLeft", -0.06, 0.055), offset("lowerChest", -0.11, 0.02)])} fill="#56554f" stroke="#343735" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d={shape([offset("lowerNeck", -0.05, -0.015), offset("lowerNeck", 0.055, -0.02), offset("lowerHead", 0.075, -0.02), offset("lowerHead", 0.075, 0.025), offset("lowerHead", 0.01, 0.085), offset("lowerHead", -0.06, 0.055), offset("lowerHead", -0.08, 0.005)])} fill="#484947" stroke="#343735" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape([offset("lowerShoulderLeft", -0.04, 0.025), offset("lowerShoulderLeft", 0.04, -0.035), offset("lowerElbowLeft", 0.04, 0.015), offset("lowerElbowLeft", -0.035, -0.02)])} fill="#55534d" stroke="#343735" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape([offset("lowerShoulderRight", -0.04, 0.025), offset("lowerShoulderRight", 0.04, -0.035), offset("lowerElbowRight", 0.04, 0.015), offset("lowerElbowRight", -0.035, -0.02)])} fill="#55534d" stroke="#383a38" strokeWidth="0.34" strokeLinejoin="round" />
+      </g>
+
+      {/* A pair of raised, solid polygonal reaches meet hand-to-hand. */}
+      <path d={limbPath("upperShoulderLeft", "upperElbowLeft", 0.048)} fill="#55534d" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("upperElbowLeft", "claspLeft", 0.043)} fill="#4b4b47" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("upperShoulderRight", "upperElbowRight", 0.048)} fill="#4b4b47" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("upperElbowRight", "claspRight", 0.043)} fill="#55534d" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("lowerShoulderLeft", "lowerElbowLeft", 0.043)} fill="#5c5a52" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("lowerElbowLeft", "claspLeft", 0.04)} fill="#55534d" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("lowerShoulderRight", "lowerElbowRight", 0.043)} fill="#55534d" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbPath("lowerElbowRight", "claspRight", 0.04)} fill="#4b4b47" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />
+      {(["claspLeft", "claspRight"] as const).map((name, index) => {
+        const [x, y] = suhayHusaySymbolPoint(p(name));
+        return <path key={name} d={index === 0 ? `M${x - 1.05} ${y - 0.55} L${x + 0.45} ${y - 0.85} L${x + 1.05} ${y + 0.35} L${x - 0.45} ${y + 0.9} Z` : `M${x - 0.9} ${y - 0.65} L${x + 0.65} ${y - 0.75} L${x + 1} ${y + 0.5} L${x - 0.5} ${y + 0.8} Z`} fill="#716858" stroke="#343735" strokeWidth="0.35" strokeLinejoin="round" />;
+      })}
+
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V4 keeps the 2D symbol deliberately spare: one clear plinth, a unified
+ * angular outcrop, an open standing stance, and a seated figure in its center. */
+function StudentSuhayHusayDecorVisualV4({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v4" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+    style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.09)" stroke="#2563eb" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />}
+
+      {/* A low, organized rock shoulder sits behind a formal stone plinth. */}
+      <path d="M4.9 24.7 L7.4 22.6 L10.2 19.7 L12.7 21 L15.8 18.3 L18.5 20.3 L21 19.5 L25.4 22.7 L27.1 24.7 Z" fill="#5d5a53" stroke="#383a38" strokeWidth="0.55" strokeLinejoin="round" />
+      <path d="M9.1 23.6 L12.7 21 L14.2 24.7 L7.2 24.7 Z" fill="#716d63" />
+      <path d="M17.1 24.7 L18.5 20.3 L22.5 22.1 L25.4 24.7 Z" fill="#494b49" />
+      <path d="M5.4 24.8 L26.6 24.8 L23.6 28.6 L8.3 28.6 Z" fill="#484946" stroke="#343735" strokeWidth="0.7" strokeLinejoin="round" />
+      <path d="M4.6 24.5 L27.4 24.5 L26.6 25.2 L5.4 25.2 Z" fill="#89857b" stroke="#494a47" strokeWidth="0.55" strokeLinejoin="round" />
+
+      {/* Standing figure. Its raised head, backward-leaning trunk, and two
+          separated legs are one unmistakable upward-reaching silhouette. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        <path d="M11.8 13.9 L14.1 14.2 L12.6 18.3 L10.2 23.7 L8.2 24 L9.1 21.5 L10.6 17.2 Z" fill="#474640" stroke="#302f2c" strokeWidth="0.45" strokeLinejoin="round" />
+        <path d="M14.8 14.1 L17 13.8 L18.4 17.4 L21.5 22.6 L20.2 24 L18.2 22.8 L15.9 19.2 L14.3 17 Z" fill="#514c43" stroke="#302f2c" strokeWidth="0.45" strokeLinejoin="round" />
+        <path d="M12.2 7.2 L15.4 7.9 L17 13.5 L15.8 15.6 L13 15 L11.9 10.5 Z" fill="#5a544a" stroke="#34332f" strokeWidth="0.48" strokeLinejoin="round" />
+        <path d="M12.2 7.7 L13.6 7.3 L11.9 5.4 L10.8 5.1 L10.4 5.8 Z" fill="#776b58" stroke="#34332f" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d="M9.1 3.7 L10.2 3.1 L11.5 3.7 L11.8 4.6 L10.8 5.3 L9.5 4.8 Z" fill="#514b42" stroke="#302f2c" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d="M12.7 8 L13.7 7.8 L17 9.8 L19.5 13.3 L20.4 14 L19.4 15 L18.1 14.2 L15.7 11 L13 9.5 Z" fill="#62594c" stroke="#34332f" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d="M15 8.8 L16.1 8.7 L18.4 10.8 L20.2 13.5 L20.7 14.7 L19.5 15.1 L18.5 13.1 L16.9 11.4 Z" fill="#514b42" stroke="#34332f" strokeWidth="0.38" strokeLinejoin="round" />
+      </g>
+
+      {/* Lower figure, clearly below and between the standing legs: a lifted
+          chest over folded legs, with both forearms joining the same hands. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        <path d="M16.5 19.4 L15.1 20.4 L13.3 22.3 L14.6 23.4 L17.3 22.6 L18.2 21.1 Z" fill="#625846" stroke="#34332f" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d="M17.5 19.5 L19.4 20.1 L21 22.1 L20 23.4 L18 22.7 L16.9 21.4 Z" fill="#514b42" stroke="#34332f" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d="M16 17.7 L16.6 16.1 L18.1 15.9 L19.7 17 L19.4 19.9 L17.2 20.7 L15.9 19.2 Z" fill="#776a56" stroke="#34332f" strokeWidth="0.45" strokeLinejoin="round" />
+        <path d="M17.6 14.5 L18.8 13.9 L20 14.5 L20.1 15.5 L19.2 16.1 L18 15.7 Z" fill="#5a5145" stroke="#34332f" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d="M16.1 16.8 L17 15.9 L18.8 14.6 L19.7 14.1 L20.3 14.9 L19.1 15.8 L17.9 17.5 Z" fill="#80715a" stroke="#34332f" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d="M18 17 L18.8 16.1 L19.9 14.8 L20.7 14.9 L20.3 16.2 L19 17.8 Z" fill="#695e4e" stroke="#34332f" strokeWidth="0.36" strokeLinejoin="round" />
+      </g>
+      <path d="M19.2 13.8 L20 13.6 L20.7 14.3 L20.1 15 L19.3 14.9 L18.9 14.3 Z" fill="#a18b6c" stroke="#443c31" strokeWidth="0.35" strokeLinejoin="round" />
+
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V5 uses one calm, angular silhouette: the standing figure rises on the
+ * left, the folded figure rests low on the right, and their four forearms
+ * meet at the same anchors used by the 3D model. */
+function StudentSuhayHusayDecorVisualV5({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const p = (name: SuhayV5PointName) => SUHAY_HUSAY_V5_POINTS[name];
+  const offset = (name: SuhayV5PointName, dx: number, dy: number): number[] => [p(name)[0] + dx, p(name)[1] + dy];
+  const shape = (points: readonly (readonly number[])[]) => suhayHusaySymbolPath(points);
+  const limb = (from: SuhayV5PointName, to: SuhayV5PointName, radius: number) => suhayHusaySymbolLimbPath(p(from), p(to), radius);
+  const limbGroup = (ids: readonly string[]) => ids.map((id) => {
+    const item = SUHAY_HUSAY_V5_LIMBS.find((part) => part.id === id)!;
+    return limb(item.from, item.to, item.radius);
+  }).join(" ");
+  const angularHead = (name: "upperHead" | "lowerHead", scaleX: number, scaleY: number) => {
+    const [x, y] = p(name);
+    return shape([
+      [x - scaleX * 0.75, y - scaleY * 0.2], [x - scaleX * 0.28, y - scaleY],
+      [x + scaleX * 0.56, y - scaleY * 0.76], [x + scaleX, y - scaleY * 0.04],
+      [x + scaleX * 0.48, y + scaleY * 0.7], [x - scaleX * 0.35, y + scaleY * 0.58],
+    ]);
+  };
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v5" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.08)" stroke="#2563eb" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />}
+
+      {/* Unified rock shoulder and a clean beveled pedestal, not loose stones. */}
+      <path d={shape([[-0.72, 0.14], [-0.65, 0.36], [-0.46, 0.31], [-0.3, 0.63], [-0.1, 0.46], [0.08, 0.59], [0.29, 0.36], [0.47, 0.43], [0.67, 0.2], [0.72, 0.14]])} fill="#555752" stroke="#343835" strokeWidth="0.52" strokeLinejoin="round" />
+      <path d={shape([[-0.65, 0.15], [-0.46, 0.31], [-0.3, 0.63], [-0.18, 0.18]])} fill="#6a6b63" />
+      <path d={shape([[-0.1, 0.46], [0.08, 0.59], [0.29, 0.36], [0.19, 0.15]])} fill="#454844" />
+      <path d={shape([[-0.7, 0.13], [0.7, 0.13], [0.54, -0.035], [-0.54, -0.035]])} fill="#494c49" stroke="#333735" strokeWidth="0.58" strokeLinejoin="round" />
+      <path d={shape([[-0.73, 0.15], [0.73, 0.15], [0.68, 0.1], [-0.68, 0.1]])} fill="#858176" stroke="#494b47" strokeWidth="0.42" strokeLinejoin="round" />
+
+      {/* Standing figure on the CABA/left side; the separated legs leave a
+          readable opening and the angular head tips toward the sky. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        <path d={limbGroup(["upper-left-shin", "upper-right-shin"])} fill="#3b3d3b" stroke="#303331" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d={limbGroup(["upper-left-thigh", "upper-right-thigh"])} fill="#4e4d47" stroke="#303331" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d={shape([offset("upperPelvis", -0.18, -0.07), offset("upperHipRight", 0.02, 0), offset("upperShoulderRight", 0.08, -0.05), offset("upperShoulderRight", 0.055, 0.055), offset("upperShoulderLeft", -0.05, 0.06), offset("upperChest", -0.11, 0.04), offset("upperPelvis", -0.1, 0.08)])} fill="#57564f" stroke="#333532" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d={limb("upperChest", "upperNeck", 0.075)} fill="#666157" stroke="#383a37" strokeWidth="0.34" strokeLinejoin="round" />
+        <path d={angularHead("upperHead", 0.12, 0.145)} fill="#494a46" stroke="#2f3331" strokeWidth="0.42" strokeLinejoin="round" />
+      </g>
+
+      {/* Right-side figure has folded knees and feet grounded on the stone. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        <path d={limbGroup(["lower-left-thigh", "lower-right-thigh"])} fill="#625b50" stroke="#343532" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d={limbGroup(["lower-left-shin", "lower-right-shin"])} fill="#41423e" stroke="#343532" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d={shape([offset("lowerPelvis", -0.12, -0.02), offset("lowerPelvis", 0.11, -0.03), offset("lowerChest", 0.1, 0.03), offset("lowerShoulderRight", 0.05, 0.07), offset("lowerShoulderLeft", -0.06, 0.06), offset("lowerChest", -0.11, 0.04)])} fill="#6a6255" stroke="#373833" strokeWidth="0.42" strokeLinejoin="round" />
+        <path d={limb("lowerChest", "lowerNeck", 0.056)} fill="#817564" stroke="#393a36" strokeWidth="0.32" strokeLinejoin="round" />
+        <path d={angularHead("lowerHead", 0.096, 0.105)} fill="#514c43" stroke="#313431" strokeWidth="0.38" strokeLinejoin="round" />
+      </g>
+
+      {/* Four solid forearms meet at two small joined hands above the lower
+          figure. They read as a clasp instead of crossing combat lines. */}
+      <path d={limbGroup(["upper-left-arm", "upper-left-forearm", "upper-right-arm", "upper-right-forearm"])} fill="#57554d" stroke="#333532" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={limbGroup(["lower-left-arm", "lower-left-forearm", "lower-right-arm", "lower-right-forearm"])} fill="#716858" stroke="#383935" strokeWidth="0.35" strokeLinejoin="round" />
+      <path d={(["claspLeft", "claspRight"] as const).map((name) => {
+        const [x, y] = suhayHusaySymbolPoint(p(name));
+        return `M${x - 0.68} ${y} L${x} ${y - 0.78} L${x + 0.72} ${y} L${x} ${y + 0.78} Z`;
+      }).join(" ")} fill="#98876b" stroke="#403d35" strokeWidth="0.32" strokeLinejoin="round" />
+
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V6 is a compact, clean side-profile icon. Its filled shapes match the 3D
+ * sculpture's normalized pose and avoid the thin crossed strokes that read as
+ * fighting stick figures at campus-map scale. */
+function StudentSuhayHusayDecorVisualV6({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shape = (name: SuhayV6ShapeName) => SUHAY_HUSAY_V6_SHAPES[name].map(([x, y], index) => {
+    const [sx, sy] = suhayHusayV6SymbolPoint([x, y]);
+    return `${index === 0 ? "M" : "L"}${sx.toFixed(2)} ${sy.toFixed(2)}`;
+  }).join(" ") + " Z";
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v6" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.07)" stroke="#2563eb" strokeWidth="1.15" vectorEffect="non-scaling-stroke" />}
+
+      {/* One formal tapered stone pedestal and one faceted rock shoulder. */}
+      <path data-testid="student-suhay-v6-pedestal" d={shape("pedestal")} fill="#555a57" stroke="#343936" strokeWidth="0.58" strokeLinejoin="round" />
+      <path d={shape("pedestalFacet")} fill="#73776f" stroke="#454a46" strokeWidth="0.28" strokeLinejoin="round" />
+      <path data-testid="student-suhay-v6-outcrop" d={shape("outcrop")} fill="#444a47" stroke="#313634" strokeWidth="0.5" strokeLinejoin="round" />
+      <path d={shape("outcropFacet")} fill="#656b64" stroke="#414641" strokeWidth="0.24" strokeLinejoin="round" />
+
+      {/* Standing figure to the left: distinct planted legs, upright mass and
+          an unmistakable upward arm/head silhouette. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        <path d={shape("standingLeftLeg")} fill="#424946" stroke="#303633" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape("standingRightLeg")} fill="#4d5450" stroke="#303633" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape("standingRaisedArm")} fill="#5b635d" stroke="#353c38" strokeWidth="0.34" strokeLinejoin="round" />
+        <path d={shape("standingTorso")} fill="#565d59" stroke="#333a37" strokeWidth="0.4" strokeLinejoin="round" />
+        <path d={shape("standingNeck")} fill="#686e67" stroke="#373d39" strokeWidth="0.3" strokeLinejoin="round" />
+        <path d={shape("standingHead")} fill="#4d5450" stroke="#303633" strokeWidth="0.36" strokeLinejoin="round" />
+      </g>
+
+      {/* Lower person sits/reclines on the right with folded legs and a lifted
+          torso. The reaching arm joins the standing figure's lower hand. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        <path d={shape("lowerRaisedThigh")} fill="#77796f" stroke="#363b37" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape("lowerBentShin")} fill="#686f67" stroke="#363b37" strokeWidth="0.36" strokeLinejoin="round" />
+        <path d={shape("lowerTuckedLeg")} fill="#5f665e" stroke="#363b37" strokeWidth="0.34" strokeLinejoin="round" />
+        <path d={shape("lowerTorso")} fill="#89897d" stroke="#3b403c" strokeWidth="0.38" strokeLinejoin="round" />
+        <path d={shape("lowerHead")} fill="#747a72" stroke="#353a37" strokeWidth="0.34" strokeLinejoin="round" />
+        <path d={shape("lowerRestingArm")} fill="#777b72" stroke="#343a37" strokeWidth="0.3" strokeLinejoin="round" />
+      </g>
+
+      <path data-testid="student-suhay-v6-linked-hands" d={shape("standingLinkedArm")} fill="#555d59" stroke="#333a37" strokeWidth="0.34" strokeLinejoin="round" />
+      <path d={shape("lowerLinkedArm")} fill="#85877c" stroke="#39403b" strokeWidth="0.34" strokeLinejoin="round" />
+      <path d={shape("clasp")} fill="#a09680" stroke="#41433d" strokeWidth="0.28" strokeLinejoin="round" />
+
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V7 is a cleaner shared side-profile pictogram: the lower body is folded
+ * between the standing legs, and the joined arms create one readable gesture. */
+function StudentSuhayHusayDecorVisualV7({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shape = (name: SuhayV7ShapeName) => SUHAY_HUSAY_V7_SHAPES[name].map(([x, y], index) => {
+    const [sx, sy] = suhayHusayV7SymbolPoint([x, y]);
+    return `${index === 0 ? "M" : "L"}${sx.toFixed(2)} ${sy.toFixed(2)}`;
+  }).join(" ") + " Z";
+  const path = (name: SuhayV7ShapeName, fill: string, stroke = "#343b38", strokeWidth = 0.34) => (
+    <path d={shape(name)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  );
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v7" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.07)" stroke="#2563eb" strokeWidth="1.15" vectorEffect="non-scaling-stroke" />}
+      {/* Formal tapered monument plinth with one rising faceted shoulder. */}
+      {path("pedestal", "#515957", "#343a38", 0.48)}
+      {path("pedestalTop", "#92958d", "#4c5350", 0.34)}
+      {path("pedestalFacet", "#6e7771", "#414946", 0.24)}
+      {path("outcrop", "#414a46", "#303734", 0.38)}
+      {path("outcropFacet", "#626c65", "#38413d", 0.25)}
+
+      {/* Left/top figure: broad torso and planted separated legs; the angled
+          head and raised arm keep the skyward gesture legible at icon scale. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        {path("standingLeftLeg", "#3e4743")}
+        {path("standingRightLeg", "#505a55")}
+        {path("standingTorso", "#59635e", "#343b38", 0.42)}
+        {path("standingNeck", "#707972", "#414945", 0.28)}
+        {path("standingHead", "#48534e", "#303835", 0.32)}
+        {path("standingRaisedArm", "#66716a", "#37403b", 0.3)}
+      </g>
+
+      {/* Right/lower figure: folded thigh and grounded shin sit within the
+          stance; filled masses avoid a crossed-stick appearance. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        {path("lowerBackThigh", "#747b73")}
+        {path("lowerFrontShin", "#626b65")}
+        {path("lowerFoldedLeg", "#606a64")}
+        {path("lowerTorso", "#85887e", "#3d4540", 0.36)}
+        {path("lowerHead", "#747b73", "#3b423f", 0.31)}
+        {path("lowerRestingArm", "#737b73", "#39413d", 0.27)}
+      </g>
+      {path("standingLinkedArm", "#515b56", "#343b38", 0.32)}
+      {path("lowerLinkedArm", "#898b80", "#414743", 0.32)}
+      {path("clasp", "#a09680", "#494b43", 0.25)}
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.9" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V8 is a compact, connected monument pictogram. Unified head/neck/body
+ * silhouettes remove the disconnected joins, while the restrained plinth and
+ * single faceted rise keep it clear at ordinary campus-map scale. */
+function StudentSuhayHusayDecorVisualConnected({ asset, descriptor, selected = false, version = "v8" }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean; version?: "v8" | "v9" }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shapes = version === "v9" ? SUHAY_HUSAY_V9_SHAPES : SUHAY_HUSAY_V8_SHAPES;
+  const shape = (name: SuhayV8ShapeName | SuhayV9ShapeName) => shapes[name].map(([x, y], index) => {
+    const [sx, sy] = version === "v9" ? suhayHusayV9SymbolPoint([x, y]) : suhayHusayV8SymbolPoint([x, y]);
+    return `${index === 0 ? "M" : "L"}${sx.toFixed(2)} ${sy.toFixed(2)}`;
+  }).join(" ") + " Z";
+  const path = (name: SuhayV8ShapeName, fill: string, stroke = "#303a36", strokeWidth = 0.24) => (
+    <path d={shape(name)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  );
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version={version} data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="16" ry="14" fill="rgba(37,99,235,0.07)" stroke="#2563eb" strokeWidth="1.15" vectorEffect="non-scaling-stroke" />}
+
+      {/* One broad, beveled base and one joined stone shoulder. */}
+      {path("pedestal", "#535b57", "#303835", 0.34)}
+      {path("pedestalTop", "#858b83", "#424a46", 0.25)}
+      {path("pedestalFacet", "#69716b", "#414844", 0.18)}
+      {path("outcrop", "#444c47", "#303835", 0.26)}
+      {path("outcropFacet", "#626b63", "#3c4540", 0.18)}
+      {path("seatedSupport", "#525a53", "#373f3a", 0.18)}
+
+      {/* The standing figure's legs and one continuous torso-to-head mass. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        {path("standingLeftLeg", "#46504a")}
+        {path("standingRightLeg", "#515b54")}
+        {path("standingCore", "#626b63", "#303a35", 0.28)}
+        {path("standingRaisedArm", "#6b746a", "#37413b", 0.22)}
+      </g>
+
+      {/* The lower person folds onto the stone seat between the standing
+          legs. Both reach masses overlap at one visible clasp. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        {path("lowerFoldedLeg", "#626b63")}
+        {path("lowerCore", "#7a8177", "#3e4740", 0.24)}
+        {path("lowerRestingArm", "#6e776d", "#3d463f", 0.18)}
+      </g>
+      {path("standingLinkedArm", "#515b54", "#303a35", 0.23)}
+      {path("lowerLinkedArm", "#85877a", "#43493f", 0.23)}
+      {path("clasp", "#a09680", "#4b4d43", 0.2)}
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.92" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** Keep all previous art selectable; flip this constant for a one-line rollback. */
+const STUDENT_SUHAY_HUSAY_2D_VERSION: "legacy" | "v2" | "v3" | "v4" | "v5" | "v6" | "v7" | "v8" | "v9" | "v10" | "v11" | "v12" | "v13" = "v13";
+
+function StudentSuhayHusayDecorVisualV10({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shape = (name: SuhayV10ShapeName) => SUHAY_HUSAY_V10_SHAPES[name].map((point, index) => {
+    const [x, y] = suhayHusayV10SymbolPoint(point);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ") + " Z";
+  const path = (name: SuhayV10ShapeName, fill: string, stroke = "#3c403e", strokeWidth = 0.24) => (
+    <path key={name} d={shape(name)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  );
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v10" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="14.7" ry="14.4" fill="rgba(37,99,235,0.055)" stroke="#2563eb" strokeWidth="1.05" vectorEffect="non-scaling-stroke" />}
+
+      {/* One clean tapered plinth with three large connected stone planes. */}
+      {path("pedestal", "#59615d", "#343a37", 0.34)}
+      {path("pedestalTop", "#858a82", "#4b504c", 0.22)}
+      {path("rockMass", "#666c65", "#363d39", 0.28)}
+      {path("rockLeftFacet", "#7b8077", "#4a504b", 0.16)}
+      {path("rockCenterFacet", "#515a55", "#3e4641", 0.16)}
+      {path("seatedSupport", "#626960", "#414842", 0.18)}
+
+      {/* The standing person's joined head, neck, and torso form one readable
+          silhouette. Its separated legs frame the lower seated figure. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        {path("standingLeftLeg", "#444c48", "#303734", 0.26)}
+        {path("standingRightLeg", "#515a54", "#303734", 0.26)}
+        {path("standingCore", "#687068", "#333a36", 0.28)}
+        {path("standingCoreFacet", "#778078", "#4b524c", 0.12)}
+        {path("standingHeadFacet", "#7b8076", "#424842", 0.14)}
+      {path("standingFreeArm", "#73796f", "#414842", 0.2)}
+      </g>
+
+      {/* Lower figure is layered forward, folded onto the stone and between
+          the standing legs. Both reaching forearms meet at one shared clasp. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        {path("lowerFoldedLeg", "#555e58", "#343b37", 0.24)}
+        {path("lowerCore", "#88877c", "#414741", 0.26)}
+        {path("lowerCoreFacet", "#797b72", "#50544d", 0.12)}
+        {path("lowerHeadFacet", "#a09a8b", "#4e5149", 0.14)}
+        {path("lowerRestingArm", "#73796f", "#414741", 0.19)}
+      </g>
+      {path("standingLinkedArm", "#626a63", "#333a36", 0.23)}
+      {path("lowerLinkedArm", "#999487", "#474b44", 0.23)}
+      {path("clasp", "#b0a58e", "#55564d", 0.18)}
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.92" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V11 is a quieter, connected landmark silhouette: fewer facets, larger
+ * masses and thinner outlines preserve the same side-profile pose at map scale. */
+function StudentSuhayHusayDecorVisualV11({ asset, descriptor, selected = false }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shape = (name: SuhayV11ShapeName) => SUHAY_HUSAY_V11_SHAPES[name].map((point, index) => {
+    const [x, y] = suhayHusayV11SymbolPoint(point);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ") + " Z";
+  const path = (name: SuhayV11ShapeName, fill: string, stroke = "#3d4540", strokeWidth = 0.16) => (
+    <path key={name} d={shape(name)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  );
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version="v11" data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="14.7" ry="14.4" fill="rgba(37,99,235,0.055)" stroke="#2563eb" strokeWidth="1.05" vectorEffect="non-scaling-stroke" />}
+
+      {/* A single grounded outcrop and clean beveled plinth; two broad facets
+          echo the target's mountain-like support without a loose-rock texture. */}
+      {path("pedestal", "#545d57", "#353d38", 0.28)}
+      {path("rockMass", "#626b64", "#414943", 0.19)}
+      {path("rockLeftFacet", "#7d847b", "#555d56", 0.11)}
+      {path("rockRightFacet", "#4e5851", "#414943", 0.11)}
+
+      {/* The upper person keeps a continuous head/neck/chest silhouette and
+          two separate planted legs, leaving a visible opening around the low figure. */}
+      <g data-testid="student-suhay-standing-silhouette">
+        {path("standingLeftLeg", "#444d47", "#333b36", 0.17)}
+        {path("standingRightLeg", "#505a53", "#333b36", 0.17)}
+        {path("standingCore", "#626d65", "#3b443e", 0.18)}
+        {path("standingCoreFacet", "#7b8278", "#566057", 0.1)}
+        {path("standingFreeArm", "#70786f", "#485148", 0.13)}
+      </g>
+
+      {/* The second person is low, folded onto the rock and visibly distinct;
+          both arms meet at the same small clasp between the figures. */}
+      <g data-testid="student-suhay-seated-silhouette">
+        {path("lowerFoldedLeg", "#58625a", "#3a433d", 0.15)}
+        {path("lowerCore", "#858378", "#444a43", 0.18)}
+        {path("lowerCoreFacet", "#74786f", "#596057", 0.1)}
+        {path("lowerRestingArm", "#70786f", "#454e47", 0.13)}
+      </g>
+      {path("standingLinkedArm", "#59635b", "#3a433d", 0.15)}
+      {path("lowerLinkedArm", "#999282", "#4d5148", 0.15)}
+      {path("clasp", "#b2a68d", "#56584f", 0.12)}
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.92" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V12 preserves V11's shared profile pose while removing inner facet cuts so
+ * the small campus icon reads as one connected, polished monument. */
+function StudentSuhayHusayDecorVisualV12({ asset, descriptor, selected = false, version = "v12" }: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean; version?: "v12" | "v13" }) {
+  const [hovered, setHovered] = useState(false);
+  const { width, height } = decorWorldSize(descriptor, asset.scale);
+  const showLabel = selected || hovered;
+  const shape = (name: SuhayV11ShapeName) => SUHAY_HUSAY_V11_SHAPES[name].map((point, index) => {
+    const [baseX, baseY] = suhayHusayV11SymbolPoint(point);
+    const x = 16 + (baseX - 16) * (version === "v13" ? 0.96 : 1);
+    const y = 17 + (baseY - 17) * (version === "v13" ? 1.03 : 1);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ") + " Z";
+  const path = (name: SuhayV11ShapeName, fill: string, stroke = "#3d4540", strokeWidth = 0.14) => (
+    <path key={name} d={shape(name)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  );
+  return <g data-testid="student-suhay-husay-2d-symbol" data-version={version} data-asset-id={asset.id}
+    transform={`translate(${asset.x - width / 2},${asset.y - height / 2}) rotate(${asset.rotation ?? 0},${width / 2},${height / 2})`}
+    opacity={asset.visible === false ? 0 : 1}
+    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={{ cursor: "help" }}>
+    <title>Suhay Husay</title>
+    <svg x={0} y={0} width={width} height={height} viewBox={`0 0 ${descriptor.defaultWidth} ${descriptor.defaultHeight}`} preserveAspectRatio="xMidYMid meet" overflow="visible">
+      {selected && <ellipse data-testid="student-suhay-husay-selection-ring" cx="16" cy="17" rx="14.7" ry="14.4" fill="rgba(37,99,235,0.055)" stroke="#2563eb" strokeWidth="1.05" vectorEffect="non-scaling-stroke" />}
+
+      {path("pedestal", "#545d57", "#353d38", 0.25)}
+      {path("rockMass", "#626b64", "#414943", 0.16)}
+
+      <g data-testid="student-suhay-standing-silhouette">
+        {path("standingLeftLeg", "#444d47")}
+        {path("standingRightLeg", "#505a53")}
+        {path("standingCore", "#687269")}
+        {path("standingFreeArm", "#70786f", "#485148", 0.12)}
+      </g>
+
+      <g data-testid="student-suhay-seated-silhouette">
+        {path("lowerFoldedLeg", "#71776e", "#3a433d", 0.13)}
+        {path("lowerCore", "#918e82", "#444a43", 0.15)}
+        {path("lowerRestingArm", "#7c8278", "#454e47", 0.12)}
+      </g>
+      {path("standingLinkedArm", "#59635b", "#3a433d", 0.13)}
+      {path("lowerLinkedArm", "#a09a8b", "#4d5148", 0.13)}
+      {path("clasp", "#b7aa90", "#56584f", 0.11)}
+      {showLabel && <g pointerEvents="none"><rect x="3.1" y="0.1" width="25.8" height="5.4" rx="2.1" fill="#17212b" opacity="0.92" /><text x="16" y="3.85" textAnchor="middle" fill="white" fontSize="3.25" fontWeight="800">Suhay Husay</text></g>}
+    </svg>
+  </g>;
+}
+
+/** V13 uses the same clean V12 symbol with a little more vertical emphasis so
+ * the standing-versus-seated relationship survives at campus overview scale. */
+function StudentSuhayHusayDecorVisualV13(props: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
+  return <StudentSuhayHusayDecorVisualV12 {...props} version="v13" />;
+}
 
 function StudentSuhayHusayDecorVisual(props: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
-  return STUDENT_SUHAY_HUSAY_2D_VERSION === "v2"
-    ? <StudentSuhayHusayDecorVisualV2 {...props} />
-    : <StudentSuhayHusayDecorVisualLegacy {...props} />;
+  return STUDENT_SUHAY_HUSAY_2D_VERSION === "v13"
+    ? <StudentSuhayHusayDecorVisualV13 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v12"
+    ? <StudentSuhayHusayDecorVisualV12 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v11"
+    ? <StudentSuhayHusayDecorVisualV11 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v10"
+    ? <StudentSuhayHusayDecorVisualV10 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v8"
+    ? <StudentSuhayHusayDecorVisualConnected {...props} version="v8" />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v9"
+    ? <StudentSuhayHusayDecorVisualConnected {...props} version="v9" />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v7"
+    ? <StudentSuhayHusayDecorVisualV7 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v6"
+    ? <StudentSuhayHusayDecorVisualV6 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v5"
+    ? <StudentSuhayHusayDecorVisualV5 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v4"
+    ? <StudentSuhayHusayDecorVisualV4 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v3"
+    ? <StudentSuhayHusayDecorVisualV3 {...props} />
+    : STUDENT_SUHAY_HUSAY_2D_VERSION === "v2"
+      ? <StudentSuhayHusayDecorVisualV2 {...props} />
+      : <StudentSuhayHusayDecorVisualLegacy {...props} />;
 }
 
 export function OutdoorDecorVisual({ asset, gridSize, studentSuhayHusayLandmark = false, selectedLandmark = false }: { asset: CampusDecorAsset; gridSize?: number; studentSuhayHusayLandmark?: boolean; selectedLandmark?: boolean }) {

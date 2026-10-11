@@ -16,6 +16,7 @@ interface StudentSelectedPlaceCardProps {
   floorId?: string;
   description?: string;
   suspendedForFloorPicker?: boolean;
+  threeDPresentation?: boolean;
 }
 
 export function StudentSelectedPlaceCard({
@@ -28,6 +29,7 @@ export function StudentSelectedPlaceCard({
   floorId,
   description,
   suspendedForFloorPicker = false,
+  threeDPresentation = false,
 }: StudentSelectedPlaceCardProps) {
   const [qrOpen, setQrOpen] = useState(false);
   const hasAdditionalDetails = Boolean(description?.trim());
@@ -103,7 +105,7 @@ export function StudentSelectedPlaceCard({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 0.99 }}
         transition={reducedMotion ? { duration: 0.01 } : { duration: 0.19, ease: "easeOut" }}
-        className="map-layer-room-sheet fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-[55] flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.2)] backdrop-blur-xl transition-[height] duration-200 ease-out motion-reduce:transition-none md:absolute md:bottom-auto md:left-auto md:right-3 md:top-[calc(env(safe-area-inset-top,0px)+3.8rem)] md:h-auto md:max-h-[calc(100%-5rem)] md:w-[min(380px,calc(100vw-1.5rem))]"
+        className={`map-layer-room-sheet fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-[55] flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.2)] backdrop-blur-xl transition-[height] duration-200 ease-out motion-reduce:transition-none md:absolute md:bottom-auto md:left-auto md:right-3 ${threeDPresentation ? "md:top-[calc(env(safe-area-inset-top,0px)+4.3rem)]" : "md:top-[calc(env(safe-area-inset-top,0px)+3.8rem)]"} md:h-auto md:max-h-[calc(100%-5rem)] md:w-[min(380px,calc(100vw-1.5rem))]`}
         style={{ height: "auto" }}
         onPointerDown={(event) => { if ((event.target as HTMLElement).closest("button")) event.stopPropagation(); }}
       >

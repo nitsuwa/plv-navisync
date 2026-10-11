@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS } from "../../services/settingsService";
 import { usePublishedCampus } from "../usePublishedCampus";
@@ -55,6 +55,10 @@ describe("published campus refresh resilience", () => {
     mocks.loadStructure.mockImplementation((value: Campus) => Promise.resolve(value));
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("keeps the last good campus when a background snapshot refresh times out", async () => {
     const { result } = renderHook(() => usePublishedCampus());
     await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
@@ -67,6 +71,77 @@ describe("published campus refresh resilience", () => {
     expect(result.current.isCached).toBe(true);
     expect(result.current.error).toBeNull();
     expect(mocks.list).not.toHaveBeenCalled();
+  });
+
+  it("keeps failed cached refreshes out of loading, bounds resume retries, and allows manual refresh", async () => {
+    const baseTime = 1_700_000_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(baseTime);
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (visibilityState: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+    };
+
+    try {
+      const { result } = renderHook(() => usePublishedCampus());
+      await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
+
+      await act(async () => { await result.current.refetch(); });
+
+      expect(result.current.activeCampus?.id).toBe(campus.id);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.isCached).toBe(true);
+      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
+
+      now.mockReturnValue(baseTime + 20_000);
+      setVisibility("hidden");
+      now.mockReturnValue(baseTime + 40_000);
+      setVisibility("visible");
+      await act(async () => { await Promise.resolve(); });
+
+      // A quick return after the failure must not start another request.
+      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.activeCampus?.id).toBe(campus.id);
+
+      now.mockReturnValue(baseTime + 50_000);
+      setVisibility("hidden");
+      now.mockReturnValue(baseTime + 70_000);
+      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
+      setVisibility("visible");
+      await waitFor(() => expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(3));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.activeCampus?.id).toBe(campus.id);
+
+      now.mockReturnValue(baseTime + 180_000);
+      setVisibility("hidden");
+      now.mockReturnValue(baseTime + 200_000);
+      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
+      setVisibility("visible");
+      await waitFor(() => expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(4));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(result.current.loading).toBe(false);
+
+      now.mockReturnValue(baseTime + 500_000);
+      setVisibility("hidden");
+      now.mockReturnValue(baseTime + 520_000);
+      setVisibility("visible");
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(4);
+
+      // Explicit user retries are never blocked by the automatic retry cap.
+      await act(async () => { await result.current.refetch(); });
+      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(5);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.isCached).toBe(false);
+      expect(result.current.activeCampus?.id).toBe(campus.id);
+    } finally {
+      now.mockRestore();
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
+    }
   });
 
   it("keeps the active published campus object graph stable when a resume refresh has no newer revision", async () => {
