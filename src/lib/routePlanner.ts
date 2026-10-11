@@ -137,6 +137,8 @@ export interface CampusNavGraph {
    * nodes into the public campus route overlay. */
   buildings?: Array<{
     id: string;
+    name?: string;
+    code?: string;
     x: number;
     y: number;
     width: number;
@@ -152,6 +154,8 @@ export interface CampusNavGraph {
   floors?: Array<{
     id: string;
     number?: number;
+    label?: string;
+    name?: string;
     canvasW?: number;
     canvasH?: number;
       /** Full floor structure is present on published Campus objects. */
@@ -181,6 +185,10 @@ export interface RouteStep {
   distanceM?: number;
   /** Optional badge, e.g. "Take the stairs to Floor 2" */
   badge?: string;
+  /** Student renderer context in the already planned authored route itinerary. */
+  contextLegIndex?: number;
+  /** Exact authored handoff following this route context, when applicable. */
+  contextHandoffIndex?: number;
 }
 
 /** A floor-local portion of a planned route.  Its coordinates must only be
@@ -189,6 +197,9 @@ export interface RouteIndoorSegment {
   buildingId: string;
   floorId?: string;
   floorNumber?: number;
+  /** Published display label; floorNumber is an internal authored index. */
+  floorLabel?: string;
+  contextLegIndex?: number;
   /** True once the authored path has entered the campus coordinate space. */
   afterOutdoor?: boolean;
   waypoints: Pt[];
@@ -209,6 +220,38 @@ export interface RouteTransitionDetail {
   buildingId?: string;
 }
 
+/** One ordered coordinate-space leg from the already selected authored path.
+ * This is presentation metadata: it never changes path selection or edges. */
+export interface RouteContextLeg {
+  kind: "campus" | "floor";
+  buildingId?: string;
+  floorId?: string;
+  floorNumber?: number;
+  /** Published display label; floorNumber is an internal authored index. */
+  floorLabel?: string;
+  /** Index into PlannedRoute.indoorSegments for floor-local legs. */
+  segmentIndex?: number;
+  /** Exact waypoints for this contiguous authored context only. */
+  waypoints: Pt[];
+  distanceM: number;
+}
+
+/** The exact edge where the chosen authored path changes coordinate context. */
+export interface RouteContextHandoff {
+  fromContextLegIndex: number;
+  toContextLegIndex: number;
+  kind: "enter_building" | "exit_building" | "stairs" | "elevator";
+  buildingId?: string;
+  buildingCode?: string;
+  buildingName?: string;
+  label: string;
+  nodeId?: string;
+  detail?: RouteTransitionDetail;
+  /** Source-side route point, already in the coordinate system being shown. */
+  sourcePoint: Pt;
+  targetPoint: Pt;
+}
+
 export interface PlannedRoute {
   /** Backward-compatible campus waypoints. Never contains floor-local points. */
   points: Pt[];
@@ -216,6 +259,10 @@ export interface PlannedRoute {
   campusPoints?: Pt[];
   /** Floor-local waypoints, grouped by building and floor context. */
   indoorSegments?: RouteIndoorSegment[];
+  /** Ordered authored coordinate contexts, preserving separate Campus legs. */
+  contextLegs?: RouteContextLeg[];
+  /** Authored boundary transitions between those contexts. */
+  contextHandoffs?: RouteContextHandoff[];
   /** Total distance in meters */
   dist: number;
   /** Estimated walking time in minutes */
@@ -412,6 +459,8 @@ function toPlannedRoute(
     points: campusPoints,
     campusPoints,
     indoorSegments: contexts?.indoorSegments,
+    contextLegs: contexts?.contextLegs,
+    contextHandoffs: contexts?.contextHandoffs,
     dist: path.distanceM,
     mins: path.minutes,
     steps,
@@ -715,6 +764,8 @@ export function planAuthoredDestinationRoute(
   planned.points = contexts.campusPoints;
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
+  planned.contextLegs = contexts.contextLegs;
+  planned.contextHandoffs = contexts.contextHandoffs;
   planned.transitionDetails = contexts.transitionDetails;
   planned.steps = authoredRouteGuidanceSteps(from, to, planned, campusGraph.nodes, graph ?? undefined);
   if (to.type === "room") {
@@ -834,6 +885,9 @@ type AuthoredContext = {
   buildingId?: string;
   floorId?: string;
   floorNumber?: number;
+  floorLabel?: string;
+  startNodeId: string;
+  endNodeId: string;
   waypoints: Pt[];
   steps: RouteStep[];
   rawDistance: number;
@@ -900,10 +954,13 @@ function authoredRouteContexts(
 ): {
   campusPoints: Pt[];
   indoorSegments: RouteIndoorSegment[];
+  contextLegs: RouteContextLeg[];
+  contextHandoffs: RouteContextHandoff[];
   transitionDetails: RouteTransitionDetail[];
 } {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const floorNumberById = new Map<string, number>();
+  const floorLabelById = new Map<string, string>();
   // Published campus snapshots already carry the canonical floor number on
   // each floor. Keep that identity on every floor-local route context, not
   // only on room endpoint nodes, so the student handoff can walk Ground Floor
@@ -913,6 +970,7 @@ function authoredRouteContexts(
       if (typeof floor.number === "number" && floor.id) {
         floorNumberById.set(floor.id, floor.number);
       }
+      if (floor.id && (floor.label || floor.name)) floorLabelById.set(floor.id, floor.label || floor.name!);
     }
   }
   const addRoomFloorNumber = (destination: Destination) => {
@@ -944,13 +1002,16 @@ function authoredRouteContexts(
     floorId: node.floorId,
     floorNumber: (node.floorId ? floorNumberById.get(node.floorId) : undefined)
       ?? floorNumberById.get(node.id),
+    floorLabel: node.floorId ? floorLabelById.get(node.floorId) : undefined,
+    startNodeId: node.id,
+    endNodeId: node.id,
     waypoints: [campusPointForRouteNode(node, graph)],
     steps: [],
     rawDistance: 0,
   });
 
   const first = nodeById.get(path.nodeIds[0]);
-  if (!first) return { campusPoints: [], indoorSegments: [], transitionDetails: [] };
+  if (!first) return { campusPoints: [], indoorSegments: [], contextLegs: [], contextHandoffs: [], transitionDetails: [] };
   let current = startContext(first);
   for (let index = 1; index < path.nodeIds.length; index += 1) {
     const fromNode = nodeById.get(path.nodeIds[index - 1]);
@@ -960,6 +1021,7 @@ function authoredRouteContexts(
     const edgeDistance = Math.max(0, Number(edge?.distance) || Math.hypot(toNode.x - fromNode.x, toNode.y - fromNode.y));
     const nextKey = pointKey(toNode);
     if (nextKey !== current.key) {
+      current.endNodeId = fromNode.id;
       contexts.push(current);
       if (fromNode.floorId && toNode.floorId && fromNode.floorId !== toNode.floorId) {
         const kind = transitionKindFor(fromNode, toNode, edge);
@@ -984,6 +1046,7 @@ function authoredRouteContexts(
           && (toNode.roomId === to.roomId || toNode.id === to.accessNodeId)
           ? to.floorNumber
           : undefined);
+      current.floorLabel = toNode.floorId ? floorLabelById.get(toNode.floorId) : undefined;
       continue;
     }
     const projectedFrom = campusPointForRouteNode(fromNode, graph);
@@ -999,6 +1062,7 @@ function authoredRouteContexts(
         : bends;
     projectedBends.forEach((bend) => appendPoint(current.waypoints, { x: bend.x, y: bend.y }));
     appendPoint(current.waypoints, projectedTo);
+    current.endNodeId = toNode.id;
     current.rawDistance += edgeDistance;
   }
   contexts.push(current);
@@ -1011,15 +1075,17 @@ function authoredRouteContexts(
     : undefined;
   const campusPoints: Pt[] = [];
   const indoorSegments: RouteIndoorSegment[] = [];
+  const contextLegs: RouteContextLeg[] = [];
   let afterOutdoor = false;
   for (let contextIndex = 0; contextIndex < contexts.length; contextIndex += 1) {
     const context = contexts[contextIndex];
+    const distanceM = Number((context.rawDistance * metersPerRawUnit).toFixed(1));
     if (context.kind === "campus") {
       afterOutdoor = true;
       context.waypoints.forEach((point) => appendPoint(campusPoints, point));
+      contextLegs.push({ kind: "campus", waypoints: context.waypoints, distanceM });
       continue;
     }
-    const distanceM = Number((context.rawDistance * metersPerRawUnit).toFixed(1));
     const isTargetFloor = Boolean(toFloorId && context.floorId === toFloorId);
     const nextContext = contexts[contextIndex + 1];
     const nextFloorTransition = nextContext?.kind === "floor"
@@ -1046,20 +1112,96 @@ function authoredRouteContexts(
           distanceM,
         }]
       : [];
+    const segmentIndex = indoorSegments.length;
     indoorSegments.push({
       buildingId: context.buildingId
         ?? (to.type === "room" || to.type === "building" ? to.buildingId
           : from.type === "room" || from.type === "building" ? from.buildingId : ""),
       floorId: context.floorId,
       floorNumber: context.floorNumber ?? (isTargetFloor && to.type === "room" ? to.floorNumber : undefined),
+      floorLabel: context.floorLabel,
       afterOutdoor,
+      contextLegIndex: contextLegs.length,
       waypoints: context.waypoints,
       distanceM,
       seconds: Math.max(0, Math.round((distanceM / Math.max(0.1, path.distanceM)) * path.minutes * 60)),
       steps,
     });
+    contextLegs.push({
+      kind: "floor",
+      buildingId: context.buildingId,
+      floorId: context.floorId,
+      floorNumber: context.floorNumber ?? (isTargetFloor && to.type === "room" ? to.floorNumber : undefined),
+      floorLabel: context.floorLabel,
+      segmentIndex,
+      waypoints: context.waypoints,
+      distanceM,
+    });
   }
-  return { campusPoints, indoorSegments, transitionDetails: transitions };
+  const buildingForContext = (buildingId?: string) => graph?.buildings?.find((candidate) => candidate.id === buildingId);
+  const contextHandoffs: RouteContextHandoff[] = [];
+  for (let fromContextLegIndex = 0; fromContextLegIndex < contexts.length - 1; fromContextLegIndex += 1) {
+    const fromContext = contexts[fromContextLegIndex];
+    const toContext = contexts[fromContextLegIndex + 1];
+    const sourcePoint = fromContext.waypoints.at(-1);
+    const targetPoint = toContext.waypoints[0];
+    if (!sourcePoint || !targetPoint) continue;
+    if (fromContext.kind === "floor" && toContext.kind === "campus" && fromContext.buildingId) {
+      const building = buildingForContext(fromContext.buildingId);
+      const node = nodeById.get(fromContext.endNodeId);
+      contextHandoffs.push({
+        fromContextLegIndex,
+        toContextLegIndex: fromContextLegIndex + 1,
+        kind: "exit_building",
+        buildingId: fromContext.buildingId,
+        buildingCode: building?.code,
+        buildingName: building?.name,
+        label: node?.name || `${building?.code || building?.name || "Building"} exit`,
+        nodeId: node?.id,
+        sourcePoint,
+        targetPoint,
+      });
+      continue;
+    }
+    if (fromContext.kind === "campus" && toContext.kind === "floor" && toContext.buildingId) {
+      const building = buildingForContext(toContext.buildingId);
+      const node = nodeById.get(toContext.startNodeId);
+      contextHandoffs.push({
+        fromContextLegIndex,
+        toContextLegIndex: fromContextLegIndex + 1,
+        kind: "enter_building",
+        buildingId: toContext.buildingId,
+        buildingCode: building?.code,
+        buildingName: building?.name,
+        label: node?.name || `${building?.code || building?.name || "Building"} entrance`,
+        nodeId: node?.id,
+        sourcePoint,
+        targetPoint,
+      });
+      continue;
+    }
+    if (fromContext.kind === "floor" && toContext.kind === "floor"
+      && fromContext.buildingId === toContext.buildingId && fromContext.floorId !== toContext.floorId) {
+      const detail = transitions.find((transition) =>
+        transition.fromFloorId === fromContext.floorId
+        && transition.toFloorId === toContext.floorId
+        && transition.buildingId === fromContext.buildingId,
+      );
+      if (!detail) continue;
+      contextHandoffs.push({
+        fromContextLegIndex,
+        toContextLegIndex: fromContextLegIndex + 1,
+        kind: detail.kind,
+        buildingId: fromContext.buildingId,
+        label: detail.label,
+        nodeId: detail.nodeId,
+        detail,
+        sourcePoint,
+        targetPoint,
+      });
+    }
+  }
+  return { campusPoints, indoorSegments, contextLegs, contextHandoffs, transitionDetails: transitions };
 }
 
 function destinationBuildingCode(destination: Destination): string {
@@ -1087,6 +1229,8 @@ function authoredRouteGuidanceSteps(
   nodes: CampusNavNode[],
   graph?: CampusNavGraph,
 ): RouteStep[] {
+  const contextSteps = authoredContextGuidanceSteps(from, to, route);
+  if (contextSteps) return contextSteps;
   const steps: RouteStep[] = [];
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const floorNumberById = new Map<string, number>();
@@ -1199,6 +1343,120 @@ function authoredRouteGuidanceSteps(
   } else {
     append("arrive", `Arrive at the entrance of ${toName} building.`);
   }
+  return steps;
+}
+
+/** Build Student guidance from the ordered contexts of the selected authored
+ * path when that path enters an intermediate building. This preserves every
+ * real building handoff without recalculating or shortcutting the graph path. */
+function authoredContextGuidanceSteps(
+  from: Destination,
+  to: Destination,
+  route: PlannedRoute,
+): RouteStep[] | null {
+  const legs = route.contextLegs;
+  const handoffs = route.contextHandoffs ?? [];
+  if (route.mode === "emergency" || !legs?.length) return null;
+  const endpointBuildingIds = new Set([
+    from.type === "room" || from.type === "building" ? from.buildingId : undefined,
+    to.type === "room" || to.type === "building" ? to.buildingId : undefined,
+  ].filter((id): id is string => Boolean(id && id !== "__point_origin__")));
+  const intermediateHandoff = handoffs.some((handoff) =>
+    handoff.buildingId && !endpointBuildingIds.has(handoff.buildingId),
+  );
+  if (!intermediateHandoff) return null;
+
+  const originInstruction = route.steps.find((step) => step.icon === "start")?.instruction
+    ?? (from.type === "room" ? `Start at the door of ${from.roomName}.` : `Start at ${destinationBuildingCode(from)}.`);
+  const arrivalInstruction = [...route.steps].reverse().find((step) => step.icon === "arrive")?.instruction
+    ?? (to.type === "room" ? `Arrive at ${to.roomName}.` : `Arrive at the entrance of ${destinationBuildingCode(to)} building.`);
+  const steps: RouteStep[] = [{
+    id: "authored-context-start",
+    icon: "start",
+    instruction: originInstruction,
+    contextLegIndex: 0,
+  }];
+  const findHandoff = (legIndex: number) => {
+    const handoffIndex = handoffs.findIndex((handoff) => handoff.fromContextLegIndex === legIndex
+      && handoff.toContextLegIndex === legIndex + 1);
+    return handoffIndex < 0 ? null : { index: handoffIndex, value: handoffs[handoffIndex] };
+  };
+  const floorLabel = (floorNumber?: number) => floorNumber === undefined
+    ? "the connected Floor"
+    : floorNumber === 1 ? "Ground Floor" : `Floor ${floorNumber}`;
+  const buildingLabel = (handoff: RouteContextHandoff) => handoff.buildingCode
+    || handoff.buildingName
+    || (handoff.kind === "enter_building" ? destinationBuildingCode(to) : destinationBuildingCode(from));
+
+  legs.forEach((leg, legIndex) => {
+    const handoff = findHandoff(legIndex);
+    let instruction: string;
+    if (leg.kind === "campus") {
+      if (handoff?.value.kind === "enter_building") {
+        instruction = `Follow the campus path to the entrance of ${buildingLabel(handoff.value)} building.`;
+      } else if (to.type === "campus_place") {
+        instruction = `Follow the campus path to ${to.label}.`;
+      } else if (legIndex === legs.length - 1) {
+        instruction = `Follow the campus path to the entrance of ${destinationBuildingCode(to)} building.`;
+      } else {
+        instruction = "Follow the campus connector.";
+      }
+    } else if (handoff?.value.kind === "exit_building") {
+      instruction = "Follow the indoor path to the building exit door.";
+    } else if (handoff && (handoff.value.kind === "stairs" || handoff.value.kind === "elevator")) {
+      instruction = `Follow the indoor path to ${routePlaceLabel(handoff.value.label, handoff.value.kind === "elevator" ? "elevator" : "stairs")}.`;
+    } else if (legIndex === legs.length - 1 && to.type === "room") {
+      instruction = `Follow the indoor path to the door of ${to.roomName}.`;
+    } else if (legIndex === legs.length - 1) {
+      instruction = `Follow the indoor path through ${destinationBuildingCode(to)} building.`;
+    } else {
+      instruction = "Follow the connected indoor path.";
+    }
+    steps.push({
+      id: `authored-context-walk-${legIndex}`,
+      icon: "walk",
+      instruction,
+      distanceM: leg.distanceM,
+      contextLegIndex: legIndex,
+    });
+
+    if (!handoff) return;
+    const detail = handoff.value.detail;
+    if (handoff.value.kind === "enter_building" || handoff.value.kind === "exit_building") {
+      const label = buildingLabel(handoff.value);
+      steps.push({
+        id: `authored-context-handoff-${handoff.index}`,
+        icon: "enter",
+        instruction: handoff.value.kind === "exit_building" ? `Exit ${label} building.` : `Enter ${label} building.`,
+        contextLegIndex: legIndex,
+        contextHandoffIndex: handoff.index,
+      });
+      return;
+    }
+    if (!detail) return;
+    const nextLeg = legs[legIndex + 1];
+    const nextFloor = nextLeg?.floorLabel || floorLabel(nextLeg?.floorNumber);
+    const currentFloor = leg.floorNumber;
+    const direction = currentFloor !== undefined && legs[legIndex + 1]?.floorNumber !== undefined
+      ? legs[legIndex + 1].floorNumber! > currentFloor ? "up" : "down"
+      : undefined;
+    const articleLabel = routePlaceLabel(detail.label, detail.kind === "elevator" ? "elevator" : "stairs");
+    steps.push({
+      id: `authored-context-handoff-${handoff.index}`,
+      icon: detail.kind,
+      instruction: detail.kind === "elevator"
+        ? `Take ${articleLabel} to ${nextFloor}.`
+        : direction ? `Take ${articleLabel} ${direction} to ${nextFloor}.` : `Take ${articleLabel} to ${nextFloor}.`,
+      contextLegIndex: legIndex,
+      contextHandoffIndex: handoff.index,
+    });
+  });
+  steps.push({
+    id: "authored-context-arrive",
+    icon: "arrive",
+    instruction: arrivalInstruction,
+    contextLegIndex: legs.length - 1,
+  });
   return steps;
 }
 
@@ -1446,6 +1704,8 @@ export function planPointToDestinationRoute(
   planned.points = contexts.campusPoints;
   planned.campusPoints = contexts.campusPoints;
   planned.indoorSegments = contexts.indoorSegments;
+  planned.contextLegs = contexts.contextLegs;
+  planned.contextHandoffs = contexts.contextHandoffs;
   planned.transitionDetails = contexts.transitionDetails;
   planned.steps = authoredRouteGuidanceSteps(pointOrigin, to, planned, campusGraph.nodes, graph ?? undefined);
   if (to.type === "room") planned.destinationRoom = {

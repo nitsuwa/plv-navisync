@@ -64,7 +64,7 @@ import {
   type MobileBuildingSheetState,
   StudentMapControls,
 } from "../components/map";
-import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
+import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFloorLabel, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
 import { studentAccountService } from "../services/studentAccountService";
 import { studentMobilePanelAvailableHeight } from "../lib/studentMobilePanels";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
@@ -87,6 +87,11 @@ import { useEventMapPreviews } from "../hooks/useEventMapPreviews";
 import { buildEventVenues, eventLocationOnMap, eventVenueCandidates, resolveEventLocation, selectedEventLocation, toEventOverlayPreview, visibleEventCards } from "../lib/eventMapView";
 import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
+
+function studentRouteTargetPoints(route: PlannedRoute, target: ReturnType<typeof studentRouteSeekTarget>): Pt[] {
+  const contextLeg = target.contextLegIndex === undefined ? undefined : route.contextLegs?.[target.contextLegIndex];
+  return contextLeg?.waypoints ?? target.segment?.waypoints ?? (route.campusPoints?.length ? route.campusPoints : route.points);
+}
 
 const LazyStudentCampus3DRenderer = lazy(() => import("../components/map/StudentCampus3DRenderer"));
 const LazyIndoorFloor3DRenderer = lazy(() => import("../components/map/IndoorFloor3DRenderer"));
@@ -3878,12 +3883,19 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
     const initialProgress = Math.max(0, Math.min(0.999, walkProgressRef.current));
     const steps = studentFacingRouteSteps(activeRoute);
-    const outdoorPoints = activeRoute.campusPoints?.length ? activeRoute.campusPoints : activeRoute.points;
+    const activeLegTarget = studentRoutePlaybackTarget(activeRoute, steps, playbackCursorRef.current);
+    const activeCampusLeg = activeLegTarget.contextLegIndex === undefined
+      ? undefined
+      : activeRoute.contextLegs?.[activeLegTarget.contextLegIndex];
+    const activeCampusLegIndex = activeCampusLeg?.kind === "campus" ? activeLegTarget.contextLegIndex : undefined;
+    const outdoorPoints = activeCampusLeg?.kind === "campus"
+      ? activeCampusLeg.waypoints
+      : activeRoute.campusPoints?.length ? activeRoute.campusPoints : activeRoute.points;
     const sampleOutdoorPoint = createRoutePointSampler(outdoorPoints);
     if (reducedMotion) {
       walkProgressRef.current = 1;
       setWalkProgress(1);
-      const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, 1);
+      const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, 1, playbackCursorRef.current, activeCampusLegIndex);
       playbackCursorRef.current = cursor;
       setPlaybackCursor(cursor);
       if (studentRouteUi.camera === "follow" && routeTransitionForStep(activeRoute, steps, Math.floor(cursor + 0.000001))) {
@@ -3901,7 +3913,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const tick = (now: number) => {
       const t = Math.min(1, initialProgress + (now - start) / remainingDuration * (1 - initialProgress));
       walkProgressRef.current = t;
-      const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, t);
+      const cursor = studentRoutePositionForLeg(activeRoute, steps, "outdoor", null, t, playbackCursorRef.current, activeCampusLegIndex);
       const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
       const crossedStepBoundary = Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001);
@@ -4416,7 +4428,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       safePx.top = Math.max(safePx.top, headerRect.bottom - mapRect.top + 12);
     }
     if (cardRect && overlapsMapX(cardRect)) {
-      if (mobileMap || cardRect.width >= (mapRect.right - mapRect.left) * 0.55) {
+      if (mobileMap) {
+        // On mobile the room card is a bottom sheet. Keep the focus region
+        // above its top edge; treating its bottom edge as a top inset pushes
+        // the selected room down underneath the sheet.
+        if (cardRect.top > (mapRect.top + mapRect.bottom) / 2) {
+          safePx.bottom = Math.max(safePx.bottom, mapRect.bottom - cardRect.top + 12);
+        } else {
+          safePx.top = Math.max(safePx.top, cardRect.bottom - mapRect.top + 12);
+        }
+      } else if (cardRect.width >= (mapRect.right - mapRect.left) * 0.55) {
         safePx.top = Math.max(safePx.top, cardRect.bottom - mapRect.top + 12);
       } else if (cardRect.left > (mapRect.left + mapRect.right) / 2) {
         safePx.right = Math.max(safePx.right, mapRect.right - cardRect.left + 12);
@@ -4786,7 +4807,9 @@ const buildingFill = (id: string) =>
       const crossedStepBoundary = Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001);
       if (crossedStepBoundary || progress >= 1) {
         setPlaybackCursor(cursor);
-        if (!student3DActive) setIndoorWalkProgress(progress);
+        // Keep 3D interpolation ref-driven during the leg, but commit the
+        // endpoint once so the canonical arrival resolver observes completion.
+        if (!student3DActive || progress >= 1) setIndoorWalkProgress(progress);
       }
       if (studentRouteUi.camera !== "explore") {
         indoorRouteLineProgressWriterRef.current?.(progress);
@@ -4925,7 +4948,9 @@ const buildingFill = (id: string) =>
     const exitLabel = steps[exitStepIndex]?.instruction ?? "Exit to Campus";
     const finishExit = () => {
       originIndoorTransitionRef.current = null;
-      const startPoint = route.campusPoints?.[0] ?? route.points[0];
+      const nextTarget = studentRouteSeekTarget(route, steps, Math.min(steps.length - 1, exitStepIndex + 1));
+      const nextLeg = nextTarget.contextLegIndex === undefined ? undefined : route.contextLegs?.[nextTarget.contextLegIndex];
+      const startPoint = nextLeg?.waypoints[0] ?? route.campusPoints?.[0] ?? route.points[0];
       if (startPoint) pendingRouteRecenterRef.current = { contextKey: "campus", point: startPoint, floor: false };
       setFloorView(null);
       setNavigationPhase("outdoor");
@@ -4982,6 +5007,33 @@ const buildingFill = (id: string) =>
 
     const nextStepIndex = Math.min(steps.length - 1, activeIndex + 1);
     const canonicalNext = studentRouteSeekTarget(route, steps, nextStepIndex);
+    const activeTransition = routeTransitionForStep(route, steps, activeIndex);
+    if (canonicalNext.context === "campus" && activeTransition?.kind === "exit_building" && transitionAuthorized) {
+      routeTransitionActivationRef.current = null;
+      const nextContextLeg = canonicalNext.contextLegIndex === undefined
+        ? undefined
+        : route.contextLegs?.[canonicalNext.contextLegIndex];
+      const campusPoint = nextContextLeg?.waypoints[0] ?? route.campusPoints?.[0] ?? route.points[0];
+      if (campusPoint) pendingRouteRecenterRef.current = { contextKey: "campus", point: campusPoint, floor: false };
+      setFloorView(null);
+      setIndoorRoute(null);
+      setActiveRouteRoom(null);
+      setHighlightedRoom(null);
+      setNavigationPhase("outdoor");
+      setWalkProgress(0);
+      walkProgressRef.current = 0;
+      playbackCursorRef.current = nextStepIndex;
+      setPlaybackCursor(nextStepIndex);
+      setWalkNonce((nonce) => nonce + 1);
+      setNavigationTransitioning(false);
+      setStairLoading(null);
+      if (transitionResumePlaybackRef.current) {
+        transitionResumePlaybackRef.current = false;
+        setNavigationPauseReason(null);
+        dispatchStudentRouteUi({ type: "RESUME" });
+      }
+      return;
+    }
     const nextSegment = canonicalNext.context === "floor" && canonicalNext.phase === "destination-indoor"
       ? canonicalNext.segment
       : null;
@@ -5826,8 +5878,7 @@ const buildingFill = (id: string) =>
     const detail = activeRouteTransition.detail;
     const transitionName = detail?.label?.trim();
     const nextTarget = studentRouteSeekTarget(route, routeNavigationSteps, activeRouteStepIndex + 1);
-    const targetFloor = nextTarget.segment?.floorNumber;
-    const floorLabel = targetFloor === undefined ? "the next Floor" : targetFloor === 1 ? "Ground Floor" : `Floor ${targetFloor}`;
+    const floorLabel = studentRouteFloorLabel(nextTarget.segment);
     switch (activeRouteTransition.kind) {
       case "enter_building": {
         const name = activeCampus?.buildings.find((building) => building.id === nextTarget.segment?.buildingId)?.code
@@ -5867,6 +5918,17 @@ const buildingFill = (id: string) =>
     : undefined;
   const activeRouteTransitionPoint = useMemo(() => {
     if (!route || !activeRouteTransition) return null;
+    if (activeRouteTransition.handoff) {
+      const source = studentRouteSeekTarget(route, routeNavigationSteps, activeTransitionStepIndex);
+      const sourceIsVisible = source.context === "campus"
+        ? !isFloorMode
+        : Boolean(source.segment && floorView && activeFloorPlan
+          && source.segment.buildingId === floorView.building.id
+          && (source.segment.floorId
+            ? source.segment.floorId === activeFloorPlan.id
+            : source.segment.floorNumber === floorView.floor));
+      return sourceIsVisible ? activeRouteTransition.handoff.sourcePoint : null;
+    }
     const routeSegmentMatchesVisibleFloor = Boolean(
       transitionIndoorSegment
       && floorView
@@ -5890,7 +5952,7 @@ const buildingFill = (id: string) =>
         ?? null;
     }
     return null;
-  }, [activeCampus?.navNodes, activeFloorPlan, activeRouteTransition, floorView, isFloorMode, route, transitionIndoorFloor, transitionIndoorSegment]);
+  }, [activeCampus?.navNodes, activeFloorPlan, activeRouteTransition, activeTransitionStepIndex, floorView, isFloorMode, route, routeNavigationSteps, transitionIndoorFloor, transitionIndoorSegment]);
   // Presentation-only matching: authored route waypoints already include the
   // selected entrance/exit connection point. Use that existing geometry to
   // softly mark relevant physical transition controls without changing route
@@ -5931,10 +5993,10 @@ const buildingFill = (id: string) =>
     () => activeCampus?.entrances?.find((entrance) => entrance.id === activeOutdoorEntranceId)?.buildingId ?? null,
     [activeCampus?.entrances, activeOutdoorEntranceId],
   );
-  const activeRouteEnterBuildingId = activeRouteTransition?.kind === "enter_building"
-    ? previewTransitionSeekTarget?.segment?.buildingId
-      ?? route?.destinationRoom?.buildingId
-      ?? route?.indoorSegments?.find((segment) => segment.afterOutdoor)?.buildingId
+  const activeRouteEnterBuildingId = activeRouteTransition?.kind === "enter_building" && route
+    ? studentRouteSeekTarget(route, routeNavigationSteps, activeRouteStepIndex + 1).segment?.buildingId
+      ?? previewTransitionSeekTarget?.segment?.buildingId
+      ?? route.destinationRoom?.buildingId
       ?? activeOutdoorEntranceBuildingId
     : null;
   const routeRelevantExitDoorIds = useMemo(() => {
@@ -5964,9 +6026,7 @@ const buildingFill = (id: string) =>
     const target = studentRoutePreviewTransitionTarget(route, routeNavigationSteps, cueId);
     if (!target) return;
 
-    const point = target.segment
-      ? pointAlongPolyline(target.segment.waypoints, target.segmentProgress)
-      : pointAlongPolyline(route.campusPoints?.length ? route.campusPoints : route.points, target.routeProgress);
+    const point = pointAlongPolyline(studentRouteTargetPoints(route, target), target.context === "floor" ? target.segmentProgress : target.routeProgress);
 
     if (target.context === "floor" && target.segment) {
       const building = MOCK_BUILDINGS.find((candidate) => candidate.id === target.segment!.buildingId);
@@ -6040,7 +6100,32 @@ const buildingFill = (id: string) =>
       stepSeekTransitionTimerRef.current = setTimeout(() => {
         stepSeekTransitionTimerRef.current = null;
         setStairLoading(null);
-        if (route.destinationRoom) {
+        if (nextTarget.segment && nextTarget.segment.buildingId === building.id) {
+          const segments = indoorSegmentsForBuilding(route, building.id, "after-outdoor");
+          const segmentIndex = segments.indexOf(nextTarget.segment);
+          const publishedBuilding = activeCampus?.buildings.find((candidate) => candidate.id === building.id);
+          const floor = indoorSegmentFloorNumber(nextTarget.segment, publishedBuilding,
+            roomDestination?.floorNumber ?? building.floors?.[0]?.number ?? 1);
+          if (segmentIndex < 0 || floor === undefined) {
+            setNavigationTransitioning(false);
+            return;
+          }
+          setDestinationIndoorSegments(segments);
+          setDestinationIndoorSegmentIndex(segmentIndex);
+          setFloorView({ building, floor });
+          setIndoorRoute(indoorRouteFromSegment(nextTarget.segment));
+          setIndoorWalkProgress(0);
+          indoorWalkProgressRef.current = 0;
+          setIndoorWalkNonce((nonce) => nonce + 1);
+          const targetRoomId = route.destinationRoom?.buildingId === building.id
+            && route.destinationRoom.floorNumber === floor ? route.destinationRoom.roomId : null;
+          setActiveRouteRoom(targetRoomId);
+          setHighlightedRoom(targetRoomId);
+          setNavigationPhase("destination-indoor");
+          routeEntryTransitionCompleteRef.current = true;
+          playbackCursorRef.current = nextStepIndex;
+          setPlaybackCursor(nextStepIndex);
+        } else if (route.destinationRoom && route.destinationRoom.buildingId === building.id) {
           enterDestinationRouteFloor(route.destinationRoom);
           routeEntryTransitionCompleteRef.current = true;
           playbackCursorRef.current = nextStepIndex;
@@ -6083,7 +6168,8 @@ const buildingFill = (id: string) =>
     }
 
     const isFloorHandoff = activeRouteTransition.kind === "stairs" || activeRouteTransition.kind === "elevator";
-    const isBuildingExit = activeRouteTransition.kind === "exit_building" && navigationPhase === "origin-indoor";
+    const isBuildingExit = activeRouteTransition.kind === "exit_building"
+      && sourceTarget.context === "floor" && nextTarget.context === "campus";
     if (!isFloorHandoff && !isBuildingExit) return;
     if (isFloorHandoff) {
       const detail = transition.detail;
@@ -6219,9 +6305,7 @@ const buildingFill = (id: string) =>
       // playback cursor, human position, and pause state remain untouched.
       setInspectedRouteStepIndex(safeIndex);
       const target = studentRouteSeekTarget(route, routeNavigationSteps, safeIndex);
-      const point = target.segment
-        ? pointAlongPolyline(target.segment.waypoints, target.segmentProgress)
-        : pointAlongPolyline(route.campusPoints?.length ? route.campusPoints : route.points, target.routeProgress);
+    const point = pointAlongPolyline(studentRouteTargetPoints(route, target), target.context === "floor" ? target.segmentProgress : target.routeProgress);
       if (target.context === "floor" && target.segment) {
         const building = MOCK_BUILDINGS.find((candidate) => candidate.id === target.segment!.buildingId);
         const publishedBuilding = activeCampus?.buildings.find((candidate) => candidate.id === target.segment!.buildingId);
@@ -6279,8 +6363,8 @@ const buildingFill = (id: string) =>
     let previousTarget: ReturnType<typeof studentRoutePlaybackTarget> | null = null;
     const applyPosition = (position: number) => {
       const target = studentRoutePlaybackTarget(route, routeNavigationSteps, position);
-      const points = target.segment?.waypoints ?? (route.campusPoints?.length ? route.campusPoints : route.points);
-      const point = pointAlongPolyline(points, target.segment ? target.segmentProgress : target.routeProgress);
+      const points = studentRouteTargetPoints(route, target);
+      const point = pointAlongPolyline(points, target.context === "floor" ? target.segmentProgress : target.routeProgress);
       const isFloorTarget = target.context === "floor" && target.segment;
       followHumanWorldPointRef.current = isFloorTarget
         ? { x: point.x + floorViewport.offsetX, y: point.y + floorViewport.offsetY }
@@ -6324,9 +6408,11 @@ const buildingFill = (id: string) =>
             setDestinationIndoorSegments(segments);
             setDestinationIndoorSegmentIndex(segmentIndex);
           }
-          setActiveRouteRoom(target.phase === "destination-indoor" ? route.destinationRoom?.roomId ?? null : roomOrigin?.roomId ?? null);
-          const roomContext = target.phase === "destination-indoor" ? route.destinationRoom : roomOrigin;
-          setHighlightedRoom(roomContext?.floorNumber === floor ? roomContext.roomId : null);
+        const endpointRoom = target.phase === "destination-indoor" ? route.destinationRoom : roomOrigin;
+        const visibleEndpointRoom = endpointRoom?.buildingId === target.segment?.buildingId
+          && endpointRoom.floorNumber === floor ? endpointRoom : null;
+        setActiveRouteRoom(visibleEndpointRoom?.roomId ?? null);
+        setHighlightedRoom(visibleEndpointRoom?.roomId ?? null);
         } else if (target.phase !== navigationPhase) {
           setNavigationPhase(target.phase);
         }
@@ -6454,17 +6540,44 @@ const buildingFill = (id: string) =>
   const routeFlowAnimated = platformSettings.animatedRouteArrows
     && (studentRouteUi.phase === "preview"
       || studentRouteUi.phase === "navigating" && (studentRouteUi.camera === "explore" || studentRouteUi.playback === "playing"));
-  const outdoorRouteLineOverlay = useMemo(() => route && route.points.length >= 2 ? (
-    <RouteMapOverlay
-      points={route.points}
-      mode={mapMode}
-      fading={routeFading}
-      walkProgress={studentRouteUi.phase === "navigating" ? displayedWalkProgress : undefined}
-      animated={routeFlowAnimated}
-      layer="line"
-      progressFrameWriterRef={outdoorRouteLineProgressWriterRef}
-    />
-  ) : null, [displayedWalkProgress, mapMode, route, routeFading, routeFlowAnimated, studentRouteUi.phase]);
+  const outdoorRouteLineOverlay = useMemo(() => {
+    if (!route) return null;
+    // A campus SVG can display several campus legs from one itinerary, but
+    // must never join them across a building's floor-local coordinates. Keep
+    // each authored campus context as its own stroke.
+    const campusLegs = route.contextLegs
+      ?.map((leg, contextLegIndex) => ({ leg, contextLegIndex }))
+      .filter(({ leg }) => leg.kind === "campus" && leg.waypoints.length >= 2);
+    const renderLegs = campusLegs?.length
+      ? campusLegs
+      : route.points.length >= 2
+        ? [{ leg: { kind: "campus" as const, waypoints: route.points, distanceM: route.dist }, contextLegIndex: -1 }]
+        : [];
+    if (!renderLegs.length) return null;
+    const activeStepTarget = studentRouteUi.phase === "navigating"
+      ? studentRouteSeekTarget(route, routeNavigationSteps, activeRouteStepIndex)
+      : null;
+    const activeCampusLegIndex = activeStepTarget?.context === "campus" ? activeStepTarget.contextLegIndex : undefined;
+    return <g data-testid="campus-route-context-legs" style={{ pointerEvents: "none" }}>
+      {renderLegs.map(({ leg, contextLegIndex }) => {
+        const isActiveLeg = contextLegIndex >= 0 && contextLegIndex === activeCampusLegIndex;
+        const legProgress = studentRouteUi.phase !== "navigating"
+          ? undefined
+          : isActiveLeg ? displayedWalkProgress
+            : activeCampusLegIndex !== undefined && contextLegIndex < activeCampusLegIndex ? 1 : 0;
+        return <RouteMapOverlay
+          key={`campus-route-context-${contextLegIndex}`}
+          points={leg.waypoints}
+          mode={mapMode}
+          fading={routeFading}
+          walkProgress={legProgress}
+          animated={routeFlowAnimated}
+          layer="line"
+          progressFrameWriterRef={isActiveLeg ? outdoorRouteLineProgressWriterRef : undefined}
+        />;
+      })}
+    </g>;
+  }, [activeRouteStepIndex, displayedWalkProgress, mapMode, route, routeFading, routeFlowAnimated, routeNavigationSteps, studentRouteUi.phase]);
   const indoorRouteLineOverlay = useMemo(() => visibleIndoorRoute && visibleIndoorRoute.waypoints.length >= 2 && indoorRouteMatchesVisibleFloor ? (
     <g data-testid="floor-indoor-route-line" style={{ pointerEvents: "none" }}>
       <RouteMapOverlay
@@ -6500,11 +6613,26 @@ const buildingFill = (id: string) =>
     moveGuidedStep(1);
   };
   const campus3DRoutePoints = route?.campusPoints?.length ? route.campusPoints : route?.points ?? EMPTY_MAP_POINTS;
+  const campus3DRouteSegments = useMemo(() => {
+    const authoredCampusLegs = route?.contextLegs?.filter((leg) => leg.kind === "campus" && leg.waypoints.length > 1)
+      .map((leg) => leg.waypoints);
+    return authoredCampusLegs?.length ? authoredCampusLegs
+      : campus3DRoutePoints.length > 1 ? [campus3DRoutePoints] : [];
+  }, [campus3DRoutePoints, route]);
+  const campus3DFollowTarget = route && studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow"
+    ? studentRouteSeekTarget(route, routeNavigationSteps, activeRouteStepIndex)
+    : null;
+  const campus3DFollowLeg = campus3DFollowTarget?.context === "campus" && campus3DFollowTarget.contextLegIndex !== undefined
+    ? route?.contextLegs?.[campus3DFollowTarget.contextLegIndex]
+    : undefined;
+  const campus3DFollowRoutePoints = campus3DFollowLeg?.kind === "campus"
+    ? campus3DFollowLeg.waypoints
+    : campus3DRoutePoints;
   const campus3DHumanPoint = studentRouteUi.phase === "navigating"
     && studentRouteUi.camera === "follow"
     && navigationPhase === "outdoor"
-    && campus3DRoutePoints.length > 0
-    ? pointAlongPolyline(campus3DRoutePoints, walkProgress)
+    && campus3DFollowRoutePoints.length > 0
+    ? pointAlongPolyline(campus3DFollowRoutePoints, walkProgress)
     : null;
   const campus3DFocusPoint = useMemo(() => {
     const buildingId = selected?.id ?? searchFocusRef.current?.buildingId;
@@ -6673,6 +6801,11 @@ const buildingFill = (id: string) =>
     destinationIndoorTransitionRef.current = null;
     setStairLoading(null);
     setFollowCameraDetached(false);
+    // Explore begins by inspecting the exact canonical Follow step that was
+    // active when the user detached. Without this seed, its local map progress
+    // can be stale (for example, the completed CABA leg can resolve to the
+    // final route step while waiting at the Canteen entrance).
+    setInspectedRouteStepIndex(activeRouteStepIndex);
     dispatchStudentRouteUi({ type: "ENTER_EXPLORE" });
   };
   const startGuidedFromCollapsedPreview = () => {
@@ -6781,6 +6914,8 @@ const buildingFill = (id: string) =>
             <LazyStudentCampus3DRenderer
               campus={readonlyOutdoorCampus}
               routePoints={campus3DRoutePoints}
+              routeSegments={campus3DRouteSegments}
+              followRoutePoints={campus3DFollowRoutePoints}
               routePreview={Boolean(route && studentRouteUi.phase === "preview")}
               startPoint={campus3DRoutePoints[0] ?? null}
               destinationPoint={campus3DRoutePoints.at(-1) ?? null}
@@ -6901,6 +7036,7 @@ const buildingFill = (id: string) =>
           floorId={activeFloorPlan?.id}
           description={activeFloorPlan?.rooms.find((room) => room.id === selectedRoomContext.roomId)?.description}
           suspendedForFloorPicker={floorPickerFallbackActive}
+          threeDPresentation={student3DActive}
           onDirections={() => useRoomAsDestination(selectedRoomContext)}
           onStartHere={() => useRoomAsStart(selectedRoomContext)}
           onReport={() => {

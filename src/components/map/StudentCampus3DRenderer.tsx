@@ -12,11 +12,12 @@ import { entranceWorldPosition } from "../../lib/buildingEntrances";
 import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } from "../../lib/studentCampus3dCoordinates";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { student3dFocusDistance, student3dSafeFocusCenter } from "../../lib/student3dCameraFocus";
-import { configureStudent3dInputMappings, crossedStudent3dDragThreshold } from "../../lib/student3dInput";
+import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
 import { campusFireEscapeLevels, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
 import type { EventVenue } from "../../lib/eventMapView";
 import type { Pt } from "../../lib/routePlanner";
+import { SUHAY_HUSAY_V3_LIMBS, SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V4_LIMBS, SUHAY_HUSAY_V4_POINTS, SUHAY_HUSAY_V4_SUPPORTS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V5_ROCKS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, type SuhayPointName, type SuhayV4PointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
 
 declare module "react" {
   namespace JSX {
@@ -27,6 +28,8 @@ declare module "react" {
 interface StudentCampus3DRendererProps {
   campus: ReadonlyOutdoorCampus;
   routePoints?: Pt[];
+  routeSegments?: Pt[][];
+  followRoutePoints?: Pt[];
   routePreview?: boolean;
   startPoint?: Pt | null;
   destinationPoint?: Pt | null;
@@ -224,6 +227,7 @@ function softBuildingColor(value: string): string {
 }
 
 function Building({ building, selected, onSelectBuilding, shouldSuppressClick }: { building: ReadonlyOutdoorCampus["buildings"][number]; selected: boolean; onSelectBuilding?: (buildingId: string) => void; shouldSuppressClick: () => boolean }) {
+  const [hovered, setHovered] = useState(false);
   const floors = Math.max(1, building.floors?.length ?? 1);
   const width = campusMapSizeToWorld(building.width);
   const depth = campusMapSizeToWorld(building.height);
@@ -236,9 +240,10 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick }:
   const paneHeight = Math.min(0.082, floorHeight * 0.42);
   const paneColor = "#5e8396";
   return <group position={[world.x, 0, world.z]} rotation={[0, -(building.rotation ?? 0) * Math.PI / 180, 0]}>
-    <mesh position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}>
+    <mesh position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}
+      onPointerOver={(event) => { event.stopPropagation(); setHovered(true); }} onPointerOut={(event) => { event.stopPropagation(); setHovered(false); }}>
       <boxGeometry args={[width, height, depth]} />
-      <meshStandardMaterial color={body} roughness={0.78} metalness={0.02} emissive={selected ? "#56a4ff" : "#000000"} emissiveIntensity={selected ? 0.18 : 0} />
+      <meshStandardMaterial color={hovered && !selected ? "#c8d9e4" : body} roughness={0.78} metalness={0.02} emissive={selected ? "#56a4ff" : hovered ? "#7399ae" : "#000000"} emissiveIntensity={selected ? 0.18 : hovered ? 0.08 : 0} />
     </mesh>
     {Array.from({ length: floors }, (_, index) => {
       const y = (index + 0.56) * floorHeight;
@@ -619,11 +624,11 @@ function SuhayHusayModelV2() {
 /** V3 draws the sculpture as connected sculptural masses instead of a row of
  * exposed joints. The low figure sits on the stone and lifts its chest toward
  * the standing figure; their arms meet at two readable support points. */
-function SuhayHusayModelV3() {
+function SuhayHusayModelV3Legacy() {
   const bronze = "#66523d";
   const bronzeLight = "#92734f";
   const joinedHands = "#c0a076";
-  return <group name="suhay-husay-v3-sculpture" scale={0.68}>
+  return <group name="suhay-husay-v3-previous-sculpture" scale={0.68}>
     {/* One grounded, faceted stone supports both figures. A raised seat stone
         gives the lower figure a clear physical place to sit against. */}
     <mesh position={[0, 0.07, 0]} castShadow receiveShadow>
@@ -703,8 +708,529 @@ function SuhayHusayModelV3() {
   </group>;
 }
 
-// The existing 3D designs remain selectable rollback options.
-const SUHAY_HUSAY_MODEL_VERSION: "legacy" | "v2" | "v3" = "v3";
+function FacetedLandmarkLimb({ from, to, radius, color }: { from: readonly number[]; to: readonly number[]; radius: number; color: string }) {
+  const start = new THREE.Vector3(from[0], from[1], from[2]);
+  const end = new THREE.Vector3(to[0], to[1], to[2]);
+  const direction = end.clone().sub(start);
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  return <mesh position={start.add(end).multiplyScalar(0.5)} quaternion={quaternion} castShadow>
+    <cylinderGeometry args={[radius * 0.9, radius, direction.length(), 5, 1]} />
+    <meshStandardMaterial color={color} roughness={0.9} metalness={0.12} flatShading />
+  </mesh>;
+}
+
+/** V3 is a unified, static low-poly outcrop composition. Shared joint anchors
+ * also drive the 2D landmark pictogram, keeping its pose consistent. */
+function SuhayHusayModelV3() {
+  const points = SUHAY_HUSAY_V3_POINTS;
+  const figureTones = { main: "#484947", highlight: "#625e55", shadow: "#383b3a" };
+  const rockTones = { dark: "#3f4240", mid: "#575751", light: "#716d63" };
+  return <group name="suhay-husay-v3-sculpture" scale={0.76}>
+    {/* Low irregular bedrock makes a stable ground contact without reading as
+        a rectangular plinth. The eight fixed rock masses rise behind and
+        around the central seated figure. */}
+    <mesh position={[0, 0.055, 0]} rotation={[0, 0, 0]} castShadow receiveShadow>
+      <cylinderGeometry args={[0.59, 0.65, 0.11, 7, 1]} />
+      <meshStandardMaterial color="#454744" roughness={0.96} flatShading />
+    </mesh>
+    {SUHAY_HUSAY_V3_ROCKS.map((rock) => <mesh key={rock.id}
+      position={[rock.position[0], rock.position[1], rock.position[2]]}
+      rotation={[rock.rotation[0], rock.rotation[1], rock.rotation[2]]}
+      scale={[rock.scale[0], rock.scale[1], rock.scale[2]]}
+      castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial color={rockTones[rock.tone]} roughness={0.97} flatShading />
+    </mesh>)}
+
+    {/* Wide, weight-bearing stance. The low person occupies the open center
+        between these legs instead of standing beside the sculpture. */}
+    {SUHAY_HUSAY_V3_LIMBS.filter((limb) => limb.id.startsWith("upper-") && !limb.id.includes("arm") && limb.id !== "upper-neck").map((limb) => (
+      <FacetedLandmarkLimb key={limb.id} from={points[limb.from as SuhayPointName]} to={points[limb.to as SuhayPointName]} radius={limb.radius} color={figureTones[limb.tone]} />
+    ))}
+    {(["upperFootLeft", "upperFootRight"] as const).map((name) => <mesh key={name} position={[points[name][0], points[name][1], points[name][2]]} rotation={[0, name === "upperFootLeft" ? -0.08 : 0.08, 0]} scale={[0.115, 0.05, 0.085]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.shadow} roughness={0.92} flatShading />
+    </mesh>)}
+    <mesh position={[-0.045, 0.8, -0.12]} rotation={[0.02, 0.04, 0.12]} scale={[0.21, 0.13, 0.17]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.main} roughness={0.88} metalness={0.1} flatShading />
+    </mesh>
+    <mesh position={[-0.08, 1.035, -0.14]} rotation={[0.04, 0.02, 0.2]} scale={[0.24, 0.32, 0.17]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.highlight} roughness={0.88} metalness={0.1} flatShading />
+    </mesh>
+    <mesh position={[-0.17, 1.43, -0.18]} rotation={[0.02, 0.08, 0.55]} scale={[0.075, 0.12, 0.073]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.main} roughness={0.86} metalness={0.1} flatShading />
+    </mesh>
+    {(() => {
+      const limb = SUHAY_HUSAY_V3_LIMBS.find((item) => item.id === "upper-neck")!;
+      return <FacetedLandmarkLimb from={points[limb.from]} to={points[limb.to]} radius={limb.radius} color={figureTones.highlight} />;
+    })()}
+
+    {/* The lower figure is seated into the front of the rock, with folded legs
+        and its torso/head rising inside the standing figure's open stance. */}
+    {SUHAY_HUSAY_V3_LIMBS.filter((limb) => limb.id.startsWith("lower-") && !limb.id.includes("arm") && limb.id !== "lower-neck").map((limb) => (
+      <FacetedLandmarkLimb key={limb.id} from={points[limb.from as SuhayPointName]} to={points[limb.to as SuhayPointName]} radius={limb.radius} color={figureTones[limb.tone]} />
+    ))}
+    {(["lowerFootLeft", "lowerFootRight"] as const).map((name) => <mesh key={name} position={[points[name][0], points[name][1], points[name][2]]} rotation={[0, 0, 0]} scale={[0.11, 0.045, 0.075]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.shadow} roughness={0.92} flatShading />
+    </mesh>)}
+    <mesh position={[0.01, 0.385, 0.36]} rotation={[0, 0.03, 0.03]} scale={[0.21, 0.13, 0.15]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.main} roughness={0.9} metalness={0.1} flatShading />
+    </mesh>
+    <mesh position={[-0.01, 0.625, 0.36]} rotation={[0.04, 0, 0.12]} scale={[0.17, 0.23, 0.14]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.highlight} roughness={0.88} metalness={0.1} flatShading />
+    </mesh>
+    <mesh position={[-0.035, 0.87, 0.39]} rotation={[0, 0.06, 0.22]} scale={[0.062, 0.087, 0.061]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={figureTones.main} roughness={0.86} metalness={0.1} flatShading />
+    </mesh>
+    {(() => {
+      const limb = SUHAY_HUSAY_V3_LIMBS.find((item) => item.id === "lower-neck")!;
+      return <FacetedLandmarkLimb from={points[limb.from]} to={points[limb.to]} radius={limb.radius} color={figureTones.highlight} />;
+    })()}
+
+    {/* Both people contribute both arms. Hands meet at two distinct clasp
+        points; the short cross-mass makes the support gesture legible at map
+        scale without using thin, detached rods. */}
+    {SUHAY_HUSAY_V3_LIMBS.filter((limb) => limb.id.includes("arm") || limb.id.includes("forearm")).map((limb) => (
+      <FacetedLandmarkLimb key={limb.id} from={points[limb.from as SuhayPointName]} to={points[limb.to as SuhayPointName]} radius={limb.radius} color={figureTones[limb.tone]} />
+    ))}
+    {(["claspLeft", "claspRight"] as const).map((name) => <mesh key={name} position={[points[name][0], points[name][1], points[name][2]]} rotation={[0.12, 0.2, 0.25]} scale={[0.065, 0.052, 0.06]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color="#716858" roughness={0.82} metalness={0.12} flatShading />
+    </mesh>)}
+  </group>;
+}
+
+/** V4 is a formal profile sculpture rather than a cluster of separate rocks:
+ * an octagonal plinth supports one rising outcrop, and the standing figure's
+ * open stance clearly frames the seated figure in front of it. The local yaw
+ * gives the campus overview a deliberate three-quarter reading. */
+function SuhayHusayModelV4() {
+  const points = SUHAY_HUSAY_V4_POINTS;
+  const tones = { main: "#514b42", highlight: "#716657", shadow: "#3e403e" };
+  const lowerTones = { main: "#786a55", highlight: "#958064", shadow: "#575044" };
+  const rockTones: Record<string, string> = { dark: "#4a4b48", mid: "#62615a", light: "#77736a" };
+  const limbs = (prefix: "upper" | "lower", arms: boolean) => SUHAY_HUSAY_V4_LIMBS.filter((limb) =>
+    limb.id.startsWith(`${prefix}-`) && (arms ? limb.id.includes("arm") || limb.id.includes("forearm") : !limb.id.includes("arm") && limb.id !== `${prefix}-neck`),
+  );
+  const limbMesh = (limb: typeof SUHAY_HUSAY_V4_LIMBS[number], palette: typeof tones | typeof lowerTones = tones) => (
+    <FacetedLandmarkLimb key={limb.id} from={points[limb.from as SuhayV4PointName]} to={points[limb.to as SuhayV4PointName]} radius={limb.radius} color={palette[limb.tone]} />
+  );
+  return <group name="suhay-husay-v4-sculpture" scale={0.76} rotation={[0, -0.48, 0]}>
+    {/* A proper low monument plinth gives the outcrop a deliberate base. */}
+    <mesh position={[0, 0.065, 0]} rotation={[0, Math.PI / 7, 0]} castShadow receiveShadow>
+      <cylinderGeometry args={[0.51, 0.56, 0.13, 7, 1]} />
+      <meshStandardMaterial color="#444643" roughness={0.95} flatShading />
+    </mesh>
+    <mesh position={[0, 0.145, 0]} castShadow receiveShadow>
+      <boxGeometry args={[0.96, 0.045, 0.62]} />
+      <meshStandardMaterial color="#77736a" roughness={0.96} flatShading />
+    </mesh>
+    {/* Three intentional angular supports rise from the plinth and leave the
+        seated silhouette open; they form a sculptural outcrop, not a rock pile. */}
+    {SUHAY_HUSAY_V4_SUPPORTS.map((support) => <mesh key={support.id}
+      position={[support.position[0], support.position[1], support.position[2]]}
+      rotation={[support.rotation[0], support.rotation[1], support.rotation[2]]}
+      scale={[support.scale[0], support.scale[1], support.scale[2]]}
+      castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial color={rockTones[support.tone]} roughness={0.96} flatShading />
+    </mesh>)}
+    {/* A raised, faceted seat supports the lower person inside the stance. */}
+    <mesh position={[0.015, 0.39, 0.18]} rotation={[0, -0.14, 0]} castShadow receiveShadow>
+      <boxGeometry args={[0.36, 0.09, 0.24]} />
+      <meshStandardMaterial color="#69675f" roughness={0.95} flatShading />
+    </mesh>
+
+    {/* Standing figure: broad separated legs, a solid upward-stretched torso,
+        extended neck and angular head tilted toward the sky. */}
+    {limbs("upper", false).filter((limb) => limb.id !== "upper-neck").map((limb) => limbMesh(limb))}
+    <mesh position={[-0.015, 0.79, -0.12]} rotation={[0, 0, -0.06]} scale={[0.22, 0.15, 0.16]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={tones.main} roughness={0.9} flatShading />
+    </mesh>
+    <mesh position={[-0.105, 1.035, -0.12]} rotation={[0, 0, -0.22]} scale={[0.205, 0.34, 0.16]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={tones.highlight} roughness={0.9} flatShading />
+    </mesh>
+    {limbs("upper", false).filter((limb) => limb.id === "upper-neck").map((limb) => limbMesh(limb))}
+    <mesh position={[-0.32, 1.48, -0.12]} rotation={[0, 0, -0.48]} scale={[0.075, 0.12, 0.07]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color={tones.main} roughness={0.88} flatShading />
+    </mesh>
+
+    {/* Lower figure: compact folded legs and a rising seated torso sit in the
+        clear gap between the standing person's legs. */}
+    {limbs("lower", false).filter((limb) => limb.id !== "lower-neck").map((limb) => limbMesh(limb, lowerTones))}
+    <mesh position={[0.02, 0.445, 0.32]} rotation={[0, 0, -0.08]} scale={[0.22, 0.13, 0.15]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lowerTones.main} roughness={0.91} flatShading />
+    </mesh>
+    <mesh position={[0.04, 0.56, 0.32]} rotation={[0, 0, -0.12]} scale={[0.18, 0.205, 0.145]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lowerTones.highlight} roughness={0.9} flatShading />
+    </mesh>
+    {limbs("lower", false).filter((limb) => limb.id === "lower-neck").map((limb) => limbMesh(limb, lowerTones))}
+    <mesh position={[0.08, 0.74, 0.32]} rotation={[0, 0, -0.24]} scale={[0.068, 0.09, 0.065]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lowerTones.main} roughness={0.88} flatShading />
+    </mesh>
+
+    {/* Both people contribute both arms. Their broad forearms meet at two
+        shared, visibly joined hands above the seated figure. */}
+    {limbs("upper", true).map((limb) => limbMesh(limb))}
+    {limbs("lower", true).map((limb) => limbMesh(limb, lowerTones))}
+    {(["claspLeft", "claspRight"] as const).map((name) => <mesh key={name}
+      position={[points[name][0], points[name][1], points[name][2]]}
+      rotation={[0.1, 0.2, 0.18]} scale={[0.064, 0.055, 0.06]} castShadow>
+      <octahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial color="#a18b6c" roughness={0.8} flatShading />
+    </mesh>)}
+  </group>;
+}
+
+/** V5 is a side-profile interpretation: the tall skyward figure stays left,
+ * while the lower folded figure sits to its right and reaches up to the same
+ * joined-hand anchors. V4 and all earlier models remain intact for rollback. */
+function SuhayHusayModelV5() {
+  const points = SUHAY_HUSAY_V5_POINTS;
+  const upper = { main: "#585951", highlight: "#747167", shadow: "#414441" };
+  const lower = { main: "#716653", highlight: "#8b7a61", shadow: "#494943" };
+  const rockTones: Record<string, string> = { dark: "#414441", mid: "#565852", light: "#6b6a61" };
+  const limbMesh = (limb: typeof SUHAY_HUSAY_V5_LIMBS[number], palette: typeof upper | typeof lower = upper) => (
+    <FacetedLandmarkLimb key={limb.id} from={points[limb.from as SuhayV5PointName]} to={points[limb.to as SuhayV5PointName]} radius={limb.radius} color={palette[limb.tone]} />
+  );
+  const limbs = (prefix: "upper" | "lower", arms: boolean) => SUHAY_HUSAY_V5_LIMBS.filter((limb) =>
+    limb.id.startsWith(`${prefix}-`) && (arms ? limb.id.includes("arm") || limb.id.includes("forearm") : !limb.id.includes("arm") && limb.id !== `${prefix}-neck`),
+  );
+  return <group name="suhay-husay-v5-sculpture" scale={0.76} rotation={[0, 0.62, 0]}>
+    {/* A defined beveled plinth under a rising, connected stone outcrop. */}
+    <mesh position={[0, 0.065, 0]} rotation={[0, Math.PI / 14, 0]} castShadow receiveShadow>
+      <cylinderGeometry args={[0.54, 0.6, 0.13, 7, 1]} />
+      <meshStandardMaterial color="#393d3b" roughness={0.97} flatShading />
+    </mesh>
+    <mesh position={[0, 0.17, 0]} castShadow receiveShadow>
+      <cylinderGeometry args={[0.49, 0.55, 0.1, 7, 1]} />
+      <meshStandardMaterial color="#65645d" roughness={0.96} flatShading />
+    </mesh>
+    <mesh position={[0, 0.34, -0.045]} rotation={[0, 0.08, -0.04]} castShadow receiveShadow>
+      <cylinderGeometry args={[0.38, 0.5, 0.2, 6, 1]} />
+      <meshStandardMaterial color="#4c4e4b" roughness={0.98} flatShading />
+    </mesh>
+    {SUHAY_HUSAY_V5_ROCKS.map((rock) => <mesh key={rock.id}
+      position={[rock.position[0], rock.position[1], rock.position[2]]}
+      rotation={[rock.rotation[0], rock.rotation[1], rock.rotation[2]]}
+      scale={[rock.scale[0], rock.scale[1], rock.scale[2]]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial color={rockTones[rock.tone]} roughness={0.97} flatShading />
+    </mesh>)}
+
+    {/* Standing figure: broad, weight-bearing legs and a single leaning torso
+        mass establish the upward silhouette before its angular head. */}
+    {limbs("upper", false).filter((limb) => limb.id !== "upper-neck").map((limb) => limbMesh(limb))}
+    {(["upperFootLeft", "upperFootRight"] as const).map((name) => <mesh key={name}
+      position={[points[name][0], points[name][1], points[name][2]]}
+      rotation={[0, name === "upperFootLeft" ? -0.16 : 0.18, 0]}
+      scale={[0.14, 0.052, 0.092]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={upper.shadow} roughness={0.94} flatShading />
+    </mesh>)}
+    <mesh position={[-0.18, 0.97, -0.1]} rotation={[0, 0.02, 0.08]} scale={[0.24, 0.14, 0.15]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={upper.main} roughness={0.92} flatShading />
+    </mesh>
+    <mesh position={[-0.39, 1.2, -0.12]} rotation={[0.02, 0, 0.23]} scale={[0.2, 0.31, 0.15]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={upper.highlight} roughness={0.92} flatShading />
+    </mesh>
+    <mesh position={[-0.42, 1.31, -0.1]} rotation={[0, 0, 0.14]} scale={[0.205, 0.12, 0.16]} castShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={upper.main} roughness={0.93} flatShading />
+    </mesh>
+    {limbs("upper", false).filter((limb) => limb.id === "upper-neck").map((limb) => limbMesh(limb))}
+    <mesh position={[points.upperHead[0], points.upperHead[1], points.upperHead[2]]} rotation={[0.04, 0.02, 0.58]} scale={[0.072, 0.12, 0.068]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color={upper.shadow} roughness={0.9} flatShading />
+    </mesh>
+
+    {/* Lower figure is folded onto the right-hand stone shoulder: low pelvis,
+        bent grounded legs, angled torso, and raised head distinguish sitting
+        from a second standing pose. */}
+    {limbs("lower", false).filter((limb) => limb.id !== "lower-neck").map((limb) => limbMesh(limb, lower))}
+    {(["lowerFootLeft", "lowerFootRight"] as const).map((name) => <mesh key={name}
+      position={[points[name][0], points[name][1], points[name][2]]}
+      rotation={[0, name === "lowerFootLeft" ? 0.12 : -0.12, 0]}
+      scale={[0.12, 0.048, 0.085]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lower.shadow} roughness={0.94} flatShading />
+    </mesh>)}
+    <mesh position={[0.24, 0.41, 0.64]} rotation={[0, 0, -0.1]} scale={[0.2, 0.12, 0.145]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lower.main} roughness={0.93} flatShading />
+    </mesh>
+    <mesh position={[0.16, 0.565, 0.65]} rotation={[0, 0, 0.28]} scale={[0.17, 0.23, 0.14]} castShadow receiveShadow>
+      <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lower.highlight} roughness={0.93} flatShading />
+    </mesh>
+    {limbs("lower", false).filter((limb) => limb.id === "lower-neck").map((limb) => limbMesh(limb, lower))}
+    <mesh position={[points.lowerHead[0], points.lowerHead[1], points.lowerHead[2]]} rotation={[0, 0, 0.26]} scale={[0.065, 0.087, 0.063]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color={lower.shadow} roughness={0.9} flatShading />
+    </mesh>
+
+    {/* Both figures reach into the same two palm anchors. The small joining
+        bridge makes the clasp visible at ordinary campus viewing distance. */}
+    {limbs("upper", true).map((limb) => limbMesh(limb))}
+    {limbs("lower", true).map((limb) => limbMesh(limb, lower))}
+    <FacetedLandmarkLimb from={points.claspLeft} to={points.claspRight} radius={0.047} color="#81745d" />
+    {(["claspLeft", "claspRight"] as const).map((name) => <mesh key={name}
+      position={[points[name][0], points[name][1], points[name][2]]}
+      rotation={[0.12, 0.2, 0.22]} scale={[0.059, 0.052, 0.055]} castShadow>
+      <octahedronGeometry args={[1, 0]} /><meshStandardMaterial color="#95866b" roughness={0.9} flatShading />
+    </mesh>)}
+  </group>;
+}
+
+function SuhayHusayProfileMass({ name, polygon, depth, z, color }: { name: string; polygon: readonly (readonly [number, number])[]; depth: number; z: number; color: string }) {
+  const shape = useMemo(() => {
+    const profile = new THREE.Shape();
+    polygon.forEach(([x, y], index) => index === 0 ? profile.moveTo(x, y) : profile.lineTo(x, y));
+    profile.closePath();
+    return profile;
+  }, [polygon]);
+  return <mesh name={name} position={[0, 0, z]} castShadow receiveShadow>
+    <extrudeGeometry args={[shape, { depth, bevelEnabled: false, steps: 1, curveSegments: 1 }]} />
+    <meshStandardMaterial color={color} roughness={0.94} metalness={0.04} flatShading />
+  </mesh>;
+}
+
+/** V6 is a carved side-profile relief rather than a pile of rounded masses.
+ * The two filled figures and pedestal use the same normalized polygons as the
+ * Student 2D symbol, with shallow depth giving them a readable three-quarter
+ * stone-sculpture profile at campus scale. */
+function SuhayHusayModelV6() {
+  const mass = (name: SuhayV6ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v6-${name}`} polygon={SUHAY_HUSAY_V6_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v6-sculpture" scale={[0.64, 1.42, 0.64]} rotation={[0, 0.2, 0]}>
+    {/* Formal tapered pedestal with one broad stone facet. */}
+    {mass("pedestal", 0.56, -0.28, "#626966")}
+    {mass("pedestalFacet", 0.018, 0.284, "#767d76")}
+    {/* One continuous, angular outcrop rises behind the seated figure. */}
+    {mass("outcrop", 0.36, -0.18, "#505753")}
+    {mass("outcropFacet", 0.014, 0.186, "#70756d")}
+
+    {/* The standing figure's separated, load-bearing legs leave a clear gap;
+        the long torso, sky-tilted head and lifted arm define the left profile. */}
+    {mass("standingLeftLeg", 0.2, 0.04, "#4d5551")}
+    {mass("standingRightLeg", 0.2, 0.04, "#59615c")}
+    {mass("standingTorso", 0.22, 0.05, "#606863")}
+    {mass("standingNeck", 0.18, 0.07, "#70776e")}
+    {mass("standingHead", 0.18, 0.08, "#555d59")}
+    {mass("standingRaisedArm", 0.16, 0.02, "#676f69")}
+    {mass("standingLinkedArm", 0.16, 0.1, "#59615c")}
+
+    {/* The right-hand figure is a low folded silhouette in front of the
+        standing legs, with its upward reach meeting the same clasp shape. */}
+    {mass("lowerRaisedThigh", 0.2, 0.19, "#818379")}
+    {mass("lowerBentShin", 0.18, 0.2, "#71786f")}
+    {mass("lowerTuckedLeg", 0.18, 0.18, "#656d65")}
+    {mass("lowerTorso", 0.2, 0.2, "#898a7e")}
+    {mass("lowerHead", 0.17, 0.21, "#777d75")}
+    {mass("lowerLinkedArm", 0.16, 0.22, "#85877c")}
+    {mass("lowerRestingArm", 0.15, 0.23, "#777c73")}
+    {mass("clasp", 0.12, 0.25, "#a09680")}
+  </group>;
+}
+
+/** V7 uses a more formal tapered plinth and a side-profile pair whose lower
+ * seated figure is framed by the standing figure's legs. The geometry remains
+ * a small set of static extruded silhouette masses. */
+function SuhayHusayModelV7() {
+  const mass = (name: SuhayV7ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v7-${name}`} polygon={SUHAY_HUSAY_V7_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v7-sculpture" scale={[0.66, 1.38, 0.66]} rotation={[0, 0.36, 0]}>
+    {/* The broad, tapered plinth reads as a formal monument base. One rising
+        shoulder supports the seated figure without becoming a loose rock pile. */}
+    {mass("pedestal", 0.62, -0.3, "#555d5b")}
+    {mass("pedestalTop", 0.035, 0.31, "#777e79")}
+    {mass("pedestalFacet", 0.02, 0.33, "#68716d")}
+    {mass("outcrop", 0.4, -0.2, "#454d4a")}
+    {mass("outcropFacet", 0.018, 0.205, "#606965")}
+
+    {/* Upper figure: a planted, separated stance; the head tilts skyward and
+        one arm rises overhead while the other reaches down into the clasp. */}
+    {mass("standingLeftLeg", 0.23, 0.04, "#414a47")}
+    {mass("standingRightLeg", 0.23, 0.04, "#515b57")}
+    {mass("standingTorso", 0.25, 0.05, "#59635e")}
+    {mass("standingNeck", 0.2, 0.07, "#707a73")}
+    {mass("standingHead", 0.21, 0.08, "#4a5450")}
+    {mass("standingRaisedArm", 0.19, 0.02, "#626d67")}
+    {mass("standingLinkedArm", 0.18, 0.1, "#535d58")}
+
+    {/* Lower figure: compact torso angled up, distinct folded thigh and shin,
+        and feet resting on the plinth in the negative space between the legs. */}
+    {mass("lowerBackThigh", 0.24, 0.3, "#77766d")}
+    {mass("lowerFrontShin", 0.21, 0.31, "#656b64")}
+    {mass("lowerFoldedLeg", 0.22, 0.29, "#6b7168")}
+    {mass("lowerTorso", 0.24, 0.31, "#918b7c")}
+    {mass("lowerHead", 0.2, 0.32, "#827d70")}
+    {mass("lowerLinkedArm", 0.24, 0.27, "#928b7b")}
+    {mass("lowerRestingArm", 0.18, 0.33, "#77796f")}
+    {mass("clasp", 0.16, 0.32, "#a09680")}
+  </group>;
+}
+
+/** V8 replaces the loosely joined profile parts with one connected core mass
+ * per figure. The lower figure is pulled inward over the raised stone seat;
+ * its folded foot profile overlaps the pedestal top to prevent a floating or
+ * off-platform read from oblique campus views. */
+function SuhayHusayConnectedModel({ version = "v8" }: { version?: "v8" | "v9" | "v10" }) {
+  if (version === "v10") return <SuhayHusayModelV10 />;
+  const shapes = version === "v9" ? SUHAY_HUSAY_V9_SHAPES : SUHAY_HUSAY_V8_SHAPES;
+  const mass = (name: SuhayV8ShapeName | SuhayV9ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-${version}-${name}`} polygon={shapes[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name={`suhay-husay-${version}-sculpture`} scale={[0.66, 1.38, 0.66]} rotation={[0, 0.36, 0]}>
+    {/* Broad, tapered formal plinth; the faceted rise and seat form one support
+        under both figures rather than leaving the kneeling body at the edge.
+        This shallow box supplies a real horizontal top surface beneath the
+        formerly profile-only base, so both sets of feet visibly land on stone. */}
+    <mesh name={`suhay-${version}-pedestal-top-surface`} position={[0, 0.25, 0]} castShadow receiveShadow>
+      <boxGeometry args={version === "v9" ? [1.9, 0.18, 1.62] : [1.56, 0.18, 1.34]} />
+      <meshStandardMaterial color="#626a65" roughness={0.94} flatShading />
+    </mesh>
+    {mass("pedestal", 0.76, -0.34, "#535b58")}
+    {mass("pedestalTop", 0.74, -0.33, "#737a74")}
+    {mass("pedestalFacet", 0.018, 0.405, "#68716c")}
+    {mass("outcrop", 0.48, -0.20, "#414946")}
+    {mass("outcropFacet", 0.018, 0.282, "#606963")}
+    {mass("seatedSupport", 0.36, 0.015, "#505853")}
+
+    {/* Standing figure: broad angular core includes head, extended neck, chest
+        and waist as one solid silhouette, eliminating the former head seam. */}
+    {mass("standingLeftLeg", 0.31, 0.035, "#434b47")}
+    {mass("standingRightLeg", 0.31, 0.035, "#515a55")}
+    {mass("standingCore", 0.34, 0.07, "#5e6761")}
+    {mass("standingRaisedArm", 0.25, 0.04, "#68716a")}
+    {mass("standingLinkedArm", 0.28, 0.14, "#4e5853")}
+
+    {/* Seated figure: the angular head/neck continues into the torso; the low
+        bent leg overlaps both the seat and plinth, visibly grounding the pose. */}
+    {mass("lowerFoldedLeg", 0.32, 0.24, "#626a63")}
+    {mass("lowerCore", 0.32, 0.26, "#7a8076")}
+    {mass("lowerRestingArm", 0.28, 0.30, "#70776d")}
+    {mass("lowerLinkedArm", 0.30, 0.31, "#858579")}
+    {mass("clasp", 0.30, 0.32, "#a09680")}
+  </group>;
+}
+
+/** V10 follows the supplied target with a narrower monument-scale footprint,
+ * a continuous skyward upper silhouette, a folded lower body in the stance,
+ * one unmistakable clasp, and a restrained three-plane stone outcrop. */
+function SuhayHusayModelV10() {
+  const mass = (name: SuhayV10ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v10-${name}`} polygon={SUHAY_HUSAY_V10_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v10-sculpture" scale={[0.60, 1.08, 0.58]} rotation={[0, 0.68, 0]}>
+    {/* Broad, beveled plinth; the larger contiguous outcrop rises behind and
+        supports the seated figure without reading as a loose rock pile. */}
+    {mass("pedestal", 0.72, -0.40, "#555d59")}
+    {mass("pedestalTop", 0.70, -0.39, "#858a81")}
+    {mass("rockMass", 0.48, -0.24, "#69716a")}
+    {mass("rockLeftFacet", 0.016, 0.245, "#858a80")}
+    {mass("rockCenterFacet", 0.016, 0.248, "#505953")}
+    {mass("seatedSupport", 0.40, 0.05, "#59615a")}
+
+    {/* Standing figure: faceted legs, a single head-neck-torso mass tilted
+        skyward, and a reaching arm that remains visibly connected at shoulder. */}
+    {mass("standingLeftLeg", 0.24, 0.015, "#454d49")}
+    {mass("standingRightLeg", 0.24, 0.015, "#56605a")}
+    {mass("standingCore", 0.30, 0.045, "#697168")}
+    {mass("standingCoreFacet", 0.012, 0.348, "#7b8278")}
+    {mass("standingHeadFacet", 0.012, 0.35, "#7b8076")}
+    {mass("standingFreeArm", 0.20, 0.03, "#747a71")}
+    {mass("standingLinkedArm", 0.24, 0.13, "#56605a")}
+
+    {/* Seated figure is layered forward of the legs and overlaps the seat and
+        plinth; the forearms terminate at the same solid hand clasp. */}
+    {mass("lowerFoldedLeg", 0.27, 0.25, "#606860")}
+    {mass("lowerCore", 0.27, 0.28, "#8b897e")}
+    {mass("lowerCoreFacet", 0.012, 0.56, "#767a70")}
+    {mass("lowerHeadFacet", 0.012, 0.56, "#a09a8b")}
+    {mass("lowerRestingArm", 0.22, 0.30, "#777c73")}
+    {mass("lowerLinkedArm", 0.24, 0.36, "#a09a8b")}
+    {mass("clasp", 0.18, 0.41, "#b4a78d")}
+  </group>;
+}
+
+/** V11 keeps the reference's left standing / right seated profile while
+ * reducing the layered fragments into continuous sculptural masses. */
+function SuhayHusayModelV11() {
+  const mass = (name: SuhayV11ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v11-${name}`} polygon={SUHAY_HUSAY_V11_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v11-sculpture" scale={[0.54, 0.96, 0.52]} rotation={[0, 0.68, 0]}>
+    {/* One formal plinth and a single rising, faceted outcrop support both
+        figures; the top remains broad enough to visibly seat the lower pose. */}
+    {mass("pedestal", 0.70, -0.38, "#555c58")}
+    {mass("rockMass", 0.46, -0.22, "#626a64")}
+    {mass("rockLeftFacet", 0.014, 0.245, "#7b8279")}
+    {mass("rockRightFacet", 0.014, 0.248, "#4c554f")}
+
+    {/* The upper person's head/neck/chest are one unbroken profile. Separated
+        planted legs form an open stance around the seated figure. */}
+    {mass("standingLeftLeg", 0.22, 0.01, "#424a46")}
+    {mass("standingRightLeg", 0.22, 0.01, "#505953")}
+    {mass("standingCore", 0.29, 0.035, "#626b64")}
+    {mass("standingCoreFacet", 0.012, 0.338, "#7b8278")}
+    {mass("standingFreeArm", 0.18, 0.025, "#70776e")}
+
+    {/* The seated figure folds onto the stone between the legs; its torso
+        contains the angular head and its reaching arm meets the upper hand. */}
+    {mass("lowerFoldedLeg", 0.25, 0.20, "#59625b")}
+    {mass("lowerCore", 0.25, 0.23, "#817f75")}
+    {mass("lowerCoreFacet", 0.012, 0.482, "#74776f")}
+    {mass("lowerRestingArm", 0.20, 0.25, "#70776f")}
+    {mass("standingLinkedArm", 0.22, 0.13, "#58615b")}
+    {mass("lowerLinkedArm", 0.22, 0.34, "#969082")}
+    {mass("clasp", 0.16, 0.39, "#b0a48d")}
+  </group>;
+}
+
+/** V12 keeps V11's recognizable two-figure composition while making its
+ * campus-scale silhouette a little shorter and reducing decorative facets. */
+function SuhayHusayModelV12() {
+  const mass = (name: SuhayV11ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v12-${name}`} polygon={SUHAY_HUSAY_V11_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v12-sculpture" scale={[0.54, 0.86, 0.52]} rotation={[0, 0.68, 0]}>
+    {mass("pedestal", 0.70, -0.38, "#555c58")}
+    {mass("rockMass", 0.46, -0.22, "#626a64")}
+
+    {mass("standingLeftLeg", 0.22, 0.01, "#424a46")}
+    {mass("standingRightLeg", 0.22, 0.01, "#505953")}
+    {mass("standingCore", 0.29, 0.035, "#626b64")}
+    {mass("standingFreeArm", 0.18, 0.025, "#70776e")}
+
+    {mass("lowerFoldedLeg", 0.25, 0.20, "#59625b")}
+    {mass("lowerCore", 0.25, 0.23, "#817f75")}
+    {mass("lowerRestingArm", 0.20, 0.25, "#70776f")}
+    {mass("standingLinkedArm", 0.22, 0.13, "#58615b")}
+    {mass("lowerLinkedArm", 0.22, 0.34, "#969082")}
+    {mass("clasp", 0.16, 0.39, "#b0a48d")}
+  </group>;
+}
+
+/** V13 trims the overall monument footprint and height while keeping the
+ * seated profile, open standing stance, hand clasp, and single stone outcrop. */
+function SuhayHusayModelV13() {
+  const mass = (name: SuhayV11ShapeName, depth: number, z: number, color: string) => (
+    <SuhayHusayProfileMass key={name} name={`suhay-v13-${name}`} polygon={SUHAY_HUSAY_V11_SHAPES[name]} depth={depth} z={z} color={color} />
+  );
+  return <group name="suhay-husay-v13-sculpture" scale={[0.50, 0.74, 0.48]} rotation={[0, 0.68, 0]}>
+    {mass("pedestal", 0.70, -0.38, "#555c58")}
+    {mass("rockMass", 0.46, -0.22, "#626a64")}
+
+    {mass("standingLeftLeg", 0.22, 0.01, "#424a46")}
+    {mass("standingRightLeg", 0.22, 0.01, "#505953")}
+    {mass("standingCore", 0.29, 0.035, "#626b64")}
+    {mass("standingFreeArm", 0.18, 0.025, "#70776e")}
+
+    {mass("lowerFoldedLeg", 0.25, 0.20, "#747b71")}
+    {mass("lowerCore", 0.25, 0.23, "#999587")}
+    {mass("lowerRestingArm", 0.20, 0.25, "#7d8378")}
+    {mass("standingLinkedArm", 0.22, 0.13, "#58615b")}
+    {mass("lowerLinkedArm", 0.22, 0.34, "#a49c8b")}
+    {mass("clasp", 0.16, 0.39, "#b8aa90")}
+  </group>;
+}
+
+// Every earlier implementation remains selectable for one-line rollback.
+const SUHAY_HUSAY_MODEL_VERSION: "legacy" | "v2" | "v3-previous" | "v3" | "v4" | "v5" | "v6" | "v7" | "v8" | "v9" | "v10" | "v11" | "v12" | "v13" = "v13";
 
 function GenericAsset({ asset, isSuhayHusay = false, selectedLandmark = false }: { asset: CampusDecorAsset; isSuhayHusay?: boolean; selectedLandmark?: boolean }) {
   const rootRef = useRef<THREE.Group>(null);
@@ -740,7 +1266,7 @@ function GenericAsset({ asset, isSuhayHusay = false, selectedLandmark = false }:
       event.stopPropagation();
     }}>
     <group ref={modelRef}>
-    {asset.type === "monument" ? isSuhayHusay ? (SUHAY_HUSAY_MODEL_VERSION === "v3" ? <SuhayHusayModelV3 /> : SUHAY_HUSAY_MODEL_VERSION === "v2" ? <SuhayHusayModelV2 /> : <SuhayHusayModelLegacy />) : <GenericMonumentModel /> : asset.type === "gazebo" || asset.type === "picnic-table" ? <>
+    {asset.type === "monument" ? isSuhayHusay ? (SUHAY_HUSAY_MODEL_VERSION === "v13" ? <SuhayHusayModelV13 /> : SUHAY_HUSAY_MODEL_VERSION === "v12" ? <SuhayHusayModelV12 /> : SUHAY_HUSAY_MODEL_VERSION === "v11" ? <SuhayHusayModelV11 /> : SUHAY_HUSAY_MODEL_VERSION === "v10" ? <SuhayHusayConnectedModel version="v10" /> : SUHAY_HUSAY_MODEL_VERSION === "v9" ? <SuhayHusayConnectedModel version="v9" /> : SUHAY_HUSAY_MODEL_VERSION === "v8" ? <SuhayHusayConnectedModel version="v8" /> : SUHAY_HUSAY_MODEL_VERSION === "v7" ? <SuhayHusayModelV7 /> : SUHAY_HUSAY_MODEL_VERSION === "v6" ? <SuhayHusayModelV6 /> : SUHAY_HUSAY_MODEL_VERSION === "v5" ? <SuhayHusayModelV5 /> : SUHAY_HUSAY_MODEL_VERSION === "v4" ? <SuhayHusayModelV4 /> : SUHAY_HUSAY_MODEL_VERSION === "v3" ? <SuhayHusayModelV3 /> : SUHAY_HUSAY_MODEL_VERSION === "v3-previous" ? <SuhayHusayModelV3Legacy /> : SUHAY_HUSAY_MODEL_VERSION === "v2" ? <SuhayHusayModelV2 /> : <SuhayHusayModelLegacy />) : <GenericMonumentModel /> : asset.type === "gazebo" || asset.type === "picnic-table" ? <>
       {[-0.42, 0.42].flatMap((x) => [-0.3, 0.3].map((z) => <mesh key={`${x}-${z}`} position={[x, 0.35, z]}><boxGeometry args={[0.035, 0.7, 0.035]} /><meshStandardMaterial color="#76644e" /></mesh>))}
       <mesh position={[0, 0.74, 0]}><coneGeometry args={[0.58, 0.27, 4]} /><meshStandardMaterial color="#527894" /></mesh>
       {asset.type === "picnic-table" && <mesh position={[0, 0.25, 0]}><boxGeometry args={[0.9, 0.09, 0.42]} /><meshStandardMaterial color="#977658" /></mesh>}
@@ -761,8 +1287,8 @@ function GenericAsset({ asset, isSuhayHusay = false, selectedLandmark = false }:
       <mesh position={[0, 0.46, 0]}><sphereGeometry args={[0.12, 8, 6]} /><meshStandardMaterial color="#8bc7d3" roughness={0.25} /></mesh>
     </> : <mesh position={[0, 0.18, 0]}>{isCone ? <coneGeometry args={[0.22, 0.42, 7]} /> : <boxGeometry args={[0.38, 0.34, 0.38]} />}<meshStandardMaterial color={color} roughness={0.74} /></mesh>}
     </group>
-    {isSuhayHusay && selectedLandmark && <mesh name="suhay-husay-selection-ring" rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.46, 0]}><ringGeometry args={[0.48, 0.515, 32]} /><meshBasicMaterial color="#2563eb" transparent opacity={0.9} side={THREE.DoubleSide} /></mesh>}
-    {(isSuhayHusay ? hovered || selectedLandmark : Boolean(asset.name)) && <Html position={[0, isSuhayHusay ? 1.04 : 0.75, 0]} center style={{ pointerEvents: "none" }}><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold shadow ${isSuhayHusay && selectedLandmark ? "bg-blue-700 text-white" : "bg-slate-900/75 text-white"}`}>{isSuhayHusay ? "Suhay Husay" : asset.name}</span></Html>}
+    {isSuhayHusay && selectedLandmark && <mesh name="suhay-husay-selection-ring" rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}><ringGeometry args={[0.48, 0.515, 32]} /><meshBasicMaterial color="#2563eb" transparent opacity={0.9} side={THREE.DoubleSide} /></mesh>}
+    {(isSuhayHusay ? hovered || selectedLandmark : Boolean(asset.name)) && <Html position={[0, isSuhayHusay ? (SUHAY_HUSAY_MODEL_VERSION === "v13" ? 2.17 : SUHAY_HUSAY_MODEL_VERSION === "v12" ? 2.48 : SUHAY_HUSAY_MODEL_VERSION === "v11" ? 2.72 : SUHAY_HUSAY_MODEL_VERSION === "v10" ? 2.9 : 1.48) : 0.75, 0]} center style={{ pointerEvents: "none" }}><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold shadow ${isSuhayHusay && selectedLandmark ? "bg-blue-700 text-white" : "bg-slate-900/75 text-white"}`}>{isSuhayHusay ? "Suhay Husay" : asset.name}</span></Html>}
   </group>;
 }
 
@@ -797,6 +1323,7 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
   const doorWidth = Math.max(0.105, Math.min(0.18, facadeWidth * 0.34));
   const doorHeight = 0.28;
   const firstServedLevelIndex = levels.findIndex((level) => level.served);
+  const servedLevels = levels.filter((level) => level.served);
   const renderFlight = (index: number) => {
     const lower = levels[index];
     const upper = levels[index + 1];
@@ -830,7 +1357,74 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
     </Fragment>;
   };
 
-  if (!levels.length) return null;
+  if (!levels.length || servedLevels.length === 0) return null;
+
+  // A stair serving one elevation is a compact egress module, not a tower.
+  // Give it a full landing and a short, guarded run to grade. The tread bottoms
+  // stay above the campus ground plane so the small module cannot z-fight or
+  // look like it is sinking into the terrain.
+  if (servedLevels.length === 1) {
+    const level = servedLevels[0];
+    const y = level.elevation;
+    const platformWidth = Math.max(0.36, Math.min(0.7, Math.max(facadeWidth * 0.84, landingWidth * 1.6)));
+    const platformDepth = Math.max(0.22, Math.min(0.36, outwardDepth * 0.5));
+    const flightDepth = Math.max(0.34, Math.min(0.58, outwardDepth * 0.72));
+    const startZ = platformDepth / 2 + 0.015;
+    const endZ = startZ + flightDepth;
+    const endY = Math.max(0.014, Math.min(y - 0.045, 0.02));
+    const stepCount = 4;
+    const showsDoor = !(level.floorIndex === 0 && suppressGroundDoor);
+    return <group name="student-3d-single-level-emergency-exit">
+      {showsDoor && <group name="student-3d-emergency-access-door" userData={{ servedLevel: level.floorIndex }}>
+        <mesh position={[0, y + doorHeight / 2, -0.012]} castShadow><boxGeometry args={[doorWidth, doorHeight, 0.025]} /><meshStandardMaterial color="#3b454a" roughness={0.68} metalness={0.34} /></mesh>
+        {[-1, 1].map((side) => <SculptureLimb key={side} from={[side * (doorWidth / 2 + 0.009), y, -0.004]} to={[side * (doorWidth / 2 + 0.009), y + doorHeight + 0.01, -0.004]} radius={0.006} color="#c7d0d3" />)}
+        <mesh position={[0, y + doorHeight * 0.62, 0.008]}><boxGeometry args={[doorWidth * 0.76, 0.012, 0.012]} /><meshStandardMaterial color="#dce3e4" metalness={0.5} roughness={0.38} /></mesh>
+        <mesh position={[0, y + doorHeight + 0.035, 0.002]}><boxGeometry args={[doorWidth * 0.66, 0.035, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
+        <Html position={[0, y + doorHeight + 0.035, 0.016]} center transform sprite distanceFactor={7} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+          <span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span>
+        </Html>
+      </group>}
+      <mesh position={[0, y - 0.018, platformDepth / 2]} castShadow receiveShadow>
+        <boxGeometry args={[platformWidth, 0.036, platformDepth]} />
+        <meshStandardMaterial color="#687982" roughness={0.68} metalness={0.24} />
+      </mesh>
+      {Array.from({ length: stepCount }, (_, index) => {
+        const t = (index + 1) / stepCount;
+        const previousT = index / stepCount;
+        const treadY = y + (endY - y) * t;
+        const previousY = y + (endY - y) * previousT;
+        const z = startZ + flightDepth * t;
+        const rise = Math.max(0.012, Math.abs(previousY - treadY));
+        return <Fragment key={`compact-step-${index}`}>
+          <mesh position={[0, treadY - 0.009, z]} castShadow receiveShadow>
+            <boxGeometry args={[platformWidth * 0.78, 0.018, flightDepth / stepCount + 0.014]} />
+            <meshStandardMaterial color={tread} roughness={0.64} metalness={0.26} />
+          </mesh>
+          {rise > 0.018 && <mesh position={[0, (previousY + treadY) / 2, z - flightDepth / stepCount * 0.46]}>
+            <boxGeometry args={[platformWidth * 0.76, rise, 0.018]} />
+            <meshStandardMaterial color="#697a81" roughness={0.72} metalness={0.2} />
+          </mesh>}
+        </Fragment>;
+      })}
+      {[-1, 1].map((side) => {
+        const x = side * platformWidth * 0.43;
+        const railZ = startZ + flightDepth / 2;
+        const railStartY = y + 0.16;
+        const railEndY = endY + 0.16;
+        return <Fragment key={`compact-rail-${side}`}>
+          <SculptureLimb from={[x, railStartY, startZ]} to={[x, railEndY, endZ]} radius={0.008} color={steel} />
+          {[0, 0.5, 1].map((t) => {
+            const z = startZ + flightDepth * t;
+            const railY = railStartY + (railEndY - railStartY) * t;
+            return <SculptureLimb key={t} from={[x, railY - 0.15, z]} to={[x, railY, z]} radius={0.006} color={steel} />;
+          })}
+          <SculptureLimb from={[x, y + 0.16, platformDepth * 0.08]} to={[x, y + 0.16, startZ]} radius={0.007} color={steel} />
+        </Fragment>;
+      })}
+      {y > 0.08 && [-1, 1].map((side) => <SculptureLimb key={`compact-support-${side}`} from={[side * platformWidth * 0.38, 0.025, platformDepth * 0.18]} to={[side * platformWidth * 0.38, y - 0.03, platformDepth * 0.18]} radius={0.009} color={steel} />)}
+    </group>;
+  }
+
   return <group name="student-3d-exterior-fire-escape">
     {levels.map((level, index) => {
       const x = centers[index] ?? 0;
@@ -1076,13 +1670,13 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
     const physicalFocusPoint = isSuhayHusay && suhayAsset ? { x: suhayAsset.x, y: suhayAsset.y } : point;
     const buildingHeight = selectedBuilding ? 0.38 + Math.max(1, selectedBuilding.floors?.length ?? 1) * 0.15 : 0;
     const isGate = selectedPlace?.type === "gate";
-    const landmarkHeight = isGate ? 1.52 : isSuhayHusay ? 1.05 : /monument|suhay|landmark/i.test(`${selectedPlace?.name ?? ""} ${selectedPlace?.type ?? ""}`) ? 2.0 : 0.8;
+    const landmarkHeight = isGate ? 1.52 : isSuhayHusay ? 1.5 : /monument|suhay|landmark/i.test(`${selectedPlace?.name ?? ""} ${selectedPlace?.type ?? ""}`) ? 2.0 : 0.8;
     const width = selectedBuilding
       ? campusMapSizeToWorld(selectedBuilding.width)
-      : isGate ? 1.72 : isSuhayHusay ? 0.92 : campusMapSizeToWorld(selectedPlace?.width ?? 72);
+      : isGate ? 1.72 : isSuhayHusay ? 1.22 : campusMapSizeToWorld(selectedPlace?.width ?? 72);
     const depth = selectedBuilding
       ? campusMapSizeToWorld(selectedBuilding.height)
-      : isGate ? 0.42 : isSuhayHusay ? 0.72 : campusMapSizeToWorld(selectedPlace?.height ?? 58);
+      : isGate ? 0.42 : isSuhayHusay ? 0.88 : campusMapSizeToWorld(selectedPlace?.height ?? 58);
     const height = buildingHeight || landmarkHeight;
     const source = campusMapPointToWorld(physicalFocusPoint, Math.max(0.3, height * 0.52));
     const next = new THREE.Vector3(source.x, source.y, source.z);
@@ -1381,11 +1975,27 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const worldW = campusMapSizeToWorld(campus.canvasW);
   const worldH = campusMapSizeToWorld(campus.canvasH);
   const route = props.routePoints ?? [];
+  const routeSegments = useMemo(() => props.routeSegments?.filter((points) => points.length > 1)
+    ?? (route.length > 1 ? [route] : []), [props.routeSegments, route]);
   const routeEnd = props.destinationPoint ? worldTuple(props.destinationPoint, 0.12) : null;
   const start = props.startPoint ? worldTuple(props.startPoint, 0.12) : null;
   const human = props.humanPoint ? worldTuple(props.humanPoint, 0.25) : null;
-  const hasRoute = route.length > 1;
+  const hasRoute = routeSegments.length > 0;
   const orbitRef = useRef<any>(null);
+  const cameraTargetBounds = useMemo<Student3dCameraTargetBounds>(() => {
+    const content = campusContentBounds(campus);
+    const first = campusMapPointToWorld({ x: content.x - content.width / 2, y: content.y - content.height / 2 });
+    const second = campusMapPointToWorld({ x: content.x + content.width / 2, y: content.y + content.height / 2 });
+    const padding = Math.max(1.5, campusMapSizeToWorld(Math.max(content.width, content.height) * 0.12));
+    return {
+      minX: Math.min(first.x, second.x) - padding,
+      maxX: Math.max(first.x, second.x) + padding,
+      minY: -0.04,
+      maxY: 0.8,
+      minZ: Math.min(first.z, second.z) - padding,
+      maxZ: Math.max(first.z, second.z) + padding,
+    };
+  }, [campus]);
   const pointerStart = useRef<{ x: number; y: number; id: number } | null>(null);
   const pointers = useRef(new Set<number>());
   const propsRef = useRef(props);
@@ -1432,9 +2042,18 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     configureStudent3dInputMappings(controls);
   }, []);
 
+  useEffect(() => {
+    const controls = orbitRef.current;
+    if (!controls) return;
+    const keepTargetInCampus = () => clampStudent3dCameraTarget(controls, cameraTargetBounds);
+    controls.addEventListener("change", keepTargetInCampus);
+    keepTargetInCampus();
+    return () => controls.removeEventListener("change", keepTargetInCampus);
+  }, [cameraTargetBounds]);
+
   const shouldSuppressClick = useCallback(() => props.draggedRef.current, [props.draggedRef]);
 
-  const routes = useMemo(() => route.length > 1 ? { id: "canonical-route", points: route, width: 12, type: "route" } : null, [route]);
+  const routes = useMemo(() => routeSegments.map((points, index) => ({ id: `canonical-route-${index}`, points, width: 12, type: "route" })), [routeSegments]);
   const markers = props.showEvents ? props.eventVenues ?? EMPTY_EVENT_VENUES : EMPTY_EVENT_VENUES;
   const selectedLocationIds = new Set([props.selectedEventLocationId].filter(Boolean));
   const selectedPlace = campus.markers.find((marker) => marker.id === props.selectedPlaceId);
@@ -1470,11 +2089,11 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </group>;
     })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}
-    {hasRoute && routes && <>
-      <MemoPathSurface path={routes} route halo />
-      <MemoPathSurface path={routes} route />
-      <RouteArrows points={route} reducedMotion={props.reducedMotion} />
-    </>}
+    {hasRoute && routes.map((segment, index) => <group key={segment.id}>
+      <MemoPathSurface path={segment} route halo />
+      <MemoPathSurface path={segment} route />
+      <RouteArrows points={segment.points} reducedMotion={props.reducedMotion} />
+    </group>)}
     {start && (props.showStartMarker ?? true) && <group position={start}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.14, 0.19, 24]} /><meshBasicMaterial color="#22a06b" side={THREE.DoubleSide} /></mesh>
       <Html position={[0, 0.18, 0]} center distanceFactor={12}><span className="grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-emerald-600 text-[13px] font-black text-white shadow-lg">A</span></Html>
@@ -1485,9 +2104,9 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
         <span className="student-destination-pin block -translate-y-full drop-shadow-md"><MapPin className="h-8 w-8 fill-rose-600 stroke-white stroke-[2.25]" /></span>
       </Html>
     </group>}
-    {(props.followMode || human) && <FollowHumanMarker route={route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
+    {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
-    <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.48} maxPolarAngle={1.2} minDistance={4} maxDistance={80} />
+    <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
   <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
   </>;
 }

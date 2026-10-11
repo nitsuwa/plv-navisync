@@ -12,8 +12,8 @@ import { exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
 import type { Pt } from "../../lib/routePlanner";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
-import { configureStudent3dInputMappings, crossedStudent3dDragThreshold } from "../../lib/student3dInput";
-import { student3dFocusDistance, student3dSafeFocusCenter } from "../../lib/student3dCameraFocus";
+import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
+import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 
 declare module "react" {
   namespace JSX {
@@ -229,10 +229,11 @@ type RoomLabelRegistry = MutableRefObject<Map<string, { element: HTMLSpanElement
 function RoomFloor({ room, viewport, level, selected, destination, holes = [], labelPriority = 1, labelRegistry, onClick }: {
   room: FloorRoom; viewport: FloorViewport; level: number; selected: boolean; destination: boolean; holes?: readonly Pt[][]; labelPriority?: number; labelRegistry: RoomLabelRegistry; onClick?: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   const points = useMemo(() => roomOutlinePoints(room), [room]);
   const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShapeWithHoles(points, holes, viewport)), [holes, points, viewport]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const color = destination ? "#4b98f0" : selected ? "#79b4f4" : "#e4e2dc";
+  const color = destination ? "#4b98f0" : selected ? "#79b4f4" : hovered ? "#d4e5f1" : "#e4e2dc";
   const protectedLabel = selected || destination;
   const center = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
   const labelWorld = pointToWorld(center, viewport, FLOOR_SURFACE_Y + 0.025 + level * 0.003);
@@ -242,8 +243,11 @@ function RoomFloor({ room, viewport, level, selected, destination, holes = [], l
   }, [labelPriority, labelRegistry, labelWorld[0], labelWorld[1], labelWorld[2], room.id]);
   const outline = [...points, points[0]].map((point) => pointToWorld(point, viewport, FLOOR_SURFACE_Y + 0.018 + level * 0.003));
   return <group>
-    <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_SURFACE_Y + level * 0.003, 0]} onClick={onClick}>
-    <meshStandardMaterial color={color} roughness={0.9} side={THREE.DoubleSide} emissive={destination ? "#1764c4" : selected ? "#2875ca" : "#000000"} emissiveIntensity={destination ? 0.34 : selected ? 0.24 : 0} />
+    <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_SURFACE_Y + level * 0.003, 0]}
+      onClick={onClick}
+      onPointerOver={onClick ? (event) => { event.stopPropagation(); setHovered(true); } : undefined}
+      onPointerOut={onClick ? (event) => { event.stopPropagation(); setHovered(false); } : undefined}>
+    <meshStandardMaterial color={color} roughness={0.9} side={THREE.DoubleSide} emissive={destination ? "#1764c4" : selected ? "#2875ca" : hovered ? "#3979a8" : "#000000"} emissiveIntensity={destination ? 0.34 : selected ? 0.24 : hovered ? 0.08 : 0} />
     </mesh>
     {(selected || destination) && <Line points={outline} color={destination ? "#064fb8" : "#1471d4"} lineWidth={destination ? 4 : 3.5} />}
     <Html position={labelWorld} center style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
@@ -261,7 +265,7 @@ function RoomFloor({ room, viewport, level, selected, destination, holes = [], l
         textAlign: "center",
         lineHeight: 1.2,
         textOverflow: protectedLabel ? "clip" : "ellipsis",
-      }} className={`rounded-md px-2 py-1 text-[10px] transition-colors duration-150 ease-out ${destination ? "bg-blue-800 text-white font-extrabold shadow-md ring-2 ring-white/90" : selected ? "bg-blue-700 text-white font-extrabold shadow-md ring-2 ring-white/90" : "bg-white/85 font-semibold text-slate-700"}`}>{room.name}</span>
+      }} className={`rounded-md px-2 py-1 text-[10px] transition-[background-color,color,box-shadow] duration-150 ease-out ${destination ? "bg-blue-800 text-white font-extrabold shadow-md ring-2 ring-white/90" : selected ? "bg-blue-700 text-white font-extrabold shadow-md ring-2 ring-white/90" : hovered ? "bg-blue-100 text-blue-900 font-bold shadow-sm ring-1 ring-blue-300/80" : "bg-white/85 font-semibold text-slate-700"}`}>{room.name}</span>
     </Html>
   </group>;
 }
@@ -705,8 +709,8 @@ function Beam({ start, end, thickness, color, metalness = 0 }: { start: [number,
   </mesh>;
 }
 
-function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79 }: {
-  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number;
+function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79, treadThickness = 0.07 }: {
+  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number; treadThickness?: number;
 }) {
   const count = Math.max(3, steps);
   const direction = Math.sign(toZ - fromZ) || 1;
@@ -721,8 +725,8 @@ function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7
       const riserY = (previousY + treadY) / 2;
       const riserZ = treadZ - direction * treadDepth * 0.47;
       return <Fragment key={index}>
-        <mesh position={[x, treadY - 0.035, treadZ]} castShadow receiveShadow><boxGeometry args={[width, 0.07, treadDepth + 0.025]} /><meshStandardMaterial color={color} roughness={0.76} metalness={0.08} /></mesh>
-        <mesh position={[x, riserY - 0.035, riserZ]}><boxGeometry args={[width - 0.015, Math.max(0.025, Math.abs(treadY - previousY)), 0.035]} /><meshStandardMaterial color="#9faab0" roughness={0.8} /></mesh>
+        <mesh position={[x, treadY - treadThickness / 2, treadZ]} castShadow receiveShadow><boxGeometry args={[width, treadThickness, treadDepth + 0.025]} /><meshStandardMaterial color={color} roughness={0.76} metalness={0.08} /></mesh>
+        <mesh position={[x, riserY - treadThickness / 2, riserZ]}><boxGeometry args={[width - 0.015, Math.max(0.025, Math.abs(treadY - previousY)), 0.035]} /><meshStandardMaterial color="#9faab0" roughness={0.8} /></mesh>
       </Fragment>;
     })}
     {edgeXs.map((edgeX) => <Fragment key={edgeX}>
@@ -742,7 +746,7 @@ function Landing({ width, depth, z, y, color = "#d8dfe2" }: { width: number; dep
   return <mesh position={[0, y - 0.04, z]} castShadow receiveShadow><boxGeometry args={[width, 0.08, depth]} /><meshStandardMaterial color={color} roughness={0.82} /></mesh>;
 }
 
-function StairModel({ stair, viewport, floor, entranceModel = false }: { stair: StairVisualItem; viewport: FloorViewport; floor: FloorPlan; entranceModel?: boolean }) {
+function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = false }: { stair: StairVisualItem; viewport: FloorViewport; floor: FloorPlan; labelRegistry: RoomLabelRegistry; entranceModel?: boolean }) {
   if (stair.visible === false) return null;
   if (stair.exteriorEmergencyStairId) return <ExteriorEmergencyStairModel stair={stair as FloorStairs} viewport={viewport} floor={floor} />;
   const position = pointToWorld({ x: stair.x + stair.width / 2, y: stair.y + stair.height / 2 }, viewport, FLOOR_SURFACE_Y);
@@ -776,13 +780,21 @@ function StairModel({ stair, viewport, floor, entranceModel = false }: { stair: 
   const laneWidth = Math.max(0.38, width * 0.39);
   const firstLane = stair.flip ? width * 0.23 : -width * 0.23;
   const secondLane = -firstLane;
+  const labelPosition = new THREE.Vector3(0, fullRise + 0.1, backZ)
+    .applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    .add(new THREE.Vector3(...position));
+  const labelRef = (element: HTMLSpanElement | null) => {
+    const id = `stair:${stair.id}`;
+    if (element) labelRegistry.current.set(id, { element, position: labelPosition, priority: 4 });
+    else labelRegistry.current.delete(id);
+  };
   return <group position={position} rotation={[0, yaw, 0]}>
     <Landing width={width * 0.98} depth={landingDepth} z={frontZ} y={0} />
     <StairFlight x={firstLane} width={laneWidth} fromZ={frontZ - landingDepth * 0.28} toZ={backZ + landingDepth * 0.28} fromY={0} toY={halfRise} steps={stepCount} />
     <Landing width={width * 0.98} depth={landingDepth} z={backZ} y={halfRise} />
     <StairFlight x={secondLane} width={laneWidth} fromZ={backZ + landingDepth * 0.28} toZ={frontZ - landingDepth * 0.28} fromY={halfRise} toY={fullRise} steps={stepCount} />
     <Landing width={width * 0.98} depth={landingDepth} z={frontZ} y={fullRise} />
-    <Html position={[0, fullRise + 0.1, backZ]} center style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 shadow-sm">{stair.label}</span></Html>
+    <Html position={[0, fullRise + 0.1, backZ]} center style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span ref={labelRef} className="rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 shadow-sm">{stair.label}</span></Html>
   </group>;
 }
 const MemoStairModel = memo(StairModel);
@@ -827,59 +839,48 @@ function ExteriorEmergencyStairModel({ stair, viewport, floor }: { stair: FloorS
   const yaw = edge === "right" ? Math.PI / 2 : edge === "left" ? -Math.PI / 2 : edge === "top" ? Math.PI : 0;
   const width = Math.max(0.55, (edge === "left" || edge === "right" ? visual.height : visual.width) * FLOOR_SCALE);
   const depth = Math.max(0.6, (edge === "left" || edge === "right" ? visual.width : visual.height) * FLOOR_SCALE);
-  const count = Math.max(6, Math.min(10, Math.round(depth / 0.18)));
-  // Exterior fire-escape metal is lighter and less wire-dense than the old
-  // near-black treatment, which collapsed into a tangled silhouette at map scale.
+  const count = Math.max(5, Math.min(8, Math.round(depth / 0.2)));
   const steel = "#53666f";
   const upperZ = -depth / 2 + 0.16;
   const outerZ = depth / 2 - 0.18;
   const groundFloorAccess = floor.number <= 1;
-  // The indoor Floor view anchors this model at its current landing. On the
-  // Ground Floor, show only the short access flight to grade; repeating the
-  // full two-flight descent below every Floor made ground exits look like a
-  // basement tower. The campus renderer owns the complete authored fire
-  // escape across served Floors.
-  const middleY = groundFloorAccess ? -0.42 : -1.28;
-  const lowerY = groundFloorAccess ? middleY : -2.56;
-  const flightWidth = Math.max(0.44, width * 0.38);
-  const firstLane = -width * 0.24;
-  const secondLane = width * 0.24;
-  const landingDepth = Math.max(0.32, Math.min(0.48, depth * 0.2));
-  // The published 2D module includes a narrow platform from the authored wall
-  // opening to the exterior stair. Carry that same connection into 3D so the
-  // fire escape reads as attached to the building instead of a detached prop.
+  const flightWidth = Math.max(0.44, width * 0.52);
+  const landingDepth = Math.max(0.38, Math.min(0.54, depth * 0.24));
   const wallGap = 28 * FLOOR_SCALE;
-  return <group>
-    {/* The authored occurrence anchors the access door. The two flights and
-        intermediate landing project out from that wall as a metal fire escape. */}
-    <group position={center} rotation={[0, yaw, 0]}>
-      <mesh position={[0, -0.035, upperZ - wallGap / 2]} castShadow receiveShadow>
-        <boxGeometry args={[width * 0.92, 0.07, wallGap + 0.025]} />
-        <meshStandardMaterial color="#7d8b91" roughness={0.78} metalness={0.12} />
-      </mesh>
-      {!groundFloorAccess && [-1, 1].map((side) => <Fragment key={`access-rail-${side}`}>
-        <Beam start={[side * width * 0.47, 0.8, upperZ - wallGap]} end={[side * width * 0.47, 0.8, upperZ]} thickness={0.035} color="#52646d" metalness={0.28} />
-        {[0, 0.33, 0.66, 1].map((step) => {
-          const z = upperZ - wallGap + wallGap * step;
-          return <Beam key={step} start={[side * width * 0.47, -0.02, z]} end={[side * width * 0.47, 0.8, z]} thickness={0.022} color="#60727a" metalness={0.24} />;
-        })}
-      </Fragment>)}
-      <Landing width={width * 1.08} depth={landingDepth} z={upperZ} y={0} color="#687780" />
-      <StairFlight x={firstLane} width={flightWidth} fromZ={upperZ + landingDepth * 0.38} toZ={outerZ - landingDepth * 0.3} fromY={0} toY={middleY} steps={count} color="#78888f" railColor={steel} railPostSegments={groundFloorAccess ? 1 : 2} railHeight={groundFloorAccess ? 0.62 : 0.79} />
-      <Landing width={width} depth={landingDepth} z={outerZ} y={middleY} color="#77868d" />
-      {!groundFloorAccess && <>
-        <StairFlight x={secondLane} width={flightWidth} fromZ={outerZ - landingDepth * 0.3} toZ={upperZ + landingDepth * 0.38} fromY={middleY} toY={lowerY} steps={count} color="#78888f" railColor={steel} railPostSegments={2} />
-        <Landing width={width * 1.08} depth={landingDepth} z={upperZ} y={lowerY} color="#687780" />
-      </>}
-      {!groundFloorAccess && [-1, 1].map((side) => <Fragment key={`support-${side}`}>
-        <Beam start={[side * width * 0.48, 0.02, outerZ]} end={[side * width * 0.48, lowerY - 0.02, outerZ]} thickness={0.055} color={steel} metalness={0.42} />
-        <Beam start={[side * width * 0.48, 0.02, upperZ]} end={[side * width * 0.48, lowerY - 0.02, upperZ]} thickness={0.055} color={steel} metalness={0.42} />
-        {(groundFloorAccess ? [0] : [0, middleY, lowerY]).map((y) => <Beam key={y} start={[side * width * 0.52, y, upperZ]} end={[side * width * 0.52, y + 0.56, upperZ]} thickness={0.032} color={steel} metalness={0.3} />)}
-      </Fragment>)}
-      {(!groundFloorAccess ? [{ z: upperZ, y: 0 }, { z: outerZ, y: middleY }, { z: upperZ, y: lowerY }] : []).map(({ z, y }, index) => <mesh key={`landing-grate-${index}`} position={[0, y - 0.006, z]}>
-        <boxGeometry args={[width * 0.92, 0.018, 0.025]} /><meshStandardMaterial color="#c2c9cc" metalness={0.25} roughness={0.55} />
-      </mesh>)}
-    </group>
+  // In a single-floor plan this is a compact door-to-landing-to-short-run
+  // detail. The campus renderer owns the actual multi-floor tower. Keeping
+  // this floor-view module above the slab avoids the old negative-Y flights
+  // cutting through room/floor geometry.
+  const landingTop = 0.055;
+  const outerLandingTop = groundFloorAccess ? 0.035 : 0.025;
+  const railHeight = groundFloorAccess ? 0.56 : 0.72;
+  const runStartZ = upperZ + landingDepth * 0.42;
+  const runEndZ = outerZ - landingDepth * 0.34;
+  return <group name="student-3d-indoor-emergency-access" position={center} rotation={[0, yaw, 0]}>
+    {/* Full threshold bridge from the authored wall opening to the landing. */}
+    <mesh position={[0, 0.002, upperZ - wallGap / 2]} castShadow receiveShadow>
+      <boxGeometry args={[width * 0.96, 0.04, wallGap + 0.025]} />
+      <meshStandardMaterial color="#7d8b91" roughness={0.78} metalness={0.12} />
+    </mesh>
+    <mesh position={[0, landingTop - 0.02, upperZ]} castShadow receiveShadow>
+      <boxGeometry args={[width * 1.08, 0.04, landingDepth]} />
+      <meshStandardMaterial color="#687780" roughness={0.82} />
+    </mesh>
+    <StairFlight x={0} width={flightWidth} fromZ={runStartZ} toZ={runEndZ} fromY={landingTop} toY={outerLandingTop} steps={count}
+      color="#78888f" railColor={steel} railPostSegments={3} railHeight={railHeight} treadThickness={0.018} />
+    <mesh position={[0, outerLandingTop - 0.015, outerZ]} castShadow receiveShadow>
+      <boxGeometry args={[width * 1.06, 0.03, landingDepth]} />
+      <meshStandardMaterial color="#77868d" roughness={0.82} />
+    </mesh>
+    {/* Both sides of the threshold and landing are guarded; the flight rails
+        terminate into the landing rails instead of ending as a single side. */}
+    {[-1, 1].map((side) => <Fragment key={`landing-guard-${side}`}>
+      <Beam start={[side * width * 0.49, landingTop + railHeight, upperZ - landingDepth * 0.48]} end={[side * width * 0.49, landingTop + railHeight, runStartZ]} thickness={0.035} color={steel} metalness={0.24} />
+      {[upperZ - landingDepth * 0.42, runStartZ].map((z) => <Beam key={z} start={[side * width * 0.49, landingTop, z]} end={[side * width * 0.49, landingTop + railHeight, z]} thickness={0.026} color={steel} metalness={0.2} />)}
+      <Beam start={[side * width * 0.49, outerLandingTop + railHeight, runEndZ]} end={[side * width * 0.49, outerLandingTop + railHeight, outerZ + landingDepth * 0.42]} thickness={0.035} color={steel} metalness={0.24} />
+      {[-landingDepth * 0.36, landingDepth * 0.36].map((offset) => <Beam key={offset} start={[side * width * 0.49, outerLandingTop, outerZ + offset]} end={[side * width * 0.49, outerLandingTop + railHeight, outerZ + offset]} thickness={0.026} color={steel} metalness={0.2} />)}
+      <Beam start={[side * width * 0.48, 0.02, outerZ]} end={[side * width * 0.48, outerLandingTop, outerZ]} thickness={0.045} color={steel} metalness={0.3} />
+    </Fragment>)}
   </group>;
 }
 
@@ -983,7 +984,7 @@ function IndoorExitCue({ door, viewport, routeRelevant, onActivate }: {
   return <Html position={position} center zIndexRange={routeRelevant ? [75, 0] : [35, 0]}>
     <button type="button" aria-label={`${label}${door.label ? `: ${door.label}` : ""}`} title={label}
       onClick={(event) => { event.stopPropagation(); onActivate?.(door.id); }}
-      className={`inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full border px-2 text-[10px] font-extrabold shadow-md whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${routeRelevant ? "border-blue-300 bg-blue-700 text-white" : "border-slate-300/80 bg-white/92 text-slate-700"}`}>
+      className={`inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-full border px-2 text-[10px] font-extrabold shadow-md whitespace-nowrap transition-[transform,background-color,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${routeRelevant ? "border-blue-300 bg-blue-700 text-white" : "border-slate-300/80 bg-white/92 text-slate-700 hover:bg-blue-50 hover:text-blue-800"}`}>
       <DoorOpen aria-hidden="true" className="h-3 w-3" />{label}
     </button>
   </Html>;
@@ -1152,6 +1153,27 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     maxX: Math.max(bounds.maxX, region.x + region.width),
     maxY: Math.max(bounds.maxY, region.y + region.height),
   }), { minX: 0, minY: 0, maxX: floor.canvasW ?? viewport.width, maxY: floor.canvasH ?? viewport.height });
+  const cameraTargetBounds = useMemo<Student3dCameraTargetBounds>(() => {
+    const first = pointToWorld({ x: floorBounds.minX, y: floorBounds.minY }, viewport, FLOOR_SURFACE_Y + 0.04);
+    const second = pointToWorld({ x: floorBounds.maxX, y: floorBounds.maxY }, viewport, FLOOR_SURFACE_Y + 0.04);
+    const padding = 1.6;
+    return {
+      minX: Math.min(first[0], second[0]) - padding,
+      maxX: Math.max(first[0], second[0]) + padding,
+      minY: FLOOR_SURFACE_Y + 0.04,
+      maxY: FLOOR_SURFACE_Y + 2.2,
+      minZ: Math.min(first[2], second[2]) - padding,
+      maxZ: Math.max(first[2], second[2]) + padding,
+    };
+  }, [floorBounds.maxX, floorBounds.maxY, floorBounds.minX, floorBounds.minY, viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
+  useEffect(() => {
+    const instance = controls.current;
+    if (!instance) return;
+    const keepTargetAboveFloor = () => clampStudent3dCameraTarget(instance, cameraTargetBounds);
+    instance.addEventListener("change", keepTargetAboveFloor);
+    keepTargetAboveFloor();
+    return () => instance.removeEventListener("change", keepTargetAboveFloor);
+  }, [cameraTargetBounds]);
   const floorCameraDepth = indoorFloorCameraHalfDepth(
     Math.max(floor.canvasW ?? viewport.width, floorBounds.maxX - floorBounds.minX),
     Math.max(floor.canvasH ?? viewport.height, floorBounds.maxY - floorBounds.minY),
@@ -1186,7 +1208,9 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   useEffect(() => {
     // A cross-floor room search should animate directly from the current
     // camera pose to the selected room. Do not first fit the entire floor.
-    if (props.focusRoomId && selectionRoom && !(props.followMode && !props.freeLook)) return;
+    // Keep waiting if the newly selected Floor has not resolved its room yet;
+    // fitting that Floor first would create a second, visible camera movement.
+    if (props.focusRoomId && !(props.followMode && !props.freeLook)) return;
     const progress = props.walkProgressRef?.current ?? props.walkProgress;
     const followPoint = props.followMode && !props.freeLook && props.humanVisible && progress !== undefined
       ? sampleRoute(progress, routeSamplePointRef.current)
@@ -1374,33 +1398,66 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     const canvasRect = canvas.getBoundingClientRect();
     const surface = canvas.closest<HTMLElement>("[data-testid='student-map-surface']");
     const overlayRects = surface ? Array.from(surface.querySelectorAll<HTMLElement>(
-      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-map-search-header='true']",
+      ".map-layer-building-sheet, .student-map-utility-stack, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-map-search-header='true']",
     )).filter((element) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
     }).map((element) => element.getBoundingClientRect()) : [];
-    const safeCenter = student3dSafeFocusCenter(canvasRect, overlayRects);
-    const contextPadding = size.width < 768 ? 2.1 : 1.1;
+    const mobileFocus = size.width < 768;
+    const safeRect = student3dSafeFocusRect(canvasRect, overlayRects);
+    const safeCenter = { x: safeRect.left + safeRect.width / 2, y: safeRect.top + safeRect.height / 2 };
+    const contextPadding = mobileFocus ? 2.1 : 1.1;
     const width = Math.max(0.6, (bounds.maxX - bounds.minX) * FLOOR_SCALE + contextPadding);
     const depth = Math.max(0.6, (bounds.maxY - bounds.minY) * FLOOR_SCALE + contextPadding);
     const perspective = camera as THREE.PerspectiveCamera;
-    const distance = student3dFocusDistance(
-      width,
-      depth,
-      3.1,
-      perspective.fov ?? 42,
-      size.width / Math.max(1, size.height),
-      // Leave enough breathing room for the room outline and its door, and
-      // account for wall height so selection does not dive inside the room.
-      { padding: size.width < 768 ? 1.45 : 1.4, min: 12.5, max: size.width < 768 ? 40 : 21 },
-    );
-    const offsetDirection = new THREE.Vector3(0.22, 0.95, 0.2).normalize();
-    const right = new THREE.Vector3().crossVectors(offsetDirection.clone().negate(), camera.up).normalize();
+    // Keep desktop's established pose. Mobile uses a more oblique architectural
+    // angle, so room walls and the doorway read instead of collapsing into a
+    // nearly top-down roof/floor view.
+    const offsetDirection = mobileFocus
+      ? new THREE.Vector3(0.38, 0.82, 0.43).normalize()
+      : new THREE.Vector3(0.22, 0.95, 0.2).normalize();
+    const viewDirection = offsetDirection.clone().negate();
+    const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
+    const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+    const distanceOptions = { padding: mobileFocus ? 1.4 : 1.4, min: 12.5, max: mobileFocus ? 42 : 21 };
+    let distance: number;
+    if (mobileFocus) {
+      // Project the authored room bounds into the intended oblique camera's
+      // screen plane, then fit that complete outline into the exposed map crop.
+      const projectedWidth = Math.abs(right.x) * width + Math.abs(right.z) * depth;
+      const projectedHeight = Math.abs(screenUp.x) * width + Math.abs(screenUp.z) * depth + Math.abs(screenUp.y) * 3.1;
+      distance = student3dFocusDistanceForViewport(
+        projectedWidth,
+        0.1,
+        projectedHeight,
+        perspective.fov ?? 42,
+        canvasRect.height,
+        safeRect.width,
+        safeRect.height,
+        distanceOptions,
+      );
+    } else {
+      // Desktop camera framing remains unchanged.
+      distance = student3dFocusDistance(width, depth, 3.1, perspective.fov ?? 42,
+        size.width / Math.max(1, size.height), distanceOptions);
+    }
     const verticalSpan = 2 * distance * Math.tan(THREE.MathUtils.degToRad(perspective.fov ?? 42) / 2);
     const worldPerPixel = verticalSpan / Math.max(1, canvasRect.height);
     target.addScaledVector(right, -(safeCenter.x - (canvasRect.left + canvasRect.width / 2)) * worldPerPixel);
-    target.addScaledVector(camera.up, (safeCenter.y - (canvasRect.top + canvasRect.height / 2)) * worldPerPixel);
+    if (mobileFocus) {
+      // Translate the focus along the floor plane. Using world-up here on a
+      // near-vertical mobile camera raised the room target off its own Floor.
+      const groundScreenUp = new THREE.Vector3(screenUp.x, 0, screenUp.z);
+      const groundProjection = groundScreenUp.length();
+      if (groundProjection > 0.15) {
+        groundScreenUp.multiplyScalar(1 / groundProjection);
+        target.addScaledVector(groundScreenUp,
+          (safeCenter.y - (canvasRect.top + canvasRect.height / 2)) * worldPerPixel / groundProjection);
+      }
+    } else {
+      target.addScaledVector(camera.up, (safeCenter.y - (canvasRect.top + canvasRect.height / 2)) * worldPerPixel);
+    }
     const endPosition = target.clone().add(offsetDirection.multiplyScalar(distance));
     const currentTarget = controls.current.target as THREE.Vector3;
     cancelRecenterTween();
@@ -1482,11 +1539,11 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {floor.doors?.map((door) => <MemoDoorModel key={`door-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
       {rendererDoorOpenings.filter((door) => door.id.startsWith("visual-emergency-access-") || (door.isEmergencyExit && door.openingType === "open_passage")).map((door) => <EmergencyDoorwayFrame key={`emergency-frame-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
       {exitCueDoors.map((door) => <IndoorExitCue key={`exit-cue-${door.id}`} door={door} viewport={viewport} routeRelevant={Boolean(props.routeRelevantExitDoorIds?.has(door.id))} onActivate={props.onExitDoorClick} />)}
-      {floor.stairs?.map((stair) => <MemoStairModel key={`stairs-${stair.id}`} stair={stair} viewport={viewport} floor={floor} />)}
+      {floor.stairs?.map((stair) => <MemoStairModel key={`stairs-${stair.id}`} stair={stair} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} />)}
       {floor.elevators?.map((elevator) => <MemoElevatorModel key={`elevator-${elevator.id}`} elevator={elevator} viewport={viewport} />)}
       {floor.ramps?.map((ramp) => <MemoRampModel key={`ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
       {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
-      {floor.entranceSteps?.filter((step) => step.visible !== false).map((step) => <MemoStairModel key={`entrance-step-${step.id}`} stair={step} viewport={viewport} floor={floor} entranceModel />)}
+      {floor.entranceSteps?.filter((step) => step.visible !== false).map((step) => <MemoStairModel key={`entrance-step-${step.id}`} stair={step} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} entranceModel />)}
       {floor.furniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
       {props.eventFurniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`event-furniture-${item.id}`} item={item} viewport={viewport} />)}
       {props.eventLabels?.map((label) => <Html key={`event-label-${label.id}`} position={pointToWorld({ x: label.x, y: label.y }, viewport, 0.06)} center distanceFactor={10} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
@@ -1519,7 +1576,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
         <span className="text-[9px] font-semibold text-slate-500">{label.text}</span>
       </Html>)}
     </group>
-    <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.25} maxPolarAngle={Math.PI / 2.05}
+    <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.2} maxPolarAngle={Math.PI / 3}
       enableRotate enablePan={!props.followMode || props.freeLook} enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
   </>;
 }
