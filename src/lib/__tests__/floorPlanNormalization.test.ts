@@ -70,6 +70,28 @@ describe("floorPlanNormalization", () => {
     expect(afterDeletingBoth.accessType).toBeUndefined();
   });
 
+  it("preserves a legacy Door access type when the Room has no explicit Door reference", () => {
+    const room = {
+      id: "r-legacy", name: "Legacy Room", type: "classroom", x: 0, y: 0, w: 100, h: 80,
+      buildingId: "b1", floorId: "f1", accessType: "door" as const,
+    };
+
+    expect(normalizeRoomAccessDoors([room], [], [])[0].accessType).toBe("door");
+  });
+
+  it("drops a stale single Door reference when a normalized Floor has no Doors", () => {
+    const floor = normalizeFloor({
+      id: "f-stale-door", buildingId: "b1", rooms: [{
+        id: "r-stale-door", buildingId: "b1", floorId: "f-stale-door",
+        name: "Legacy Room", type: "classroom", x: 0, y: 0, w: 100, h: 80,
+        accessDoorId: "missing-door",
+      }],
+      walls: [], doors: [],
+    });
+
+    expect(floor.rooms[0].accessDoorId).toBeUndefined();
+  });
+
   it("remaps Room Door links through an explicit copied Door identity map", () => {
     const room = {
       id: "r1", name: "Room A", type: "classroom", x: 0, y: 0, w: 100, h: 80,

@@ -11,8 +11,8 @@ describe("Student 3D camera input", () => {
 
     configureStudent3dInputMappings(controls);
 
-    expect(controls.mouseButtons).toEqual({ LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN });
-    expect(controls.touches).toEqual({ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN });
+    expect(controls.mouseButtons).toEqual({ LEFT: MOUSE.PAN, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.ROTATE });
+    expect(controls.touches).toEqual({ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE });
   });
 
   it("requires intentional pointer movement before suppressing entity clicks", () => {

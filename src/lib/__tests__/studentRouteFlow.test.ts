@@ -350,6 +350,118 @@ describe("student route state flow", () => {
     expect(studentRouteSeekTarget(route, steps, 3)).toMatchObject({ context: "campus", phase: "outdoor" });
   });
 
+  it("keeps a multi-floor SOS stair descent and final Campus exit on their authored contexts", () => {
+    const floors = [7, 6, 5, 4, 3, 1].map((floorNumber, index) => ({
+      buildingId: "coed",
+      floorId: `coed-${floorNumber}`,
+      floorNumber,
+      afterOutdoor: false,
+      waypoints: [{ x: index, y: index }, { x: index + 1, y: index + 1 }],
+      distanceM: index === 0 ? 40 : 0,
+      seconds: index === 0 ? 24 : 0,
+      steps: [{ id: `floor-${floorNumber}`, icon: "walk" as const, instruction: `Follow the path on Floor ${floorNumber}.` }],
+    }));
+    const campusLegIndex = floors.length;
+    const stairTransitions = floors.slice(0, -1).map((floor, index) => ({
+      kind: "stairs" as const,
+      nodeId: `stair-${index}`,
+      label: "Exterior Stair 1",
+      fromFloorId: floor.floorId,
+      toFloorId: floors[index + 1].floorId,
+      buildingId: "coed",
+    }));
+    const stairHandoffs = stairTransitions.map((detail, index) => ({
+      fromContextLegIndex: index,
+      toContextLegIndex: index + 1,
+      kind: "stairs" as const,
+      buildingId: "coed",
+      label: "Exterior Stair 1",
+      nodeId: detail.nodeId,
+      detail,
+      sourcePoint: { x: index + 1, y: index + 1 },
+      targetPoint: { x: index + 1, y: index + 1 },
+    }));
+    const exitHandoff = {
+      fromContextLegIndex: floors.length - 1,
+      toContextLegIndex: campusLegIndex,
+      kind: "exit_building" as const,
+      buildingId: "coed",
+      buildingCode: "COED",
+      label: "Exterior Stair 1",
+      nodeId: "coed-ground-discharge",
+      sourcePoint: { x: 8, y: 8 },
+      targetPoint: { x: 80, y: 80 },
+    };
+    const route: PlannedRoute = {
+      ...sampleRoute,
+      mode: "emergency",
+      points: [{ x: 80, y: 80 }, { x: 90, y: 90 }],
+      campusPoints: [{ x: 80, y: 80 }, { x: 90, y: 90 }],
+      indoorSegments: floors,
+      contextLegs: [
+        ...floors.map((floor, segmentIndex) => ({
+          kind: "floor" as const,
+          buildingId: floor.buildingId,
+          floorId: floor.floorId,
+          floorNumber: floor.floorNumber,
+          segmentIndex,
+          waypoints: floor.waypoints,
+          distanceM: floor.distanceM,
+        })),
+        { kind: "campus", waypoints: [{ x: 80, y: 80 }, { x: 90, y: 90 }], distanceM: 20 },
+      ],
+      contextHandoffs: [...stairHandoffs, exitHandoff],
+      transitionDetails: stairTransitions,
+      steps: [
+        { id: "start", icon: "start", instruction: "Start from Door" },
+        { id: "walk-to-stair", icon: "walk", instruction: "Follow the path toward Exterior Stair 1." },
+        { id: "start-stair-descent", icon: "info", instruction: "Start from Exterior Stair 1" },
+        ...stairTransitions.map((_, index) => ({
+          id: `stair-step-${index}`,
+          icon: "stairs" as const,
+          instruction: "Take the stairs to Exterior Stair 1",
+        })),
+        { id: "start-campus-exit", icon: "info", instruction: "Start from Exterior Stair 1" },
+        { id: "walk-to-campus-gate", icon: "walk", instruction: "Walk 9m to Campus Gate" },
+        { id: "arrive", icon: "arrive", instruction: "Arrive at Campus Gate" },
+      ],
+    };
+
+    const steps = studentFacingRouteSteps(route);
+    const exitIndex = steps.findIndex((step) => step.instruction === "Exit via Exterior Stair 1 to Campus.");
+    const campusWalkIndex = steps.findIndex((step) => step.instruction === "Follow the path toward Campus Gate.");
+    const arrivalIndex = steps.findIndex((step) => step.icon === "arrive");
+
+    expect(steps.map((step) => step.instruction)).not.toContain("Start from Exterior Stair 1");
+    expect(exitIndex).toBeGreaterThan(0);
+    expect(routeTransitionForStep(route, steps, exitIndex)).toMatchObject({ kind: "exit_building", handoff: exitHandoff });
+    expect(studentRouteSeekTarget(route, steps, exitIndex)).toMatchObject({
+      context: "floor",
+      segment: floors.at(-1),
+      contextLegIndex: floors.length - 1,
+      segmentProgress: 1,
+    });
+    for (let index = 0; index < stairTransitions.length; index += 1) {
+      const stepIndex = steps.findIndex((step) => step.id === `stair-step-${index}`);
+      expect(studentRouteSeekTarget(route, steps, stepIndex)).toMatchObject({
+        context: "floor",
+        segment: floors[index],
+        contextLegIndex: index,
+        segmentProgress: 1,
+      });
+    }
+    expect(studentRouteSeekTarget(route, steps, campusWalkIndex)).toMatchObject({
+      context: "campus",
+      phase: "outdoor",
+      contextLegIndex: campusLegIndex,
+    });
+    expect(studentRouteSeekTarget(route, steps, arrivalIndex)).toMatchObject({
+      context: "campus",
+      phase: "outdoor",
+      contextLegIndex: campusLegIndex,
+    });
+  });
+
   it("keeps explicit Previous/Next ordered across untravelled steps and interpolates authored route legs", () => {
     expect(studentRouteStepSeekIndex(1, 1, 13)).toBe(2);
     expect(studentRouteStepSeekIndex(11, 1, 13)).toBe(12);

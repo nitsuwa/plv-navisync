@@ -21,6 +21,8 @@ function createStore(ownerId: string) {
   let lifecycle = 0;
   let serverReceipts: Map<string,string> | undefined;
   const readRequests = new Map<string,Promise<ReadResult>>();
+  let refreshInFlight: Promise<void> | null = null;
+  let lastAutomaticRefreshAt = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   const listeners = new Set<() => void>();
   const memoryRead = new Map<string, string>();
@@ -34,29 +36,41 @@ function createStore(ownerId: string) {
     snapshot = { ...snapshot, ...patch, events, unreadIds, unreadCount: unreadIds.size };
     listeners.forEach(listener => listener());
   };
-  const refresh = async (retrySync = true) => {
-    if (!listeners.size) return;
+  const refresh = (retrySync = true): Promise<void> => {
+    if (!listeners.size) return Promise.resolve();
+    if (refreshInFlight) return refreshInFlight;
+    const now = Date.now();
+    if (!retrySync && now - lastAutomaticRefreshAt < 5_000) return Promise.resolve();
+    if (!retrySync) lastAutomaticRefreshAt = now;
     const request = ++generation;
-    if (!snapshot.events.length && !snapshot.error) publish({ loading: true });
-    try {
-      const events = await eventOverlayService.listEventOverlays({ allCampuses: true, createdByUserId: ownerId, strict: true });
-      if (request !== generation || !listeners.size) return;
-      const owned = events.filter(event => event.createdByUserId === ownerId);
-      let receiptError = '';
+    const task = (async () => {
+      if (!snapshot.events.length && !snapshot.error) publish({ loading: true });
       try {
-        const states = await eventNotificationService.getStates(ownerId,'org_review',owned,retrySync);
+        const events = await eventOverlayService.listEventOverlays({ allCampuses: true, createdByUserId: ownerId, strict: true });
         if (request !== generation || !listeners.size) return;
-        serverReceipts = new Map(owned.filter(event=>{const state=states.get(event.id);return state?.isCurrent && state.isRead;}).map(event=>[event.id,eventReviewFingerprint(event)!]));
-      } catch (cause) {
+        const owned = events.filter(event => event.createdByUserId === ownerId);
+        let receiptError = '';
+        try {
+          const states = await eventNotificationService.getStates(ownerId,'org_review',owned,retrySync);
+          if (request !== generation || !listeners.size) return;
+          serverReceipts = new Map(owned.filter(event=>{const state=states.get(event.id);return state?.isCurrent && state.isRead;}).map(event=>[event.id,eventReviewFingerprint(event)!]));
+        } catch (cause) {
+          if (request !== generation || !listeners.size) return;
+          if (cause instanceof EventNotificationSyncUnavailable) serverReceipts = undefined;
+          receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        }
+        publish({ events: owned, loading: false, error: "", receiptError });
+      } catch (error) {
         if (request !== generation || !listeners.size) return;
-        if (cause instanceof EventNotificationSyncUnavailable) serverReceipts = undefined;
-        receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        publish({ loading: false, error: error instanceof Error ? error.message : "Could not load event updates. Please retry." });
       }
-      publish({ events: owned, loading: false, error: "", receiptError });
-    } catch (error) {
-      if (request !== generation || !listeners.size) return;
-      publish({ loading: false, error: error instanceof Error ? error.message : "Could not load event updates. Please retry." });
-    }
+    })();
+    refreshInFlight = task;
+    void task.then(
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+    );
+    return task;
   };
   const onFocus = () => { if (document.visibilityState !== "hidden") void refresh(false); };
   const updateRead = () => { if(serverReceipts) void refresh(false); else publish(); };
@@ -70,7 +84,7 @@ function createStore(ownerId: string) {
     listeners.add(listener);
     if (listeners.size === 1) {
       void refresh(false);
-      timer = setInterval(onFocus, 15000);
+      timer = setInterval(onFocus, 60000);
       window.addEventListener("focus", onFocus);
       document.addEventListener("visibilitychange", onFocus);
       window.addEventListener(EVENT_REVIEW_READ_EVENT, onRead);
@@ -80,6 +94,7 @@ function createStore(ownerId: string) {
       listeners.delete(listener);
       if (listeners.size) return;
       ++generation;
+      refreshInFlight = null;
       // Actor-scoped fallback receipts survive ordinary route changes, like the
       // browser receipt cache. They hold no event list and expire on reload.
       ++lifecycle; readRequests.clear(); serverReceipts = undefined;

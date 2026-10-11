@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
-import { Bookmark, ChevronDown, Flag, LogIn, LogOut, Settings, UserRound } from "lucide-react";
+import { Bookmark, ChevronDown, Flag, LogIn, LogOut, Loader2, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/utils";
@@ -19,6 +19,7 @@ interface MobileMapAccountMenuProps {
 export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: MobileMapAccountMenuProps) {
   const { isStudent, loading, username, role, profile, signOut } = useStudentAuth();
   const [internalOpen, setInternalOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const reducedMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -140,12 +141,16 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
   }, [open]);
 
   const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
     try {
       await signOut();
       changeOpen(false);
       navigate("/");
     } catch {
-      showError("Could not sign out. Please try again.");
+      showError("This browser could not clear the saved session. Please retry.");
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -222,8 +227,8 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
                   <Link role="menuitem" to="/student/settings" onClick={() => changeOpen(false)} className={menuItemClass}>
                     <Settings className="h-4 w-4 shrink-0 text-muted-foreground" /> Settings
                   </Link>
-                  <button role="menuitem" type="button" onClick={() => void handleSignOut()} className={cn(menuItemClass, "text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10")}>
-                    <LogOut className="h-4 w-4 shrink-0" /> Sign Out
+                  <button role="menuitem" type="button" onClick={() => void handleSignOut()} disabled={signingOut} aria-busy={signingOut} className={cn(menuItemClass, "text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 disabled:opacity-60")}>
+                    {signingOut ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <LogOut className="h-4 w-4 shrink-0" />} {signingOut ? "Signing out…" : "Sign Out"}
                   </button>
                 </div>
               </>

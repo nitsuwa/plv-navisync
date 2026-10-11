@@ -483,17 +483,24 @@ export async function listCampuses(): Promise<Campus[]> {
   return mapRows((data ?? []) as CampusListRow[]);
 }
 
-/** Read the immutable snapshots that are currently visible to students. */
+export interface PublishedCampusVersionStatus {
+  campus_id: string;
+  latest_published_version_id: string;
+  published_at: string | null;
+}
+
+/** Read lightweight publication metadata without loading campus map JSON. */
+export async function listPublishedCampusVersionStatus(): Promise<PublishedCampusVersionStatus[]> {
+  const { data, error } = await getSupabase().rpc("list_published_campus_version_status");
+  assertOk(error, "list published campus version status");
+  return (data ?? []).filter((row): row is PublishedCampusVersionStatus =>
+    Boolean(row && typeof row.campus_id === "string" && typeof row.latest_published_version_id === "string"),
+  );
+}
+
+/** Read sanitized immutable snapshots that are currently visible to students. */
 export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
-  const client = getSupabase();
-  let { data, error } = await client.rpc("list_event_safe_published_campuses");
-  // Transitional compatibility for databases that have not installed the event
-  // migration. Other failures stay visible; this is not a security fallback.
-  if (error?.code === "PGRST202") {
-    const legacy = await client.from("campus_versions").select("campus_id,snapshot,published_at").eq("state", "published").order("published_at", { ascending: false });
-    data = legacy.data;
-    error = legacy.error;
-  }
+  const { data, error } = await getSupabase().rpc("list_event_safe_published_campuses");
   assertOk(error, "list published campus versions");
   const result: Campus[] = [];
   for (const row of data ?? []) {
@@ -966,7 +973,7 @@ export async function publishCampusVersion(
 export const campusService = {
   list: listCampuses, getById: getCampusById, create: createCampus, update: updateCampus,
   archive: archiveCampus, restore: restoreCampus, unpublish: unpublishCampus, selectActive: selectActiveCampus,
-  listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, listComingSoon: listComingSoonCampuses, permanentlyDelete: permanentlyDeleteCampus,
+  listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, listPublishedVersionStatus: listPublishedCampusVersionStatus, listComingSoon: listComingSoonCampuses, permanentlyDelete: permanentlyDeleteCampus,
   hideComingSoon: hideComingSoonCampus,
   validateImage: validateCampusImage, uploadImage: uploadCampusImage,
   publishVersion: publishCampusVersion,

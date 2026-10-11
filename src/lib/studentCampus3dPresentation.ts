@@ -1,4 +1,4 @@
-import type { CampusBuilding, CampusDecorAsset, CampusMarker } from "../components/map-builder/types";
+import type { CampusBuilding, CampusDecorAsset, CampusMarker, FloorEntranceRamp } from "../components/map-builder/types";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "./readonlyOutdoorCampus";
 import { entranceWorldPosition } from "./buildingEntrances";
 
@@ -11,6 +11,54 @@ export interface CampusParkingMarkingSegment {
   x2: number;
   z2: number;
   kind: "stall-divider" | "stall-row-edge" | "drive-aisle";
+}
+
+export interface StudentMapDirection {
+  x: number;
+  y: number;
+}
+
+/** Direction from attached entrance steps toward the downhill end of their
+ * authored entrance ramp. Ramp yaw/direction matches the Student 3D ramp model. */
+export function studentEntranceRampGroundDirection(
+  from: StudentMapDirection,
+  ramp: Pick<FloorEntranceRamp, "x" | "y" | "width" | "height" | "rotation" | "direction">,
+): StudentMapDirection {
+  const yaw = -((ramp.rotation ?? 0) * Math.PI) / 180;
+  const downhillSign = ramp.direction === "reverse" ? 1 : -1;
+  const halfRun = Math.max(0, ramp.height) / 2;
+  const rampCenterX = ramp.x + ramp.width / 2;
+  const rampCenterY = ramp.y + ramp.height / 2;
+  const downhillX = rampCenterX + Math.sin(yaw) * halfRun * downhillSign;
+  const downhillY = rampCenterY + Math.cos(yaw) * halfRun * downhillSign;
+  return { x: downhillX - from.x, y: downhillY - from.y };
+}
+
+/** Resolve the downhill facing of attached veranda steps from authored
+ * connections, falling back to the parent facade normal. */
+export function resolveStudentEntranceStairYaw(input: {
+  authoredRotation?: number;
+  connectionDirection?: StudentMapDirection;
+  outwardDirection?: StudentMapDirection;
+}): number {
+  const validDirection = (direction?: StudentMapDirection) => {
+    if (!direction || !Number.isFinite(direction.x) || !Number.isFinite(direction.y)) return null;
+    const length = Math.hypot(direction.x, direction.y);
+    return length > 1e-6 ? { x: direction.x / length, y: direction.y / length } : null;
+  };
+  const target = validDirection(input.connectionDirection) ?? validDirection(input.outwardDirection);
+  const authoredYaw = typeof input.authoredRotation === "number" && Number.isFinite(input.authoredRotation)
+    ? -(input.authoredRotation * Math.PI) / 180
+    : null;
+  if (!target) return authoredYaw ?? 0;
+  if (authoredYaw !== null) {
+    const authoredFacing = { x: Math.sin(authoredYaw), y: Math.cos(authoredYaw) };
+    // Preserve an authored angle when it faces into the physical connection
+    // hemisphere. Small alignment tolerances are common in hand-authored
+    // ramps, so do not require near-perfect mathematical collinearity.
+    if (authoredFacing.x * target.x + authoredFacing.y * target.y >= 0.5) return authoredYaw;
+  }
+  return Math.atan2(target.x, target.y);
 }
 
 /**
@@ -31,7 +79,9 @@ export function campusParkingMarkingSegments(width: number, depth: number): Camp
   const edge = Math.min(3, rowDepth * 0.08);
   const aisleHalf = aisleDepth / 2;
   const bayDepth = Math.max(0, (rowDepth - aisleDepth) / 2);
-  const count = Math.max(2, Math.min(14, Math.floor(span / 22)));
+  // Cap divider density so distant/oblique views do not alias into scratchy
+  // moire patterns across the asphalt.
+  const count = Math.max(2, Math.min(8, Math.floor(span / 42)));
   const points = (along: number, across: number) => horizontal
     ? { x: along, z: across }
     : { x: across, z: along };
@@ -62,9 +112,18 @@ export interface CampusFireEscapeLevel {
   served: boolean;
 }
 
+/** Raised visual threshold for the compact ground-level emergency module. */
+export const CAMPUS_GROUND_EXIT_LANDING_ELEVATION = 0.18;
+
+export function campusEmergencyExitVisualElevation(floorIndex: number, elevation: number): number {
+  return floorIndex === 0 ? Math.max(elevation, CAMPUS_GROUND_EXIT_LANDING_ELEVATION) : elevation;
+}
+
 /** Project authored served Floors into renderer-only fire-escape landings.
- * A single elevated Floor gets one direct flight to grade; multiple served
- * Floors receive only the intermediate landings needed to connect them. */
+ * Any elevated egress uses the side-fire-escape presentation, with landings at
+ * intervening levels so the run stays stair-like. Only a ground-only exit is
+ * rendered as the compact short-stair module. Intermediate landings do not
+ * create authored doors or navigation connections. */
 export function campusFireEscapeLevels(
   floors: readonly { id: string; number: number }[],
   servedFloorIds: readonly string[],
@@ -74,12 +133,28 @@ export function campusFireEscapeLevels(
   const servedIds = new Set(servedFloorIds);
   const servedIndexes = ordered.flatMap((floor, index) => servedIds.has(floor.id) ? [index] : []);
   const highest = servedIndexes.length ? Math.max(...servedIndexes) : 0;
-  const indices = servedIndexes.length > 1
-    ? Array.from({ length: highest + 1 }, (_, index) => index)
-    : highest > 0 ? [0, highest] : [0];
+  const indices = highest > 0 ? Array.from({ length: highest + 1 }, (_, index) => index) : [0];
   const served = new Set(servedIndexes);
   const step = Math.max(0, Number.isFinite(floorStep) ? floorStep : 0);
   return indices.map((floorIndex) => ({ floorIndex, elevation: floorIndex * step, served: served.has(floorIndex) }));
+}
+
+/** Compact exterior egress is appropriate only for a single ground-level
+ * served door. Elevated single-floor exits still need the side escape. */
+export function usesCompactGroundEmergencyExit(levels: readonly CampusFireEscapeLevel[]): boolean {
+  const served = levels.filter((level) => level.served);
+  return served.length === 1 && served[0].floorIndex === 0;
+}
+
+/** Keep emergency-door detailing within the vertical clearance of a story. */
+export function campusEmergencyExitDoorHeight(levels: readonly CampusFireEscapeLevel[], maximumHeight = 0.28): number {
+  const smallestSpacing = levels.slice(1)
+    .map((level, index) => Math.abs(level.elevation - levels[index].elevation))
+    .filter((spacing) => spacing > 0)
+    .reduce((smallest, spacing) => Math.min(smallest, spacing), Number.POSITIVE_INFINITY);
+  return Number.isFinite(smallestSpacing)
+    ? Math.max(0, Math.min(maximumHeight, smallestSpacing * 0.82))
+    : maximumHeight;
 }
 
 /** Convert an authored campus-map outward angle (0° east, 90° south) to the
