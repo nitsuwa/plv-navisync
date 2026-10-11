@@ -189,7 +189,9 @@ export function normalizeRoomAccessDoors(
       ...candidateRoom,
       accessDoorId: validIds[0],
       accessDoorIds: validIds.length > 0 ? validIds : undefined,
-      ...(validIds.length === 0 && candidateRoom.accessType === "door" ? { accessType: undefined } : {}),
+      ...(orderedIds.length > 0 && validIds.length === 0 && candidateRoom.accessType === "door"
+        ? { accessType: undefined }
+        : {}),
     };
   });
 }
@@ -360,6 +362,9 @@ export function normalizeFloor(input: Partial<FloorPlan> | null | undefined, def
       visible: item.visible !== false,
       locked: item.locked === true,
     })),
+    ...(Array.isArray(source.templatePreservedNavigationNodeIds)
+      ? { templatePreservedNavigationNodeIds: [...new Set(source.templatePreservedNavigationNodeIds.filter((id): id is string => typeof id === "string" && id.length > 0))] }
+      : {}),
   };
   const normalizedFloor = normalized as FloorPlan;
   return {
@@ -737,6 +742,7 @@ export function floorUndoEntryFromFloor(floor: Partial<FloorPlan>): FloorUndoEnt
       ["backgroundImage", normalized.backgroundImage],
       ["calibration", normalized.calibration],
       ["label", normalized.label],
+      ["templatePreservedNavigationNodeIds", normalized.templatePreservedNavigationNodeIds],
       ...FLOOR_COLLECTION_KEYS.map((key: FloorCollectionKey) => [key, normalized[key]]),
     ]
   ) as FloorUndoEntry;

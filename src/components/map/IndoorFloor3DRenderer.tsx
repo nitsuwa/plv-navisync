@@ -4,16 +4,17 @@ import { Html, Line, OrbitControls } from "@react-three/drei";
 import { DoorOpen, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import * as THREE from "three";
-import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture } from "../map-builder/types";
+import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
 import { clampIndoorPriorityRoomLabel, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
-import { exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
+import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
 import type { Pt } from "../../lib/routePlanner";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
+import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
 
 declare module "react" {
   namespace JSX {
@@ -25,6 +26,7 @@ interface FloorViewport { width: number; height: number; offsetX: number; offset
 interface IndoorFloor3DRendererProps {
   floor: FloorPlan;
   floorLabel: string;
+  darkMode?: boolean;
   viewport: FloorViewport;
   routePoints?: readonly Pt[];
   walkProgress?: number;
@@ -55,6 +57,7 @@ interface IndoorFloor3DRendererProps {
 }
 type StairVisualItem = Pick<FloorStairs, "id" | "x" | "y" | "width" | "height" | "label"> & {
   rotation?: number; visible?: boolean; exteriorEmergencyStairId?: string; attachment?: FloorStairs["attachment"];
+  parentZoneId?: string; linkedEntranceId?: string; attachmentEdge?: FloorEntranceSteps["attachmentEdge"];
   direction?: FloorStairs["direction"] | "forward" | "reverse"; flip?: boolean;
 };
 type RampVisualItem = { x: number; y: number; width: number; height: number; rotation?: number; visible?: boolean; slope?: "gentle" | "medium" | "steep"; handrails?: boolean; direction?: "up" | "down" | "both" | "forward" | "reverse"; layout?: "straight" | "l_turn_left" | "l_turn_right" };
@@ -226,14 +229,23 @@ function rampHeightAt(point: Pt, ramps: readonly RampVisualItem[]) {
 
 type RoomLabelRegistry = MutableRefObject<Map<string, { element: HTMLSpanElement; position: THREE.Vector3; priority: number }>>;
 
-function RoomFloor({ room, viewport, level, selected, destination, holes = [], labelPriority = 1, labelRegistry, onClick }: {
-  room: FloorRoom; viewport: FloorViewport; level: number; selected: boolean; destination: boolean; holes?: readonly Pt[][]; labelPriority?: number; labelRegistry: RoomLabelRegistry; onClick?: () => void;
+function indoorThemeColor(color: string, darkMode?: boolean): string {
+  if (!darkMode) return color;
+  try {
+    return `#${new THREE.Color(color).lerp(new THREE.Color("#34434c"), 0.34).getHexString()}`;
+  } catch {
+    return "#68767b";
+  }
+}
+
+function RoomFloor({ room, viewport, level, selected, destination, darkMode, holes = [], labelPriority = 1, labelRegistry, onClick }: {
+  room: FloorRoom; viewport: FloorViewport; level: number; selected: boolean; destination: boolean; darkMode?: boolean; holes?: readonly Pt[][]; labelPriority?: number; labelRegistry: RoomLabelRegistry; onClick?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const points = useMemo(() => roomOutlinePoints(room), [room]);
   const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShapeWithHoles(points, holes, viewport)), [holes, points, viewport]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const color = destination ? "#4b98f0" : selected ? "#79b4f4" : hovered ? "#d4e5f1" : "#e4e2dc";
+  const color = destination ? "#4b98f0" : selected ? "#79b4f4" : hovered ? (darkMode ? "#879ca7" : "#d4e5f1") : (darkMode ? "#69777c" : "#e4e2dc");
   const protectedLabel = selected || destination;
   const center = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
   const labelWorld = pointToWorld(center, viewport, FLOOR_SURFACE_Y + 0.025 + level * 0.003);
@@ -245,8 +257,8 @@ function RoomFloor({ room, viewport, level, selected, destination, holes = [], l
   return <group>
     <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_SURFACE_Y + level * 0.003, 0]}
       onClick={onClick}
-      onPointerOver={onClick ? (event) => { event.stopPropagation(); setHovered(true); } : undefined}
-      onPointerOut={onClick ? (event) => { event.stopPropagation(); setHovered(false); } : undefined}>
+      onPointerOver={onClick ? (event) => { event.stopPropagation(); setHovered(true); (event.nativeEvent.target as HTMLElement).style.cursor = "pointer"; } : undefined}
+      onPointerOut={onClick ? (event) => { event.stopPropagation(); setHovered(false); (event.nativeEvent.target as HTMLElement).style.cursor = "grab"; } : undefined}>
     <meshStandardMaterial color={color} roughness={0.9} side={THREE.DoubleSide} emissive={destination ? "#1764c4" : selected ? "#2875ca" : hovered ? "#3979a8" : "#000000"} emissiveIntensity={destination ? 0.34 : selected ? 0.24 : hovered ? 0.08 : 0} />
     </mesh>
     {(selected || destination) && <Line points={outline} color={destination ? "#064fb8" : "#1471d4"} lineWidth={destination ? 4 : 3.5} />}
@@ -265,7 +277,7 @@ function RoomFloor({ room, viewport, level, selected, destination, holes = [], l
         textAlign: "center",
         lineHeight: 1.2,
         textOverflow: protectedLabel ? "clip" : "ellipsis",
-      }} className={`rounded-md px-2 py-1 text-[10px] transition-[background-color,color,box-shadow] duration-150 ease-out ${destination ? "bg-blue-800 text-white font-extrabold shadow-md ring-2 ring-white/90" : selected ? "bg-blue-700 text-white font-extrabold shadow-md ring-2 ring-white/90" : hovered ? "bg-blue-100 text-blue-900 font-bold shadow-sm ring-1 ring-blue-300/80" : "bg-white/85 font-semibold text-slate-700"}`}>{room.name}</span>
+      }} className={`rounded-md px-2 py-1 text-[10px] transition-[background-color,color,box-shadow] duration-150 ease-out ${destination ? "bg-blue-800 text-white font-extrabold shadow-md ring-2 ring-white/90" : selected ? "bg-blue-700 text-white font-extrabold shadow-md ring-2 ring-white/90" : hovered ? "bg-blue-100 text-blue-900 font-bold shadow-sm ring-1 ring-blue-300/80" : "bg-white/85 font-semibold text-slate-700 dark:bg-slate-800/90 dark:text-slate-200"}`}>{room.name}</span>
     </Html>
   </group>;
 }
@@ -318,11 +330,12 @@ function IndoorRoomLabelDeclutter({ registry }: { registry: RoomLabelRegistry })
   return null;
 }
 
-function Wall({ id, segment, viewport, registry }: {
+function Wall({ id, segment, viewport, registry, darkMode }: {
   id: string;
   segment: ReturnType<typeof normalizeIndoorWallSegments>[number];
   viewport: FloorViewport;
   registry: WallOcclusionRegistry;
+  darkMode?: boolean;
 }) {
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   const invalidate = useThree((state) => state.invalidate);
@@ -358,8 +371,10 @@ function Wall({ id, segment, viewport, registry }: {
     const authored = new THREE.Color(segment.color || "#8d999f");
     // Keep a warm architectural wall tone without blending it into the floor.
     // A lighter mix made the full floor read as one washed-out mass at overview.
-    return `#${authored.lerp(new THREE.Color("#ece7dd"), 0.38).getHexString()}`;
-  }, [segment.color]);
+    const wall = authored.lerp(new THREE.Color("#ece7dd"), 0.38);
+    if (darkMode) wall.lerp(new THREE.Color("#263740"), 0.34);
+    return `#${wall.getHexString()}`;
+  }, [darkMode, segment.color]);
   return <mesh position={[(start[0] + end[0]) / 2, FLOOR_SURFACE_Y + segment.baseHeight + height / 2, (start[2] + end[2]) / 2]} rotation={[0, angle, 0]} castShadow receiveShadow>
     <boxGeometry args={[length, height, thickness]} />
     <meshStandardMaterial ref={materialRef} color={wallColor} roughness={0.88} />
@@ -709,8 +724,8 @@ function Beam({ start, end, thickness, color, metalness = 0 }: { start: [number,
   </mesh>;
 }
 
-function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79, treadThickness = 0.07 }: {
-  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number; treadThickness?: number;
+function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79, treadThickness = 0.07, alignLandings = false }: {
+  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number; treadThickness?: number; alignLandings?: boolean;
 }) {
   const count = Math.max(3, steps);
   const direction = Math.sign(toZ - fromZ) || 1;
@@ -718,12 +733,12 @@ function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7
   const edgeXs = [x - width / 2, x + width / 2];
   return <group>
     {Array.from({ length: count }, (_, index) => {
-      const ratio = (index + 1) / count;
+      const ratio = alignLandings ? (index + 0.5) / count : (index + 1) / count;
       const previousY = fromY + (toY - fromY) * (index / count);
-      const treadY = fromY + (toY - fromY) * ratio;
+      const treadY = fromY + (toY - fromY) * ((index + 1) / count);
       const treadZ = fromZ + (toZ - fromZ) * ratio;
       const riserY = (previousY + treadY) / 2;
-      const riserZ = treadZ - direction * treadDepth * 0.47;
+      const riserZ = treadZ - direction * treadDepth * (alignLandings ? 0.5 : 0.47);
       return <Fragment key={index}>
         <mesh position={[x, treadY - treadThickness / 2, treadZ]} castShadow receiveShadow><boxGeometry args={[width, treadThickness, treadDepth + 0.025]} /><meshStandardMaterial color={color} roughness={0.76} metalness={0.08} /></mesh>
         <mesh position={[x, riserY - treadThickness / 2, riserZ]}><boxGeometry args={[width - 0.015, Math.max(0.025, Math.abs(treadY - previousY)), 0.035]} /><meshStandardMaterial color="#9faab0" roughness={0.8} /></mesh>
@@ -753,20 +768,53 @@ function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = fal
   const width = Math.max(0.92, stair.width * FLOOR_SCALE);
   const depth = Math.max(1.15, stair.height * FLOOR_SCALE);
   const entrance = entranceModel || stair.direction === "forward" || stair.direction === "reverse";
-  const yaw = -(stair.rotation ?? 0) * Math.PI / 180;
   const stepCount = Math.max(5, Math.min(10, Math.round(depth / 0.22)));
   const steel = "#657780";
   if (entrance) {
-    const sign = stair.direction === "reverse" ? -1 : 1;
-    const fromZ = sign * depth / 2;
-    const toZ = -sign * depth / 2;
+    const parentZone = stair.parentZoneId ? floor.exteriorZones?.find((zone) => zone.id === stair.parentZoneId) : undefined;
+    const attachedGeometry = parentZone
+      ? exteriorZoneAccessFeatureGeometry(parentZone, stair as FloorEntranceSteps, floor.canvasW ?? 600, floor.canvasH ?? 450)
+      : null;
+    const featureSide = attachedGeometry && "side" in attachedGeometry ? attachedGeometry.side : parentZone?.side;
+    const outwardDirection = featureSide === "top" ? { x: 0, y: -1 }
+      : featureSide === "bottom" ? { x: 0, y: 1 }
+        : featureSide === "left" ? { x: -1, y: 0 }
+          : featureSide === "right" ? { x: 1, y: 0 }
+            : undefined;
+    const stairCenter = { x: stair.x + stair.width / 2, y: stair.y + stair.height / 2 };
+    const candidateRamps = (floor.entranceRamps ?? []).filter((ramp) => ramp.visible !== false && (
+      Boolean(stair.linkedEntranceId && ramp.linkedEntranceId === stair.linkedEntranceId)
+      || Boolean(stair.parentZoneId && ramp.parentZoneId === stair.parentZoneId)
+    ));
+    const matchingRamp = candidateRamps.sort((a, b) => {
+      const linkedA = stair.linkedEntranceId && a.linkedEntranceId === stair.linkedEntranceId ? 0 : 1;
+      const linkedB = stair.linkedEntranceId && b.linkedEntranceId === stair.linkedEntranceId ? 0 : 1;
+      if (linkedA !== linkedB) return linkedA - linkedB;
+      const directionA = studentEntranceRampGroundDirection(stairCenter, a);
+      const directionB = studentEntranceRampGroundDirection(stairCenter, b);
+      return Math.hypot(directionA.x, directionA.y) - Math.hypot(directionB.x, directionB.y);
+    })[0];
+    const connectionDirection = matchingRamp ? studentEntranceRampGroundDirection(stairCenter, matchingRamp) : undefined;
+    // For attached features, the floor-plan attachment determines which way
+    // is physically outside. A saved rotation is retained only when it points
+    // along that authored ramp/egress vector; this fixes side-mounted runs
+    // whose legacy 0-degree angle points sideways along the facade.
+    const yaw = parentZone || matchingRamp
+      ? resolveStudentEntranceStairYaw({ authoredRotation: stair.rotation, connectionDirection, outwardDirection })
+      : -(stair.rotation ?? 0) * Math.PI / 180;
+    // The low end is always outside and the high end meets the veranda. The
+    // route cue's forward/reverse value does not invert the physical stair.
+    const fromZ = depth / 2;
+    const toZ = -depth / 2;
     const rise = 0.42;
     return <group position={position} rotation={[0, yaw, 0]}>
-      <Landing width={width * 1.08} depth={0.34} z={fromZ + sign * 0.13} y={0.02} color="#d9ddd9" />
-      <StairFlight x={0} width={width * 0.88} fromZ={fromZ} toZ={toZ} fromY={0} toY={rise} steps={stepCount} color="#d1d4d1" railColor={steel} railPostSegments={2} railHeight={0.44} />
-      <Landing width={width * 1.08} depth={0.38} z={toZ - sign * 0.12} y={rise} color="#d9ddd9" />
+      <Landing width={width * 1.08} depth={0.34} z={fromZ + 0.13} y={0.02} color="#d9ddd9" />
+      <StairFlight x={0} width={width * 0.88} fromZ={fromZ} toZ={toZ} fromY={0} toY={rise} steps={stepCount} color="#d1d4d1" railColor={steel} railPostSegments={2} railHeight={0.44} alignLandings />
+      <Landing width={width * 1.08} depth={0.38} z={toZ - 0.12} y={rise} color="#d9ddd9" />
     </group>;
   }
+
+  const yaw = -(stair.rotation ?? 0) * Math.PI / 180;
 
   // The first published Floor is ground level; never project a stair run
   // through the terrain when its authored direction is ambiguous/downward.
@@ -804,7 +852,8 @@ function EmergencyDoorwayFrame({ door, floor, viewport }: { door: FloorPlan["doo
   const angle = wall ? Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) : 0;
   const position = pointToWorld({ x: door.x, y: door.y }, viewport, FLOOR_SURFACE_Y);
   const width = Math.max(0.82, indoorDoorVisualWidth(door) * FLOOR_SCALE);
-  const needsVisualLeaf = door.openingType === "open_passage";
+  const emergencyPassage = door.isEmergencyExit && door.openingType === "open_passage";
+  const needsVisualLeaf = door.openingType === "open_passage" && !emergencyPassage;
   const leafCount = door.doorType === "double" || door.direction === "double" ? 2 : 1;
   return <group position={position} rotation={[0, -angle, 0]}>
     {[-1, 1].map((side) => <mesh key={side} position={[side * width * 0.5, 1.04, 0]} castShadow>
@@ -815,6 +864,22 @@ function EmergencyDoorwayFrame({ door, floor, viewport }: { door: FloorPlan["doo
       <boxGeometry args={[width + 0.1, 0.08, 0.09]} />
       <meshStandardMaterial color="#36434a" roughness={0.68} metalness={0.28} />
     </mesh>
+    {emergencyPassage && Array.from({ length: leafCount }, (_, index) => {
+      const span = width / leafCount;
+      const hingeX = leafCount === 1 || index === 0 ? -width / 2 : width / 2;
+      const leafCenterX = leafCount === 1 || index === 0 ? span / 2 : -span / 2;
+      const swing = leafCount === 1 || index === 0 ? -Math.PI / 3 : Math.PI / 3;
+      return <group key={`emergency-leaf-${index}`} position={[hingeX, 1.02, 0.018]} rotation={[0, swing, 0]}>
+        <mesh position={[leafCenterX, 0, 0]} castShadow>
+          <boxGeometry args={[span - 0.025, 2.02, 0.035]} />
+          <meshStandardMaterial color="#4c5960" roughness={0.68} metalness={0.24} />
+        </mesh>
+        <mesh position={[leafCenterX, -0.04, 0.038]} castShadow>
+          <boxGeometry args={[Math.max(span - 0.18, 0.32), 0.055, 0.055]} />
+          <meshStandardMaterial color="#d5dde0" metalness={0.72} roughness={0.3} />
+        </mesh>
+      </group>;
+    })}
     {needsVisualLeaf && Array.from({ length: leafCount }, (_, index) => {
       const x = leafCount === 1 ? 0 : (index === 0 ? -1 : 1) * width / 4;
       return <group key={index}>
@@ -839,48 +904,53 @@ function ExteriorEmergencyStairModel({ stair, viewport, floor }: { stair: FloorS
   const yaw = edge === "right" ? Math.PI / 2 : edge === "left" ? -Math.PI / 2 : edge === "top" ? Math.PI : 0;
   const width = Math.max(0.55, (edge === "left" || edge === "right" ? visual.height : visual.width) * FLOOR_SCALE);
   const depth = Math.max(0.6, (edge === "left" || edge === "right" ? visual.width : visual.height) * FLOOR_SCALE);
-  const count = Math.max(5, Math.min(8, Math.round(depth / 0.2)));
-  const steel = "#53666f";
-  const upperZ = -depth / 2 + 0.16;
-  const outerZ = depth / 2 - 0.18;
+  const count = Math.max(5, Math.min(9, Math.round(depth / 0.18)));
+  const steel = "#4d6068";
   const groundFloorAccess = floor.number <= 1;
-  const flightWidth = Math.max(0.44, width * 0.52);
-  const landingDepth = Math.max(0.38, Math.min(0.54, depth * 0.24));
+  const flightWidth = Math.max(0.44, width * 0.92);
+  const landingDepth = Math.max(0.38, Math.min(0.52, depth * 0.24));
   const wallGap = 28 * FLOOR_SCALE;
-  // In a single-floor plan this is a compact door-to-landing-to-short-run
-  // detail. The campus renderer owns the actual multi-floor tower. Keeping
-  // this floor-view module above the slab avoids the old negative-Y flights
-  // cutting through room/floor geometry.
-  const landingTop = 0.055;
-  const outerLandingTop = groundFloorAccess ? 0.035 : 0.025;
-  const railHeight = groundFloorAccess ? 0.56 : 0.72;
-  const runStartZ = upperZ + landingDepth * 0.42;
-  const runEndZ = outerZ - landingDepth * 0.34;
+  // exteriorStairVisualItem positions the outside model one authored gap from
+  // the facade. Build the upper landing back to that exact wall plane, so the
+  // threshold is continuous instead of appearing as a floating mini tower.
+  const wallZ = -depth / 2 - wallGap;
+  const upperLandingZ = wallZ + landingDepth / 2;
+  const outerLandingZ = depth / 2 - landingDepth / 2;
+  const runStartZ = wallZ + landingDepth;
+  const runEndZ = depth / 2 - landingDepth;
+  // Ground-level modules stay compact; upper-floor views show a clearly
+  // descending exterior flight to the next landing, outside the active slab.
+  const landingTop = groundFloorAccess ? 0.055 : 0.025;
+  const outerLandingTop = groundFloorAccess ? -0.1 : -0.48;
+  const railHeight = 0.64;
+  const railX = flightWidth / 2;
+  const outerEdgeZ = depth / 2;
   return <group name="student-3d-indoor-emergency-access" position={center} rotation={[0, yaw, 0]}>
-    {/* Full threshold bridge from the authored wall opening to the landing. */}
-    <mesh position={[0, 0.002, upperZ - wallGap / 2]} castShadow receiveShadow>
-      <boxGeometry args={[width * 0.96, 0.04, wallGap + 0.025]} />
-      <meshStandardMaterial color="#7d8b91" roughness={0.78} metalness={0.12} />
-    </mesh>
-    <mesh position={[0, landingTop - 0.02, upperZ]} castShadow receiveShadow>
+    {/* One full-width metal platform starts exactly at the wall/threshold. */}
+    <mesh position={[0, landingTop - 0.02, upperLandingZ]} castShadow receiveShadow>
       <boxGeometry args={[width * 1.08, 0.04, landingDepth]} />
-      <meshStandardMaterial color="#687780" roughness={0.82} />
+      <meshStandardMaterial color="#65767d" roughness={0.82} metalness={0.16} />
     </mesh>
+    {/* The descending run starts at the outside edge of that platform. */}
     <StairFlight x={0} width={flightWidth} fromZ={runStartZ} toZ={runEndZ} fromY={landingTop} toY={outerLandingTop} steps={count}
-      color="#78888f" railColor={steel} railPostSegments={3} railHeight={railHeight} treadThickness={0.018} />
-    <mesh position={[0, outerLandingTop - 0.015, outerZ]} castShadow receiveShadow>
+      color="#75858b" railColor={steel} railPostSegments={3} railHeight={railHeight} treadThickness={0.025} alignLandings />
+    <mesh position={[0, outerLandingTop - 0.015, outerLandingZ]} castShadow receiveShadow>
       <boxGeometry args={[width * 1.06, 0.03, landingDepth]} />
-      <meshStandardMaterial color="#77868d" roughness={0.82} />
+      <meshStandardMaterial color="#65767d" roughness={0.82} metalness={0.16} />
     </mesh>
-    {/* Both sides of the threshold and landing are guarded; the flight rails
-        terminate into the landing rails instead of ending as a single side. */}
+    {/* Short landing rails meet the flight rails without duplicating a second
+        parallel cage. The entry edge stays open at the emergency door. */}
     {[-1, 1].map((side) => <Fragment key={`landing-guard-${side}`}>
-      <Beam start={[side * width * 0.49, landingTop + railHeight, upperZ - landingDepth * 0.48]} end={[side * width * 0.49, landingTop + railHeight, runStartZ]} thickness={0.035} color={steel} metalness={0.24} />
-      {[upperZ - landingDepth * 0.42, runStartZ].map((z) => <Beam key={z} start={[side * width * 0.49, landingTop, z]} end={[side * width * 0.49, landingTop + railHeight, z]} thickness={0.026} color={steel} metalness={0.2} />)}
-      <Beam start={[side * width * 0.49, outerLandingTop + railHeight, runEndZ]} end={[side * width * 0.49, outerLandingTop + railHeight, outerZ + landingDepth * 0.42]} thickness={0.035} color={steel} metalness={0.24} />
-      {[-landingDepth * 0.36, landingDepth * 0.36].map((offset) => <Beam key={offset} start={[side * width * 0.49, outerLandingTop, outerZ + offset]} end={[side * width * 0.49, outerLandingTop + railHeight, outerZ + offset]} thickness={0.026} color={steel} metalness={0.2} />)}
-      <Beam start={[side * width * 0.48, 0.02, outerZ]} end={[side * width * 0.48, outerLandingTop, outerZ]} thickness={0.045} color={steel} metalness={0.3} />
+      <Beam start={[side * railX, landingTop + railHeight, wallZ + 0.06]} end={[side * railX, landingTop + railHeight, runStartZ]} thickness={0.035} color={steel} metalness={0.24} />
+      {[wallZ + 0.08, runStartZ].map((z) => <Beam key={`upper-post-${z}`} start={[side * railX, landingTop, z]} end={[side * railX, landingTop + railHeight, z]} thickness={0.03} color={steel} metalness={0.2} />)}
+      <Beam start={[side * railX, outerLandingTop + railHeight, runEndZ]} end={[side * railX, outerLandingTop + railHeight, outerEdgeZ - 0.04]} thickness={0.035} color={steel} metalness={0.24} />
+      {[runEndZ, outerEdgeZ - 0.04].map((z) => <Beam key={`lower-post-${z}`} start={[side * railX, outerLandingTop, z]} end={[side * railX, outerLandingTop + railHeight, z]} thickness={0.03} color={steel} metalness={0.2} />)}
     </Fragment>)}
+    {/* Keep the lower landing open at its discharge edge. A cross-rail here
+        sat directly across the walking line and made the exit look blocked. */}
+    {/* Two compact diagonal brackets make the wall-mounted landing read as
+        supported without adding vertical bars through the active floor. */}
+    {[-1, 1].map((side) => <Beam key={`landing-brace-${side}`} start={[side * railX, landingTop - 0.34, wallZ + 0.035]} end={[side * railX, landingTop - 0.035, wallZ + landingDepth * 0.86]} thickness={0.055} color="#53666f" metalness={0.28} />)}
   </group>;
 }
 
@@ -990,7 +1060,7 @@ function IndoorExitCue({ door, viewport, routeRelevant, onActivate }: {
   </Html>;
 }
 
-function FloorBase({ region, floor, viewport, index, holes = [] }: { region: { x: number; y: number; width: number; height: number }; floor: FloorPlan; viewport: FloorViewport; index: number; holes?: readonly Pt[][] }) {
+function FloorBase({ region, floor, viewport, index, holes = [], darkMode }: { region: { x: number; y: number; width: number; height: number }; floor: FloorPlan; viewport: FloorViewport; index: number; holes?: readonly Pt[][]; darkMode?: boolean }) {
   const geometry = useMemo(() => {
     const shape = rectShape(region.x, region.y, region.width, region.height, viewport);
     for (const polygon of holes) {
@@ -1008,16 +1078,16 @@ function FloorBase({ region, floor, viewport, index, holes = [] }: { region: { x
   }, [region, viewport, holes]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02 + index * 0.0002, 0]} receiveShadow>
-    <meshStandardMaterial color={floor.appearance?.color || floor.backgroundColor || "#f1eee8"} roughness={0.96} side={THREE.DoubleSide} />
+    <meshStandardMaterial color={indoorThemeColor(floor.appearance?.color || floor.backgroundColor || "#f1eee8", darkMode)} roughness={0.96} side={THREE.DoubleSide} />
   </mesh>;
 }
 const MemoFloorBase = memo(FloorBase);
 
-function FloorPath({ path, viewport }: { path: FloorPlan["paths"][number]; viewport: FloorViewport }) {
+function FloorPath({ path, viewport, darkMode }: { path: FloorPlan["paths"][number]; viewport: FloorViewport; darkMode?: boolean }) {
   const geometry = useMemo(() => routeRibbon(path.points ?? [], viewport, Math.max(0.12, (path.width || 10) * FLOOR_SCALE)), [path.points, path.width, viewport]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   if (!path.points || path.points.length < 2) return null;
-  const color = path.type === "accessible" ? "#adc7da" : path.type === "emergency" ? "#dfb1a8" : path.color || "#ddd8cf";
+  const color = path.type === "accessible" ? "#adc7da" : path.type === "emergency" ? "#dfb1a8" : indoorThemeColor(path.color || "#ddd8cf", darkMode);
   return <mesh geometry={geometry} position={[0, 0.018, 0]}>
     <meshStandardMaterial color={color} roughness={0.9} side={THREE.DoubleSide} />
   </mesh>;
@@ -1040,6 +1110,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   const dampingBeforeRecenterRef = useRef<boolean | null>(null);
   const followCameraStateRef = useRef({ freeLook: Boolean(props.freeLook) });
   const { camera, invalidate, size } = useThree();
+  useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const cancelRecenterTween = useCallback(() => {
     if (recenterFrameRef.current) cancelAnimationFrame(recenterFrameRef.current);
     recenterFrameRef.current = 0;
@@ -1147,16 +1218,13 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       (routeBounds.maxY - routeBounds.minY) * FLOOR_SCALE * 0.78,
     )
     : 0;
-  const floorBounds = regions.reduce((bounds, region) => ({
-    minX: Math.min(bounds.minX, region.x),
-    minY: Math.min(bounds.minY, region.y),
-    maxX: Math.max(bounds.maxX, region.x + region.width),
-    maxY: Math.max(bounds.maxY, region.y + region.height),
-  }), { minX: 0, minY: 0, maxX: floor.canvasW ?? viewport.width, maxY: floor.canvasH ?? viewport.height });
   const cameraTargetBounds = useMemo<Student3dCameraTargetBounds>(() => {
-    const first = pointToWorld({ x: floorBounds.minX, y: floorBounds.minY }, viewport, FLOOR_SURFACE_Y + 0.04);
-    const second = pointToWorld({ x: floorBounds.maxX, y: floorBounds.maxY }, viewport, FLOOR_SURFACE_Y + 0.04);
-    const padding = 1.6;
+    // The viewport already includes presentation-only exterior stairs and
+    // veranda geometry. Let the indoor camera inspect that authored context
+    // without clamping its target back inside the room shell.
+    const first = pointToWorld({ x: 0, y: 0 }, viewport, FLOOR_SURFACE_Y + 0.04);
+    const second = pointToWorld({ x: viewport.width, y: viewport.height }, viewport, FLOOR_SURFACE_Y + 0.04);
+    const padding = 0.35;
     return {
       minX: Math.min(first[0], second[0]) - padding,
       maxX: Math.max(first[0], second[0]) + padding,
@@ -1165,7 +1233,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       minZ: Math.min(first[2], second[2]) - padding,
       maxZ: Math.max(first[2], second[2]) + padding,
     };
-  }, [floorBounds.maxX, floorBounds.maxY, floorBounds.minX, floorBounds.minY, viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
+  }, [viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
   useEffect(() => {
     const instance = controls.current;
     if (!instance) return;
@@ -1175,8 +1243,8 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     return () => instance.removeEventListener("change", keepTargetAboveFloor);
   }, [cameraTargetBounds]);
   const floorCameraDepth = indoorFloorCameraHalfDepth(
-    Math.max(floor.canvasW ?? viewport.width, floorBounds.maxX - floorBounds.minX),
-    Math.max(floor.canvasH ?? viewport.height, floorBounds.maxY - floorBounds.minY),
+    viewport.width,
+    viewport.height,
     size.width / Math.max(1, size.height),
     FLOOR_SCALE,
   );
@@ -1490,13 +1558,14 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   const baseRegions = regions.length ? regions : [{ x: 0, y: 0, width: floor.canvasW ?? 600, height: floor.canvasH ?? 450 }];
   const visibleRoute = route.length > 1;
   return <>
-    <color attach="background" args={["#dfe6e5"]} />
-    <ambientLight intensity={1.08} />
-    <directionalLight position={[5, 12, 7]} intensity={0.98} />
+    <color attach="background" args={[props.darkMode ? "#243443" : "#dfe6e5"]} />
+    <ambientLight intensity={props.darkMode ? 0.9 : 1.08} />
+    <directionalLight position={[5, 12, 7]} intensity={props.darkMode ? 0.9 : 0.98} />
     <group>
-      {baseRegions.map((region, index) => <MemoFloorBase key={`base-${index}`} region={region} floor={floor} viewport={viewport} index={index} holes={openBelowPolygons} />)}
-      {floor.paths?.map((path) => <MemoFloorPath key={`path-${path.id}`} path={path} viewport={viewport} />)}
+      {baseRegions.map((region, index) => <MemoFloorBase key={`base-${index}`} region={region} floor={floor} viewport={viewport} index={index} holes={openBelowPolygons} darkMode={props.darkMode} />)}
+      {floor.paths?.map((path) => <MemoFloorPath key={`path-${path.id}`} path={path} viewport={viewport} darkMode={props.darkMode} />)}
       {rooms.map(({ room, openBelow }, index) => openBelow ? null : <MemoRoomFloor key={`room-${room.id}`} room={room} viewport={viewport} level={roomLevels[index] ?? 0} holes={nestedRoomPolygons[index] ?? []}
+        darkMode={props.darkMode}
         selected={room.id === props.selectedRoomId} destination={room.id === props.destinationRoomId}
         labelPriority={indoorRoomLabelPriority({
           selected: room.id === props.selectedRoomId,
@@ -1522,7 +1591,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       <IndoorWallOcclusionController registry={wallRegistry} viewport={viewport} route={route} progressRef={props.walkProgressRef} focusPoint={cutawayFocus} followMode={props.followMode && props.humanVisible} />
       {wallSegments.map((segment, index) => {
         const id = `wall-${segment.sourceIds.join("-")}-${index}`;
-        return <MemoWall key={id} id={id} segment={segment} viewport={viewport} registry={wallRegistry} />;
+        return <MemoWall key={id} id={id} segment={segment} viewport={viewport} registry={wallRegistry} darkMode={props.darkMode} />;
       })}
       {floor.windows?.filter((window) => window.visible !== false).map((window) => {
         const wall = floor.walls.find((candidate) => candidate.id === window.wallId);
@@ -1588,7 +1657,11 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const dragStartedRef = useRef(false);
   useEffect(() => {
-    const resetGesture = () => { pointersRef.current.clear(); dragStartedRef.current = false; };
+    const resetGesture = () => {
+      pointersRef.current.clear();
+      dragStartedRef.current = false;
+      if (interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.dragging;
+    };
     const updateVisibility = () => {
       const isVisible = !document.hidden;
       setVisible(isVisible);
@@ -1617,9 +1690,13 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
     // A drag in attached Follow is an orbit gesture. Panning is disabled on
     // OrbitControls and must not detach the camera or pause playback.
     dragStartedRef.current = true;
+    if (event.pointerType === "mouse" && (!props.followMode || props.freeLook || Boolean(event.buttons & 2))) {
+      event.currentTarget.dataset.dragging = "true";
+    }
   };
   const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size === 0 && interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.dragging;
     if (event.type === "pointercancel" && pointersRef.current.size === 0) dragStartedRef.current = false;
   };
   return <div ref={interactionSurfaceRef} data-testid="student-indoor-3d-renderer" className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => event.preventDefault()} onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {

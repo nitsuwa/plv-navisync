@@ -10,6 +10,11 @@ const authMocks = vi.hoisted(() => ({
 vi.mock("../../lib/supabase", () => ({
   get isConnected() { return true; },
   get supabase() { return authMocks.client; },
+  supabaseAuthStorageKey: "test-auth-token",
+  clearPersistedSupabaseSession: vi.fn(() => {
+    authMocks.session = null;
+    return true;
+  }),
 }));
 
 import { AuthProvider, useAuth } from "../StudentAuthContext";
@@ -61,7 +66,7 @@ describe("shared auth logout", () => {
     };
   });
 
-  it("revokes the local Supabase session before clearing auth state", async () => {
+  it("clears auth state immediately and uses current-session scope", async () => {
     render(<AuthProvider><LogoutProbe /></AuthProvider>);
     expect(await screen.findByText("authenticated:admin")).toBeInTheDocument();
 
@@ -70,6 +75,35 @@ describe("shared auth logout", () => {
     await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("unauthenticated:guest"));
     expect(authMocks.client.auth.signOut).toHaveBeenCalledTimes(1);
     expect(await authMocks.client.auth.getSession()).toEqual({ data: { session: null }, error: null });
+  });
+
+  it("coalesces rapid clicks into one sign-out request", async () => {
+    let completeSignOut: ((value: { error: null }) => void) | undefined;
+    authMocks.client.auth.signOut.mockImplementationOnce((options) => {
+      expect(options).toEqual({ scope: "local" });
+      return new Promise((resolve) => { completeSignOut = resolve; });
+    });
+    render(<AuthProvider><LogoutProbe /></AuthProvider>);
+    expect(await screen.findByText("authenticated:admin")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("unauthenticated:guest"));
+    await waitFor(() => expect(authMocks.client.auth.signOut).toHaveBeenCalledTimes(1));
+    await act(async () => { completeSignOut?.({ error: null }); });
+  });
+
+  it("clears the exact saved session after a rejected Auth logout request", async () => {
+    authMocks.client.auth.signOut.mockRejectedValueOnce(new Error("network unavailable"));
+    render(<AuthProvider><LogoutProbe /></AuthProvider>);
+    expect(await screen.findByText("authenticated:admin")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("unauthenticated:guest"));
+    expect(authMocks.client.auth.signOut).toHaveBeenCalledTimes(1);
+    expect((await import("../../lib/supabase")).clearPersistedSupabaseSession).toHaveBeenCalledWith("test-access-token");
   });
 
   it("coalesces the focus and visibility revalidation emitted when returning to a tab", async () => {

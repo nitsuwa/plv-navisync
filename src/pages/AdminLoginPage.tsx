@@ -392,29 +392,82 @@ export function AdminLoginPage() {
   const [form, setForm]        = useState({ email: "", password: "" });
   const [showPw, setShowPw]    = useState(false);
   const [loading, setLoading]  = useState(false);
+  const [loginPhase, setLoginPhase] = useState<"idle" | "authenticating" | "verifying">("idle");
   const [error, setError]      = useState("");
   const [demoOpen, setDemoOpen] = useState(false);
   const [selectedDemoId, setSelectedDemoId] = useState<string | null>(null);
   const demoRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const pendingLoginRef = useRef(false);
+  const routedUserRef = useRef<string | null>(null);
 
-  // A valid restored session should leave the login route without asking for
-  // credentials again. Destination still comes from the verified DB role.
+  // The shared auth provider performs the profile/role query after sign-in.
+  // Route when that database-backed authorization result is ready.
   useEffect(() => {
-    if (auth.status !== "authenticated" || !auth.profile?.is_active) return;
+    if (auth.status === "unauthenticated") {
+      routedUserRef.current = null;
+      return;
+    }
+    if (auth.status === "error") {
+      if (pendingLoginRef.current) {
+        pendingLoginRef.current = false;
+        setLoginPhase("idle");
+        setLoading(false);
+        setError("We couldn't verify your account. Check your connection and try again.");
+      }
+      return;
+    }
+    if (auth.status !== "authenticated") return;
+
+    const finishLogin = () => {
+      if (!pendingLoginRef.current) return false;
+      pendingLoginRef.current = false;
+      setLoginPhase("idle");
+      setLoading(false);
+      return true;
+    };
+    if (!auth.profile) {
+      if (finishLogin()) {
+        setError("Your account is not fully set up. Please contact the administrator.");
+        void auth.signOut().catch(() => {});
+      }
+      return;
+    }
+    if (!auth.profile.is_active) {
+      if (finishLogin()) {
+        setError("This account is inactive. Please contact the administrator.");
+        void auth.signOut().catch(() => {});
+      }
+      return;
+    }
+
+    const userId = auth.profile.id;
+    if (routedUserRef.current === userId) return;
+    routedUserRef.current = userId;
+    const submittedCredentials = pendingLoginRef.current;
     let active = true;
     if (isAdminRole(auth.profile.role)) {
+      if (finishLogin()) toastRef.current.success("Welcome back", "Redirecting to admin dashboard...");
       navigate(safeAdminReturnPath(location.state), { replace: true });
     } else if (auth.profile.role === "student") {
       void studentReturnPath(location.state).then((path) => {
-        if (active) navigate(path, { replace: true });
+        if (!active) return;
+        if (finishLogin()) toastRef.current.success("Signed in", "Welcome to the student experience!");
+        navigate(path, { replace: true });
       });
     } else if (auth.profile.role === "student_org") {
+      if (finishLogin()) toastRef.current.success("Signed in", "Welcome to the student experience!");
       navigate("/home", { replace: true });
+    } else if (submittedCredentials) {
+      finishLogin();
+      setError("This account type cannot sign in here. Please contact the administrator.");
+      void auth.signOut().catch(() => {});
     }
     return () => { active = false; };
-  }, [auth.status, auth.profile, location.state, navigate]);
+  }, [auth.status, auth.profile, auth.error, auth.signOut, location.state, navigate]);
 
   // Close the demo dropdown on outside click or Escape.
   useEffect(() => {
@@ -447,13 +500,17 @@ export function AdminLoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (loading || auth.signingOut) return;
     setError("");
     setLoading(true);
+    setLoginPhase("authenticating");
+    pendingLoginRef.current = true;
 
     if (!isConnected || !supabase) {
+      pendingLoginRef.current = false;
       setError("Authentication is not configured. Please set up Supabase credentials and restart the app.");
       setLoading(false);
+      setLoginPhase("idle");
       return;
     }
 
@@ -463,64 +520,23 @@ export function AdminLoginPage() {
         password: form.password,
       });
       if (error || !data.user) {
+        pendingLoginRef.current = false;
         setError(friendlyAuthError(error?.message ?? ""));
         setLoading(false);
+        setLoginPhase("idle");
         return;
       }
 
-      // Retrieve the authenticated user's matching profile row.
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", data.user.id)
-        .maybeSingle();
-
-      if (profileError || !profile) {
-        await supabase.auth.signOut();
-        setError("Your account is not fully set up. Please contact the administrator.");
-        setLoading(false);
-        return;
-      }
-
-      if (!profile.is_active) {
-        await supabase.auth.signOut();
-        setError("This account is inactive. Please contact the administrator.");
-        setLoading(false);
-        return;
-      }
-
-      if (isAdminRole(profile.role)) {
-        toast.success("Welcome back", "Redirecting to admin dashboard...");
-        navigate(safeAdminReturnPath(location.state), { replace: true });
-        return;
-      }
-
-      // Students land on the campus map; Student Orgs go to the home page
-      // where the My Events section is visible.
-      if (profile.role === "student_org") {
-        toast.success("Signed in", "Welcome to the student experience!");
-        navigate("/home", { replace: true });
-        return;
-      }
-      // Students return to the protected page that sent them here. This keeps
-      // deep links such as /student/reports useful after authentication while
-      // still falling back to the student home page for a normal login.
-      if (profile.role === "student") {
-        toast.success("Signed in", "Welcome to the student experience!");
-        navigate(await studentReturnPath(location.state), { replace: true });
-        return;
-      }
-
-      // Unknown role — never grant access, end the session safely.
-      await supabase.auth.signOut();
-      setError("This account type cannot sign in here. Please contact the administrator.");
-      setLoading(false);
+      // AuthProvider owns the single profile/role lookup and will route only
+      // after it has verified the account. This phase remains visible meanwhile.
+      setLoginPhase("verifying");
     } catch {
+      pendingLoginRef.current = false;
       setError("Unable to sign in right now. Please try again.");
       setLoading(false);
+      setLoginPhase("idle");
     }
   };
-
   return (
     <div
       data-testid="admin-login-layout"
@@ -734,8 +750,8 @@ export function AdminLoginPage() {
                 </motion.div>
               )}
 
-              <Button type="submit" variant="primary" size="lg" isLoading={loading} className="w-full h-11">
-                <LogIn className="h-4 w-4"/> Sign In
+              <Button type="submit" variant="primary" size="lg" isLoading={loading} disabled={loading || auth.signingOut} className="w-full h-11">
+                <LogIn className="h-4 w-4"/> {loginPhase === "verifying" ? "Verifying account…" : loginPhase === "authenticating" ? "Signing in…" : "Sign In"}
               </Button>
             </form>
 

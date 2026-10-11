@@ -442,6 +442,8 @@ export function AdminEventLayoutsPage() {
   );
   const [publicationTarget, setPublicationTarget] = useState<CampusEventOverlay | null>(null);
   const requestRef = useRef(0);
+  const activeRequestRef = useRef<number | null>(null);
+  const lastBackgroundRefreshAt = useRef(0);
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -470,7 +472,11 @@ export function AdminEventLayoutsPage() {
   }, [loading, error, overlays.length, reviewTarget, submissions.events, submissions.markRead]);
 
   const loadOverlays = useCallback(async (background = false) => {
+    const now = Date.now();
+    if (background && (activeRequestRef.current === requestRef.current || now - lastBackgroundRefreshAt.current < 5_000)) return;
+    if (background) lastBackgroundRefreshAt.current = now;
     const requestId = ++requestRef.current;
+    activeRequestRef.current = requestId;
     if (!background) setLoading(true);
     try {
       const data = await eventOverlayService.listEventOverlays({
@@ -495,6 +501,7 @@ export function AdminEventLayoutsPage() {
       );
       if (!background) setOverlays([]);
     } finally {
+      if (activeRequestRef.current === requestId) activeRequestRef.current = null;
       if (requestId === requestRef.current) setLoading(false);
     }
   }, [statusFilter, search]);
@@ -504,7 +511,7 @@ export function AdminEventLayoutsPage() {
     const refresh = () => { if (document.visibilityState === "visible") void loadOverlays(true); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
-    const timer = window.setInterval(refresh, 15000);
+    const timer = window.setInterval(refresh, 60000);
     return () => {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);

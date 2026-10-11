@@ -178,6 +178,96 @@ export function studentFacingRouteSteps(route: PlannedRoute): RouteStep[] {
       );
       if (duplicateStartIndex >= 0) hidden.add(duplicateStartIndex);
     });
+
+    // Graph-generated SOS itineraries can encode the final floor-to-campus
+    // boundary as a synthetic "Start from Exterior Stair …" row instead of
+    // an "Already at …" row. Keep that authored handoff actionable, and use
+    // its context indices so the following walk/arrival resolve to Campus.
+    const handoffs = route.contextHandoffs ?? [];
+    const exitHandoffIndex = handoffs.findIndex((handoff) => handoff.kind === "exit_building"
+      && route.contextLegs?.[handoff.fromContextLegIndex]?.kind === "floor"
+      && route.contextLegs?.[handoff.toContextLegIndex]?.kind === "campus");
+    const exitHandoff = exitHandoffIndex >= 0 ? handoffs[exitHandoffIndex] : undefined;
+    if (exitHandoff) {
+      const matchedHandoffSteps = new Map<number, number>();
+      handoffs.forEach((handoff, handoffIndex) => {
+        const transitionStepIndex = route.steps.findIndex((_, index) => {
+          const transition = routeTransitionForStep(route, route.steps, index);
+          if (transition?.kind !== handoff.kind) return false;
+          const handoffNodeId = handoff.detail?.nodeId ?? handoff.nodeId;
+          return handoffNodeId
+            ? transition.detail?.nodeId === handoffNodeId
+            : transition.handoff?.fromContextLegIndex === handoff.fromContextLegIndex;
+        });
+        if (transitionStepIndex >= 0) matchedHandoffSteps.set(transitionStepIndex, handoffIndex);
+      });
+
+      const firstVerticalTransition = [...matchedHandoffSteps.entries()]
+        .filter(([, handoffIndex]) => handoffs[handoffIndex]?.kind === "stairs" || handoffs[handoffIndex]?.kind === "elevator")
+        .sort(([left], [right]) => left - right)[0];
+      if (firstVerticalTransition) {
+        const [transitionStepIndex, handoffIndex] = firstVerticalTransition;
+        const startIndex = transitionStepIndex - 1;
+        const startStep = authoredSteps[startIndex];
+        const approachStep = authoredSteps[startIndex - 1];
+        const handoffLabel = handoffs[handoffIndex].label.toLocaleLowerCase().replace(/[.!?]+$/g, "").trim();
+        const startLabel = startStep?.instruction.replace(/^start from\s+/i, "").replace(/[.!?]+$/g, "").toLocaleLowerCase().trim();
+        if (startStep && /^start from\s+/i.test(startStep.instruction)
+          && approachStep?.icon === "walk"
+          && startLabel === handoffLabel) {
+          // This start row follows the indoor approach to the first stair and
+          // otherwise leaves Follow paused before the actual transition.
+          // The walk already supplies that location; the stair step is next.
+          hidden.add(startIndex);
+        }
+      }
+
+      const lastPriorTransitionStep = [...matchedHandoffSteps.keys()]
+        .filter((stepIndex) => matchedHandoffSteps.get(stepIndex) !== exitHandoffIndex)
+        .reduce((last, stepIndex) => Math.max(last, stepIndex), -1);
+      const normalizedExitLabel = exitHandoff.label.toLocaleLowerCase().replace(/[.!?]+$/g, "").trim();
+      const syntheticExitStepIndex = authoredSteps.reduce((match, step, index) => {
+        if (index <= lastPriorTransitionStep || !/^start from\s+/i.test(step.instruction)) return match;
+        const startLabel = step.instruction.replace(/^start from\s+/i, "").replace(/[.!?]+$/g, "").toLocaleLowerCase().trim();
+        return startLabel === normalizedExitLabel ? index : match;
+      }, -1);
+      if (syntheticExitStepIndex >= 0) {
+        const exitLabel = exitHandoff.label.trim() || "the emergency exit";
+        authoredSteps[syntheticExitStepIndex] = {
+          ...authoredSteps[syntheticExitStepIndex],
+          icon: "enter",
+          instruction: `Exit via ${exitLabel} to Campus.`,
+          contextLegIndex: exitHandoff.fromContextLegIndex,
+          contextHandoffIndex: exitHandoffIndex,
+        };
+        matchedHandoffSteps.set(syntheticExitStepIndex, exitHandoffIndex);
+      }
+
+      // A route may have several zero-walk stair floors. Associate each
+      // transition with its exact source context, then carry the destination
+      // context forward to the next step. This keeps Previous/Next, Follow,
+      // the visible Floor, and the final outdoor leg on the same itinerary.
+      let contextLegIndex = 0;
+      authoredSteps.forEach((step, index) => {
+        const handoffIndex = matchedHandoffSteps.get(index);
+        if (handoffIndex !== undefined) {
+          const handoff = handoffs[handoffIndex];
+          contextLegIndex = handoff.fromContextLegIndex;
+          authoredSteps[index] = {
+            ...step,
+            contextLegIndex: handoff.fromContextLegIndex,
+            contextHandoffIndex: handoffIndex,
+          };
+          contextLegIndex = handoff.toContextLegIndex;
+          return;
+        }
+        if (step.contextLegIndex !== undefined) {
+          contextLegIndex = step.contextLegIndex;
+          return;
+        }
+        authoredSteps[index] = { ...step, contextLegIndex };
+      });
+    }
   }
   const visible = authoredSteps.filter((step, index) => !hidden.has(index)).filter((step) => {
     const instruction = step.instruction.trim();

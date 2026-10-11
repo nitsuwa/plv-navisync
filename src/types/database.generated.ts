@@ -1557,6 +1557,10 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: { campus_id: string; snapshot: Json; published_at: string | null }[]
       }
+      list_published_campus_version_status: {
+        Args: Record<PropertyKey, never>
+        Returns: { campus_id: string; latest_published_version_id: string; published_at: string | null }[]
+      }
       admin_update_profile: {
         Args: {
           p_department: string

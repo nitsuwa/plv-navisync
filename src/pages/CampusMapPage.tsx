@@ -17,6 +17,7 @@ import { cn } from "../lib/utils";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { useToast } from "../hooks/useToast";
+import { useTheme } from "../hooks/useTheme";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import {
@@ -795,6 +796,8 @@ export interface CampusMapPageProps {
 export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, fullScreen = false, fullScreenHeight }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { theme } = useTheme();
+  const darkMode = theme === "dark";
   const studentAuth = useStudentAuth();
   const mobileStudentNotificationRef = useRef<HTMLDivElement>(null);
   const studentEventUpdates = useStudentOrgEventUpdates(
@@ -1155,12 +1158,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [reportRoomContext, setReportRoomContext] = useState<{ floorId: string; roomId: string } | null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
   const wasCampusCachedRef = useRef(false);
+  const lastCampusRefreshWarningAtRef = useRef(0);
 
   useEffect(() => {
-    if (isCampusCached && !wasCampusCachedRef.current) {
+    const warningCooldownMs = 5 * 60_000;
+    const warningIsDue = Date.now() - lastCampusRefreshWarningAtRef.current >= warningCooldownMs;
+    if (isCampusCached && !wasCampusCachedRef.current && warningIsDue) {
+      lastCampusRefreshWarningAtRef.current = Date.now();
       showWarning("Campus map refresh unavailable", {
-        description: "Campus map could not refresh. Showing the latest available map.",
-        duration: 6000,
+        description: "Using the latest available campus map.",
+        duration: 4000,
         action: { label: "Refresh", onClick: () => { void refetchCampus(); } },
       });
     }
@@ -6932,7 +6939,7 @@ const buildingFill = (id: string) =>
               showEvents={showEventMaps}
               eventVenues={campus3DEventVenues}
               selectedEventLocationId={currentEventLocationId}
-              darkMode={typeof document !== "undefined" && document.documentElement.classList.contains("dark")}
+              darkMode={darkMode}
               reducedMotion={reducedMotion}
               followPlaying={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && studentRouteUi.playback === "playing" && !followCameraDetached && navigationPhase === "outdoor"}
               followMode={studentRouteUi.phase === "navigating" && studentRouteUi.camera === "follow" && navigationPhase === "outdoor"}
@@ -6955,6 +6962,7 @@ const buildingFill = (id: string) =>
           <Suspense fallback={null}>
             <LazyIndoorFloor3DRenderer
               floor={activeFloorPlan}
+              darkMode={darkMode}
               floorLabel={`${floorView?.building.name ?? "Building"} · ${currentFloor?.label ?? "Floor"}`}
               viewport={floorViewport}
               routePoints={indoorRouteMatchesVisibleFloor ? visibleIndoorRoute?.waypoints ?? EMPTY_MAP_POINTS : EMPTY_MAP_POINTS}

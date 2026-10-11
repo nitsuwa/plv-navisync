@@ -3,7 +3,7 @@ import { assertFloorPhysicalReferences, normalizeFloor } from "../lib/floorPlanN
 import { repairInvalidFloorMapElementIds } from "../lib/physicalFloorIntegrity";
 import { nextFloorNumberForBuilding } from "../lib/floorManagement";
 import { syncEntranceNodePositions } from "../lib/navigationGraph";
-import { pruneOrphanedIndoorNodes, syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
+import { CROSS_FLOOR_EDGE_TYPE, pruneOrphanedIndoorNodes, reconcileCrossFloorTransitions, syncIndoorLinkedNodePositions } from "../lib/indoorNavigationGraph";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../lib/entranceTransitions";
 import { canonicalExteriorEmergencyStairsForBuilding, syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import { syncCampusGateNavigation } from "../lib/campusGates";
@@ -475,6 +475,12 @@ function navigationNodeFromRow(row: NavigationNodeRow): NavigationNode {
   const ui = jsonRecord(metadata?.ui as Json | undefined);
   const source = ui ?? metadata ?? {};
   const hasUiSnapshot = Boolean(ui);
+  const campusId = (typeof source.campusId === "string" ? source.campusId : undefined)
+    ?? (typeof row.campus_id === "string" ? row.campus_id : undefined);
+  const buildingId = row.building_id
+    ?? (typeof source.buildingId === "string" ? source.buildingId : undefined);
+  const floorId = row.floor_id
+    ?? (typeof source.floorId === "string" ? source.floorId : undefined);
   return {
     ...(source as unknown as Partial<NavigationNode>),
     id: row.id,
@@ -482,9 +488,9 @@ function navigationNodeFromRow(row: NavigationNodeRow): NavigationNode {
     type: (source.type as NavigationNode["type"] | undefined) ?? nodeTypeFromDatabase(row.node_type),
     x: finiteOr(row.x, finiteOr(source.x)),
     y: finiteOr(row.y, finiteOr(source.y)),
-    campusId: (typeof source.campusId === "string" ? source.campusId : undefined) ?? row.campus_id,
-    buildingId: row.building_id ?? (typeof source.buildingId === "string" ? source.buildingId : undefined),
-    floorId: row.floor_id ?? (typeof source.floorId === "string" ? source.floorId : undefined),
+    ...(campusId !== undefined ? { campusId } : {}),
+    ...(buildingId !== undefined ? { buildingId } : {}),
+    ...(floorId !== undefined ? { floorId } : {}),
     accessible: hasUiSnapshot && typeof source.accessible === "boolean" ? source.accessible : row.is_accessible,
     ...(hasUiSnapshot
       ? (typeof source.emergencySafe === "boolean" ? { emergencySafe: source.emergencySafe } : {})
@@ -752,11 +758,69 @@ function verifyHydratedBuildingCodes(payload: CampusStructurePayload, hydrated: 
  * serialized.
  */
 export function canonicalizeCampusStructureForPersistence(campus: Campus): Campus {
-  return reconcileExteriorApproachNavigation(
-    syncCampusGateNavigation(
-      syncExteriorEmergencyStairGraph(reconcileEntranceTransitions(campus), { reconcileOrdinaryFloorTransitions: false }),
+  const positionedEntranceNodes = syncEntranceNodePositions(campus.buildings ?? [], campus.navNodes ?? []);
+  const indoorNodes = positionedEntranceNodes.filter((node) => !!node.floorId);
+  const positionedIndoorNodes = (campus.buildings ?? []).flatMap((building) =>
+    syncIndoorLinkedNodePositions(
+      indoorNodes.filter((node) => node.buildingId === building.id),
+      {
+        rooms: (building.floors ?? []).flatMap((floor) => floor.rooms ?? []),
+        doors: (building.floors ?? []).flatMap((floor) => floor.doors ?? []),
+        stairs: (building.floors ?? []).flatMap((floor) => floor.stairs ?? []),
+        ramps: (building.floors ?? []).flatMap((floor) => floor.ramps ?? []),
+        elevators: (building.floors ?? []).flatMap((floor) => floor.elevators ?? []),
+      },
     ),
   );
+  const positionedById = new Map(positionedIndoorNodes.map((node) => [node.id, node]));
+  const positionedCampus = {
+    ...campus,
+    navNodes: positionedEntranceNodes.map((node) => positionedById.get(node.id) ?? node),
+  };
+  const withExteriorStairs = syncExteriorEmergencyStairGraph(
+    reconcileEntranceTransitions(positionedCampus),
+    { reconcileOrdinaryFloorTransitions: false },
+  );
+  const withFloorTransitions = reconcilePersistedFloorTransitions(withExteriorStairs);
+  return reconcileExteriorApproachNavigation(
+    syncCampusGateNavigation(withFloorTransitions),
+  );
+}
+
+/** Reconcile physically-backed floor transitions while retaining older
+ * explicitly-authored edges whose endpoints still exist but have no current
+ * physical Stair/Elevator/Ramp owners to regenerate them from. */
+function reconcilePersistedFloorTransitions(campus: Campus, preserveTemplateNodesOnly = false): Campus {
+  let edges = campus.navEdges ?? [];
+  const nodesById = new Map((campus.navNodes ?? []).map((node) => [node.id, node]));
+  const templatePreservedNodeIds = new Set((campus.buildings ?? []).flatMap((building) =>
+    (building.floors ?? []).flatMap((floor) => floor.templatePreservedNavigationNodeIds ?? []),
+  ));
+  const hasPhysicalOwner = (node: NavigationNode, building: CampusBuilding) => {
+    const floor = (building.floors ?? []).find((candidate) => candidate.id === node.floorId);
+    if (!floor) return false;
+    if (node.stairId) return (floor.stairs ?? []).some((item) => item.id === node.stairId);
+    if (node.elevatorId) return (floor.elevators ?? []).some((item) => item.id === node.elevatorId);
+    if (node.rampId) return (floor.ramps ?? []).some((item) => item.id === node.rampId);
+    return false;
+  };
+  for (const building of campus.buildings ?? []) {
+    const before = edges;
+    const reconciled = reconcileCrossFloorTransitions(campus.navNodes, before, building.floors, building.id);
+    const reconciledIds = new Set(reconciled.map((edge) => edge.id));
+    const retainedLegacy = before.filter((edge) => {
+      if (edge.type !== CROSS_FLOOR_EDGE_TYPE || reconciledIds.has(edge.id)) return false;
+      const start = nodesById.get(edge.startNodeId);
+      const end = nodesById.get(edge.endNodeId);
+      if (!start || !end) return false;
+      if (preserveTemplateNodesOnly
+        && !templatePreservedNodeIds.has(start.id)
+        && !templatePreservedNodeIds.has(end.id)) return false;
+      return !hasPhysicalOwner(start, building) || !hasPhysicalOwner(end, building);
+    });
+    edges = [...reconciled, ...retainedLegacy];
+  }
+  return { ...campus, navEdges: edges };
 }
 
 function isEventOverlayPersistenceRow(row: Pick<MapElementRow, "element_type" | "metadata">): boolean {
@@ -1054,7 +1118,12 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     for (const floor of building.floors ?? []) {
       const scopedNodes = finalNodes.filter((node) => node.buildingId === building.id && node.floorId === floor.id);
       if (scopedNodes.length === 0) continue;
-      const pruned = pruneOrphanedIndoorNodes(scopedNodes, finalEdges, floor);
+      const pruned = pruneOrphanedIndoorNodes(
+        scopedNodes,
+        finalEdges,
+        floor,
+        new Set(floor.templatePreservedNavigationNodeIds ?? []),
+      );
       const keptIds = new Set(pruned.nodes.map((node) => node.id));
       const removedIds = new Set(scopedNodes.filter((node) => !keptIds.has(node.id)).map((node) => node.id));
       if (removedIds.size === 0) continue;
@@ -1063,8 +1132,9 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     }
   }
   const reconciledGraph = reconcileEntranceTransitions({ ...campus, buildings, navNodes: finalNodes, navEdges: finalEdges });
-  const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")], navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] });
-  const withCampusGates = syncCampusGateNavigation({ ...withExteriorEmergencyStairs, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")] });
+  const withExteriorEmergencyStairs = syncExteriorEmergencyStairGraph({ ...campus, buildings, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")], navNodes: finalNodes, navEdges: reconciledGraph.navEdges ?? [] }, { reconcileOrdinaryFloorTransitions: false });
+  const withFloorTransitions = reconcilePersistedFloorTransitions(withExteriorEmergencyStairs, true);
+  const withCampusGates = syncCampusGateNavigation({ ...withFloorTransitions, markers: [...top<CampusMarker>("marker"), ...top<CampusMarker>("gate")] });
   // Exterior Veranda/Ramp/Steps topology is deterministic and owned by the
   // hydrated physical records. Rebuild it once after all canonical Entrance,
   // emergency-stair, and Campus Gate identities are restored so a save/reload

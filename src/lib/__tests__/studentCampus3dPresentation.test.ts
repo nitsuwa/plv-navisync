@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CampusBuilding, CampusDecorAsset, CampusMarker } from "../../components/map-builder/types";
 import { canEnterOutdoorBuilding } from "../../components/map-builder/ReadonlyOutdoorVisuals";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../readonlyOutdoorCampus";
-import { campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, resolveSuhayHusayDecorAssetId } from "../studentCampus3dPresentation";
+import { campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, resolveStudentEntranceStairYaw, resolveSuhayHusayDecorAssetId, studentEntranceRampGroundDirection, usesCompactGroundEmergencyExit } from "../studentCampus3dPresentation";
 
 const building = { id: "b1", x: 0, y: 0, width: 100, height: 60, floors: [] } as unknown as CampusBuilding;
 const entrance = (id: string, overrides: Partial<ReadonlyOutdoorEntrance> = {}): ReadonlyOutdoorEntrance => ({
@@ -57,7 +57,7 @@ describe("Student Campus 3D presentation helpers", () => {
 
   it("generates restrained two-row parking markings inside the authored area", () => {
     const markings = campusParkingMarkingSegments(120, 28);
-    expect(markings.filter((line) => line.kind === "stall-divider")).toHaveLength(12);
+    expect(markings.filter((line) => line.kind === "stall-divider")).toHaveLength(6);
     expect(markings.filter((line) => line.kind === "stall-row-edge")).toHaveLength(2);
     expect(markings.filter((line) => line.kind === "drive-aisle")).toHaveLength(1);
     for (const line of markings) {
@@ -76,6 +76,30 @@ describe("Student Campus 3D presentation helpers", () => {
     expect(divider!.z1).toBe(divider!.z2);
   });
 
+  it("caps parking stripe density at a readable renderer-only level", () => {
+    const markings = campusParkingMarkingSegments(500, 70);
+    expect(markings.filter((line) => line.kind === "stall-divider")).toHaveLength(18);
+  });
+
+  it("faces attached veranda steps toward their authored ramp before using the facade", () => {
+    expect(resolveStudentEntranceStairYaw({
+      authoredRotation: 0,
+      connectionDirection: { x: 1, y: 0 },
+      outwardDirection: { x: 0, y: 1 },
+    })).toBeCloseTo(Math.PI / 2);
+    expect(resolveStudentEntranceStairYaw({ authoredRotation: 0, outwardDirection: { x: 0, y: 1 } })).toBeCloseTo(0);
+    expect(resolveStudentEntranceStairYaw({ authoredRotation: 0, outwardDirection: { x: -1, y: 0 } })).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it("uses the authored entrance ramp downhill end when orienting veranda steps", () => {
+    expect(studentEntranceRampGroundDirection({ x: 10, y: 30 }, {
+      x: 0, y: 0, width: 20, height: 40, rotation: 0, direction: "forward",
+    })).toEqual({ x: 0, y: -30 });
+    expect(studentEntranceRampGroundDirection({ x: 10, y: 30 }, {
+      x: 0, y: 0, width: 20, height: 40, rotation: 0, direction: "reverse",
+    })).toEqual({ x: 0, y: 10 });
+  });
+
   it("projects only authored served floors into a compact fire-escape layout", () => {
     const floors = [
       { id: "g", number: 1 }, { id: "2f", number: 2 }, { id: "3f", number: 3 }, { id: "4f", number: 4 },
@@ -85,12 +109,27 @@ describe("Student Campus 3D presentation helpers", () => {
       { floorIndex: 0, elevation: 0, served: false },
       { floorIndex: 1, elevation: 0.2, served: true },
     ]);
+    expect(campusFireEscapeLevels(floors, ["4f"], 0.2)).toEqual([
+      { floorIndex: 0, elevation: 0, served: false },
+      { floorIndex: 1, elevation: 0.2, served: false },
+      { floorIndex: 2, elevation: 0.4, served: false },
+      { floorIndex: 3, elevation: 0.6000000000000001, served: true },
+    ]);
     expect(campusFireEscapeLevels(floors, ["g", "4f"], 0.2)).toEqual([
       { floorIndex: 0, elevation: 0, served: true },
       { floorIndex: 1, elevation: 0.2, served: false },
       { floorIndex: 2, elevation: 0.4, served: false },
       { floorIndex: 3, elevation: 0.6000000000000001, served: true },
     ]);
+    expect(usesCompactGroundEmergencyExit(campusFireEscapeLevels(floors, ["g"], 0.2))).toBe(true);
+    expect(usesCompactGroundEmergencyExit(campusFireEscapeLevels(floors, ["2f"], 0.2))).toBe(false);
+    expect(campusEmergencyExitDoorHeight(campusFireEscapeLevels(floors, ["4f"], 0.2))).toBeCloseTo(0.164);
+  });
+
+  it("raises a ground-level emergency threshold for a visible short egress stair", () => {
+    expect(campusEmergencyExitVisualElevation(0, 0)).toBe(0.18);
+    expect(campusEmergencyExitVisualElevation(2, 0.4)).toBe(0.4);
+    expect(campusEmergencyExitVisualElevation(0, 0.24)).toBe(0.24);
   });
 
   it("batches outdoor assets without inventing, dropping, sorting, or cloning authored instances", () => {

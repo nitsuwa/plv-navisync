@@ -1,39 +1,36 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { campusService } from "../services/campusService";
-import { campusStructureService } from "../services/campusStructureService";
 import type { Campus } from "../components/map-builder/types";
 import { studentCampusListing } from "../lib/studentCampusListing";
 import { useAuth } from "../contexts/StudentAuthContext";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
 
-const SESSION_CACHE_KEY = "plv_published_campuses_cache_v1";
+const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
-const RESUME_REFRESH_INTERVAL_MS = 15_000;
-const MIN_RESUME_REFRESH_ATTEMPT_MS = 60_000;
-const MAX_RESUME_REFRESH_BACKOFF_MS = 5 * 60_000;
-const MAX_AUTOMATIC_RESUME_RETRIES = 3;
+const PUBLISHED_VERSION_POLL_INTERVAL_MS = 60_000;
+const SHARED_VERSION_STATUS_FRESH_MS = 5_000;
+const MAX_REFRESH_BACKOFF_MS = 5 * 60_000;
+const REFRESH_RETRY_BASE_MS = 60_000;
+const COMING_SOON_CACHE_TTL_MS = 5 * 60_000;
 const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try again.";
 
-function sameCampusListingRevision(left: readonly Campus[], right: readonly Campus[]): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((campus, index) => {
-    const next = right[index];
-    return campus.id === next.id
-      && campus.name === next.name
-      && campus.code === next.code
-      && campus.description === next.description
-      && campus.address === next.address
-      && campus.city === next.city
-      && campus.province === next.province
-      && campus.themeColor === next.themeColor
-      && campus.isDefault === next.isDefault
-      && campus.status === next.status
-      && campus.lifecycleStatus === next.lifecycleStatus
-      && campus.publishStatus === next.publishStatus
-      && campus.visibleToStudents === next.visibleToStudents
-      && campus.publishedAt === next.publishedAt
-      && campus.updatedAt === next.updatedAt;
-  });
+interface PublishedVersionStatus {
+  campus_id: string;
+  latest_published_version_id: string;
+  published_at: string | null;
+}
+
+interface VersionedCampusSnapshot {
+  campusId: string;
+  versionId: string;
+  publishedAt: string | null;
+  campus: Campus | null;
+}
+
+interface PersistedPublishedCampusCache {
+  schemaVersion: 2;
+  snapshots: VersionedCampusSnapshot[];
+  comingSoon: Campus[];
 }
 
 function samePublicSettings(left: PublicPlatformSettings, right: PublicPlatformSettings): boolean {
@@ -41,36 +38,200 @@ function samePublicSettings(left: PublicPlatformSettings, right: PublicPlatformS
   return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
 }
 
-function isMissingPublishedSnapshotSchema(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) return false;
-  const code = String((error as { code?: unknown }).code ?? "");
-  // Older installations may not have the immutable snapshot relation/columns.
-  // Timeouts, permission errors, and network failures must not fall through to
-  // the legacy list, which can look like a valid empty published map.
-  return ["42P01", "42703"].includes(code);
-}
-
 function isPublished(campus: Campus): boolean {
   return campus.lifecycleStatus === "published" || campus.publishStatus === "published";
 }
 
-export function lastCampusStorageKey(userId: string): string {
-  return `${LAST_CAMPUS_KEY}:${userId || "guest"}`;
-}
+const sharedDirectoryRequests = new Map<string, Promise<unknown>>();
+const publishedSnapshotsByCampus = new Map<string, VersionedCampusSnapshot>();
+let publishedCacheHydrated = false;
+let cachedComingSoonCampuses: Campus[] = [];
+let cachedComingSoonAt = 0;
+let sharedVersionStatusRequest: Promise<PublishedVersionStatus[]> | null = null;
+let sharedVersionStatus: PublishedVersionStatus[] | null = null;
+let sharedVersionStatusAt = 0;
+let sharedVersionStatusLastAttemptAt = 0;
+let sharedVersionFailureCount = 0;
+let sharedVersionRetryAt = 0;
+let sharedSnapshotFailureCount = 0;
+let sharedSnapshotRetryAt = 0;
 
-function readCachedCampuses(): Campus[] {
+function hydrateVersionedCache(): void {
+  if (publishedCacheHydrated) return;
+  publishedCacheHydrated = true;
   try {
     const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((campus): campus is Campus =>
-      campus && typeof campus.id === "string" &&
-      (campus.lifecycleStatus === "published" || campus.publishStatus === "published" || campus.lifecycleStatus === "coming_soon"),
-    );
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<PersistedPublishedCampusCache>;
+    if (parsed.schemaVersion !== 2 || !Array.isArray(parsed.snapshots)) return;
+    for (const record of parsed.snapshots) {
+      if (record && typeof record.campusId === "string" && typeof record.versionId === "string"
+        && (!record.campus || record.campus.id === record.campusId)) {
+        publishedSnapshotsByCampus.set(record.campusId, record as VersionedCampusSnapshot);
+      }
+    }
+    if (Array.isArray(parsed.comingSoon)) {
+      cachedComingSoonCampuses = parsed.comingSoon.filter((campus): campus is Campus =>
+        Boolean(campus && typeof campus.id === "string" && campus.lifecycleStatus === "coming_soon"),
+      );
+    }
   } catch {
-    return [];
+    publishedSnapshotsByCampus.clear();
+    cachedComingSoonCampuses = [];
   }
+}
+
+function persistVersionedCache(): void {
+  hydrateVersionedCache();
+  try {
+    const value: PersistedPublishedCampusCache = {
+      schemaVersion: 2,
+      snapshots: Array.from(publishedSnapshotsByCampus.values()),
+      comingSoon: cachedComingSoonCampuses,
+    };
+    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(value));
+  } catch {
+    // Session storage is only an offline optimization.
+  }
+}
+
+function cachedCampusesForStatus(status: readonly PublishedVersionStatus[]): Campus[] {
+  hydrateVersionedCache();
+  return status.flatMap((item) => {
+    const cached = publishedSnapshotsByCampus.get(item.campus_id);
+    return cached?.versionId === item.latest_published_version_id && cached.campus ? [cached.campus] : [];
+  });
+}
+
+function setCachedSnapshots(status: readonly PublishedVersionStatus[], snapshots: readonly Campus[]): void {
+  hydrateVersionedCache();
+  const allowedCampusIds = new Set(status.map((item) => item.campus_id));
+  for (const campusId of publishedSnapshotsByCampus.keys()) {
+    if (!allowedCampusIds.has(campusId)) publishedSnapshotsByCampus.delete(campusId);
+  }
+  const snapshotsById = new Map(snapshots.map((campus) => [campus.id, campus]));
+  for (const item of status) {
+    const campus = snapshotsById.get(item.campus_id);
+    publishedSnapshotsByCampus.set(item.campus_id, {
+      campusId: item.campus_id,
+      versionId: item.latest_published_version_id,
+      publishedAt: item.published_at,
+      campus,
+    });
+  }
+  persistVersionedCache();
+}
+
+function reconcilePublishedCache(status: readonly PublishedVersionStatus[]): boolean {
+  hydrateVersionedCache();
+  const allowedCampusIds = new Set(status.map((item) => item.campus_id));
+  let removed = false;
+  for (const campusId of publishedSnapshotsByCampus.keys()) {
+    if (!allowedCampusIds.has(campusId)) {
+      publishedSnapshotsByCampus.delete(campusId);
+      removed = true;
+    }
+  }
+  if (removed) persistVersionedCache();
+  return removed;
+}
+
+function sameCampusObjects(left: readonly Campus[], right: readonly Campus[]): boolean {
+  return left.length === right.length && left.every((campus, index) => campus === right[index]);
+}
+
+function getSharedVersionStatus(force = false): Promise<PublishedVersionStatus[] | null> {
+  hydrateVersionedCache();
+  if (sharedVersionStatusRequest) return sharedVersionStatusRequest;
+  const now = Date.now();
+  if (!force && sharedVersionStatus && now - sharedVersionStatusAt < SHARED_VERSION_STATUS_FRESH_MS) {
+    return Promise.resolve(sharedVersionStatus);
+  }
+  if (!force && now < sharedVersionRetryAt) return Promise.resolve(null);
+  if (!force && now - sharedVersionStatusLastAttemptAt < PUBLISHED_VERSION_POLL_INTERVAL_MS) {
+    return Promise.resolve(sharedVersionStatus);
+  }
+  sharedVersionStatusLastAttemptAt = now;
+  const request = shareDirectoryRequest("published-version-status", () => campusService.listPublishedVersionStatus());
+  sharedVersionStatusRequest = request as Promise<PublishedVersionStatus[]>;
+  return request.then((status) => {
+    sharedVersionStatus = status;
+    sharedVersionStatusAt = Date.now();
+    sharedVersionFailureCount = 0;
+    sharedVersionRetryAt = 0;
+    return status;
+  }, (error) => {
+    sharedVersionFailureCount += 1;
+    const delay = Math.min(REFRESH_RETRY_BASE_MS * 2 ** (sharedVersionFailureCount - 1), MAX_REFRESH_BACKOFF_MS);
+    sharedVersionRetryAt = Date.now() + delay;
+    throw error;
+  }).finally(() => {
+    if (sharedVersionStatusRequest === request) sharedVersionStatusRequest = null;
+  });
+}
+
+function loadSanitizedPublishedSnapshots(): Promise<Campus[]> {
+  if (Date.now() < sharedSnapshotRetryAt) {
+    return Promise.reject(new Error("Published campus snapshot retry is deferred."));
+  }
+  return shareDirectoryRequest("published-sanitized-snapshots", async () => {
+    try {
+      const snapshots = await campusService.listPublishedSnapshots();
+      sharedSnapshotFailureCount = 0;
+      sharedSnapshotRetryAt = 0;
+      return snapshots;
+    } catch (error) {
+      sharedSnapshotFailureCount += 1;
+      const delay = Math.min(REFRESH_RETRY_BASE_MS * 2 ** (sharedSnapshotFailureCount - 1), MAX_REFRESH_BACKOFF_MS);
+      sharedSnapshotRetryAt = Date.now() + delay;
+      throw error;
+    }
+  });
+}
+
+function loadComingSoonCampuses(force = false): Promise<Campus[]> {
+  hydrateVersionedCache();
+  if (!force && cachedComingSoonAt > 0 && Date.now() - cachedComingSoonAt < COMING_SOON_CACHE_TTL_MS) {
+    return Promise.resolve(cachedComingSoonCampuses);
+  }
+  return shareDirectoryRequest("coming-soon-campuses", () => campusService.listComingSoon()).then((campuses) => {
+    cachedComingSoonCampuses = campuses;
+    cachedComingSoonAt = Date.now();
+    persistVersionedCache();
+    return campuses;
+  });
+}
+
+export function resetPublishedCampusDirectoryThrottle(): void {
+  sharedDirectoryRequests.clear();
+  publishedSnapshotsByCampus.clear();
+  publishedCacheHydrated = false;
+  cachedComingSoonCampuses = [];
+  cachedComingSoonAt = 0;
+  sharedVersionStatusRequest = null;
+  sharedVersionStatus = null;
+  sharedVersionStatusAt = 0;
+  sharedVersionStatusLastAttemptAt = 0;
+  sharedVersionFailureCount = 0;
+  sharedVersionRetryAt = 0;
+  sharedSnapshotFailureCount = 0;
+  sharedSnapshotRetryAt = 0;
+}
+
+function shareDirectoryRequest<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const existing = sharedDirectoryRequests.get(key);
+  if (existing) return existing as Promise<T>;
+  const request = Promise.resolve().then(load);
+  sharedDirectoryRequests.set(key, request);
+  void request.then(
+    () => { if (sharedDirectoryRequests.get(key) === request) sharedDirectoryRequests.delete(key); },
+    () => { if (sharedDirectoryRequests.get(key) === request) sharedDirectoryRequests.delete(key); },
+  );
+  return request;
+}
+
+export function lastCampusStorageKey(userId: string): string {
+  return `${LAST_CAMPUS_KEY}:${userId || "guest"}`;
 }
 
 function readRememberedCampus(userId: string): string | null {
@@ -108,124 +269,88 @@ interface UsePublishedCampusResult {
 export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedCampusResult {
   const auth = useAuth();
   const userId = auth.session?.user.id ?? auth.profile?.id ?? "guest";
-  const [campuses, setCampuses] = useState<Campus[]>(readCachedCampuses);
+  // Do not present a session snapshot as current until the lightweight version
+  // RPC confirms that its exact version id is still published.
+  const [campuses, setCampuses] = useState<Campus[]>([]);
   const campusesRef = useRef(campuses);
   campusesRef.current = campuses;
   const [selectedCampusId, setSelectedCampusId] = useState<string | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PublicPlatformSettings>(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
+  const platformSettingsRef = useRef(platformSettings);
+  platformSettingsRef.current = platformSettings;
   const [loading, setLoading] = useState<boolean>(() => campuses.length === 0);
   const [error, setError] = useState<string | null>(null);
-  // A session cache can render immediately while the live list revalidates.
-  // Show the offline warning only if that revalidation actually fails.
   const [isCached, setIsCached] = useState(false);
   const hasCampusDataRef = useRef(campuses.length > 0);
-  const lastGoodCampusesRef = useRef<Campus[]>(campuses);
   const fetchInFlightRef = useRef<Promise<void> | null>(null);
-  const lastResumeRefreshAtRef = useRef(0);
-  const resumeRefreshNotBeforeRef = useRef(0);
-  const consecutiveRefreshFailuresRef = useRef(0);
   const userIdRef = useRef(userId);
   const previousUserIdRef = useRef(userId);
   userIdRef.current = userId;
 
-  const fetchPublishedCampuses = useCallback((source: "initial" | "manual" | "resume" = "manual"): Promise<void> => {
+  const fetchPublishedCampuses = useCallback((source: "initial" | "manual" | "poll" | "resume" = "manual"): Promise<void> => {
     if (fetchInFlightRef.current) return fetchInFlightRef.current;
-    // Keep a usable map on screen during background revalidation. The full
-    // loading state is reserved for the initial load or an explicit retry.
-    // A resume refresh is silent if the previous attempt already failed.
-    if (!hasCampusDataRef.current && source !== "resume") setLoading(true);
-    if (source !== "resume") setError(null);
+    if (!hasCampusDataRef.current && source === "initial") setLoading(true);
+    if (source === "initial" || source === "manual") setError(null);
+
     const request = (async () => {
       try {
-        const studentSettings = await settingsService.getPublicPlatformSettings();
-        setPlatformSettings((current) => samePublicSettings(current, studentSettings) ? current : studentSettings);
-        // Prefer immutable published snapshots. This keeps draft/editor edits
-        // out of the public map until the database publication RPC succeeds.
-        let published: Campus[] = [];
-        try {
-          published = await campusService.listPublishedSnapshots();
-          // Published snapshots carry the full campus object including buildings,
-          // floors, rooms, walls, and navigation data from the serialized
-          // structure payload — no additional hydration needed.
-        } catch (snapshotError) {
-          if (!isMissingPublishedSnapshotSchema(snapshotError)) throw snapshotError;
-          // Compatibility fallback is limited to known missing-schema cases.
-          // In particular, a Postgres statement timeout (57014) must preserve
-          // the previous map rather than falling through to an empty legacy list.
-        }
-        if (published.length === 0) {
-          const allCampuses = await campusService.list();
-          published = allCampuses.filter((campus) => campus.publishStatus === "published");
-          // The list() path returns lightweight campus rows with empty floors.
-          // Hydrate each campus so buildings carry their authored floor plans,
-          // rooms, and walls — required by the public CampusMapPage.
-          if (published.length > 0) {
-            const hydrated = await Promise.allSettled(
-              published.map(async (campus) => {
-                try { return await campusStructureService.load(campus); }
-                catch { return campus; }
-              }),
-            );
-            published = hydrated.map((r, i) => r.status === "fulfilled" ? r.value : published[i]);
+        let status: PublishedVersionStatus[] | null;
+        if (source === "initial") {
+          const settingsPromise = shareDirectoryRequest("settings", () => settingsService.getPublicPlatformSettings());
+          const [settingsResult, statusResult] = await Promise.allSettled([
+            settingsPromise,
+            getSharedVersionStatus(),
+          ]);
+          if (settingsResult.status === "fulfilled") {
+            setPlatformSettings((current) => samePublicSettings(current, settingsResult.value) ? current : settingsResult.value);
+            platformSettingsRef.current = settingsResult.value;
           }
+          if (statusResult.status === "rejected") throw statusResult.reason;
+          status = statusResult.value;
+        } else {
+          status = await getSharedVersionStatus(source === "manual");
+        }
+        if (status === null) return;
+
+        const removedCampus = reconcilePublishedCache(status);
+        const needsSnapshot = status.some((item) => {
+          const cached = publishedSnapshotsByCampus.get(item.campus_id);
+          return cached?.versionId !== item.latest_published_version_id;
+        });
+
+        if (needsSnapshot) {
+          const snapshots = await loadSanitizedPublishedSnapshots();
+          setCachedSnapshots(status, snapshots);
         }
 
-        // Coming Soon campuses are loaded through a database RPC that returns
-        // announcement metadata only. Their authored map structure remains
-        // protected by the existing published-only RLS policies.
-        const comingSoon = await campusService.listComingSoon().catch(() => []);
-        const refreshedListing = studentCampusListing(published, comingSoon);
-        // A resume refresh often returns the exact same immutable publication
-        // revisions. Keep the existing object graph in that case so the active
-        // map renderer/camera do not rebuild just because a tab became visible.
-        published = sameCampusListingRevision(campusesRef.current, refreshedListing)
+        const published = cachedCampusesForStatus(status);
+        const shouldRefreshComingSoon = source === "initial" || needsSnapshot || removedCampus;
+        const comingSoon = shouldRefreshComingSoon
+          ? await loadComingSoonCampuses()
+          : cachedComingSoonCampuses;
+        const nextListing = studentCampusListing(published, comingSoon);
+        const stableListing = sameCampusObjects(campusesRef.current, nextListing)
           ? campusesRef.current
-          : refreshedListing;
-        if (published !== campusesRef.current) {
-          campusesRef.current = published;
-          setCampuses(published);
+          : nextListing;
+
+        if (stableListing !== campusesRef.current) {
+          campusesRef.current = stableListing;
+          setCampuses(stableListing);
         }
-        hasCampusDataRef.current = published.length > 0;
-        lastGoodCampusesRef.current = published;
-        setSelectedCampusId((currentId) => currentId && published.some((campus) => campus.id === currentId)
+        hasCampusDataRef.current = stableListing.length > 0;
+        setSelectedCampusId((currentId) => currentId && stableListing.some((campus) => campus.id === currentId)
           ? currentId
-          : chooseInitialCampus(published, studentSettings, userIdRef.current)?.id ?? null);
+          : chooseInitialCampus(stableListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
         setIsCached(false);
         setError(null);
-        consecutiveRefreshFailuresRef.current = 0;
-        resumeRefreshNotBeforeRef.current = 0;
-        lastResumeRefreshAtRef.current = Date.now();
-
-        // Save to sessionStorage cache for offline / fallback
-        if (published.length > 0) {
-          try {
-            sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(published));
-          } catch {
-            // Ignore sessionStorage write errors
-          }
-        }
       } catch {
-        // Preserve the last successfully rendered campus before consulting
-        // session storage. This keeps refresh failures from clearing the map,
-        // even when browser storage is unavailable.
-        const cached = lastGoodCampusesRef.current;
-        if (cached.length > 0) {
-          setCampuses(cached);
-          lastGoodCampusesRef.current = cached;
-          hasCampusDataRef.current = true;
-          setIsCached(true);
+        // Background metadata or snapshot failure leaves the last good map
+        // untouched; the shared retry timers bound future attempts.
+        if (hasCampusDataRef.current) {
           setError(null);
-        } else if (source !== "resume") {
-          // Keep a prior finite error visible during silent resume retries,
-          // rather than swapping the error screen back to a fake loading state.
+        } else if (source === "initial" || source === "manual") {
           setError(CAMPUS_LOAD_ERROR);
         }
-        consecutiveRefreshFailuresRef.current += 1;
-        const retryDelay = Math.min(
-          MIN_RESUME_REFRESH_ATTEMPT_MS * 2 ** (consecutiveRefreshFailuresRef.current - 1),
-          MAX_RESUME_REFRESH_BACKOFF_MS,
-        );
-        resumeRefreshNotBeforeRef.current = Date.now() + retryDelay;
       } finally {
         setLoading(false);
       }
@@ -239,9 +364,8 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
 
   useEffect(() => {
     if (previewCampus) {
-      // Preview is intentionally read-only and must never fall back to the
-      // published directory. It renders exactly the saved candidate passed by
-      // the Admin Map Builder.
+      // Preview is read-only and renders exactly the saved candidate passed by
+      // the Admin Map Builder; it does not use the published cache.
       setCampuses([previewCampus]);
       hasCampusDataRef.current = true;
       setSelectedCampusId(previewCampus.id);
@@ -250,12 +374,11 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       setIsCached(false);
       return;
     }
-    fetchPublishedCampuses("initial");
+    void fetchPublishedCampuses("initial");
   }, [fetchPublishedCampuses, previewCampus]);
 
-  // Auth bootstrap may resolve after the public campus list is already visible.
-  // Apply the signed-in student's own remembered/default campus without
-  // restarting the map fetch or showing another loading state.
+  // Apply the signed-in student's remembered/default campus without restarting
+  // the public version check or map fetch.
   useEffect(() => {
     if (previousUserIdRef.current === userId) return;
     previousUserIdRef.current = userId;
@@ -263,33 +386,29 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     setSelectedCampusId(chooseInitialCampus(campuses, platformSettings, userId)?.id ?? null);
   }, [userId, previewCampus, campuses, platformSettings]);
 
-  // ── Real-time publishing: refetch when the user returns to this tab ──
-  // When an admin publishes a new campus version, student tabs that were
-  // backgrounded will pick it up on refocus without requiring a manual
-  // page reload.
+  // Every mounted consumer joins the same lightweight version check. Full
+  // sanitized snapshots are fetched only after metadata reports a new version.
   useEffect(() => {
     if (previewCampus) return;
     let hiddenAt = 0;
+    const interval = window.setInterval(() => {
+      void fetchPublishedCampuses("poll");
+    }, PUBLISHED_VERSION_POLL_INTERVAL_MS);
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        const wasHiddenLongEnough = hiddenAt > 0 && Date.now() - hiddenAt >= RESUME_REFRESH_INTERVAL_MS;
+        const wasHiddenLongEnough = hiddenAt > 0 && Date.now() - hiddenAt >= 15_000;
         hiddenAt = 0;
-        const now = Date.now();
-        const resumeRefreshIsDue = now - lastResumeRefreshAtRef.current >= MIN_RESUME_REFRESH_ATTEMPT_MS
-          && now >= resumeRefreshNotBeforeRef.current
-          && consecutiveRefreshFailuresRef.current < MAX_AUTOMATIC_RESUME_RETRIES;
-        if (wasHiddenLongEnough && resumeRefreshIsDue) {
-          lastResumeRefreshAtRef.current = now;
-          void fetchPublishedCampuses("resume");
-        }
+        if (wasHiddenLongEnough) void fetchPublishedCampuses("resume");
       } else {
         hiddenAt = Date.now();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetchPublishedCampuses, previewCampus]);
-
   // Derived active campus
   const activeCampus = useMemo(() => {
     if (!campuses.length) return null;

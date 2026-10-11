@@ -69,6 +69,20 @@ function publishedCampus(id: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("event overlay service", () => {
+  it("coalesces concurrent published event preview reads for the same campus", async () => {
+    const { client } = makeClient();
+    vi.mocked(client.rpc).mockResolvedValue({ data: { serverNow: "2026-10-08T02:00:00.000Z", events: [] }, error: null });
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const [first, second] = await Promise.all([
+      eventOverlayService.listPublishedEventPreviews("campus-1"),
+      eventOverlayService.listPublishedEventPreviews("campus-1"),
+    ]);
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+  });
+
   it('reports an expired-session read instead of pretending the event was deleted',async()=>{
     const {client,mapElements}=makeClient();
     mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);
@@ -363,6 +377,7 @@ describe("event overlay service", () => {
   });
 
   it("rejects publication at or after the event end", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-08T00:00:00.000Z"));
     const {client, mapElements} = makeClient([{id:"event-1",metadata:{status:"pending",dateStart:"2026-10-01T01:00:00Z",dateEnd:"2026-10-01T03:00:00Z"}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await expect(eventOverlayService.reviewEventOverlay("event-1", "approved", undefined, {expectedUpdatedAt:"2026-10-02T00:00:00.000Z",dateStart:"2026-10-08T01:00:00Z",dateEnd:"2026-10-09T01:00:00Z",publicationMode:"schedule",publicationAt:"2026-10-09T01:00:00Z"})).rejects.toThrow(/before the event ends/i);

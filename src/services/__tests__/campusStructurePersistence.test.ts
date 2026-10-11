@@ -17,6 +17,7 @@ import {
 } from "../campusStructureService";
 import { ENTRANCE_TRANSITION_EDGE_TYPE, linkEntranceToIndoorDoor, removeEntranceIndoorConnection } from "../../lib/entranceTransitions";
 import { createIndoorNavNode } from "../../lib/indoorNavigationGraph";
+import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
 import { repairInvalidFloorMapElementIds } from "../../lib/physicalFloorIntegrity";
 import { duplicateFloorInBuilding } from "../../lib/floorManagement";
 import { prepareFloorTemplateReplacement } from "../../lib/floorTemplateReplacement";
@@ -906,10 +907,20 @@ describe("B6 Phase 1 — event overlay persistence", () => {
 /** Serialize → hydrate a campus through the existing structure payload shape. */
 const roundTripHydrate = (campus: Campus) => {
   const rows = serializeCampusStructure(campus);
+  // Generic Map Builder saves intentionally exclude Event-owned overlay rows.
+  // Model those existing rows as part of the DB read so this helper exercises
+  // hydration without pretending the generic save RPC owns Event persistence.
+  const eventOverlayRows = (campus.eventOverlays ?? []).map((overlay) => ({
+    id: overlay.id,
+    campus_id: campus.id,
+    element_type: "event_overlay",
+    floor_id: null,
+    metadata: { kind: "event_overlay", ui: overlay },
+  }));
   return hydrateCampusStructure(campus, {
     buildings: rows.buildings as never,
     floors: rows.floors.map((row) => ({ ...row, display_order: Number(row.display_order ?? 0), floor_number: Number(row.floor_number ?? 1) })) as never,
-    mapElements: rows.map_elements as never,
+    mapElements: [...rows.map_elements, ...eventOverlayRows] as never,
     navigationNodes: rows.navigation_nodes as never,
     navigationEdges: rows.navigation_edges as never,
   });
@@ -1037,6 +1048,11 @@ describe("floor duplication graph persistence protection", () => {
     expect(afterFirstReload.navEdges).toEqual(expectedEdges);
     expect(afterSecondReload.navNodes).toEqual(expectedNodes);
     expect(afterSecondReload.navEdges).toEqual(expectedEdges);
+    const replacementNodeIssues = validateNavigationGraph(afterFirstReload).issues
+      .filter((issue) => [roomNode.id, doorNode.id].includes(issue.nodeId ?? ""));
+    expect(replacementNodeIssues.filter((issue) => issue.severity === "error")).toHaveLength(0);
+    expect(replacementNodeIssues.filter((issue) => issue.severity === "warning").map((issue) => issue.nodeId))
+      .toEqual(expect.arrayContaining([roomNode.id, doorNode.id]));
   });
 
   it("retains Outdoor, source-Floor, other-Floor, and copied-Floor graph through repeated save/reload round-trips", () => {
@@ -1280,7 +1296,7 @@ function makeMaximalCampus(): Campus {
       { id: "node-room101", name: "Room 101", type: "room_access" as const, x: 150, y: 150, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", roomId: "room-101", accessible: true, color: "#64748b" },
       { id: "node-stair-g", name: "Stairwell A", type: "stair" as const, x: 220, y: 140, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
       { id: "node-stair-2", name: "Stairwell A", type: "stair" as const, x: 220, y: 140, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" as const, color: "#64748b" },
-      { id: "node-elev-g", name: "Elevator A", type: "elevator" as const, x: 362, y: 55, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", elevatorId: "elev-1", transitionSharedId: "elev-a", accessible: true, color: "#64748b" },
+      { id: "node-elev-g", name: "Elevator A", type: "elevator" as const, x: 362, y: 70, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", elevatorId: "elev-1", transitionSharedId: "elev-a", accessible: true, color: "#64748b" },
       { id: "node-ramp-g", name: "Access Ramp", type: "ramp" as const, x: 315, y: 80, campusId: IDs.campus, buildingId: "bldg-eng", floorId: "flr-g", rampId: "ramp-1", accessible: true, color: "#64748b" },
     ],
     navEdges: [
@@ -1438,7 +1454,7 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
     expect(node.get("node-room101")).toMatchObject({ type: "room_access", x: 150, y: 150, floorId: "flr-g", roomId: "room-101" });
     expect(node.get("node-stair-g")).toMatchObject({ type: "stair", x: 220, y: 140, floorId: "flr-g", stairId: "stair-g", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
     expect(node.get("node-stair-2")).toMatchObject({ type: "stair", x: 220, y: 140, floorId: "flr-2", stairId: "stair-2", transitionSharedId: "stairwell-a", accessible: false, inaccessibleReason: "stairs" });
-    expect(node.get("node-elev-g")).toMatchObject({ type: "elevator", x: 362, y: 55, elevatorId: "elev-1", transitionSharedId: "elev-a" });
+    expect(node.get("node-elev-g")).toMatchObject({ type: "elevator", x: 362, y: 70, elevatorId: "elev-1", transitionSharedId: "elev-a" });
     expect(node.get("node-ramp-g")).toMatchObject({ type: "ramp", x: 315, y: 80, rampId: "ramp-1" });
 
     // Navigation edges: endpoints, distance, direction, accessibility, emergency, closed, bends, types.
@@ -1449,20 +1465,27 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
     expect(edge.get("edge-out-ab")).toMatchObject({ startNodeId: "node-out-a", endNodeId: "node-out-b", distance: 400, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", bendPoints: [{ x: 250, y: 500 }] });
     expect(edge.get("edge-ent-trans")).toMatchObject({ startNodeId: "node-ent-main", endNodeId: "node-door-f2", type: "entrance_transition", accessible: true });
     expect(edge.get("edge-oneway")).toMatchObject({ bidirectional: false, accessible: false, inaccessibleReason: "stairs", emergencySafe: false, emergencyReason: "hazard", closed: true, type: "hallway" });
-    expect(edge.get("edge-trans")).toMatchObject({ startNodeId: "node-stair-g", endNodeId: "node-stair-2", type: "floor_transition", accessible: false, inaccessibleReason: "stairs" });
+    // A bidirectional transition uses the persisted Floor order as its
+    // canonical endpoint order, so the second-floor occurrence leads here.
+    expect(edge.get("edge-trans")).toMatchObject({ startNodeId: "node-stair-2", endNodeId: "node-stair-g", type: "floor_transition", accessible: false, inaccessibleReason: "stairs" });
     expect(edge.get("edge-elev")).toMatchObject({ startNodeId: "node-room101", endNodeId: "node-elev-g", type: "hallway" });
   });
 
   it("round trip is idempotent — repeated save does not progressively mutate data", () => {
     const A = makeMaximalCampus();
+    // Simulate a persisted linked Elevator anchor from before entry-side
+    // positioning became canonical. Serialization repairs it once, then must
+    // remain byte-stable on every later reload/save cycle.
+    A.navNodes!.find((node) => node.id === "node-elev-g")!.y = 55;
     const first = serializeCampusStructure(A);
     const B = roundTripHydrate(A);
     const second = serializeCampusStructure(B);
     const C = roundTripHydrate(B);
     const third = serializeCampusStructure(C);
 
-    // The first cycle must not change the payload at all (fixture is already
-    // in normalized form), and later cycles must be byte-stable.
+    expect(first.navigation_nodes.find((node) => node.id === "node-elev-g")?.y).toBe(70);
+    // After the stale linked anchor has been normalized once, later cycles
+    // must be byte-stable.
     expect(second).toEqual(first);
     expect(third).toEqual(second);
 

@@ -25,13 +25,13 @@ interface Student3dCameraControlsWithTarget {
 /** Keep mouse mappings enabled independently of viewport size or pointer media queries. */
 export function configureStudent3dInputMappings(controls: Student3dOrbitInputControls): void {
   Object.assign(controls.mouseButtons, {
-    LEFT: MOUSE.ROTATE,
+    LEFT: MOUSE.PAN,
     MIDDLE: MOUSE.PAN,
-    RIGHT: MOUSE.PAN,
+    RIGHT: MOUSE.ROTATE,
   });
   Object.assign(controls.touches, {
-    ONE: TOUCH.ROTATE,
-    TWO: TOUCH.DOLLY_PAN,
+    ONE: TOUCH.PAN,
+    TWO: TOUCH.DOLLY_ROTATE,
   });
 }
 

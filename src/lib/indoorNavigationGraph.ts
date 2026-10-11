@@ -258,7 +258,8 @@ export function syncIndoorLinkedNodePositions(
 export function pruneOrphanedIndoorNodes(
   nodes: NavigationNode[] | undefined,
   edges: NavigationEdge[] | undefined,
-  floor: Pick<FloorPlan, "rooms" | "doors" | "stairs" | "ramps" | "elevators">
+  floor: Pick<FloorPlan, "rooms" | "doors" | "stairs" | "ramps" | "elevators">,
+  preservedNodeIds: ReadonlySet<string> = new Set(),
 ): { nodes: NavigationNode[]; edges: NavigationEdge[] } {
   const safeNodes = nodes ?? [];
   const safeEdges = edges ?? [];
@@ -268,6 +269,7 @@ export function pruneOrphanedIndoorNodes(
   const rampIds = new Set((floor.ramps ?? []).map((r) => r.id));
   const elevatorIds = new Set((floor.elevators ?? []).map((e) => e.id));
   const orphaned = safeNodes.filter((n) => {
+    if (preservedNodeIds.has(n.id)) return false;
     if (n.roomId) return !roomIds.has(n.roomId);
     if (n.doorId) return !doorIds.has(n.doorId);
     if (n.stairId) return !stairIds.has(n.stairId);

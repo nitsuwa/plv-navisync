@@ -16,7 +16,13 @@ import {
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { supabase, isConnected, type Profile } from "../lib/supabase";
+import {
+  supabase,
+  isConnected,
+  supabaseAuthStorageKey,
+  clearPersistedSupabaseSession,
+  type Profile,
+} from "../lib/supabase";
 import { isAdminRole } from "../lib/roles";
 
 export type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "error";
@@ -72,6 +78,7 @@ export interface AuthState {
   username: string;
   /** Existing student-facing role fallback retained for compatibility. */
   role: "student" | "student_org" | "faculty";
+  signingOut: boolean;
   refreshProfile: () => Promise<void>;
   /** Adopt a profile mutation immediately so every account surface stays in sync. */
   applyProfileUpdate: (profile: Partial<Profile>) => void;
@@ -81,7 +88,8 @@ export interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 const PROFILE_RETRY_MESSAGE = "NaviSync could not verify your login/profile right now. Check your connection and retry; the saved login has not been cleared.";
-const AUTH_REVALIDATION_COALESCE_MS = 5_000;
+const AUTH_REVALIDATION_COALESCE_MS = 60_000;
+const SIGN_OUT_TIMEOUT_MS = 2_500;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -89,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("initializing");
   const [recoveryState, setRecoveryState] = useState<PasswordRecoveryState>(() =>
     isPasswordResetRoute() ? "processing" : "idle");
+  const [signingOut, setSigningOut] = useState(false);
   const recoveryStateRef = useRef(recoveryState);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -98,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const authEventVersionRef = useRef(0);
   const mountedRef = useRef(false);
   const pendingProfileRef = useRef<{ userId: string; generation: number; promise: Promise<void> } | null>(null);
+  const signOutPromiseRef = useRef<Promise<void> | null>(null);
   const retryRef = useRef<() => Promise<void>>(async () => {});
   // Capture before Supabase consumes/cleans the callback URL.
   const recoveryUrlRef = useRef(isPasswordResetRoute() && hasAuthRedirectPayload());
@@ -297,6 +307,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     });
 
+    // The bounded offline logout fallback removes this exact Supabase storage
+    // entry. Mirror that local sign-out in other tabs too.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== supabaseAuthStorageKey || event.newValue !== null) return;
+      authEventVersionRef.current += 1;
+      clearSession();
+    };
+    window.addEventListener("storage", onStorage);
+
     void restoreSession();
 
     let lastRevalidationAt = 0;
@@ -327,9 +346,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return request;
     };
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void revalidate();
-    }, 15_000);
     const onFocus = () => { if (document.visibilityState === "visible") void revalidate(); };
     const onVisibility = () => { if (document.visibilityState === "visible") void revalidate(); };
     window.addEventListener("focus", onFocus);
@@ -337,9 +353,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mountedRef.current = false;
-      window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("storage", onStorage);
       listener.subscription.unsubscribe();
     };
   }, [adoptSession, clearSession, loadProfile, restoreSession, updateRecoveryState]);
@@ -360,18 +376,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const retryBootstrap = useCallback(() => retryRef.current(), []);
 
-  const signOut = useCallback(async () => {
-    if (supabase) {
-      // End this browser's session before clearing the in-memory profile. A
-      // failed revoke must not look like a successful logout and send the user
-      // back through a login route that can restore the still-active session.
-      const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
-      if (signOutError) throw signOutError;
-      const { data, error: verifyError } = await supabase.auth.getSession();
-      if (verifyError) throw verifyError;
-      if (data.session) throw new Error("Sign out did not clear the current session.");
+  const signOut = useCallback((): Promise<void> => {
+    if (signOutPromiseRef.current) return signOutPromiseRef.current;
+    if (!supabase) {
+      clearSession();
+      return Promise.resolve();
     }
-    clearSession();
+
+    setSigningOut(true);
+    const operation = (async () => {
+      // Supabase's supported local scope keeps other devices signed in. Start
+      // it once, then clear protected in-memory state immediately so no UI
+      // waits on Auth, profiles, campus data, or map cleanup.
+      const accessTokenAtSignOut = sessionRef.current?.access_token;
+      const logoutRequest = Promise.resolve()
+        .then(() => supabase.auth.signOut({ scope: "local" }))
+        .then(({ error: signOutError }) => !signOutError)
+        .catch(() => false);
+      clearSession();
+
+      let timeoutId: number | undefined;
+      const timedOut = new Promise<false>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(false), SIGN_OUT_TIMEOUT_MS);
+      });
+      try {
+        const remoteLogoutConfirmed = await Promise.race([logoutRequest, timedOut]);
+        if (!remoteLogoutConfirmed && !clearPersistedSupabaseSession(accessTokenAtSignOut)) {
+          throw new Error("The browser could not clear the saved sign-in session.");
+        }
+      } finally {
+        if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+        clearSession();
+      }
+    })();
+
+    signOutPromiseRef.current = operation;
+    void operation.then(
+      () => {
+        if (signOutPromiseRef.current === operation) signOutPromiseRef.current = null;
+        setSigningOut(false);
+      },
+      () => {
+        if (signOutPromiseRef.current === operation) signOutPromiseRef.current = null;
+        setSigningOut(false);
+      },
+    );
+    return operation;
   }, [clearSession]);
 
   // A cached/in-flight profile is never authentication by itself. Only expose
@@ -386,9 +436,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const role = activeProfile?.role === "student" ? "student" : activeProfile?.role === "student_org" ? "student_org" : "faculty";
 
   const value = useMemo<AuthState>(() => ({
-    session, profile: activeProfile, status, recoveryState, loading: status === "initializing" || status === "error", error,
+    session, profile: activeProfile, status, recoveryState, loading: status === "initializing" || status === "error", error, signingOut,
     isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut,
-  }), [session, activeProfile, status, recoveryState, error, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut]);
+  }), [session, activeProfile, status, recoveryState, error, signingOut, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -405,6 +455,7 @@ const EMPTY_AUTH_STATE: AuthState = {
   recoveryState: "idle",
   loading: true,
   error: null,
+  signingOut: false,
   isAdmin: false,
   isStudent: false,
   isStudentOrg: false,
@@ -421,8 +472,8 @@ export function useAuth(): AuthState {
 }
 
 /** Drop-in compatibility hook for existing student UI. */
-export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isAdmin" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signOut">;
+export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isAdmin" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signingOut" | "signOut">;
 export function useStudentAuth(): StudentAuthState {
-  const { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut } = useAuth();
-  return { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signOut };
+  const { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signingOut, signOut } = useAuth();
+  return { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signingOut, signOut };
 }

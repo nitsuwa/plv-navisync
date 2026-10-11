@@ -13,7 +13,7 @@ import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } 
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { student3dFocusDistance, student3dSafeFocusCenter } from "../../lib/student3dCameraFocus";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
-import { campusFireEscapeLevels, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
+import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
 import type { EventVenue } from "../../lib/eventMapView";
 import type { Pt } from "../../lib/routePlanner";
@@ -241,7 +241,7 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick }:
   const paneColor = "#5e8396";
   return <group position={[world.x, 0, world.z]} rotation={[0, -(building.rotation ?? 0) * Math.PI / 180, 0]}>
     <mesh position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}
-      onPointerOver={(event) => { event.stopPropagation(); setHovered(true); }} onPointerOut={(event) => { event.stopPropagation(); setHovered(false); }}>
+      onPointerOver={(event) => { event.stopPropagation(); setHovered(true); (event.nativeEvent.target as HTMLElement).style.cursor = "pointer"; }} onPointerOut={(event) => { event.stopPropagation(); setHovered(false); (event.nativeEvent.target as HTMLElement).style.cursor = "grab"; }}>
       <boxGeometry args={[width, height, depth]} />
       <meshStandardMaterial color={hovered && !selected ? "#c8d9e4" : body} roughness={0.78} metalness={0.02} emissive={selected ? "#56a4ff" : hovered ? "#7399ae" : "#000000"} emissiveIntensity={selected ? 0.18 : hovered ? 0.08 : 0} />
     </mesh>
@@ -471,7 +471,7 @@ function GroundArea({ asset }: { asset: CampusDecorAsset }) {
       const dz = z2 - z1;
       const length = Math.hypot(dx, dz);
       if (length < 1e-6) continue;
-      const lineWidth = (segment.kind === "drive-aisle" ? 1.2 : 1) * STUDENT_CAMPUS_3D_SCALE;
+      const lineWidth = (segment.kind === "drive-aisle" ? 2.8 : 2.4) * STUDENT_CAMPUS_3D_SCALE;
       const nx = -(dz / length) * lineWidth / 2;
       const nz = (dx / length) * lineWidth / 2;
       const base = positions.length / 3;
@@ -482,6 +482,7 @@ function GroundArea({ asset }: { asset: CampusDecorAsset }) {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
     return geometry;
   }, [parkingSegments]);
   useEffect(() => () => parkingMarkings.dispose(), [parkingMarkings]);
@@ -490,15 +491,15 @@ function GroundArea({ asset }: { asset: CampusDecorAsset }) {
     const rects = cells && asset.type !== "parking-lot" ? cells.map((c) => ({ x: c.x * cell - asset.x, z: c.y * cell - asset.y, w: cell, d: cell })) : [{ x: -width / 2, z: -depth / 2, w: width, d: depth }];
     const vertices: number[] = []; const indices: number[] = [];
     rects.forEach((rect) => { const base = vertices.length / 3; const s = STUDENT_CAMPUS_3D_SCALE; vertices.push(rect.x * s, 0, rect.z * s, (rect.x + rect.w) * s, 0, rect.z * s, (rect.x + rect.w) * s, 0, (rect.z + rect.d) * s, rect.x * s, 0, (rect.z + rect.d) * s); indices.push(base, base + 2, base + 1, base, base + 3, base + 2); });
-    const result = new THREE.BufferGeometry(); result.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3)); result.setIndex(indices); result.computeVertexNormals(); return result;
+    const result = new THREE.BufferGeometry(); result.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3)); result.setIndex(indices); result.computeVertexNormals(); result.computeBoundingSphere(); return result;
   }, [asset.scale, asset.surfaceCellSize, asset.surfaceCells, asset.type, asset.width, asset.height, asset.x, asset.y, cells, depth, width]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   const position = campusMapPointToWorld({ x: asset.x, y: asset.y }, 0.002);
   const color = asset.groundColor ?? (asset.groundType === "plaza" || asset.type === "plaza-area" ? "#d8d9d1" : parking ? "#828b90" : asset.groundType === "field" ? "#91ae75" : "#9db989");
   return <group position={[position.x, position.y, position.z]} rotation={[0, -(asset.rotation ?? 0) * Math.PI / 180, 0]}>
     <mesh geometry={geometry} receiveShadow renderOrder={1}><meshStandardMaterial color={color} roughness={1} side={THREE.DoubleSide} /></mesh>
-    {parkingSegments.length > 0 && <mesh name="student-campus-parking-stall-markings" geometry={parkingMarkings} position={[0, 0.004, 0]} renderOrder={2} frustumCulled>
-      <meshBasicMaterial color="#f5f6f4" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
+    {parkingSegments.length > 0 && <mesh name="student-campus-parking-stall-markings" geometry={parkingMarkings} position={[0, 0.008, 0]} renderOrder={2} frustumCulled>
+      <meshBasicMaterial color="#cbd1ce" depthTest depthWrite={false} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} toneMapped={false} side={THREE.DoubleSide} />
     </mesh>}
   </group>;
 }
@@ -1211,7 +1212,7 @@ function SuhayHusayModelV13() {
   const mass = (name: SuhayV11ShapeName, depth: number, z: number, color: string) => (
     <SuhayHusayProfileMass key={name} name={`suhay-v13-${name}`} polygon={SUHAY_HUSAY_V11_SHAPES[name]} depth={depth} z={z} color={color} />
   );
-  return <group name="suhay-husay-v13-sculpture" scale={[0.50, 0.74, 0.48]} rotation={[0, 0.68, 0]}>
+  return <group name="suhay-husay-v13-sculpture" scale={[0.50, 0.34, 0.48]} rotation={[0, 0.68, 0]}>
     {mass("pedestal", 0.70, -0.38, "#555c58")}
     {mass("rockMass", 0.46, -0.22, "#626a64")}
 
@@ -1288,7 +1289,7 @@ function GenericAsset({ asset, isSuhayHusay = false, selectedLandmark = false }:
     </> : <mesh position={[0, 0.18, 0]}>{isCone ? <coneGeometry args={[0.22, 0.42, 7]} /> : <boxGeometry args={[0.38, 0.34, 0.38]} />}<meshStandardMaterial color={color} roughness={0.74} /></mesh>}
     </group>
     {isSuhayHusay && selectedLandmark && <mesh name="suhay-husay-selection-ring" rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}><ringGeometry args={[0.48, 0.515, 32]} /><meshBasicMaterial color="#2563eb" transparent opacity={0.9} side={THREE.DoubleSide} /></mesh>}
-    {(isSuhayHusay ? hovered || selectedLandmark : Boolean(asset.name)) && <Html position={[0, isSuhayHusay ? (SUHAY_HUSAY_MODEL_VERSION === "v13" ? 2.17 : SUHAY_HUSAY_MODEL_VERSION === "v12" ? 2.48 : SUHAY_HUSAY_MODEL_VERSION === "v11" ? 2.72 : SUHAY_HUSAY_MODEL_VERSION === "v10" ? 2.9 : 1.48) : 0.75, 0]} center style={{ pointerEvents: "none" }}><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold shadow ${isSuhayHusay && selectedLandmark ? "bg-blue-700 text-white" : "bg-slate-900/75 text-white"}`}>{isSuhayHusay ? "Suhay Husay" : asset.name}</span></Html>}
+    {(isSuhayHusay ? hovered || selectedLandmark : Boolean(asset.name)) && <Html position={[0, isSuhayHusay ? (SUHAY_HUSAY_MODEL_VERSION === "v13" ? 1.08 : SUHAY_HUSAY_MODEL_VERSION === "v12" ? 2.48 : SUHAY_HUSAY_MODEL_VERSION === "v11" ? 2.72 : SUHAY_HUSAY_MODEL_VERSION === "v10" ? 2.9 : 1.48) : 0.75, 0]} center style={{ pointerEvents: "none" }}><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold shadow ${isSuhayHusay && selectedLandmark ? "bg-blue-700 text-white" : "bg-slate-900/75 text-white"}`}>{isSuhayHusay ? "Suhay Husay" : asset.name}</span></Html>}
   </group>;
 }
 
@@ -1312,7 +1313,7 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
 }) {
   const steel = "#3f5058";
   const tread = "#788991";
-  const railHeight = 0.1;
+  const railHeight = Math.min(0.1, campusEmergencyExitDoorHeight(levels) * 0.55);
   const runLength = Math.max(0.26, Math.min(0.68, facadeWidth * 0.66));
   const landingWidth = Math.max(0.14, Math.min(0.22, outwardDepth * 0.46));
   const landingDepth = Math.max(0.075, Math.min(0.13, outwardDepth * 0.26));
@@ -1321,7 +1322,9 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
   const stairZ = landingZ + landingDepth / 2 + treadDepth / 2;
   const centers = levels.map((_, index) => index % 2 === 0 ? -runLength / 2 : runLength / 2);
   const doorWidth = Math.max(0.105, Math.min(0.18, facadeWidth * 0.34));
-  const doorHeight = 0.28;
+  // Keep the access door and sign inside the served story, including at the
+  // highest landing where the roofline is immediately above the escape.
+  const doorHeight = campusEmergencyExitDoorHeight(levels);
   const firstServedLevelIndex = levels.findIndex((level) => level.served);
   const servedLevels = levels.filter((level) => level.served);
   const renderFlight = (index: number) => {
@@ -1363,9 +1366,9 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
   // Give it a full landing and a short, guarded run to grade. The tread bottoms
   // stay above the campus ground plane so the small module cannot z-fight or
   // look like it is sinking into the terrain.
-  if (servedLevels.length === 1) {
+  if (usesCompactGroundEmergencyExit(levels)) {
     const level = servedLevels[0];
-    const y = level.elevation;
+    const y = campusEmergencyExitVisualElevation(level.floorIndex, level.elevation);
     const platformWidth = Math.max(0.36, Math.min(0.7, Math.max(facadeWidth * 0.84, landingWidth * 1.6)));
     const platformDepth = Math.max(0.22, Math.min(0.36, outwardDepth * 0.5));
     const flightDepth = Math.max(0.34, Math.min(0.58, outwardDepth * 0.72));
@@ -1380,7 +1383,7 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
         {[-1, 1].map((side) => <SculptureLimb key={side} from={[side * (doorWidth / 2 + 0.009), y, -0.004]} to={[side * (doorWidth / 2 + 0.009), y + doorHeight + 0.01, -0.004]} radius={0.006} color="#c7d0d3" />)}
         <mesh position={[0, y + doorHeight * 0.62, 0.008]}><boxGeometry args={[doorWidth * 0.76, 0.012, 0.012]} /><meshStandardMaterial color="#dce3e4" metalness={0.5} roughness={0.38} /></mesh>
         <mesh position={[0, y + doorHeight + 0.035, 0.002]}><boxGeometry args={[doorWidth * 0.66, 0.035, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
-        <Html position={[0, y + doorHeight + 0.035, 0.016]} center transform sprite distanceFactor={7} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+        <Html position={[0, y + doorHeight + 0.035, 0.016]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}>
           <span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span>
         </Html>
       </group>}
@@ -1444,10 +1447,10 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
             <boxGeometry args={[doorWidth, doorHeight, 0.025]} />
             <meshStandardMaterial color="#3b454a" roughness={0.68} metalness={0.34} />
           </mesh>
-          {[-1, 1].map((side) => <SculptureLimb key={"frame-" + side} from={[side * (doorWidth / 2 + 0.009), y, -0.004]} to={[side * (doorWidth / 2 + 0.009), y + doorHeight + 0.01, -0.004]} radius={0.006} color="#c7d0d3" />)}
+          {[-1, 1].map((side) => <SculptureLimb key={"frame-" + side} from={[side * (doorWidth / 2 + 0.009), y, -0.004]} to={[side * (doorWidth / 2 + 0.009), y + doorHeight, -0.004]} radius={0.006} color="#c7d0d3" />)}
           <mesh position={[0, y + doorHeight * 0.62, 0.008]}><boxGeometry args={[doorWidth * 0.76, 0.012, 0.012]} /><meshStandardMaterial color="#dce3e4" metalness={0.5} roughness={0.38} /></mesh>
-          <mesh position={[0, y + doorHeight + 0.035, 0.002]}><boxGeometry args={[doorWidth * 0.66, 0.035, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
-          {index === firstServedLevelIndex && <Html position={[0, y + doorHeight + 0.035, 0.016]} center transform sprite distanceFactor={7} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+          <mesh position={[0, y + doorHeight - 0.02, 0.002]}><boxGeometry args={[doorWidth * 0.66, 0.032, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
+          {index === firstServedLevelIndex && <Html position={[0, y + doorHeight - 0.02, 0.016]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}>
             <span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span>
           </Html>}
         </group>}
@@ -1474,16 +1477,20 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
     const p = campusMapPointToWorld(world, STUDENT_CAMPUS_3D_GROUND_EPSILON);
     const angle = entrance.legacyPosition ? 0 : campusEntranceFacingYaw((world as { angle?: number }).angle);
     const buildingName = building.code || building.name;
-    const emergencyDoor = campus.exteriorEmergencyStairs.some((stair) => {
+    const emergencyStair = campus.exteriorEmergencyStairs.find((stair) => {
       if (stair.buildingId !== building.id) return false;
       if (!campusFireEscapeLevels(building.floors, stair.servedFloorIds, 1).some((level) => level.floorIndex === 0 && level.served)) return false;
       const stairPoint = entranceWorldPosition(building, stair.attachment);
       return Math.hypot(stairPoint.x - world.x, stairPoint.y - world.y) <= 2.5;
     });
+    const emergencyDoor = Boolean(emergencyStair);
+    const emergencyLevels = emergencyStair ? campusFireEscapeLevels(building.floors, emergencyStair.servedFloorIds, 1) : [];
+    const raisedSingleFloorThreshold = emergencyLevels.filter((level) => level.served).length === 1
+      && emergencyLevels.some((level) => level.floorIndex === 0 && level.served);
     return <group key={entrance.id} position={[p.x, p.y, p.z]} rotation={[0, angle, 0]}>
       {/* One quiet physical doorway is always drawn, regardless of whether
           Campus context permits an action at this authored door. */}
-      <group name="student-3d-physical-entrance" userData={{ entranceId: entrance.id }}>
+      <group name="student-3d-physical-entrance" userData={{ entranceId: entrance.id }} position={[0, raisedSingleFloorThreshold ? CAMPUS_GROUND_EXIT_LANDING_ELEVATION : 0, 0]}>
         <mesh position={[0, 0.17, 0.025]}><boxGeometry args={[emergencyDoor ? 0.2 : 0.19, 0.32, 0.045]} /><meshStandardMaterial color={emergencyDoor ? "#3b454a" : "#324754"} roughness={0.85} metalness={emergencyDoor ? 0.28 : 0} /></mesh>
         <mesh position={[-0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
         <mesh position={[0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
@@ -1492,7 +1499,7 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
         {emergencyDoor && <>
           <mesh position={[0, 0.21, 0.083]}><boxGeometry args={[0.145, 0.015, 0.015]} /><meshStandardMaterial color="#dce3e4" metalness={0.48} roughness={0.38} /></mesh>
           <mesh position={[0, 0.405, 0.048]}><boxGeometry args={[0.13, 0.035, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
-          <Html position={[0, 0.405, 0.061]} center transform sprite distanceFactor={7} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span></Html>
+          <Html position={[0, 0.405, 0.061]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}><span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span></Html>
         </>}
       </group>
       {canEnterFromCampus && !isActiveDoor && <Html position={[0, 0.43, 0.08]} center distanceFactor={12} zIndexRange={hasRoute ? [25, 0] : [55, 0]}>
@@ -1972,6 +1979,8 @@ function FollowHumanMarker({ route, progressRef, initialPoint }: { route: readon
 
 function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTMLCanvasElement | null>; draggedRef: MutableRefObject<boolean> }) {
   const { campus } = props;
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const worldW = campusMapSizeToWorld(campus.canvasW);
   const worldH = campusMapSizeToWorld(campus.canvasH);
   const route = props.routePoints ?? [];
@@ -1996,7 +2005,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       maxZ: Math.max(first.z, second.z) + padding,
     };
   }, [campus]);
-  const pointerStart = useRef<{ x: number; y: number; id: number } | null>(null);
+  const pointerStart = useRef<{ x: number; y: number; id: number; button: number } | null>(null);
   const pointers = useRef(new Set<number>());
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -2012,18 +2021,29 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     const handleDown = (event: PointerEvent) => {
       pointers.current.add(event.pointerId);
       if (event.pointerType === "touch" && pointers.current.size > 1) { pointerStart.current = null; props.draggedRef.current = true; return; }
-      pointerStart.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+      pointerStart.current = { x: event.clientX, y: event.clientY, id: event.pointerId, button: event.button };
       props.draggedRef.current = false;
     };
     const handleMove = (event: PointerEvent) => {
       if (!pointerStart.current || pointerStart.current.id !== event.pointerId || props.draggedRef.current || pointers.current.size > 1) return;
       if (crossedStudent3dDragThreshold(pointerStart.current, event)) {
         props.draggedRef.current = true;
+        const surface = element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']");
+        if (event.pointerType === "mouse" && (!props.followMode || props.freeLook || pointerStart.current.button === 2)) {
+          if (surface) surface.dataset.dragging = "true";
+        }
         if (!props.followMode) props.onIntentionalPan?.();
       }
     };
-    const handleUp = (event: PointerEvent) => { pointers.current.delete(event.pointerId); if (pointerStart.current?.id === event.pointerId) pointerStart.current = null; };
-    const reset = () => { pointers.current.clear(); pointerStart.current = null; props.draggedRef.current = false; };
+    const handleUp = (event: PointerEvent) => {
+      pointers.current.delete(event.pointerId);
+      if (pointerStart.current?.id === event.pointerId) pointerStart.current = null;
+      if (pointers.current.size === 0) element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-dragging");
+    };
+    const reset = () => {
+      pointers.current.clear(); pointerStart.current = null; props.draggedRef.current = false;
+      element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-dragging");
+    };
     element.addEventListener("pointerdown", handleDown, { passive: true });
     element.addEventListener("pointermove", handleMove, { passive: true });
     window.addEventListener("pointerup", handleUp, { passive: true });
@@ -2034,7 +2054,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       element.removeEventListener("pointerdown", handleDown); element.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp); window.removeEventListener("pointercancel", reset); window.removeEventListener("blur", reset); document.removeEventListener("visibilitychange", reset);
     };
-  }, [props.draggedRef, props.followMode, props.onIntentionalPan]);
+  }, [props.draggedRef, props.followMode, props.freeLook, props.onIntentionalPan]);
 
   useEffect(() => {
     const controls = orbitRef.current;
@@ -2076,16 +2096,28 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       const position = worldTuple(marker, STUDENT_CAMPUS_3D_GROUND_EPSILON);
       const selected = props.selectedPlaceId === marker.id;
       const gateRotation = marker.type === "gate" ? campusGateFacingRotation(marker, campus) : 0;
-      return <group key={marker.id} position={position} rotation={[0, gateRotation, 0]} onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) selectPlace(marker.id); }}>
+      return <group key={marker.id} position={position} rotation={[0, gateRotation, 0]} onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) selectPlace(marker.id); }} onPointerOver={(event) => { event.stopPropagation(); (event.nativeEvent.target as HTMLElement).style.cursor = "pointer"; }} onPointerOut={(event) => { event.stopPropagation(); (event.nativeEvent.target as HTMLElement).style.cursor = "grab"; }}>
         {marker.type === "gate" ? <group name="student-campus-gate-structure">
           <mesh position={[-0.62, 0.58, 0]} castShadow receiveShadow><boxGeometry args={[0.28, 1.16, 0.38]} /><meshStandardMaterial color={selected ? "#8098a1" : "#91a1a4"} roughness={0.78} /></mesh>
           <mesh position={[0.62, 0.58, 0]} castShadow receiveShadow><boxGeometry args={[0.28, 1.16, 0.38]} /><meshStandardMaterial color={selected ? "#8098a1" : "#91a1a4"} roughness={0.78} /></mesh>
           <mesh position={[0, 1.14, 0]} castShadow receiveShadow><boxGeometry args={[1.72, 0.38, 0.42]} /><meshStandardMaterial color="#35677e" roughness={0.66} /></mesh>
           <mesh position={[0, 1.14, 0.216]}><boxGeometry args={[0.82, 0.14, 0.014]} /><meshStandardMaterial color="#f4f7f5" roughness={0.72} /></mesh>
           {[-0.52, 0.52].map((x) => <mesh key={x} position={[x, 1.14, 0.218]}><boxGeometry args={[0.025, 0.2, 0.016]} /><meshStandardMaterial color="#b4c1c3" /></mesh>)}
+          {/* Two closed leaves meet at center between the grounded pillars. */}
+          {[-1, 1].map((side) => {
+            const leafCenter = side * 0.245;
+            const leafWidth = 0.49;
+            return <group key={`closed-gate-leaf-${side}`}>
+              {[0.12, 0.78].map((y) => <mesh key={`rail-${y}`} position={[leafCenter, y, 0.208]} castShadow><boxGeometry args={[leafWidth, 0.045, 0.055]} /><meshStandardMaterial color="#44545b" metalness={0.42} roughness={0.48} /></mesh>)}
+              {Array.from({ length: 6 }, (_, index) => {
+                const x = leafCenter - leafWidth / 2 + 0.045 + index * ((leafWidth - 0.09) / 5);
+                return <mesh key={`bar-${index}`} position={[x, 0.45, 0.208]} castShadow><boxGeometry args={[0.025, 0.64, 0.04]} /><meshStandardMaterial color="#53646a" metalness={0.38} roughness={0.5} /></mesh>;
+              })}
+            </group>;
+          })}
         <mesh position={[0, 0.48, 0]} onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) selectPlace(marker.id); }}><boxGeometry args={[1.1, 1.08, 0.3]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh>
         </group> : <mesh><cylinderGeometry args={[0.075, 0.12, 0.28, 16]} /><meshStandardMaterial color={selected ? "#1d4ed8" : marker.color || "#2563eb"} /></mesh>}
-        {!(hasRoute && props.activeTransition && selected) && <Html position={[0, marker.type === "gate" ? 1.38 : 0.38, 0]} center zIndexRange={selected ? [60, 0] : [10, 0]} style={{ pointerEvents: "none" }}><div className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-slate-800 shadow whitespace-nowrap">{marker.name}</div></Html>}
+        {!(hasRoute && props.activeTransition && selected) && <Html position={[0, marker.type === "gate" ? 1.38 : 0.38, 0]} center zIndexRange={selected ? [60, 0] : [10, 0]} style={{ pointerEvents: "none", userSelect: "none" }}><div className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-slate-800 shadow whitespace-nowrap">{marker.name}</div></Html>}
       </group>;
     })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}

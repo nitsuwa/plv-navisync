@@ -2,13 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS } from "../../services/settingsService";
-import { usePublishedCampus } from "../usePublishedCampus";
+import { resetPublishedCampusDirectoryThrottle, usePublishedCampus } from "../usePublishedCampus";
 
 const mocks = vi.hoisted(() => ({
   listPublishedSnapshots: vi.fn(),
-  list: vi.fn(),
+  listPublishedVersionStatus: vi.fn(),
   listComingSoon: vi.fn(),
-  loadStructure: vi.fn(),
   getSettings: vi.fn(),
 }));
 
@@ -19,13 +18,9 @@ vi.mock("../../contexts/StudentAuthContext", () => ({
 vi.mock("../../services/campusService", () => ({
   campusService: {
     listPublishedSnapshots: mocks.listPublishedSnapshots,
-    list: mocks.list,
+    listPublishedVersionStatus: mocks.listPublishedVersionStatus,
     listComingSoon: mocks.listComingSoon,
   },
-}));
-
-vi.mock("../../services/campusStructureService", () => ({
-  campusStructureService: { load: mocks.loadStructure },
 }));
 
 vi.mock("../../services/settingsService", async (importOriginal) => {
@@ -42,142 +37,176 @@ const campus = {
   isDefault: true,
   lifecycleStatus: "published",
   publishStatus: "published",
+  publishedAt: "2026-10-01T00:00:00.000Z",
 } as unknown as Campus;
 
-describe("published campus refresh resilience", () => {
+const status = (versionId = "version-1") => [{
+  campus_id: campus.id,
+  latest_published_version_id: versionId,
+  published_at: "2026-10-01T00:00:00.000Z",
+}];
+
+async function flushPromises(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe("published campus version refresh", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    resetPublishedCampusDirectoryThrottle();
     vi.clearAllMocks();
     mocks.getSettings.mockResolvedValue(DEFAULT_PUBLIC_PLATFORM_SETTINGS);
+    mocks.listPublishedVersionStatus.mockResolvedValue(status());
     mocks.listPublishedSnapshots.mockResolvedValue([campus]);
-    mocks.list.mockResolvedValue([]);
     mocks.listComingSoon.mockResolvedValue([]);
-    mocks.loadStructure.mockImplementation((value: Campus) => Promise.resolve(value));
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("keeps the last good campus when a background snapshot refresh times out", async () => {
+  it("loads one sanitized snapshot on a cold start and stores it under the published version", async () => {
+    const { result } = renderHook(() => usePublishedCampus());
+
+    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    const cached = JSON.parse(sessionStorage.getItem("plv_published_campuses_version_cache_v2") ?? "{}");
+    expect(cached.schemaVersion).toBe(2);
+    expect(cached.snapshots).toMatchObject([{
+      campusId: campus.id,
+      versionId: "version-1",
+      campus: { id: campus.id },
+    }]);
+  });
+
+  it("does not fetch or replace the campus object when manual refresh sees an unchanged version", async () => {
     const { result } = renderHook(() => usePublishedCampus());
     await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
-    mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
+    const currentCampus = result.current.activeCampus;
 
     await act(async () => { await result.current.refetch(); });
 
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(2);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    expect(result.current.activeCampus).toBe(currentCampus);
+  });
+
+  it("checks metadata across three polling intervals without repeating the full snapshot RPC", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => usePublishedCampus());
+    await flushPromises();
     expect(result.current.activeCampus?.id).toBe(campus.id);
-    expect(result.current.campuses).toHaveLength(1);
-    expect(result.current.isCached).toBe(true);
-    expect(result.current.error).toBeNull();
-    expect(mocks.list).not.toHaveBeenCalled();
-  });
 
-  it("keeps failed cached refreshes out of loading, bounds resume retries, and allows manual refresh", async () => {
-    const baseTime = 1_700_000_000_000;
-    const now = vi.spyOn(Date, "now").mockReturnValue(baseTime);
-    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
-    const setVisibility = (visibilityState: DocumentVisibilityState) => {
-      Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState });
-      act(() => document.dispatchEvent(new Event("visibilitychange")));
-    };
-
-    try {
-      const { result } = renderHook(() => usePublishedCampus());
-      await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
-      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
-
-      await act(async () => { await result.current.refetch(); });
-
-      expect(result.current.activeCampus?.id).toBe(campus.id);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.isCached).toBe(true);
-      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
-
-      now.mockReturnValue(baseTime + 20_000);
-      setVisibility("hidden");
-      now.mockReturnValue(baseTime + 40_000);
-      setVisibility("visible");
-      await act(async () => { await Promise.resolve(); });
-
-      // A quick return after the failure must not start another request.
-      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.activeCampus?.id).toBe(campus.id);
-
-      now.mockReturnValue(baseTime + 50_000);
-      setVisibility("hidden");
-      now.mockReturnValue(baseTime + 70_000);
-      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
-      setVisibility("visible");
-      await waitFor(() => expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(3));
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(result.current.loading).toBe(false);
-      expect(result.current.activeCampus?.id).toBe(campus.id);
-
-      now.mockReturnValue(baseTime + 180_000);
-      setVisibility("hidden");
-      now.mockReturnValue(baseTime + 200_000);
-      mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "statement timeout" });
-      setVisibility("visible");
-      await waitFor(() => expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(4));
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(result.current.loading).toBe(false);
-
-      now.mockReturnValue(baseTime + 500_000);
-      setVisibility("hidden");
-      now.mockReturnValue(baseTime + 520_000);
-      setVisibility("visible");
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(4);
-
-      // Explicit user retries are never blocked by the automatic retry cap.
-      await act(async () => { await result.current.refetch(); });
-      expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(5);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.isCached).toBe(false);
-      expect(result.current.activeCampus?.id).toBe(campus.id);
-    } finally {
-      now.mockRestore();
-      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
-      else delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
+    for (let interval = 0; interval < 3; interval += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
     }
+
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(4);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    expect(result.current.activeCampus?.id).toBe(campus.id);
   });
 
-  it("keeps the active published campus object graph stable when a resume refresh has no newer revision", async () => {
+  it("fetches exactly one new sanitized snapshot after the version id changes", async () => {
+    const updatedCampus = { ...campus, name: "Updated Main Campus" } as Campus;
+    mocks.listPublishedSnapshots.mockResolvedValueOnce([campus]).mockResolvedValueOnce([updatedCampus]);
+    const { result } = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(result.current.activeCampus?.name).toBe(campus.name));
+
+    mocks.listPublishedVersionStatus.mockResolvedValue(status("version-2"));
+    await act(async () => { await result.current.refetch(); });
+
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
+    expect(result.current.activeCampus?.name).toBe("Updated Main Campus");
+    expect(JSON.parse(sessionStorage.getItem("plv_published_campuses_version_cache_v2") ?? "{}").snapshots)
+      .toMatchObject([{ versionId: "version-2", campus: { name: "Updated Main Campus" } }]);
+  });
+
+  it("preserves the working map silently when a background metadata check fails", async () => {
     const { result } = renderHook(() => usePublishedCampus());
     await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
-    const existingListing = result.current.campuses;
-    mocks.listPublishedSnapshots.mockResolvedValueOnce([{ ...campus } as Campus]);
+    const currentCampus = result.current.activeCampus;
+    mocks.listPublishedVersionStatus.mockRejectedValueOnce({ code: "500", message: "temporary failure" });
 
     await act(async () => { await result.current.refetch(); });
 
-    expect(result.current.campuses).toBe(existingListing);
-    expect(result.current.activeCampus).toBe(existingListing[0]);
+    expect(result.current.activeCampus).toBe(currentCampus);
+    expect(result.current.error).toBeNull();
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a retryable generic error when the first campus load times out", async () => {
-    mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "57014", message: "canceling statement due to statement timeout" });
-
+  it("keeps the last good map if the full snapshot fetch fails after a version change", async () => {
     const { result } = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+    const currentCampus = result.current.activeCampus;
+    mocks.listPublishedVersionStatus.mockResolvedValue(status("version-2"));
+    mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "500", message: "temporary failure" });
+
+    await act(async () => { await result.current.refetch(); });
+
+    expect(result.current.activeCampus).toBe(currentCampus);
+    expect(result.current.error).toBeNull();
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces initial status and full-snapshot requests across mounted consumers", async () => {
+    const first = renderHook(() => usePublishedCampus());
+    const second = renderHook(() => usePublishedCampus());
+
+    await waitFor(() => {
+      expect(first.result.current.activeCampus?.id).toBe(campus.id);
+      expect(second.result.current.activeCampus?.id).toBe(campus.id);
+    });
+
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    expect(mocks.listComingSoon).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates the removed campus cache without refetching surviving snapshots", async () => {
+    const { result } = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+    mocks.listPublishedVersionStatus.mockResolvedValue([]);
+
+    await act(async () => { await result.current.refetch(); });
+
+    expect(result.current.campuses).toEqual([]);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sessionStorage.getItem("plv_published_campuses_version_cache_v2") ?? "{}").snapshots).toEqual([]);
+  });
+
+  it("does not use the full snapshot RPC when the initial metadata request fails", async () => {
+    mocks.listPublishedVersionStatus.mockRejectedValueOnce({ code: "500", message: "temporary failure" });
+    const { result } = renderHook(() => usePublishedCampus());
+
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.activeCampus).toBeNull();
-    expect(result.current.isEmpty).toBe(true);
     expect(result.current.error).toBe("We couldn't load the campus map right now. Please try again.");
-    expect(result.current.error).not.toContain("57014");
-    expect(result.current.error).not.toContain("statement timeout");
-    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.listPublishedSnapshots).not.toHaveBeenCalled();
   });
 
-  it("keeps the legacy campus-list fallback for a missing snapshot relation", async () => {
-    mocks.listPublishedSnapshots.mockRejectedValueOnce({ code: "42P01", message: "relation missing" });
-    mocks.list.mockResolvedValueOnce([campus]);
+  it("reuses a persisted snapshot only when its cached version matches current metadata", async () => {
+    const first = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(first.result.current.activeCampus?.id).toBe(campus.id));
+    first.unmount();
 
-    const { result } = renderHook(() => usePublishedCampus());
-    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+    resetPublishedCampusDirectoryThrottle();
+    mocks.listPublishedSnapshots.mockClear();
+    const second = renderHook(() => usePublishedCampus());
+    await waitFor(() => expect(second.result.current.activeCampus?.id).toBe(campus.id));
 
-    expect(mocks.list).toHaveBeenCalledTimes(1);
-    expect(result.current.error).toBeNull();
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(2);
+    expect(mocks.listPublishedSnapshots).not.toHaveBeenCalled();
   });
 });

@@ -1598,6 +1598,32 @@
     user-select: none;
   }
 
+  /* Map labels live in the interactive renderers; keep pan/orbit drags from
+     selecting them without disabling normal selection elsewhere in the app. */
+  [data-testid="student-campus-3d-surface"],
+  [data-testid="student-indoor-3d-renderer"] {
+    cursor: grab;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  [data-testid="student-campus-3d-surface"][data-dragging="true"],
+  [data-testid="student-indoor-3d-renderer"][data-dragging="true"] {
+    cursor: grabbing;
+  }
+  [data-testid="student-campus-3d-surface"]:active,
+  [data-testid="student-indoor-3d-renderer"]:active {
+    cursor: grabbing !important;
+  }
+  [data-testid="student-campus-3d-surface"] *,
+  [data-testid="student-indoor-3d-renderer"] * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  [data-testid="student-campus-3d-surface"] button,
+  [data-testid="student-indoor-3d-renderer"] button {
+    cursor: pointer;
+  }
+
   /* ── Improved tap highlight ── */
   .tap-highlight {
     -webkit-tap-highlight-color: rgba(14, 42, 110, 0.1);

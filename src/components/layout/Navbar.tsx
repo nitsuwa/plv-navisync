@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, Compass, CalendarDays, LayoutDashboard, LogIn, LogOut, User, Bookmark, Flag, Settings,
-  ChevronDown,
+  ChevronDown, Loader2,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -35,6 +35,7 @@ export function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const [scrollY, setScrollY] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dropdownTriggerRef = useRef<HTMLButtonElement>(null);
@@ -53,12 +54,16 @@ export function Navbar() {
   const studentNotificationRef = useRef<HTMLDivElement>(null);
 
   const handleStudentLogout = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
     try {
       await signOut();
       setDropdownOpen(false);
       navigate("/");
     } catch {
-      toast.error("Could not sign out. Please try again.");
+      toast.error("This browser could not clear the saved session. Please retry.");
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -285,9 +290,9 @@ export function Navbar() {
                         <Link to="/student/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors">
                           <Settings className="h-4 w-4 text-muted-foreground shrink-0" /> Settings
                         </Link>
-                        <button onClick={handleStudentLogout}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold hover:bg-destructive/8 text-destructive transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                          <LogOut className="h-4 w-4 shrink-0" /> Sign Out
+                        <button onClick={handleStudentLogout} disabled={signingOut} aria-busy={signingOut}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold hover:bg-destructive/8 text-destructive transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60">
+                          {signingOut ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <LogOut className="h-4 w-4 shrink-0" />} {signingOut ? "Signing out…" : "Sign Out"}
                         </button>
                       </div>
                     </motion.div>
