@@ -18,6 +18,8 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { cn } from "../lib/utils";
 import { Reveal } from "../components/ui/Reveal";
 import { getOpenStatus } from "../lib/buildingHours";
+import { appUrl } from "../lib/appUrl";
+import { shareBuildingLink } from "../lib/buildingShare";
 import type { Building } from "../types";
 import { studentAccountService } from "../services/studentAccountService";
 import { ReportModal } from "../components/map/ReportModal";
@@ -152,14 +154,12 @@ export function BuildingDetailsPage() {
 
   const handleShare = async () => {
     if (!building) return;
-    const shareText = `${building.name} (${building.code}) — PLV NaviSync`;
     try {
-      if (navigator.share) {
-        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${encodeURIComponent(building.id)}${campusSearch}` });
-      } else {
-        await navigator.clipboard?.writeText(shareText);
-      }
-      success("Building link ready");
+      const result = await shareBuildingLink({
+        buildingName: `${building.name} (${building.code})`,
+        url: appUrl(`/buildings/${encodeURIComponent(building.id)}${campusSearch}`),
+      });
+      if (result !== "cancelled") success("Building link ready");
     } catch {
       showError("Building link could not be shared");
     }
