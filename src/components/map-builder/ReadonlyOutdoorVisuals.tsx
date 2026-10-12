@@ -1306,8 +1306,20 @@ function StudentSuhayHusayDecorVisualV13(props: { asset: CampusDecorAsset; descr
   return <StudentSuhayHusayDecorVisualV12 {...props} version="v13" />;
 }
 
-function StudentSuhayHusayDecorVisual(props: { asset: CampusDecorAsset; descriptor: DecorAssetDescriptor; selected?: boolean }) {
-  return STUDENT_SUHAY_HUSAY_2D_VERSION === "v13"
+export function StudentSuhayHusayDecorVisual({
+  asset,
+  descriptor,
+  selected = false,
+  interactive = true,
+}: {
+  asset: CampusDecorAsset;
+  descriptor: DecorAssetDescriptor;
+  selected?: boolean;
+  /** Admin's editor wrapper owns selection and dragging; its artwork is passive. */
+  interactive?: boolean;
+}) {
+  const props = { asset, descriptor, selected };
+  const visual = STUDENT_SUHAY_HUSAY_2D_VERSION === "v13"
     ? <StudentSuhayHusayDecorVisualV13 {...props} />
     : STUDENT_SUHAY_HUSAY_2D_VERSION === "v12"
     ? <StudentSuhayHusayDecorVisualV12 {...props} />
@@ -1332,6 +1344,10 @@ function StudentSuhayHusayDecorVisual(props: { asset: CampusDecorAsset; descript
     : STUDENT_SUHAY_HUSAY_2D_VERSION === "v2"
       ? <StudentSuhayHusayDecorVisualV2 {...props} />
       : <StudentSuhayHusayDecorVisualLegacy {...props} />;
+
+  return interactive
+    ? visual
+    : <g data-testid="admin-suhay-husay-artwork" pointerEvents="none">{visual}</g>;
 }
 
 export function OutdoorDecorVisual({ asset, gridSize, studentSuhayHusayLandmark = false, selectedLandmark = false }: { asset: CampusDecorAsset; gridSize?: number; studentSuhayHusayLandmark?: boolean; selectedLandmark?: boolean }) {

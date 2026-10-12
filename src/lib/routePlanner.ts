@@ -217,6 +217,8 @@ export interface RouteTransitionDetail {
   toFloorId?: string;
   /** Authored shared shaft identity, when multiple per-Floor nodes represent one elevator. */
   transitionSharedId?: string;
+  /** Canonical owner identity for a building-attached Exterior Emergency Stair. */
+  exteriorEmergencyStairId?: string;
   buildingId?: string;
 }
 
@@ -718,30 +720,95 @@ export function planAuthoredDestinationRoute(
   if (!campusGraph || (from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
 
   const accessibleOnly = mode === "accessible";
-  const fromNodes = authoredDestinationEndpoints(campusGraph.nodes, from, accessibleOnly, campusGraph.edges, graph, "outbound", mode === "emergency");
+  const sameBuildingEntrancePlace = to.type === "room"
+    && from.type === "campus_place"
+    && campusGraph.nodes.some((node) => node.id === from.nodeId
+      && node.buildingId === to.buildingId
+      && !node.floorId
+      && Boolean(node.entranceId || node.type === "entrance" || node.type === "emergency_exit"));
+  const startsAtSameBuilding = to.type === "room"
+    && (from.type === "building" && from.buildingId === to.buildingId || sameBuildingEntrancePlace);
+  // A Building → room route starts by entering that building. Resolving its
+  // origin as an outbound endpoint can choose an exit-only door, then route
+  // across Campus to re-enter through another door. Use an inbound eligible
+  // entrance for this same-building case; cross-building routes still leave
+  // through the normal outbound entrance resolver.
+  const fromNodes = authoredDestinationEndpoints(
+    campusGraph.nodes,
+    from,
+    accessibleOnly,
+    campusGraph.edges,
+    graph,
+    startsAtSameBuilding && from.type === "building" ? "inbound" : "outbound",
+    mode === "emergency",
+  );
   const toNodes = authoredDestinationEndpoints(campusGraph.nodes, to, accessibleOnly, campusGraph.edges, graph, "inbound", mode === "emergency");
   if (fromNodes.length === 0 || toNodes.length === 0) return null;
+
+  const entranceMetadata = startsAtSameBuilding && from.type === "building"
+    ? graph?.buildings?.find((building) => building.id === from.buildingId)?.entrances
+    : undefined;
+  const primaryEntranceId = entranceMetadata?.find((entrance) => entrance.isPrimary)?.id
+    ?? entranceMetadata?.find((entrance) => entrance.type === undefined
+      || entrance.type === "general" || entrance.type === "main" || entrance.type === "secondary")?.id;
+  const preferredOriginNode = startsAtSameBuilding
+    ? from.type === "building"
+      ? fromNodes.find((node) => node.id === from.entranceNodeId)
+      ?? (primaryEntranceId ? fromNodes.find((node) => node.entranceId === primaryEntranceId) : undefined)
+      ?? fromNodes[0]
+      : fromNodes[0]
+    : undefined;
 
   // A room may have more than one linked Door.  Resolve the actual route for
   // every authored Door candidate and keep the shortest connected option,
   // exactly as the admin route tester does when selecting a viable room Door.
   let selected: { fromNode: CampusNavNode; toNode: CampusNavNode; path: GraphPath } | null = null;
-  for (const fromNode of fromNodes) {
-    for (const toNode of toNodes) {
-      if (fromNode.id === toNode.id) continue;
-      const candidatePath = findNavigationRoute(
-        campusGraph.nodes,
-        campusGraph.edges,
-        fromNode.id,
-        toNode.id,
-        accessibleOnly,
-        mode === "emergency",
-        { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) },
-      );
-      if (!candidatePath) continue;
-      if (!selected || candidatePath.distanceM < selected.path.distanceM) {
-        selected = { fromNode, toNode, path: candidatePath };
+  const sourceGroups = preferredOriginNode
+    ? [[preferredOriginNode], fromNodes.filter((node) => node.id !== preferredOriginNode.id)]
+    : [fromNodes];
+  const findBestPath = (sourceGroup: CampusNavNode[], localToBuilding: boolean) => {
+    let best: { fromNode: CampusNavNode; toNode: CampusNavNode; path: GraphPath } | null = null;
+    for (const fromNode of sourceGroup) {
+      const localNodeIds = localToBuilding
+        ? new Set(campusGraph.nodes
+            .filter((node) => node.id === fromNode.id
+              || (node.buildingId === to.buildingId
+                && (Boolean(node.floorId) || node.derivedOwnerType?.startsWith("entrance_"))))
+            .map((node) => node.id))
+        : null;
+      const routeNodes = localNodeIds
+        ? campusGraph.nodes.filter((node) => localNodeIds.has(node.id))
+        : campusGraph.nodes;
+      const routeEdges = localNodeIds
+        ? campusGraph.edges.filter((edge) => localNodeIds.has(edge.startNodeId) && localNodeIds.has(edge.endNodeId))
+        : campusGraph.edges;
+      for (const toNode of toNodes) {
+        if (fromNode.id === toNode.id) continue;
+        const candidatePath = findNavigationRoute(
+          routeNodes,
+          routeEdges,
+          fromNode.id,
+          toNode.id,
+          accessibleOnly,
+          mode === "emergency",
+          { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) },
+        );
+        if (candidatePath && (!best || candidatePath.distanceM < best.path.distanceM)) {
+          best = { fromNode, toNode, path: candidatePath };
+        }
       }
+    }
+    return best;
+  };
+  for (const sourceGroup of sourceGroups) {
+    // Prefer a route contained within this building's authored graph. It
+    // still includes derived entrance ramps/thresholds and the real entry
+    // transition, but cannot detour through unrelated Campus connectors.
+    const localPath = startsAtSameBuilding ? findBestPath(sourceGroup, true) : null;
+    const groupPath = localPath ?? findBestPath(sourceGroup, false);
+    if (groupPath) {
+      selected = groupPath;
+      break;
     }
   }
   if (!selected) return null;
@@ -1035,6 +1102,7 @@ function authoredRouteContexts(
           fromFloorId: fromNode.floorId,
           toFloorId: toNode.floorId,
           ...(transitionNode.transitionSharedId ? { transitionSharedId: transitionNode.transitionSharedId } : {}),
+          ...(transitionNode.exteriorEmergencyStairId ? { exteriorEmergencyStairId: transitionNode.exteriorEmergencyStairId } : {}),
           ...(transitionNode.buildingId ? { buildingId: transitionNode.buildingId } : {}),
         });
       }
@@ -1319,7 +1387,14 @@ function authoredRouteGuidanceSteps(
     append("enter", `Exit ${fromName} building.`);
   }
 
-  const hasCampusLeg = from.type === "campus_place" || to.type === "campus_place" || from.buildingId !== to.buildingId
+  const startsAtDestinationBuildingEntrance = from.type === "campus_place"
+    && to.type === "room"
+    && nodes.some((node) => node.id === from.nodeId
+      && node.buildingId === to.buildingId
+      && !node.floorId
+      && Boolean(node.entranceId || node.type === "entrance" || node.type === "emergency_exit"));
+  const hasCampusLeg = (from.type === "campus_place" && !startsAtDestinationBuildingEntrance)
+    || to.type === "campus_place" || from.buildingId !== to.buildingId
     || (originSegments.length > 0 && destinationSegments.length > 0);
   const totalIndoorDistance = indoorSegments.reduce((total, segment) => total + segment.distanceM, 0);
   if (hasCampusLeg) {

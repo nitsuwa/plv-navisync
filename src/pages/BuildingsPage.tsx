@@ -183,9 +183,14 @@ export function BuildingsPage() {
         {/* ── Search & Filters ── */}
         <Reveal delay={80}>
           <div className="surface-card rounded-2xl p-3.5 sm:p-5 mb-8 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,0.7fr)]">
-            <div className="min-w-0">
+          <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,0.7fr)]">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <label htmlFor="buildings-search" className="flex h-4 items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                Search
+              </label>
               <SearchBar
+                id="buildings-search"
+                label="Search buildings, rooms, campuses, codes, or categories"
                 placeholder="Search buildings, rooms, campuses, codes, or categories..."
                 value={search}
                 onSearch={setSearch}
@@ -195,7 +200,7 @@ export function BuildingsPage() {
               />
             </div>
             <div className="flex min-w-0 flex-col gap-1.5">
-              <label htmlFor="campus-filter" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+              <label htmlFor="campus-filter" className="flex h-4 items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                 <MapPin className="h-3.5 w-3.5" />
                 Campus
               </label>
@@ -204,7 +209,7 @@ export function BuildingsPage() {
                   id="campus-filter"
                   aria-label="Filter buildings by campus"
                   title={selectedCampusName ?? "All campuses"}
-                  className="h-11 w-full min-w-0 rounded-xl border-border bg-card px-3.5 text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/35 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20 data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/10"
+                  className="h-10 w-full min-w-0 rounded-xl border-border bg-card px-3.5 text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/35 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20 data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/10"
                 >
                   <SelectValue placeholder="All campuses" className="min-w-0 truncate" />
                 </SelectTrigger>

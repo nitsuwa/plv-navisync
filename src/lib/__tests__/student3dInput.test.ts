@@ -4,15 +4,23 @@ import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStu
 
 describe("Student 3D camera input", () => {
   it("keeps mouse mappings available at any viewport and configures touch gestures independently", () => {
-    const controls = {
-      mouseButtons: { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN },
-      touches: { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN },
-    };
+    const originalWidth = window.innerWidth;
+    try {
+      for (const width of [1440, 1024, 768, 390, 360]) {
+        Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+        const controls = {
+          mouseButtons: { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN },
+          touches: { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN },
+        };
 
-    configureStudent3dInputMappings(controls);
+        configureStudent3dInputMappings(controls);
 
-    expect(controls.mouseButtons).toEqual({ LEFT: MOUSE.PAN, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.ROTATE });
-    expect(controls.touches).toEqual({ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE });
+        expect(controls.mouseButtons, `mouse at ${width}px`).toEqual({ LEFT: MOUSE.PAN, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.ROTATE });
+        expect(controls.touches, `touch at ${width}px`).toEqual({ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE });
+      }
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
   });
 
   it("requires intentional pointer movement before suppressing entity clicks", () => {
