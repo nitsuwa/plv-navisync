@@ -58,7 +58,10 @@ describe("StudentMapControls", () => {
     expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
     expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-3", "md:bottom-6", "flex-col", "items-end");
-    expect(screen.getByTestId("student-map-utility-controls")).toHaveStyle({ bottom: "var(--student-map-utility-bottom-inset, calc(0.75rem + env(safe-area-inset-bottom, 0px)))" });
+    expect(screen.getByTestId("student-map-utility-controls")).toHaveStyle({
+      right: "var(--student-map-utility-anchor-right, calc(0.75rem + env(safe-area-inset-right, 0px)))",
+      bottom: "var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px)))",
+    });
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
     expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();

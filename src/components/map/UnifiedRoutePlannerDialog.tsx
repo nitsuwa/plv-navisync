@@ -33,15 +33,22 @@ export interface UnifiedRoutePlannerDialogProps {
   primaryAction?: StudentRoutePrimaryAction;
   primaryActionDisabled?: boolean;
   transitionBusy?: boolean;
+  pauseDuringVerticalRun?: boolean;
+  verticalRunPausePending?: boolean;
   transitionAwaitingAction?: boolean;
   transitionPrompt?: string | null;
   onContinueTransition?: () => void;
   playbackSpeed?: 1 | 1.5 | 2;
   onPlaybackSpeedChange?: (speed: 1 | 1.5 | 2) => void;
   currentStepIndex?: number;
+  followStepIndex?: number;
   navigationSteps?: readonly string[];
+  onInspectStep?: (stepIndex: number) => void;
+  inspectionContextLabel?: string;
+  editingCompletedRoute?: boolean;
   onStartNavigation?: () => void;
   onEditRoute?: () => void;
+  onCancelEditRoute?: () => void;
   onPause?: () => void;
   onResume?: () => void;
   onPreviousStep?: () => void;
@@ -93,6 +100,44 @@ const MODES: Array<{ key: RouteMode; label: string; icon: ReactNode }> = [
   { key: "accessible", label: "Accessible", icon: <Accessibility className="h-3.5 w-3.5" /> },
   { key: "emergency", label: "SOS", icon: <ShieldAlert className="h-3.5 w-3.5" /> },
 ];
+
+function RouteInstructionRow({
+  index,
+  instruction,
+  onInspect,
+  inspected = false,
+  followPosition = false,
+  testId,
+}: {
+  index: number;
+  instruction: string;
+  onInspect?: () => void;
+  inspected?: boolean;
+  followPosition?: boolean;
+  testId?: string;
+}) {
+  const content = <>
+    <span className="shrink-0 font-black text-primary">{index + 1}</span>
+    <span className="min-w-0 flex-1">{instruction}</span>
+    {followPosition && <span data-testid="explore-follow-current-marker" className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-muted-foreground">Current</span>}
+    {inspected && <span className="sr-only">Inspected context</span>}
+  </>;
+  const typography = "flex gap-2 text-[11px] leading-snug";
+
+  return onInspect ? (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onInspect}
+      aria-current={inspected ? "location" : undefined}
+      className={cn(
+        typography,
+        "w-full items-start rounded-md px-1.5 py-1 text-left text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+        inspected ? "bg-primary/10 font-semibold ring-1 ring-primary/20" : followPosition ? "bg-muted/60 font-medium" : "hover:bg-muted/40",
+      )}
+    >{content}</button>
+  ) : <div className={cn(typography, "text-foreground")}>{content}</div>;
+}
 
 const ROUTE_PLANNER_MIN_HEIGHT = 96;
 const ROUTE_PLANNER_DEFAULT_HEIGHT = 374;
@@ -174,10 +219,11 @@ export function UnifiedRoutePlannerDialog({
   standardPreference = "best", onStandardPreferenceChange,
   mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, onChooseOnMap, onConfirmMapSelection, onClearMapSelectionCandidate, selectionError = null,
   suspendedForBuilding = false, suspendedForFloorPicker = false,
-  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, transitionAwaitingAction = false, primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
+  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, pauseDuringVerticalRun = false, verticalRunPausePending = false, transitionAwaitingAction = false, primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
   transitionPrompt = null, onContinueTransition,
-  currentStepIndex = 0, navigationSteps = [], playbackSpeed = 1, onPlaybackSpeedChange, onStartNavigation, onEditRoute,
-  onPause, onResume, onPreviousStep, onNextStep,
+  currentStepIndex = 0, followStepIndex = currentStepIndex, navigationSteps = [], inspectionContextLabel = "Route context", editingCompletedRoute = false,
+  playbackSpeed = 1, onPlaybackSpeedChange, onStartNavigation, onEditRoute, onCancelEditRoute,
+  onPause, onResume, onPreviousStep, onNextStep, onInspectStep,
   onEndNavigation, onDone, onCollapse, onExpand, routeAttempted = false,
 }: UnifiedRoutePlannerDialogProps) {
   const [compactPanelLayout, setCompactPanelLayout] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -428,11 +474,12 @@ export function UnifiedRoutePlannerDialog({
   const normalizedSteps = route ? studentFacingRouteSteps(route).map((step) => step.instruction) : [];
   const visibleNavigationSteps = navigationSteps.length > 0 ? navigationSteps : normalizedSteps;
   const safeStepIndex = Math.max(0, Math.min(currentStepIndex, Math.max(0, visibleNavigationSteps.length - 1)));
+  const safeFollowStepIndex = Math.max(0, Math.min(followStepIndex, Math.max(0, visibleNavigationSteps.length - 1)));
   const currentInstruction = visibleNavigationSteps[safeStepIndex] ?? "Follow the route to your destination.";
   const activeDestinationName = route?.emergencyDestinationLabel ?? toDisplay.label;
   const exploreMode = cameraMode === "explore";
   useEffect(() => {
-    if (!showAllSteps) return;
+    if (!showAllSteps && !exploreMode) return;
     const list = stepListRef.current;
     const row = stepRowRefs.current.get(safeStepIndex);
     if (!list || !row) return;
@@ -442,7 +489,7 @@ export function UnifiedRoutePlannerDialog({
     const bottom = top + rowRect.height;
     if (top < list.scrollTop) list.scrollTop = top;
     else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
-  }, [safeStepIndex, showAllSteps]);
+  }, [exploreMode, safeStepIndex, showAllSteps]);
   /** Obvious FOLLOW | EXPLORE segmented control with a clearly active state. */
   const cameraModeSegmented = (testid: string) => (
     <div role="group" aria-label="Route camera mode" data-testid={testid}
@@ -560,7 +607,7 @@ export function UnifiedRoutePlannerDialog({
           ) : phase !== "planning" && !activeEndpoint && !mapSelectionEndpoint ? (
             <button type="button" onClick={() => { if (isMobileViewport) setMobileSheetState("compact"); onCollapse?.(); }} aria-label={navigatingPhase ? "Collapse navigation panel" : "Collapse route preview"} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ChevronDown className="h-4 w-4" /></button>
           ) : (
-            <button type="button" onClick={onClose} aria-label="Cancel route planning" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={onClose} aria-label={editingCompletedRoute ? "Cancel editing route" : "Cancel route planning"} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
           )}
         </div>
       </header>
@@ -638,23 +685,27 @@ export function UnifiedRoutePlannerDialog({
             <div data-testid={isMobileViewport ? "mobile-route-collapsed-summary" : "desktop-route-collapsed-summary"} className="flex min-h-0 flex-1 flex-col justify-center gap-1.5 px-3 pb-2">
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-extrabold">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)} · {activeDestinationName}</p>
-                  <p data-testid="compact-current-route-instruction" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">{currentInstruction}</p>
+                  {exploreMode ? <>
+                    <p data-testid="collapsed-explore-route" className="truncate text-[11px] font-extrabold">{fromDisplay.label} → {activeDestinationName}</p>
+                    <p data-testid="explore-context-label" className="truncate text-[10px] font-bold text-muted-foreground">{inspectionContextLabel} · {mode === "emergency" ? "SOS" : preferenceLabel}</p>
+                    <p data-testid="compact-explore-guidance" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">Move around the map and use route markers to inspect each part of your route.</p>
+                  </> : <>
+                    <p className="truncate text-[11px] font-extrabold">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)} · {activeDestinationName}</p>
+                    <p data-testid="compact-current-route-instruction" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">{currentInstruction}</p>
+                  </>}
                 </div>
                 {cameraModeSegmented("compact-camera-mode")}
               </div>
-              {transitionAwaitingAction && transitionPrompt && <p data-testid="compact-transition-prompt" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
+              {!exploreMode && transitionAwaitingAction && transitionPrompt && <p data-testid="compact-transition-prompt" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
               <div className="flex items-center gap-1.5">
                 {exploreMode ? (
-                  <>
-                    <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} className="min-h-10 flex-1 rounded-xl border border-border px-2 text-[10px] font-extrabold text-foreground disabled:opacity-40">Previous</button>
-                    <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} className="min-h-10 flex-1 rounded-xl border border-border px-2 text-[10px] font-extrabold text-foreground disabled:opacity-40">Next</button>
-                    <button type="button" onClick={() => onCameraModeChange?.("follow")} aria-label="Return to Follow" className="min-h-10 flex-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground">Return to Follow</button>
-                  </>
+                  <div className="flex w-full gap-1.5">
+                    <button type="button" onClick={() => setShowAllSteps((open) => !open)} className="min-h-10 w-full rounded-xl border border-border px-2 text-[10px] font-extrabold text-foreground">{showAllSteps ? "Hide details" : "Route details"}</button>
+                  </div>
                 ) : (
                   <>
                     <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} aria-label="Previous step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                    {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label="Continue through the active route transition" className="flex h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="flex h-10 flex-1 items-center justify-center rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={transitionBusy || primaryActionDisabled} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
+                    {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label="Continue through the active route transition" className="flex h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="flex h-10 flex-1 items-center justify-center rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
                     {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
                     {speedControl(true)}
                   </>
@@ -664,7 +715,11 @@ export function UnifiedRoutePlannerDialog({
           ) : arrivedPhase ? (
             <div data-testid="mobile-route-arrival-compact" className="flex min-h-0 flex-col gap-2 px-3 pb-2">
               <p className="truncate text-[12px] font-extrabold">{activeDestinationName}</p>
-              <div className="flex gap-2"><button type="button" onClick={onDone} className="min-h-11 flex-1 rounded-xl border border-border text-[11px] font-extrabold">Done</button><button type="button" onClick={onStartNavigation} className="min-h-11 flex-1 rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button></div>
+              <button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button>
+                <button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button>
+              </div>
             </div>
           ) : null
         ) : (
@@ -694,33 +749,37 @@ export function UnifiedRoutePlannerDialog({
                 <div data-testid="route-facts" className="flex flex-wrap gap-1.5">{routeFacts.map((fact) => <span key={fact} className="rounded-full border border-border/70 bg-card px-2.5 py-1 text-[10px] font-bold text-muted-foreground">{fact}</span>)}</div>
                 <div className="rounded-xl border border-border/70 bg-card/80 px-3 py-2.5">
                   <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Route highlights</p>
-                  <ol className="mt-1.5 space-y-1">{normalizedSteps.map((instruction, index) => <li key={`${index}-${instruction}`} className="flex gap-2 text-[11px] leading-snug text-foreground"><span className="font-black text-primary">{index + 1}</span><span>{instruction}</span></li>)}</ol>
+                  <ol className="mt-1.5 space-y-1">{normalizedSteps.map((instruction, index) => <li key={`${index}-${instruction}`}><RouteInstructionRow index={index} instruction={instruction} /></li>)}</ol>
                 </div>
               </div>
             ) : navigatingPhase && route ? (
               <div data-testid="guided-navigation-summary" className="flex min-h-0 flex-col gap-2">
-                <div className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
+                {exploreMode && <div data-testid="explore-route-summary" className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
+                  <div className="flex items-start gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><RouteIcon className="h-4 w-4" /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">{mode === "emergency" ? "Emergency route" : `${MODES.find((item) => item.key === mode)?.label} route`}</p>
+                      <p className="truncate text-[12px] font-extrabold">{fromDisplay.label} → {activeDestinationName}</p>
+                      <p data-testid="guided-inspection-context" className="truncate text-[11px] font-bold text-muted-foreground"><span data-testid="explore-context-label">{inspectionContextLabel}</span></p>
+                    </div>
+                    {cameraModeSegmented("camera-mode")}
+                  </div>
+                  <div data-testid="explore-route-facts" className="mt-2 flex flex-wrap gap-1.5">{routeFacts.map((fact) => <span key={fact} className="rounded-full border border-border/70 bg-card px-2 py-1 text-[10px] font-bold text-muted-foreground">{fact}</span>)}</div>
+                  <p data-testid="explore-route-guidance" className="mt-2 text-[11px] font-medium leading-snug text-muted-foreground">Move around the map or select an instruction to inspect each part of your route.</p>
+                </div>}
+                {!exploreMode && <div className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
                   <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Navigation className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p><p data-testid="guided-destination" className="truncate text-[13px] font-extrabold">{activeDestinationName}</p></div>{cameraModeSegmented("camera-mode")}</div>
-                  <p data-testid="current-route-instruction" role="status" aria-live="polite" className="mt-3 text-[14px] font-bold leading-snug text-foreground">{currentInstruction}</p>
-                  {transitionAwaitingAction && transitionPrompt && <p data-testid="transition-wait-prompt" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-2 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
-                  {visibleNavigationSteps[safeStepIndex + 1] && <p className="mt-2 text-[11px] text-muted-foreground">Next: {visibleNavigationSteps[safeStepIndex + 1]}</p>}
-                </div>
-                {exploreMode ? (
                   <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous</button>
-                      <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>
-                    </div>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => onCameraModeChange?.("follow")} aria-label="Return to Follow" className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Return to Follow</button>
-                      <button type="button" onClick={() => setShowAllSteps((open) => !open)} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border text-[11px] font-extrabold"><List className="h-3.5 w-3.5" />{showAllSteps ? "Hide steps" : "Steps"}</button>
-                    </div>
+                    <p data-testid="current-route-instruction" role="status" aria-live="polite" className="mt-3 text-[14px] font-bold leading-snug text-foreground">{currentInstruction}</p>
+                    {transitionAwaitingAction && transitionPrompt && <p data-testid="transition-wait-prompt" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-2 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
+                    {visibleNavigationSteps[safeStepIndex + 1] && <p className="mt-2 text-[11px] text-muted-foreground">Next: {visibleNavigationSteps[safeStepIndex + 1]}</p>}
                   </>
-                ) : (
+                </div>}
+                {!exploreMode && (
                   <>
                     <div className="grid grid-cols-4 gap-2">
                       <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous</button>
-                      {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={transitionBusy || primaryActionDisabled} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
+                      {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
                       {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>}
                       {speedControl()}
                     </div>
@@ -729,10 +788,22 @@ export function UnifiedRoutePlannerDialog({
                     </div>
                   </>
                 )}
-                {showAllSteps && <ol ref={stepListRef} data-testid="guided-route-steps" className="max-h-[min(35dvh,18rem)] space-y-1 overflow-y-auto overscroll-contain rounded-xl border border-border/70 p-2">{visibleNavigationSteps.map((step, index) => <li ref={(node) => { if (node) stepRowRefs.current.set(index, node); else stepRowRefs.current.delete(index); }} key={`${index}-${step}`} aria-current={index === safeStepIndex ? "step" : undefined} data-testid={index === safeStepIndex ? "guided-active-step" : undefined} className={cn("rounded-lg px-2 py-1.5 text-[11px]", index === safeStepIndex ? "bg-primary/10 font-bold text-foreground" : "text-muted-foreground")}>{index + 1}. {step}</li>)}</ol>}
+                {(exploreMode || showAllSteps) && <ol ref={stepListRef} data-testid="guided-route-steps" className="max-h-[min(48dvh,28rem)] space-y-1 overflow-y-auto overscroll-contain rounded-xl border border-border/70 p-2">
+                  {visibleNavigationSteps.map((step, index) => {
+                    const inspected = exploreMode && index === safeStepIndex;
+                    const actualFollow = exploreMode && index === safeFollowStepIndex;
+                    return <li ref={(node) => { if (node) stepRowRefs.current.set(index, node); else stepRowRefs.current.delete(index); }} key={`${index}-${step}`} aria-current={!exploreMode && index === safeStepIndex ? "step" : undefined} data-testid={inspected ? "explore-inspected-step" : !exploreMode && index === safeStepIndex ? "guided-active-step" : undefined} className="rounded-md">
+                      <RouteInstructionRow
+                        index={index}
+                        instruction={step}
+                        {...(exploreMode ? { onInspect: () => onInspectStep?.(index), inspected, followPosition: actualFollow, testId: `explore-instruction-${index}` } : {})}
+                      />
+                    </li>;
+                  })}
+                </ol>}
               </div>
             ) : arrivedPhase ? (
-              <div data-testid="route-arrival-state" className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5 text-center"><span className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white"><Check className="h-6 w-6" /></span><p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">You've arrived</p><p className="mt-1 text-lg font-extrabold">{activeDestinationName}</p><div className="mt-4 flex w-full gap-2"><button type="button" onClick={onDone} className="min-h-11 flex-1 rounded-xl border border-border text-[11px] font-extrabold">Done</button><button type="button" onClick={onStartNavigation} className="min-h-11 flex-1 rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button></div></div>
+              <div data-testid="route-arrival-state" className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5 text-center"><span className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white"><Check className="h-6 w-6" /></span><p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">You've arrived</p><p className="mt-1 text-lg font-extrabold">{activeDestinationName}</p><div className="mt-4 flex w-full flex-col gap-2"><button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button><div className="grid w-full grid-cols-2 gap-2"><button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button><button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button></div></div></div>
             ) : (
               <>
                 <div className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1" role="group" aria-label="Route modes">
@@ -777,7 +848,9 @@ export function UnifiedRoutePlannerDialog({
 
       {canShowMainForm && <footer className="shrink-0 border-t border-border/60 bg-card/95 px-3.5 pb-2.5 pt-2.5 backdrop-blur-xl md:px-4 md:pb-3">
         {phase === "planning" ? <div className="flex gap-2">
-        <button type="button" onClick={onClear} className="min-h-11 rounded-xl border border-border px-3 text-[12px] font-extrabold text-muted-foreground transition-colors hover:bg-muted">Clear</button>
+        {editingCompletedRoute
+          ? <button type="button" onClick={onCancelEditRoute ?? onClose} className="min-h-11 rounded-xl border border-border px-3 text-[12px] font-extrabold text-muted-foreground transition-colors hover:bg-muted">Cancel</button>
+          : <button type="button" onClick={onClear} className="min-h-11 rounded-xl border border-border px-3 text-[12px] font-extrabold text-muted-foreground transition-colors hover:bg-muted">Clear</button>}
           <button type="button" onClick={findRoute} disabled={!canStart} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-[12px] font-extrabold text-primary-foreground shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"><Navigation className="h-3.5 w-3.5" />{canStart ? "Find Route" : sameEndpoint ? "Choose a different place" : hasFrom ? "Choose a destination" : "Choose starting point"}</button>
         </div> : previewPhase ? <div className="flex gap-2">
           <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Edit Route</button>

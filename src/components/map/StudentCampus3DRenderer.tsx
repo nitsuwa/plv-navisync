@@ -42,8 +42,13 @@ interface StudentCampus3DRendererProps {
   humanPoint?: Pt | null;
   walkProgressRef?: MutableRefObject<number>;
   activeTransition?: { point: Pt; label: string; buildingId?: string | null; entranceId?: string | null; onActivate: () => void } | null;
+  exploreTransitionCues?: readonly { id: string; point: Pt; label: string; onActivate: () => void }[];
   focusPoint?: Pt | null;
   focusNonce?: number;
+  arrivalFocusPoint?: Pt | null;
+  arrivalFocusKey?: string | null;
+  arrivalFocusBuildingId?: string | null;
+  arrivalFocusPlaceId?: string | null;
   routeInspectionFocusPoint?: Pt | null;
   routeInspectionFocusKey?: string;
   recenterNonce?: number;
@@ -1609,10 +1614,10 @@ function ActiveTransitionMarker({ transition, reducedMotion, shouldSuppressClick
   </group>;
 }
 
-function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, surfaceRef }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null> }) {
+function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, arrivalFocusPoint, arrivalFocusKey, arrivalFocusBuildingId, arrivalFocusPlaceId, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, surfaceRef }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "arrivalFocusPoint" | "arrivalFocusKey" | "arrivalFocusBuildingId" | "arrivalFocusPlaceId" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null> }) {
   const { invalidate, camera, size } = useThree();
   const initialized = useRef(false);
-  const owner = useRef<"fit" | "focus" | "follow" | "user" | "recenter">("fit");
+  const owner = useRef<"fit" | "focus" | "follow" | "arrival" | "user" | "recenter">("fit");
   const tween = useRef<{ startTarget: THREE.Vector3; endTarget: THREE.Vector3; startPosition: THREE.Vector3; endPosition: THREE.Vector3; startedAt: number; duration: number } | null>(null);
   const previousDamping = useRef<boolean | null>(null);
   const cameraTime = useRef(0);
@@ -1620,6 +1625,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   const desired = useRef(new THREE.Vector3());
   const focusKey = useRef("");
   const routeInspectionKey = useRef("");
+  const lastArrivalFocusKey = useRef("");
   const enteredFollow = useRef(false);
   const route = routePoints ?? [];
   // walkProgressRef is local to the active campus leg. Sampling that fraction
@@ -1682,9 +1688,11 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     }
     return { target, position: target.clone().add(offsetDirection.multiplyScalar(distance)) };
   }, [camera, campus, route, size.height, size.width, surfaceRef]);
-  const focusTarget = useCallback((point: Pt) => {
-    const selectedBuilding = campus.buildings.find((building) => building.id === selectedBuildingId);
-    const selectedPlace = campus.markers.find((marker) => marker.id === selectedPlaceId);
+  const focusTarget = useCallback((point: Pt, override?: { buildingId?: string | null; placeId?: string | null }) => {
+    const focusBuildingId = override ? override.buildingId : selectedBuildingId;
+    const focusPlaceId = override ? override.placeId : selectedPlaceId;
+    const selectedBuilding = campus.buildings.find((building) => building.id === focusBuildingId);
+    const selectedPlace = campus.markers.find((marker) => marker.id === focusPlaceId);
     const isSuhayHusay = Boolean(selectedPlace && /suhay\s*(?:ng\s*)?husay/i.test(`${selectedPlace.id} ${selectedPlace.name} ${selectedPlace.type}`));
     const suhayAssetId = isSuhayHusay ? resolveSuhayHusayDecorAssetId(campus.decorAssets) : null;
     const suhayAsset = suhayAssetId ? campus.decorAssets.find((asset) => asset.id === suhayAssetId) : undefined;
@@ -1743,7 +1751,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     controls.enableDamping = previousDamping.current;
     previousDamping.current = null;
   }, [orbitRef]);
-  const startTween = useCallback((nextTarget: THREE.Vector3, kind: "focus" | "recenter" | "follow", nextPosition?: THREE.Vector3) => {
+  const startTween = useCallback((nextTarget: THREE.Vector3, kind: "focus" | "recenter" | "follow" | "arrival", nextPosition?: THREE.Vector3) => {
     const controls = orbitRef.current;
     if (!controls) return;
     tween.current = null;
@@ -1761,7 +1769,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       startPosition: controls.object.position.clone(),
       endPosition,
       startedAt: cameraTime.current,
-      duration: kind === "follow" ? 0.36 : kind === "focus" ? 0.36 : 0.34,
+      duration: kind === "arrival" ? 0.4 : kind === "follow" ? 0.36 : kind === "focus" ? 0.36 : 0.34,
     };
     invalidate();
   }, [invalidate, orbitRef, restoreDamping]);
@@ -1809,13 +1817,41 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     invalidate();
   }, [camera, campus, focusPoint, invalidate, orbitRef, routeFrameKey, routeFramePose, size.height, size.width]);
 
+  useEffect(() => {
+    if (!arrivalFocusKey || !arrivalFocusPoint) {
+      lastArrivalFocusKey.current = "";
+      return;
+    }
+    const controls = orbitRef.current;
+    if (lastArrivalFocusKey.current === arrivalFocusKey || !initialized.current || !controls) return;
+    lastArrivalFocusKey.current = arrivalFocusKey;
+    // Arrival has higher priority than Follow, route inspection, selection,
+    // preview framing, or an older Recenter request. startTween replaces any
+    // in-flight camera owner so its stale target cannot win later.
+    const pose = focusTarget(arrivalFocusPoint, {
+      buildingId: arrivalFocusBuildingId,
+      placeId: arrivalFocusPlaceId,
+    });
+    if (reducedMotion) {
+      tween.current = null;
+      restoreDamping();
+      owner.current = "arrival";
+      controls.target.copy(pose.target);
+      controls.object.position.copy(pose.position);
+      controls.update();
+      invalidate();
+      return;
+    }
+    startTween(pose.target, "arrival", pose.position);
+  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, focusTarget, invalidate, orbitRef, reducedMotion, restoreDamping, startTween]);
+
   useEffect(() => { enteredFollow.current = false; }, [followSessionKey]);
   useEffect(() => {
     // Follow owns the camera as soon as the canonical session returns to this
     // renderer, including a paused Follow session after Explore inspection.
     // A context renderer is mounted only for its active Campus/Floor, so this
     // also rebinds the camera when a route crosses a scene boundary.
-    if (!followMode || freeLook || enteredFollow.current || !orbitRef.current) return;
+    if (arrivalFocusKey || !followMode || freeLook || enteredFollow.current || !orbitRef.current) return;
     tween.current = null;
     const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
     const source = currentPoint ? campusMapPointToWorld(currentPoint) : null;
@@ -1826,12 +1862,12 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     startTween(target, "follow", position);
     enteredFollow.current = true;
     invalidate();
-  }, [followMode, freeLook, followSessionKey, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
+  }, [arrivalFocusKey, followMode, freeLook, followSessionKey, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
 
   useEffect(() => {
     // Selection focus is a presentation action; it must never take camera
     // ownership away from the live player while Follow is attached.
-    if (followMode && !freeLook) return;
+    if (arrivalFocusKey || followMode && !freeLook) return;
     if (routeInspectionFocusPoint && routeInspectionFocusKey) return;
     if (!focusPoint) { focusKey.current = ""; return; }
     const initialPreviewSelection = routePreviewFocusBaseline.current;
@@ -1860,9 +1896,9 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       return;
     }
     startTween(pose.target, "focus", pose.position);
-  }, [focusNonce, focusPoint, focusTarget, followMode, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, routePreview, selectedBuildingId, selectedPlaceId, selectionKey, startTween]);
+  }, [arrivalFocusKey, focusNonce, focusPoint, focusTarget, followMode, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, routePreview, selectedBuildingId, selectedPlaceId, selectionKey, startTween]);
   useEffect(() => {
-    if (followMode && !freeLook) {
+    if (arrivalFocusKey || followMode && !freeLook) {
       routeInspectionKey.current = "";
       return;
     }
@@ -1894,9 +1930,9 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       return;
     }
     startTween(target, "focus", position);
-  }, [freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, followMode, startTween]);
+  }, [arrivalFocusKey, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, followMode, startTween]);
   useEffect(() => {
-    if (!routePreview || !routeFrameKey || !initialized.current || !orbitRef.current) {
+    if (arrivalFocusKey || !routePreview || !routeFrameKey || !initialized.current || !orbitRef.current) {
       if (!routePreview) lastRouteFrameKey.current = "";
       return;
     }
@@ -1916,7 +1952,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       return;
     }
     startTween(pose.target, "focus", pose.position);
-  }, [invalidate, orbitRef, reducedMotion, restoreDamping, routeFrameKey, routeFramePose, routePreview, startTween]);
+  }, [arrivalFocusKey, invalidate, orbitRef, reducedMotion, restoreDamping, routeFrameKey, routeFramePose, routePreview, startTween]);
   const lastRecenterNonce = useRef(0);
   useEffect(() => {
     const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
@@ -1928,6 +1964,14 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     }
     if (!recenterNonce || recenterNonce <= lastRecenterNonce.current || !orbitRef.current || !initialized.current) return;
     lastRecenterNonce.current = recenterNonce;
+    if (arrivalFocusKey && arrivalFocusPoint) {
+      const pose = focusTarget(arrivalFocusPoint, {
+        buildingId: arrivalFocusBuildingId,
+        placeId: arrivalFocusPlaceId,
+      });
+      startTween(pose.target, "arrival", pose.position);
+      return;
+    }
     let target: THREE.Vector3;
     let distance: number;
     if (followMode && currentPoint) {
@@ -1956,17 +2000,18 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     }
     const destinationPosition = target.clone().add(new THREE.Vector3(0, distance * 0.74, distance * 0.673));
     startTween(target, "recenter", destinationPosition);
-  }, [camera, campus, focusPoint, focusTarget, followMode, followPlaying, freeLook, humanPoint, orbitRef, recenterNonce, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
+  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, freeLook, humanPoint, orbitRef, recenterNonce, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
 
   useEffect(() => {
+    if (arrivalFocusKey) return;
     if (freeLook) {
       tween.current = null;
       enteredFollow.current = false;
       restoreDamping();
       owner.current = "user";
     }
-    else if (!followPlaying && owner.current !== "focus" && owner.current !== "recenter") owner.current = "fit";
-  }, [followPlaying, freeLook, restoreDamping]);
+    else if (!followPlaying && owner.current !== "focus" && owner.current !== "arrival" && owner.current !== "recenter" && owner.current !== "user") owner.current = "fit";
+  }, [arrivalFocusKey, followPlaying, freeLook, restoreDamping]);
 
   useFrame((_, delta) => {
     if (!initialized.current || document.hidden) return;
@@ -1975,7 +2020,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const safeDelta = Math.min(delta, 0.05);
     cameraTime.current += safeDelta;
     let tweenOwnsFrame = false;
-    if (tween.current && (owner.current === "focus" || owner.current === "recenter" || owner.current === "follow")) {
+    if (tween.current && (owner.current === "focus" || owner.current === "recenter" || owner.current === "follow" || owner.current === "arrival")) {
       const active = tween.current;
       const t = Math.min(1, Math.max(0, (cameraTime.current - active.startedAt) / active.duration));
       const eased = 1 - Math.pow(1 - t, 3);
@@ -1987,7 +2032,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       else invalidate();
     }
     const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
-    if (!tweenOwnsFrame && followMode && currentPoint && !freeLook) {
+    if (!tweenOwnsFrame && !arrivalFocusKey && followMode && currentPoint && !freeLook) {
       owner.current = "follow";
       if (Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015) {
         lastHuman.current.x = currentPoint.x;
@@ -2188,9 +2233,10 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     </group>}
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
+    {props.exploreTransitionCues?.map((transition) => <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
     <EventPreviewCamera request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
-  {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />}
+  {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />}
   </>;
 }
 

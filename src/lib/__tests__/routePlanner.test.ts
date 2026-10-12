@@ -5,6 +5,7 @@ import {
   planPointToDestinationRoute,
   planDestinationRoute,
   planAuthoredDestinationRoute,
+  plannedRouteFromAuthoredPath,
   hasNavigableRoute,
   stepsFromGraphPath,
   detectFloorTransitions,
@@ -14,6 +15,7 @@ import {
   type RouteSegment,
 } from "../routePlanner";
 import { findBuildingPath, type GraphPath } from "../pathfinding";
+import { studentRouteFacts } from "../studentRouteFlow";
 
 // Small published-campus nav graph shaped like the seed (b_mab / b_gym ids).
 const CAMPUS_GRAPH: CampusNavGraph = {
@@ -300,6 +302,60 @@ describe("authored destination endpoint combinations", () => {
     accessDoorId: roomId === "r1" ? "door-b1-room" : roomId === "r2" ? "door-b1-upper" : "door-b2-room",
   });
 
+  it("starts a same-building route at its authored entrance without a synthetic Campus loop", () => {
+    const entranceGraph: CampusNavGraph = {
+      ...graph,
+      buildings: [
+        { id: "b1", x: 0, y: 0, width: 120, height: 80, entrances: [
+          { id: "b1-main", type: "general", isPrimary: true },
+          { id: "b1-side", type: "general" },
+        ], floors: [{ id: "f1", number: 1 }, { id: "f2", number: 2 }] },
+      ],
+      navNodes: [
+        ...graph.navNodes!.map((node) => node.id === "b1-entry" ? { ...node, entranceId: "b1-main" } : node),
+        { id: "b1-side-entry", name: "Side Entrance", type: "entrance", x: -20, y: 0, buildingId: "b1", entranceId: "b1-side" },
+        { id: "b1-side-door", name: "Side Lobby Door", type: "entrance", x: -10, y: 0, buildingId: "b1", floorId: "f1", doorId: "door-b1-side" },
+      ],
+      navEdges: [
+        ...graph.navEdges!,
+        { id: "e-side-entry", startNodeId: "b1-side-entry", endNodeId: "b1-side-door", distance: 1, bidirectional: true, accessible: true, type: "entrance_transition" },
+        { id: "e-side-room", startNodeId: "b1-side-door", endNodeId: "b1-room-door", distance: 1, bidirectional: true, accessible: true },
+      ],
+    };
+    const groundRoom = room("b1", "r1", 1, "B1");
+    const buildingStart = planDestinationRoute(building("b1", "B1"), groundRoom, "standard", entranceGraph);
+
+    expect(buildingStart).not.toBeNull();
+    expect(buildingStart?.campusPoints).toEqual([{ x: 0, y: 0 }]);
+    expect(buildingStart?.contextHandoffs?.[0]).toMatchObject({ kind: "enter_building", nodeId: "b1-door" });
+    expect(buildingStart?.steps.map((step) => step.instruction)).toContain("Enter B1 building.");
+    expect(studentRouteFacts(buildingStart!, "best")).toContain("Indoor route");
+    expect(studentRouteFacts(buildingStart!, "best")).not.toContain("Indoor + outdoor");
+
+    const explicitSideEntrance = planDestinationRoute(
+      { type: "campus_place", campusPlaceId: "side-entrance", label: "Side Entrance", code: "Side Entrance", nodeId: "b1-side-entry" },
+      groundRoom,
+      "standard",
+      entranceGraph,
+    );
+    expect(explicitSideEntrance?.campusPoints).toEqual([{ x: -20, y: 0 }]);
+    expect(explicitSideEntrance?.contextHandoffs?.[0]).toMatchObject({ kind: "enter_building", nodeId: "b1-side-door" });
+
+    const upperRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 201" };
+    const upperRoute = planDestinationRoute(building("b1", "B1"), upperRoom, "standard", entranceGraph);
+    expect(upperRoute?.campusPoints).toEqual([{ x: 0, y: 0 }]);
+    expect(upperRoute?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f1", "f2"]);
+    expect(upperRoute?.transitionDetails).toHaveLength(1);
+
+    const crossBuilding = planDestinationRoute(
+      building("b1", "B1"),
+      room("b2", "r3", 1, "B2"),
+      "standard",
+      entranceGraph,
+    );
+    expect(crossBuilding?.campusPoints.length).toBeGreaterThan(1);
+  });
+
   it("routes building→room, room→room across floors, and room→room across buildings", () => {
     const targetRoom = { ...room("b1", "r2", 2, "B1"), roomName: "Room 201" };
     const buildingToRoom = planAuthoredDestinationRoute(building("b1", "B1"), targetRoom, "standard", graph);
@@ -470,6 +526,48 @@ describe("authored destination endpoint combinations", () => {
     ]);
     expect(route?.transitionDetails).toHaveLength(2);
     expect(route?.indoorSegments?.at(-1)?.waypoints.at(-1)).toEqual({ x: 250, y: 10 });
+  });
+
+  it("preserves Exterior Emergency Stair owner identity on every authored floor transition", () => {
+    const floors = [6, 5, 4, 1].map((number) => ({ id: `floor-${number}`, number }));
+    const nodes = floors.map((floor, index) => ({
+      id: `stair-${floor.number}`,
+      name: "Exterior Stair 2",
+      type: "stair",
+      x: 50,
+      y: index * 10,
+      buildingId: "student-center",
+      floorId: floor.id,
+      stairId: `stair-occurrence-${floor.number}`,
+      exteriorEmergencyStairId: "student-center-exterior-stair-2",
+    }));
+    const graph: CampusNavGraph = {
+      buildings: [{ id: "student-center", x: 0, y: 0, width: 100, height: 100, floors }],
+      navNodes: nodes,
+    };
+    const edges = nodes.slice(0, -1).map((node, index) => ({
+      id: `vertical-${index}`,
+      startNodeId: node.id,
+      endNodeId: nodes[index + 1].id,
+      distance: 1,
+      bidirectional: false,
+      accessible: false,
+      type: "floor_transition",
+    }));
+    const route = plannedRouteFromAuthoredPath({
+      nodeIds: nodes.map((node) => node.id),
+      distanceM: 3,
+      minutes: 1,
+      waypoints: nodes.map((node) => ({ x: node.x, y: node.y })),
+      steps: ["Take Exterior Stair 2 down through the served Floors."],
+    }, graph, edges, "Student Center", "Campus");
+
+    expect(route?.transitionDetails).toHaveLength(3);
+    expect(route?.transitionDetails?.map((transition) => transition.exteriorEmergencyStairId)).toEqual([
+      "student-center-exterior-stair-2",
+      "student-center-exterior-stair-2",
+      "student-center-exterior-stair-2",
+    ]);
   });
 
   it("chooses the shortest connected physical Door and ignores room-center shortcuts", () => {

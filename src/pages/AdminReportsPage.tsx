@@ -324,31 +324,8 @@ function ReportDetailModal({ report, onClose, onChanged }: {
           className="fixed inset-0 z-[60] flex flex-col bg-background"
           onClick={(event) => event.stopPropagation()}
         >
-          <header className="z-[80] shrink-0 border-b border-border bg-background/95 px-3 py-3 shadow-sm backdrop-blur sm:px-5">
-            <div className="mx-auto flex max-w-[1600px] items-center gap-3 sm:gap-4">
-              <div className="flex min-w-0 flex-1 items-start gap-3 rounded-2xl border border-border bg-card p-3 shadow-sm sm:gap-4 sm:p-4">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive sm:h-10 sm:w-10">
-                  <Flag className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                </div>
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Report location</p>
-                    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold", cfg.bg, cfg.color)}>
-                      <Icon className="h-3 w-3" /> {cfg.label}
-                    </span>
-                  </div>
-                  <h2 className="line-clamp-2 text-sm font-extrabold leading-snug text-foreground sm:text-base">{report.title}</h2>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground sm:text-xs">
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
-                      <span className="truncate">{report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus map"}</span>
-                    </span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-foreground">{formatCategoryLabel(report.category)}</span>
-                    <span>{formatCategoryLabel(report.priority)} priority</span>
-                  </div>
-                  <p className="line-clamp-2 border-t border-border/70 pt-1.5 text-xs leading-relaxed text-muted-foreground">{report.description}</p>
-                </div>
-              </div>
+          <header className="z-[80] shrink-0 border-b border-border bg-background/95 px-3 py-2.5 shadow-sm backdrop-blur sm:px-5">
+            <div className="mx-auto flex max-w-[1600px] justify-start">
               <button
                 type="button"
                 autoFocus
@@ -372,6 +349,58 @@ function ReportDetailModal({ report, onClose, onChanged }: {
                 initialCampusId={report.campusId ?? undefined}
                 initialBuildingId={report.buildingId ?? undefined}
                 initialPlaceId={report.campusPlaceId ?? undefined}
+                locationPreviewPanel={(
+                  <>
+                    <div className="shrink-0 border-b border-border px-5 py-5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Report location</p>
+                        <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold", cfg.bg, cfg.color)}>
+                          <Icon className="h-3 w-3" /> {cfg.label}
+                        </span>
+                      </div>
+                      <h2 className="mt-2 line-clamp-3 text-lg font-extrabold leading-snug text-foreground">{report.title}</h2>
+                    </div>
+                    {report.imageUrl && (
+                      <div className="shrink-0 border-b border-border/70 p-3">
+                        <img
+                          src={report.imageUrl}
+                          alt={`Evidence for ${report.title}`}
+                          loading="lazy"
+                          className="max-h-48 w-full rounded-xl border border-border object-cover"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-5 px-5 py-5">
+                      <div className="flex items-start gap-2.5">
+                        <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Location</p>
+                          <p className="mt-1 text-sm font-bold text-foreground">
+                            {[report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus map", report.floorLabel, report.roomName].filter(Boolean).join(" · ")}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-muted/50 px-3 py-2.5">
+                          <p className="text-[10px] text-muted-foreground">Issue type</p>
+                          <p className="mt-0.5 text-xs font-bold text-foreground">{formatCategoryLabel(report.category)}</p>
+                        </div>
+                        <div className="rounded-xl bg-muted/50 px-3 py-2.5">
+                          <p className="text-[10px] text-muted-foreground">Priority</p>
+                          <p className="mt-0.5 text-xs font-bold text-foreground">{formatCategoryLabel(report.priority)}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Description</p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{report.description}</p>
+                      </div>
+                      <div className="border-t border-border/70 pt-4">
+                        <p className="text-[10px] text-muted-foreground">Submitted</p>
+                        <p className="mt-0.5 text-xs font-semibold text-foreground">{formatDateTime(report.createdAt)}</p>
+                      </div>
+                    </div>
+                  </>
+                )}
               />
             </Suspense>
           </div>

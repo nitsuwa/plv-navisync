@@ -46,6 +46,7 @@ interface IndoorFloor3DRendererProps {
   onExitDoorClick?: (doorId: string) => void;
   focusRoomId?: string | null;
   focusNonce?: number;
+  arrivalFocusKey?: string;
   routeInspectionFocusPoint?: Pt | null;
   routeInspectionFocusKey?: string;
   destinationRoomId?: string | null;
@@ -56,6 +57,7 @@ interface IndoorFloor3DRendererProps {
   previewCamera?: Event3DCameraRequest;
   eventMarker?: { point: Pt; label: string } | null;
   activeTransition?: { point: Pt; label: string; onActivate?: () => void } | null;
+  exploreTransitionCues?: readonly { id: string; point: Pt; label: string; onActivate: () => void }[];
   followMode?: boolean;
   followPlaying?: boolean;
   freeLook?: boolean;
@@ -1409,6 +1411,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   }, [camera, halfDepth, invalidate]);
 
   useEffect(() => {
+    if (props.arrivalFocusKey) return;
     // A cross-floor room search should animate directly from the current
     // camera pose to the selected room. Do not first fit the entire floor.
     // Keep waiting if the newly selected Floor has not resolved its room yet;
@@ -1429,7 +1432,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     camera.lookAt(nextTarget);
     camera.updateProjectionMatrix();
     invalidate();
-  }, [camera, floor.id, frameCenter, halfDepth, invalidate, props.followMode, props.freeLook, props.humanVisible, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, viewport]);
+  }, [camera, floor.id, frameCenter, halfDepth, invalidate, props.arrivalFocusKey, props.followMode, props.freeLook, props.humanVisible, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, viewport]);
 
   useEffect(() => {
     // Follow takes camera ownership back when the canonical session is
@@ -1437,6 +1440,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     // renderer-independent route cursor; Resume then frames that live point.
     const wasExploring = followCameraStateRef.current.freeLook;
     followCameraStateRef.current.freeLook = Boolean(props.freeLook);
+    if (props.arrivalFocusKey) return;
     if (props.freeLook) {
       if (props.followMode) cancelRecenterTween();
       return;
@@ -1477,7 +1481,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       duration: 340,
     };
     invalidate();
-  }, [cancelRecenterTween, props.followMode, props.freeLook]);
+  }, [cancelRecenterTween, props.arrivalFocusKey, props.followMode, props.freeLook]);
 
   useFrame((_, delta) => {
     const progress = props.walkProgressRef?.current ?? props.walkProgress;
@@ -1509,6 +1513,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       else invalidate();
       return;
     }
+    if (props.arrivalFocusKey) return;
     if (selectionFocusLockRef.current && !(props.followMode && !props.freeLook)) return;
     if (!props.followMode || props.freeLook || recenteringRef.current || !livePoint) return;
     const safeDelta = Math.min(delta, 0.05);
@@ -1530,6 +1535,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     const nonce = props.recenterNonce ?? 0;
     if (nonce <= lastRecenterNonce.current || !controls.current) return;
     lastRecenterNonce.current = nonce;
+    if (props.arrivalFocusKey) return;
     cancelRecenterTween();
     const context = recenterContextRef.current;
     selectionFocusLockRef.current = false;
@@ -1571,16 +1577,16 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     };
     recenterFrameRef.current = requestAnimationFrame(tick);
     return cancelRecenterTween;
-  }, [camera, cancelRecenterTween, invalidate, props.recenterNonce, props.walkProgress, props.walkProgressRef, ramps, sampleRoute]);
+  }, [camera, cancelRecenterTween, invalidate, props.arrivalFocusKey, props.recenterNonce, props.walkProgress, props.walkProgressRef, ramps, sampleRoute]);
 
   useEffect(() => {
-    if (props.followMode && !props.freeLook) {
+    if (!props.arrivalFocusKey && props.followMode && !props.freeLook) {
       selectionTweenRef.current = null;
       selectionFocusLockRef.current = false;
       lastRoomFocusKeyRef.current = "";
       return;
     }
-    if (props.routeInspectionFocusPoint && props.routeInspectionFocusKey) return;
+    if (!props.arrivalFocusKey && props.routeInspectionFocusPoint && props.routeInspectionFocusKey) return;
     if (!props.focusRoomId || !selectionRoom) {
       if (!props.focusRoomId) {
         lastRoomFocusKeyRef.current = "";
@@ -1588,7 +1594,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       }
       return;
     }
-    const key = `${floor.id}:${props.focusRoomId}:${props.focusNonce ?? 0}`;
+    const key = `${floor.id}:${props.focusRoomId}:${props.focusNonce ?? 0}:${props.arrivalFocusKey ?? ""}`;
     if (lastRoomFocusKeyRef.current === key) return;
     const roomPoints = selectionRoom.points;
     if (roomPoints.length < 3 || !controls.current) return;
@@ -1689,10 +1695,10 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       duration: 360,
     };
     invalidate();
-  }, [camera, cancelRecenterTween, floor.id, invalidate, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, selectionRoom, size.height, size.width, viewport]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, selectionRoom, size.height, size.width, viewport]);
 
   useEffect(() => {
-    if (props.followMode && !props.freeLook) {
+    if (props.arrivalFocusKey || props.followMode && !props.freeLook) {
       lastRouteInspectionFocusKeyRef.current = "";
       return;
     }
@@ -1728,7 +1734,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       duration: 380,
     };
     invalidate();
-  }, [camera, cancelRecenterTween, floor.id, invalidate, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, viewport]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, viewport]);
 
   const baseRegions = regions.length ? regions : [{ x: 0, y: 0, width: floor.canvasW ?? 600, height: floor.canvasH ?? 450 }];
   const visibleRoute = route.length > 1;
@@ -1816,6 +1822,17 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {props.activeTransition && activeTransitionPoint && <Html position={pointToWorld(activeTransitionPoint, viewport, 0.42)} center zIndexRange={[100, 0]}>
         <button type="button" onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) props.activeTransition?.onActivate?.(); }} style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }} className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border px-3 py-2 text-center text-[12px] font-extrabold shadow-lg whitespace-normal focus-visible:outline-none focus-visible:ring-2 ${activeExitDoor?.isEmergencyExit ? "border-red-300 bg-red-700 text-white ring-red-300 hover:bg-red-800" : "border-blue-200 bg-white/95 text-blue-800 hover:bg-blue-50 focus-visible:ring-blue-500"}`}>{activeExitDoor?.isEmergencyExit ? "Emergency Exit" : props.activeTransition.label}</button>
       </Html>}
+      {props.exploreTransitionCues?.map((cue) => <Html key={`explore-${cue.id}`} position={pointToWorld(cue.point, viewport, 0.44)} center zIndexRange={[100, 0]}>
+        <button
+          type="button"
+          data-testid="indoor-explore-transition-cue"
+          aria-label={cue.label}
+          title={cue.label}
+          onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) cue.onActivate(); }}
+          style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-blue-200 bg-white/95 px-3 py-2 text-center text-[12px] font-extrabold text-blue-800 shadow-lg whitespace-normal hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >{cue.label}</button>
+      </Html>)}
       {floor.labels?.filter((label) => label.visible !== false).map((label) => <Html key={`label-${label.id}`} position={pointToWorld({ x: label.x, y: label.y }, viewport, 0.025)} center distanceFactor={12} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
         <span className="text-[9px] font-semibold text-slate-500">{label.text}</span>
       </Html>)}

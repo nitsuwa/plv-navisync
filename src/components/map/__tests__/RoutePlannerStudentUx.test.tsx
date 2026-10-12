@@ -189,34 +189,49 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onNextStep).toHaveBeenCalledOnce();
   });
 
-  it("suspends playback in Explore with Previous/Next and Return to Follow only", () => {
+  it("presents Explore as a route-preview itinerary without a Previous/Next stepper", () => {
     const onCameraModeChange = vi.fn();
     const onPreviousStep = vi.fn();
     const onNextStep = vi.fn();
     const onPause = vi.fn();
     const onResume = vi.fn();
+    const onInspectStep = vi.fn();
     render(<RoutePlannerDialog {...plannerProps({
       from: building("gate", "GATE", "Campus Gate"),
       to: building("canteen", "CANT", "Canteen"),
       route: route(),
       phase: "navigating",
       cameraMode: "explore",
+      inspectionContextLabel: "Science Hall · Floor 4",
       currentStepIndex: 1,
+      followStepIndex: 0,
       navigationSteps: ["Start at Campus Gate.", "Follow the campus path toward the Canteen.", "Your destination is on the right."],
-      onCameraModeChange, onPreviousStep, onNextStep, onPause, onResume,
+      onCameraModeChange, onPreviousStep, onNextStep, onPause, onResume, onInspectStep,
     })} />);
     // Explore has no automatic playback: there is no Pause/Resume control.
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(onPreviousStep).toHaveBeenCalledOnce();
-    expect(onNextStep).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("guided-inspection-context")).toHaveTextContent("Science Hall · Floor 4");
+    expect(screen.getByTestId("explore-route-guidance")).toHaveTextContent("Move around the map");
+    expect(screen.getByTestId("explore-route-summary")).toHaveTextContent("Standard route");
+    expect(screen.getByTestId("explore-route-summary")).toHaveTextContent("Campus Gate → Canteen");
+    expect(screen.getByTestId("guided-route-steps").children).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Route details" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("explore-inspected-step")).toHaveTextContent("Follow the campus path toward the Canteen.");
+    expect(screen.getByTestId("explore-follow-current-marker")).toHaveTextContent("Current");
+    expect(screen.getByTestId("explore-instruction-1")).toHaveClass("text-[11px]", "leading-snug");
+    expect(screen.getByTestId("explore-instruction-1")).not.toHaveClass("min-h-11");
+    fireEvent.click(screen.getByTestId("explore-instruction-2"));
+    expect(onInspectStep).toHaveBeenCalledWith(2);
+    expect(onPreviousStep).not.toHaveBeenCalled();
+    expect(onNextStep).not.toHaveBeenCalled();
     expect(onPause).not.toHaveBeenCalled();
     expect(onResume).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Return to Follow" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to Follow mode" }));
     expect(onCameraModeChange).toHaveBeenCalledWith("follow");
   });
 
@@ -249,7 +264,8 @@ describe("RoutePlannerDialog student accessibility", () => {
     // Explore suspends automatic playback: no Pause/Resume control remains.
     expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Return to Follow" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Return to Follow mode" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Return to Follow" })).not.toBeInTheDocument();
   });
 
   it("keeps desktop guided navigation compact by default when requested and exposes the mode switch", () => {
@@ -266,7 +282,9 @@ describe("RoutePlannerDialog student accessibility", () => {
       onExpand,
     })} />);
 
-    expect(screen.getByTestId("desktop-route-collapsed-summary")).toHaveTextContent("Step 1 of");
+    expect(screen.getByTestId("desktop-route-collapsed-summary")).toHaveTextContent("Route context");
+    expect(screen.queryByRole("button", { name: "Previous step" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next step" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Return to Follow mode" }));
     fireEvent.click(screen.getByRole("button", { name: "Expand navigation panel" }));
     expect(onCameraModeChange).toHaveBeenCalledWith("follow");
@@ -372,6 +390,30 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
+  it("allows one Pause request during an automatic vertical handoff and reflects the pending stop", () => {
+    const onPause = vi.fn();
+    const props = plannerProps({
+      from: building("science", "SCI", "Science Hall"),
+      to: room("caba-101", "CABA-101", "caba"),
+      route: route(),
+      phase: "navigating",
+      playbackPaused: false,
+      primaryAction: "pause",
+      transitionBusy: true,
+      pauseDuringVerticalRun: true,
+      onPause,
+    });
+    const view = render(<RoutePlannerDialog {...props} />);
+    const pause = screen.getByRole("button", { name: "Pause navigation" });
+    expect(pause).toBeEnabled();
+    fireEvent.click(pause);
+    expect(onPause).toHaveBeenCalledOnce();
+
+    view.rerender(<RoutePlannerDialog {...props} verticalRunPausePending />);
+    expect(screen.getByRole("button", { name: "Pause navigation" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pause navigation" })).toHaveTextContent("Pausing");
+  });
+
   it("temporarily minimizes the mobile route panel for the Floor Picker and restores its prior presentation", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
@@ -441,23 +483,73 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("keeps arrival actions distinct from clearing or starting a new route", () => {
+  it("offers Edit Route from Arrived without clearing or restarting the completed route", () => {
     const onDone = vi.fn();
     const onStartNavigation = vi.fn();
+    const onEditRoute = vi.fn();
     const onClear = vi.fn();
     render(<RoutePlannerDialog {...plannerProps({
       from: building("gate", "GATE", "Campus Gate"),
       to: building("canteen", "CANT", "Canteen"),
       route: route(),
       phase: "arrived",
-      onDone, onStartNavigation, onClear,
+      onDone, onStartNavigation, onEditRoute, onClear,
     })} />);
 
     expect(screen.getByTestId("route-arrival-state")).toHaveTextContent("You've arrived");
+    expect(screen.getByRole("button", { name: "Edit Route" })).toBeInTheDocument();
+    expect(screen.getByTestId("route-arrival-state").querySelector(".grid.grid-cols-2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Route" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: "Restart Route" }));
     expect(onDone).toHaveBeenCalledOnce();
     expect(onStartNavigation).toHaveBeenCalledOnce();
+    expect(onEditRoute).toHaveBeenCalledOnce();
+    expect(onClear).not.toHaveBeenCalled();
+  });
+
+  it("keeps collapsed mobile arrival actions in a full-width primary row and a separate secondary row", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("science", "SCI", "Science Hall"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "arrived",
+        collapsed: true,
+      })} />);
+      fireEvent.click(screen.getByRole("button", { name: "Collapse route preview" }));
+      const arrival = await screen.findByTestId("mobile-route-arrival-compact");
+      expect(within(arrival).getByRole("button", { name: "Restart Route" })).toHaveClass("w-full");
+      expect(within(arrival).getByRole("button", { name: "Edit Route" })).toHaveClass("min-h-11");
+      expect(within(arrival).getByRole("button", { name: "Done" })).toHaveClass("min-h-11");
+      expect(within(arrival).queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("uses the existing prefilled planner when editing an arrived route and Cancel restores instead of clearing", () => {
+    const onCancelEditRoute = vi.fn();
+    const onClear = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("science", "SCI", "Science Hall"),
+      to: building("canteen", "CANT", "Canteen"),
+      route: null,
+      phase: "planning",
+      editingCompletedRoute: true,
+      mode: "accessible",
+      onCancelEditRoute,
+      onClear,
+    })} />);
+
+    expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("Science Hall");
+    expect(screen.getByTestId("route-endpoint-card-destination")).toHaveTextContent("Canteen");
+    expect(screen.getByRole("button", { name: "Accessible routing" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    expect(onCancelEditRoute).toHaveBeenCalledOnce();
     expect(onClear).not.toHaveBeenCalled();
   });
 

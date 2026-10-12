@@ -7,6 +7,8 @@ interface SearchBarProps {
   placeholder?: string;
   /** Accessible label for the input (defaults to "Search") */
   label?: string;
+  /** Optional id for an external visible label */
+  id?: string;
   onSearch?: (query: string) => void;
   onClear?: () => void;
   className?: string;
@@ -21,6 +23,7 @@ interface SearchBarProps {
 export function SearchBar({
   placeholder = "Search...",
   label = "Search",
+  id,
   onSearch,
   onClear,
   className,
@@ -67,6 +70,7 @@ export function SearchBar({
       />
       <input
         ref={inputRef}
+        id={id}
         type="text"
         value={controlledValue}
         onChange={(e) => onSearch?.(e.target.value)}

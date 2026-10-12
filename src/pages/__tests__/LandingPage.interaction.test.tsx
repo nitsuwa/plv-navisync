@@ -102,6 +102,17 @@ describe("LandingPage interactive tour", () => {
     expect(screen.getByText("Choose accessible routes")).toBeInTheDocument();
   });
 
+  it("uses consistent reporting language in the Report an Issue demo", () => {
+    renderLandingPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /Report an Issue/i }));
+
+    const panel = screen.getByTestId("landing-feature-tour-panel");
+    expect(panel).toHaveTextContent("Report a broken facility");
+    expect(panel).not.toHaveTextContent("Pin a broken facility");
+    expect(within(panel).getAllByRole("link", { name: "Try it on the map" }).some((link) => link.getAttribute("href") === "/map")).toBe(true);
+  });
+
   it("frames the hero around a campus map preview and practical trust signals", () => {
     renderLandingPage();
 

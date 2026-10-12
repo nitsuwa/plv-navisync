@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link, Navigate } from "react-router";
 import {
-  GraduationCap, Building2, Bookmark, ArrowUpRight, Bell, CalendarDays,
+  GraduationCap, Building2, Bookmark, ArrowUpRight, CalendarDays,
   Compass, Flag, MapPin, Plus, RefreshCw,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -193,11 +193,11 @@ export function StudentHomePage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.08 }}
-          className="grid grid-cols-4 gap-2 md:hidden"
+          className="grid grid-cols-4 gap-2"
         >
           {[
             { icon: Compass, label: "Navigate", color: "bg-primary/10 text-primary", target: "map" },
-            { icon: Bell, label: "Notifs", color: "bg-sky-500/10 text-sky-600 dark:text-sky-400", target: "notifications" },
+            { icon: Building2, label: "Buildings", color: "bg-primary/10 text-primary", target: "buildings" },
             { icon: Bookmark, label: "Saved", color: "bg-green-500/10 text-green-600 dark:text-green-400", target: "saved" },
             { icon: Flag, label: "Report", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400", target: "reports" },
           ].map((action) => {
@@ -220,7 +220,7 @@ export function StudentHomePage() {
                 type="button"
                 onClick={() => scrollToSection(
                   action.target === "saved" ? "saved-buildings"
-                    : action.target === "notifications" ? "student-notifications"
+                    : action.target === "buildings" ? "building-directory"
                       : "student-reports",
                 )}
                 className={className}
@@ -262,6 +262,8 @@ export function StudentHomePage() {
 
         {/* ══ QUICK ACCESS BUILDINGS ══ */}
         <motion.div
+          id="building-directory"
+          className="scroll-mt-24"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.25 }}

@@ -662,6 +662,36 @@ describe("CampusMapPage event overlays", () => {
     expect(within(planner).getByRole("button", { name: "Accessible routing" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("highlights a room staged with Choose on map and keeps the planner endpoint state shared", async () => {
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [{
+        id: "map-pick-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+        rooms: [{ id: "map-pick-room", name: "Cashier", type: "office", floorId: "map-pick-floor", buildingId: "building-test", x: 20, y: 20, w: 70, h: 50 }],
+        paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }],
+    }] }, [{ buildingId: "building-test", floorId: "map-pick-floor", roomId: "map-pick-room" }]);
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Enter Building" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose on map" }));
+    const room = await screen.findByTestId("readonly-room");
+    fireEvent.click(room);
+
+    const confirmation = await screen.findByTestId("route-planner-map-pick-confirmation");
+    expect(confirmation).toHaveTextContent("Cashier");
+    expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-highlighted", "true");
+    const planner = screen.getByTestId("route-planner-dialog");
+    expect(within(planner).getByText("Cashier")).toBeInTheDocument();
+    expect(within(planner).getByRole("button", { name: "Use as destination" })).toBeInTheDocument();
+    fireEvent.click(within(planner).getByRole("button", { name: "Use as destination" }));
+    await waitFor(() => expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Cashier"));
+    expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
+  });
+
   it.each([
     ["Directions", "route-endpoint-card-destination", "Administration Office", "route-endpoint-card-start", "Choose starting point"],
     ["Start", "route-endpoint-card-start", "Administration Office", "route-endpoint-card-destination", "Choose destination"],
@@ -856,6 +886,8 @@ describe("CampusMapPage event overlays", () => {
 
     await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toBeInTheDocument());
     expect(screen.getByTestId("collapsed-route-card")).toHaveTextContent("Guided navigation");
+    expect(screen.queryByTestId("route-recenter")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /recenter on (?:current route position|inspected route context)/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/\S/);
     expect(screen.queryByText(/Walking from CABA-103 to the building exit/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("indoor-route-preview")).not.toBeInTheDocument();
@@ -867,6 +899,82 @@ describe("CampusMapPage event overlays", () => {
     consoleError.mockRestore();
     expect(runtimeWarnings).toHaveLength(0);
   });
+
+  it("consumes a short room-to-Campus building exit with one Continue action", async () => {
+    const campus: EditorCampus = {
+      ...previewCampus,
+      buildings: [{
+        ...previewCampus.buildings[0],
+        id: "short-exit-building",
+        name: "Science Hall",
+        code: "SCI",
+        entranceNodeId: "science-exit",
+        floors: [{
+          id: "short-exit-ground",
+          buildingId: "short-exit-building",
+          number: 1,
+          label: "Ground Floor",
+          rooms: [{
+            id: "short-exit-room",
+            name: "Navigation Test Room",
+            type: "classroom",
+            x: 10,
+            y: 10,
+            w: 60,
+            h: 60,
+            floorId: "short-exit-ground",
+            buildingId: "short-exit-building",
+            accessDoorId: "short-exit-door",
+          }],
+          paths: [],
+          walls: [],
+          doors: [{ id: "short-exit-door", x: 40, y: 70, width: 20, direction: "left", color: "#a16207" }],
+          windows: [],
+          furniture: [],
+          stairs: [],
+          ramps: [],
+          elevators: [],
+          labels: [],
+        }],
+      }],
+      navNodes: [
+        { id: "short-exit-room-node", name: "Navigation Test Room", type: "room_access", roomId: "short-exit-room", x: 30, y: 30, buildingId: "short-exit-building", floorId: "short-exit-ground", accessible: true, color: "#2563eb" },
+        { id: "short-exit-door-node", name: "Room Door", type: "hallway", x: 40, y: 70, buildingId: "short-exit-building", floorId: "short-exit-ground", doorId: "short-exit-door", accessible: true, color: "#2563eb" },
+        { id: "short-exit-hall", name: "Hall", type: "hallway", x: 40, y: 150, buildingId: "short-exit-building", floorId: "short-exit-ground", accessible: true, color: "#2563eb" },
+        { id: "science-exit", name: "Main Exit", type: "entrance", x: 200, y: 220, buildingId: "short-exit-building", accessible: true, color: "#2563eb" },
+        { id: "short-campus-gate-node", name: "Campus Gate", type: "gate", gateId: "short-campus-gate", x: 235, y: 220, accessible: true, color: "#2563eb" },
+      ],
+      navEdges: [
+        { id: "short-exit-indoor", startNodeId: "short-exit-door-node", endNodeId: "short-exit-hall", distance: 2, bidirectional: true, accessible: true, type: "walkway", color: "#2563eb", width: 3 },
+        { id: "short-exit-transition", startNodeId: "short-exit-hall", endNodeId: "science-exit", distance: 1, bidirectional: true, accessible: true, type: "entrance_transition", color: "#2563eb", width: 3 },
+        { id: "short-campus-connector", startNodeId: "science-exit", endNodeId: "short-campus-gate-node", distance: 35, bidirectional: true, accessible: true, type: "walkway", color: "#2563eb", width: 3 },
+      ],
+      markers: [{ id: "short-campus-gate", name: "Campus Gate", type: "gate", x: 235, y: 220, color: "#16a34a", navNodeId: "short-campus-gate-node" }],
+    };
+
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Navigation Test Room, Room/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Campus Gate/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Find Route" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start Navigation" }));
+
+    await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/Exit SCI building\./i), { timeout: 15_000 });
+    expect(screen.getByRole("button", { name: /Continue through the active route transition/i })).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-floor-plan-scene")).toBeInTheDocument();
+
+    const continueButton = screen.getByRole("button", { name: /Continue through the active route transition/i });
+    fireEvent.click(continueButton);
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Continue through the active route transition/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("collapsed-current-instruction")).not.toHaveTextContent(/Exit SCI building\./i);
+  }, 20_000);
 
   it("zooms the student map when a two-finger pinch spreads", async () => {
     renderCampusMap({ previewCampus });
