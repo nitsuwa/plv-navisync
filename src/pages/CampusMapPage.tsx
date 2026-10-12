@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useReducer, lazy, Suspense, type CSSProperties } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, useReducer, lazy, Suspense, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -793,9 +793,11 @@ export interface CampusMapPageProps {
   fullScreen?: boolean;
   /** Allow an admin preview shell to reserve space for its own toolbar. */
   fullScreenHeight?: string;
+  /** Optional details panel rendered beside a map location preview. */
+  locationPreviewPanel?: ReactNode;
 }
 
-export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, fullScreen = false, fullScreenHeight }: CampusMapPageProps = {}) {
+export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, fullScreen = false, fullScreenHeight, locationPreviewPanel }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme } = useTheme();
@@ -7039,7 +7041,7 @@ const buildingFill = (id: string) =>
       ref={mapContainerRef}
       data-testid="student-map-surface"
       role="region"
-      aria-label="Interactive campus map"
+      aria-label={locationPreviewPanel ? "Report location map preview" : "Interactive campus map"}
       className={cn(
         "student-map-surface relative overflow-hidden animate-fade-in",
         fullScreen
@@ -7053,7 +7055,10 @@ const buildingFill = (id: string) =>
         background: viewportBackground,
         animationDuration: reducedMotion ? "0ms" : "200ms",
         cursor: "grab",
-        touchAction: "none",
+        // The report preview includes a scrollable mobile details sheet. Let
+        // it receive vertical touch scrolling while keeping the regular map's
+        // custom pan gestures unchanged.
+        touchAction: locationPreviewPanel ? "pan-y" : "none",
         ...(student3DActive ? { cursor: "default" } : {}),
       } as CSSProperties}
       onMouseDown={student3DActive ? undefined : onMouseDown} onMouseMove={student3DActive ? undefined : onMouseMove}
@@ -8320,7 +8325,21 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ DESKTOP BUILDING INFO PANEL ══════════════ */}
       <AnimatePresence initial={false}>
-        {selected && !isFloorMode && (
+        {locationPreviewPanel ? (
+          <motion.aside
+            key="location-preview-panel"
+            data-no-drag
+            data-testid="report-location-preview-panel"
+            aria-label="Report location preview"
+            className="absolute inset-x-0 bottom-0 z-[55] flex max-h-[min(46dvh,24rem)] min-h-0 flex-col overflow-y-auto overscroll-contain rounded-t-2xl border border-border/80 bg-card shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:z-30 md:max-h-none md:w-[clamp(340px,32vw,390px)] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: reducedMotion ? 0 : 0.18, ease: "easeOut" }}
+          >
+            {locationPreviewPanel}
+          </motion.aside>
+        ) : selected && !isFloorMode ? (
           <BuildingInfoPanel
             key={selected.id}
             selected={selected}
@@ -8343,10 +8362,10 @@ const buildingFill = (id: string) =>
             accessibility={BUILDING_ACCESSIBILITY[selected.id] ?? []}
             onBackToRoutePlanner={directionsMode ? () => selectBuilding(null) : undefined}
           />
-        )}
+        ) : null}
       </AnimatePresence>
       <AnimatePresence initial={false}>
-        {selectedCampusPlace && !isFloorMode && (
+        {selectedCampusPlace && !isFloorMode && !locationPreviewPanel && (
           <CampusPlaceDetails
             key={`campus-place-${selectedCampusPlace.id}`}
             place={selectedCampusPlace}
@@ -8636,7 +8655,7 @@ const buildingFill = (id: string) =>
 
       {/* ══════════════ MOBILE BUILDING SHEET ══════════════ */}
       <AnimatePresence initial={false}>
-        {selected && !isFloorMode && (
+        {selected && !isFloorMode && !locationPreviewPanel && (
           <MobileBuildingSheet
             key={selected.id}
             selected={selected}

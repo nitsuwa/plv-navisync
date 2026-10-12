@@ -8,6 +8,7 @@ import type { FloorPlan } from "../map-builder/types";
 import type { CampusMarker } from "../map-builder/types";
 import { useToast } from "../../hooks/useToast";
 import { useEscToClose } from "../../hooks/useEscToClose";
+import { STUDENT_REPORT_SUBMITTED_EVENT } from "../../lib/studentReportNotifications";
 
 const ISSUE_TYPES = [
   "Broken Light",
@@ -91,6 +92,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
         imageFile,
       });
 
+      window.dispatchEvent(new Event(STUDENT_REPORT_SUBMITTED_EVENT));
       setSubmitted(true);
       setWarning(report.submissionWarning ?? null);
     } catch (err) {

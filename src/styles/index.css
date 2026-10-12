@@ -5,6 +5,17 @@
 /* Leaflet map styles (required for map rendering) */
 @import 'leaflet/dist/leaflet.css';
 
+/* Keep the navbar notification panel inside the viewport on narrow screens.
+   It remains anchored to the bell on larger screens. */
+@media (max-width: 639px) {
+  .student-notification-popover {
+    position: fixed;
+    top: calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 3.5rem);
+    right: max(0.5rem, env(safe-area-inset-right, 0px));
+    margin-top: 0;
+  }
+}
+
 /* Map Builder/Floor Editor toolbar: container queries use the effective
    editor width (after sidebars), rather than the full browser viewport. */
 .editor-toolbar-container {

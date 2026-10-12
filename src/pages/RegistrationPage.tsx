@@ -56,6 +56,14 @@ function StepProgress({ step }: { step: 1 | 2 }) {
   );
 }
 
+function isMissingStudentIdAvailabilityRpc(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const rpcError = error as { code?: unknown; message?: unknown };
+  if (rpcError.code !== "PGRST202" && rpcError.code !== "42883") return false;
+  return typeof rpcError.message === "string"
+    && /check_student_id_availability/i.test(rpcError.message);
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 export function RegistrationPage() {
   const navigate = useNavigate();
@@ -137,10 +145,12 @@ export function RegistrationPage() {
         return;
       }
       setStep(2);
-    } catch {
+    } catch (error) {
       // Availability is a convenience check. The profile uniqueness index and
       // signup trigger remain authoritative if the RPC is missing or offline.
-      setStudentIdAvailabilityWarning("We couldn't check availability right now. We'll verify it when you create the account.");
+      if (!isMissingStudentIdAvailabilityRpc(error)) {
+        setStudentIdAvailabilityWarning("We couldn't check availability right now. We'll verify it when you create the account.");
+      }
       setStep(2);
     } finally {
       setCheckingStudentId(false);
