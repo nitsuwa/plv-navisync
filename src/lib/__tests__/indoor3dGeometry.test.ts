@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FloorDoor, FloorStairs, FloorWall, FloorWindow } from "../../components/map-builder/types";
-import { clampIndoorPriorityRoomLabel, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../indoor3dGeometry";
 
 const wall = (id: string, x1: number, y1: number, x2: number, y2: number): FloorWall => ({
   id, x1, y1, x2, y2, thickness: 4, color: "#ccc", visible: true,
@@ -162,6 +162,26 @@ describe("indoor stair direction projection", () => {
     expect(shouldRenderDescendingIndoorStair(2, "down")).toBe(true);
     expect(shouldRenderDescendingIndoorStair(2, "reverse")).toBe(true);
     expect(shouldRenderDescendingIndoorStair(2, "up")).toBe(false);
+  });
+
+  it("ends a down-only stair at the lowest served Floor without reversing its presentation", () => {
+    expect(shouldRenderIndoorDownStairModule("down", false)).toBe(false);
+    expect(shouldRenderIndoorDownStairModule("down", true)).toBe(true);
+    expect(shouldRenderIndoorDownStairModule("up", false)).toBe(true);
+  });
+
+  it("sizes the renderer-only stairwell opening to the rotated 3D stair footprint", () => {
+    const polygon = descendingIndoorStairOpeningPolygon(
+      { x: 10, y: 20, width: 40, height: 60, rotation: 90 },
+      2,
+      3,
+      0.05,
+    );
+    const xs = polygon.map((point) => point.x);
+    const ys = polygon.map((point) => point.y);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(61.6);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(41.6);
+    expect(polygon).toHaveLength(4);
   });
 });
 

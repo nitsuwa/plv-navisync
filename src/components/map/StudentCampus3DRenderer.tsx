@@ -1599,7 +1599,7 @@ function ActiveTransitionMarker({ transition, reducedMotion, shouldSuppressClick
   </group>;
 }
 
-function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePreview, focusPoint, focusNonce, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, surfaceRef }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "routePreview" | "focusPoint" | "focusNonce" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null> }) {
+function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, surfaceRef }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null> }) {
   const { invalidate, camera, size } = useThree();
   const initialized = useRef(false);
   const owner = useRef<"fit" | "focus" | "follow" | "user" | "recenter">("fit");
@@ -1611,7 +1611,10 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
   const focusKey = useRef("");
   const enteredFollow = useRef(false);
   const route = routePoints ?? [];
-  const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
+  // walkProgressRef is local to the active campus leg. Sampling that fraction
+  // against the full route can pull Follow back toward an earlier building.
+  const followRoute = followRoutePoints?.length ? followRoutePoints : route;
+  const sampleFollowRoute = useMemo(() => createRoutePointSampler(followRoute), [followRoute]);
   const routeFrameKey = useMemo(() => routePreview && route.length > 1
     ? route.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")
     : "", [route, routePreview]);
@@ -1803,7 +1806,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
     // also rebinds the camera when a route crosses a scene boundary.
     if (!followMode || freeLook || enteredFollow.current || !orbitRef.current) return;
     tween.current = null;
-    const currentPoint = walkProgressRef ? sampleRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
     const source = currentPoint ? campusMapPointToWorld(currentPoint) : null;
     const target = source ? new THREE.Vector3(source.x, 0, source.z) : desired.current.clone();
     desired.current.copy(target);
@@ -1812,7 +1815,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
     startTween(target, "follow", position);
     enteredFollow.current = true;
     invalidate();
-  }, [followMode, freeLook, followSessionKey, humanPoint, invalidate, orbitRef, sampleRoute, startTween, walkProgressRef]);
+  }, [followMode, freeLook, followSessionKey, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
 
   useEffect(() => {
     // Selection focus is a presentation action; it must never take camera
@@ -1870,7 +1873,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
   }, [invalidate, orbitRef, reducedMotion, restoreDamping, routeFrameKey, routeFramePose, routePreview, startTween]);
   const lastRecenterNonce = useRef(0);
   useEffect(() => {
-    const currentPoint = walkProgressRef ? sampleRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
     if (currentPoint) {
       const source = campusMapPointToWorld(currentPoint);
       desired.current.set(source.x, 0, source.z);
@@ -1907,7 +1910,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
     }
     const destinationPosition = target.clone().add(new THREE.Vector3(0, distance * 0.74, distance * 0.673));
     startTween(target, "recenter", destinationPosition);
-  }, [camera, campus, focusPoint, focusTarget, followMode, followPlaying, freeLook, humanPoint, orbitRef, recenterNonce, sampleRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
+  }, [camera, campus, focusPoint, focusTarget, followMode, followPlaying, freeLook, humanPoint, orbitRef, recenterNonce, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
 
   useEffect(() => {
     if (freeLook) {
@@ -1937,7 +1940,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, routePr
       if (t >= 1) { tween.current = null; restoreDamping(); }
       else invalidate();
     }
-    const currentPoint = walkProgressRef ? sampleRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
     if (!tweenOwnsFrame && followMode && currentPoint && !freeLook) {
       owner.current = "follow";
       if (Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015) {
@@ -2139,7 +2142,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
-  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
+  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
   </>;
 }
 
