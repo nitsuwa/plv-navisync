@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Users,
   History,
+  Loader2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
@@ -197,7 +198,7 @@ export function AdminSidebar({
         onNavigate?.();
         navigate("/admin", { replace: true });
       } catch {
-        toast.error("Could not sign out. Please try again.");
+        toast.error("This browser could not clear the saved session. Please retry.");
       } finally {
         setSigningOut(false);
       }
@@ -257,6 +258,7 @@ export function AdminSidebar({
         <button
           onClick={handleSignOut}
           disabled={signingOut}
+          aria-busy={signingOut}
           title={collapsed ? "Sign Out" : undefined}
           className={cn(
             "flex w-full items-center rounded-xl text-sm font-medium text-sidebar-foreground/40",
@@ -266,16 +268,19 @@ export function AdminSidebar({
               : "gap-2.5 px-3 py-2.5"
           )}
         >
-          <LogOut
+          {signingOut ? <Loader2 className={cn(
+              "shrink-0 animate-spin",
+              collapsed ? "h-5 w-5" : "h-4 w-4"
+            )} /> : <LogOut
             className={cn(
               "shrink-0",
               collapsed ? "h-5 w-5" : "h-4 w-4"
             )}
-          />
+          />}
 
           {!collapsed && (
             <span style={{ fontFamily: "var(--font-body)" }}>
-              Sign Out
+              {signingOut ? "Signing out…" : "Sign Out"}
             </span>
           )}
         </button>

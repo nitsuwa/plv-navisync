@@ -11,6 +11,7 @@ import {
   routeStepIndexForBuildingTransition,
   routeProgressForStepIndex,
   studentRouteSeekTarget,
+  studentRouteExploreTransitionTarget,
   studentRoutePreviewTransitionTarget,
   studentRouteTransitionCueStepIndex,
   studentRoutePlaybackTarget,
@@ -21,6 +22,7 @@ import {
   studentTransitionMarkerLodScale,
   studentIndoorSegmentForFloor,
   studentRouteStepInstruction,
+  studentRouteFloorLabel,
   studentRouteProgressForIndoorSegment,
   routeTransitionForStep,
   studentFacingRouteSteps,
@@ -160,6 +162,36 @@ describe("student route state flow", () => {
     expect(studentRoutePositionForLeg(route, steps, "destination-indoor", floor4, 0)).toBe(7);
   });
 
+  it("preserves the active Follow cursor when an authored indoor segment has no matching student instruction", () => {
+    const segments = [
+      { buildingId: "canteen", floorId: "canteen-g", floorNumber: 1, afterOutdoor: true, waypoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }], distanceM: 8, seconds: 5, steps: [{ id: "connector", icon: "walk" as const, instruction: "Follow the connected indoor path." }] },
+      { buildingId: "coed", floorId: "coed-g", floorNumber: 1, afterOutdoor: true, waypoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }], distanceM: 10, seconds: 6, steps: [{ id: "ground", icon: "walk" as const, instruction: "Follow the indoor path to Elevator 1." }] },
+      { buildingId: "coed", floorId: "coed-3", floorNumber: 3, afterOutdoor: true, waypoints: [{ x: 2, y: 2 }, { x: 3, y: 3 }], distanceM: 10, seconds: 6, steps: [{ id: "third", icon: "walk" as const, instruction: "Follow the indoor path to Elevator 1." }] },
+      { buildingId: "coed", floorId: "coed-4", floorNumber: 4, afterOutdoor: true, waypoints: [{ x: 3, y: 3 }, { x: 4, y: 4 }], distanceM: 12, seconds: 8, steps: [{ id: "destination", icon: "walk" as const, instruction: "Follow the indoor path to the door of COED 301." }] },
+    ];
+    const route: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: segments,
+      steps: [
+        { id: "start", icon: "start", instruction: "Start at Campus Gate." },
+        { id: "campus", icon: "walk", instruction: "Follow the campus path to the entrance of COED." },
+        { id: "enter", icon: "enter", instruction: "Enter COED building." },
+        { id: "door", icon: "walk", instruction: "Follow the indoor path to the door of COED 301." },
+        { id: "elevator-walk", icon: "walk", instruction: "Follow the indoor path to Elevator 1." },
+        { id: "elevator", icon: "elevator", instruction: "Take Elevator 1 to Floor 4." },
+        { id: "destination-walk", icon: "walk", instruction: "Follow the indoor path to the door of COED 301." },
+        { id: "arrive", icon: "arrive", instruction: "Arrive at COED 301." },
+      ],
+    };
+    const steps = studentFacingRouteSteps(route);
+
+    // The authored route contains an early COED floor segment, but the
+    // Student itinerary currently has no matching instruction for it. Once
+    // Enter is activated, playback must not jump back to Start at Campus Gate.
+    expect(studentRoutePositionForLeg(route, steps, "destination-indoor", segments[1], 0.42, 3)).toBe(3);
+    expect(studentRoutePositionForLeg(route, steps, "destination-indoor", segments[3], 0.42, 6)).toBeCloseTo(6.42);
+  });
+
   it("collapses zero-walk intermediate stops on one authored elevator shaft", () => {
     const floors = [1, 2, 3, 4].map((floorNumber) => ({
       buildingId: "coed",
@@ -255,6 +287,36 @@ describe("student route state flow", () => {
     });
   });
 
+  it("uses published Floor labels instead of internal graph numbers in elevator guidance and route facts", () => {
+    const route: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: [
+        { buildingId: "coed", floorId: "coed-ground", floorNumber: 1, floorLabel: "Ground Floor", afterOutdoor: true, waypoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }], distanceM: 12, seconds: 8, steps: [{ id: "ground", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 12 }] },
+        { buildingId: "coed", floorId: "coed-stop", floorNumber: 3, floorLabel: "Floor 2", afterOutdoor: true, waypoints: [{ x: 1, y: 1 }], distanceM: 0, seconds: 0, steps: [{ id: "stop", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 0 }] },
+        { buildingId: "coed", floorId: "coed-destination", floorNumber: 4, floorLabel: "Floor 3", afterOutdoor: true, waypoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }], distanceM: 15, seconds: 9, steps: [{ id: "destination", icon: "walk", instruction: "Follow the indoor path to the door of COED 301.", distanceM: 15 }] },
+      ],
+      transitionDetails: [
+        { kind: "elevator", nodeId: "elevator-ground", label: "Elevator 1", fromFloorId: "coed-ground", toFloorId: "coed-stop", transitionSharedId: "coed-elevator", buildingId: "coed" },
+        { kind: "elevator", nodeId: "elevator-stop", label: "Elevator 1", fromFloorId: "coed-stop", toFloorId: "coed-destination", transitionSharedId: "coed-elevator", buildingId: "coed" },
+      ],
+      steps: [
+        { id: "start", icon: "start", instruction: "Start at COED 101." },
+        { id: "walk", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 12 },
+        { id: "elevator-ground", icon: "elevator", instruction: "Take Elevator 1 to Floor 2." },
+        { id: "walk-stop", icon: "walk", instruction: "Follow the indoor path to Elevator 1.", distanceM: 0 },
+        { id: "elevator-stop", icon: "elevator", instruction: "Take Elevator 1 to Floor 4." },
+        { id: "destination-walk", icon: "walk", instruction: "Follow the indoor path to the door of COED 301.", distanceM: 15 },
+        { id: "arrive", icon: "arrive", instruction: "Arrive at COED 301." },
+      ],
+    };
+    const steps = studentFacingRouteSteps(route);
+
+    expect(steps.map((step) => step.instruction)).toContain("Take the Elevator 1 to Floor 3.");
+    expect(steps.map((step) => step.instruction)).not.toContain("Take the Elevator 1 to Floor 4.");
+    expect(studentRouteFacts(route, "best")).toContain("Ground Floor → Floor 3");
+    expect(studentRouteFloorLabel(route.indoorSegments?.[2])).toBe("Floor 3");
+  });
+
   it("turns an emergency stair-to-Campus boundary into one actionable exit Step", () => {
     const inside = {
       buildingId: "caba", floorId: "caba-g", floorNumber: 1, afterOutdoor: false,
@@ -286,6 +348,118 @@ describe("student route state flow", () => {
     expect(routeTransitionForStep(route, steps, 2)).toEqual({ kind: "exit_building" });
     expect(studentRouteSeekTarget(route, steps, 2)).toMatchObject({ context: "floor", segment: inside, segmentProgress: 1 });
     expect(studentRouteSeekTarget(route, steps, 3)).toMatchObject({ context: "campus", phase: "outdoor" });
+  });
+
+  it("keeps a multi-floor SOS stair descent and final Campus exit on their authored contexts", () => {
+    const floors = [7, 6, 5, 4, 3, 1].map((floorNumber, index) => ({
+      buildingId: "coed",
+      floorId: `coed-${floorNumber}`,
+      floorNumber,
+      afterOutdoor: false,
+      waypoints: [{ x: index, y: index }, { x: index + 1, y: index + 1 }],
+      distanceM: index === 0 ? 40 : 0,
+      seconds: index === 0 ? 24 : 0,
+      steps: [{ id: `floor-${floorNumber}`, icon: "walk" as const, instruction: `Follow the path on Floor ${floorNumber}.` }],
+    }));
+    const campusLegIndex = floors.length;
+    const stairTransitions = floors.slice(0, -1).map((floor, index) => ({
+      kind: "stairs" as const,
+      nodeId: `stair-${index}`,
+      label: "Exterior Stair 1",
+      fromFloorId: floor.floorId,
+      toFloorId: floors[index + 1].floorId,
+      buildingId: "coed",
+    }));
+    const stairHandoffs = stairTransitions.map((detail, index) => ({
+      fromContextLegIndex: index,
+      toContextLegIndex: index + 1,
+      kind: "stairs" as const,
+      buildingId: "coed",
+      label: "Exterior Stair 1",
+      nodeId: detail.nodeId,
+      detail,
+      sourcePoint: { x: index + 1, y: index + 1 },
+      targetPoint: { x: index + 1, y: index + 1 },
+    }));
+    const exitHandoff = {
+      fromContextLegIndex: floors.length - 1,
+      toContextLegIndex: campusLegIndex,
+      kind: "exit_building" as const,
+      buildingId: "coed",
+      buildingCode: "COED",
+      label: "Exterior Stair 1",
+      nodeId: "coed-ground-discharge",
+      sourcePoint: { x: 8, y: 8 },
+      targetPoint: { x: 80, y: 80 },
+    };
+    const route: PlannedRoute = {
+      ...sampleRoute,
+      mode: "emergency",
+      points: [{ x: 80, y: 80 }, { x: 90, y: 90 }],
+      campusPoints: [{ x: 80, y: 80 }, { x: 90, y: 90 }],
+      indoorSegments: floors,
+      contextLegs: [
+        ...floors.map((floor, segmentIndex) => ({
+          kind: "floor" as const,
+          buildingId: floor.buildingId,
+          floorId: floor.floorId,
+          floorNumber: floor.floorNumber,
+          segmentIndex,
+          waypoints: floor.waypoints,
+          distanceM: floor.distanceM,
+        })),
+        { kind: "campus", waypoints: [{ x: 80, y: 80 }, { x: 90, y: 90 }], distanceM: 20 },
+      ],
+      contextHandoffs: [...stairHandoffs, exitHandoff],
+      transitionDetails: stairTransitions,
+      steps: [
+        { id: "start", icon: "start", instruction: "Start from Door" },
+        { id: "walk-to-stair", icon: "walk", instruction: "Follow the path toward Exterior Stair 1." },
+        { id: "start-stair-descent", icon: "info", instruction: "Start from Exterior Stair 1" },
+        ...stairTransitions.map((_, index) => ({
+          id: `stair-step-${index}`,
+          icon: "stairs" as const,
+          instruction: "Take the stairs to Exterior Stair 1",
+        })),
+        { id: "start-campus-exit", icon: "info", instruction: "Start from Exterior Stair 1" },
+        { id: "walk-to-campus-gate", icon: "walk", instruction: "Walk 9m to Campus Gate" },
+        { id: "arrive", icon: "arrive", instruction: "Arrive at Campus Gate" },
+      ],
+    };
+
+    const steps = studentFacingRouteSteps(route);
+    const exitIndex = steps.findIndex((step) => step.instruction === "Exit via Exterior Stair 1 to Campus.");
+    const campusWalkIndex = steps.findIndex((step) => step.instruction === "Follow the path toward Campus Gate.");
+    const arrivalIndex = steps.findIndex((step) => step.icon === "arrive");
+
+    expect(steps.map((step) => step.instruction)).not.toContain("Start from Exterior Stair 1");
+    expect(exitIndex).toBeGreaterThan(0);
+    expect(routeTransitionForStep(route, steps, exitIndex)).toMatchObject({ kind: "exit_building", handoff: exitHandoff });
+    expect(studentRouteSeekTarget(route, steps, exitIndex)).toMatchObject({
+      context: "floor",
+      segment: floors.at(-1),
+      contextLegIndex: floors.length - 1,
+      segmentProgress: 1,
+    });
+    for (let index = 0; index < stairTransitions.length; index += 1) {
+      const stepIndex = steps.findIndex((step) => step.id === `stair-step-${index}`);
+      expect(studentRouteSeekTarget(route, steps, stepIndex)).toMatchObject({
+        context: "floor",
+        segment: floors[index],
+        contextLegIndex: index,
+        segmentProgress: 1,
+      });
+    }
+    expect(studentRouteSeekTarget(route, steps, campusWalkIndex)).toMatchObject({
+      context: "campus",
+      phase: "outdoor",
+      contextLegIndex: campusLegIndex,
+    });
+    expect(studentRouteSeekTarget(route, steps, arrivalIndex)).toMatchObject({
+      context: "campus",
+      phase: "outdoor",
+      contextLegIndex: campusLegIndex,
+    });
   });
 
   it("keeps explicit Previous/Next ordered across untravelled steps and interpolates authored route legs", () => {
@@ -517,6 +691,58 @@ describe("student route state flow", () => {
     expect(routeStepIndexForBuildingTransition(steps, "exit")).toBe(3);
     expect(routeStepIndexForAuthoredTransition(route, steps, route.transitionDetails![0]!)).toBe(1);
     expect(routeStepIndexForAuthoredTransition(route, steps, route.transitionDetails![1]!)).toBe(2);
+  });
+
+  it("resolves Explore transition clicks to the next authored context without changing the Follow cursor", () => {
+    const ground = {
+      buildingId: "science", floorId: "ground", floorNumber: 1, afterOutdoor: true,
+      waypoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }], distanceM: 10, seconds: 5,
+      steps: [{ id: "ground-walk", icon: "walk" as const, instruction: "Walk to the elevator." }],
+    };
+    const fourth = {
+      buildingId: "science", floorId: "floor-4", floorNumber: 4, afterOutdoor: true,
+      waypoints: [{ x: 2, y: 2 }, { x: 8, y: 8 }], distanceM: 10, seconds: 5,
+      steps: [{ id: "fourth-walk", icon: "walk" as const, instruction: "Walk to Room 401." }],
+    };
+    const elevatorRoute: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: [ground, fourth],
+      steps: [ground.steps[0], { id: "lift", icon: "elevator" as const, instruction: "Take Main Elevator to Floor 4." }, fourth.steps[0]],
+      transitionDetails: [{ kind: "elevator", nodeId: "lift-node", label: "Main Elevator", fromFloorId: "ground", toFloorId: "floor-4" }],
+    };
+    const elevatorInspection = studentRouteExploreTransitionTarget(elevatorRoute, elevatorRoute.steps, 1);
+    expect(elevatorInspection).toMatchObject({
+      transition: { kind: "elevator", detail: { nodeId: "lift-node", toFloorId: "floor-4" } },
+      targetStepIndex: 2,
+      target: { context: "floor", segment: { floorId: "floor-4" } },
+    });
+
+    const entranceRoute: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: [{ ...ground, afterOutdoor: true }],
+      steps: [
+        { id: "campus-walk", icon: "walk" as const, instruction: "Follow the campus path to Science Hall." },
+        { id: "enter", icon: "enter" as const, instruction: "Enter Science Hall." },
+        { id: "inside-walk", icon: "walk" as const, instruction: "Follow the indoor path to Room 101." },
+      ],
+    };
+    expect(studentRouteExploreTransitionTarget(entranceRoute, entranceRoute.steps, 1)).toMatchObject({
+      transition: { kind: "enter_building" },
+      targetStepIndex: 2,
+      target: { context: "floor", phase: "destination-indoor", segment: { floorId: "ground" } },
+    });
+
+    const exitRoute: PlannedRoute = {
+      ...sampleRoute,
+      indoorSegments: [{ ...ground, afterOutdoor: false }],
+      steps: [ground.steps[0], { id: "exit", icon: "enter" as const, instruction: "Exit Science Hall to Campus." }, { id: "campus-walk", icon: "walk" as const, instruction: "Follow the campus path to the Gate." }],
+    };
+    expect(studentRouteExploreTransitionTarget(exitRoute, exitRoute.steps, 1)).toMatchObject({
+      transition: { kind: "exit_building" },
+      targetStepIndex: 2,
+      target: { context: "campus", phase: "outdoor" },
+    });
+    expect(studentRouteExploreTransitionTarget(exitRoute, exitRoute.steps, 99)).toBeNull();
   });
 
   it("resolves Route Preview elevator clicks to the directly authored target Floor", () => {

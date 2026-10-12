@@ -1051,23 +1051,37 @@ export async function manageEventPublication(
   return overlayFromAdminResult(data);
 }
 
-export async function listPublishedEventPreviews(campusId: string): Promise<PublicEventFeed> {
-  if (!campusId.trim()) throw new Error("A published campus must be selected.");
-  const { data, error } = await getSupabase().rpc("list_published_event_previews", { p_campus_id: campusId });
-  if (error) throw error;
-  if (!isRecord(data) || typeof data.serverNow !== "string" || !isValidEventInstant(data.serverNow) || !Array.isArray(data.events)) {
-    throw new Error("The event preview response is invalid. Retry to refresh the map.");
-  }
-  const serverNow = data.serverNow;
-  const serverNowMs = Date.parse(serverNow);
-  const seen = new Set<string>();
-  const events = data.events.flatMap((candidate) => {
-    const event = parsePublicPreview(candidate, campusId, serverNowMs);
-    if (!event || seen.has(event.id)) return [];
-    seen.add(event.id);
-    return [event];
-  });
-  return { serverNow, events };
+const publishedPreviewRequests = new Map<string, Promise<PublicEventFeed>>();
+
+export function listPublishedEventPreviews(campusId: string): Promise<PublicEventFeed> {
+  const key = campusId.trim();
+  if (!key) return Promise.reject(new Error("A published campus must be selected."));
+  const existing = publishedPreviewRequests.get(key);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const { data, error } = await getSupabase().rpc("list_published_event_previews", { p_campus_id: key });
+    if (error) throw error;
+    if (!isRecord(data) || typeof data.serverNow !== "string" || !isValidEventInstant(data.serverNow) || !Array.isArray(data.events)) {
+      throw new Error("The event preview response is invalid. Retry to refresh the map.");
+    }
+    const serverNow = data.serverNow;
+    const serverNowMs = Date.parse(serverNow);
+    const seen = new Set<string>();
+    const events = data.events.flatMap((candidate) => {
+      const event = parsePublicPreview(candidate, key, serverNowMs);
+      if (!event || seen.has(event.id)) return [];
+      seen.add(event.id);
+      return [event];
+    });
+    return { serverNow, events };
+  })();
+  publishedPreviewRequests.set(key, request);
+  void request.then(
+    () => { if (publishedPreviewRequests.get(key) === request) publishedPreviewRequests.delete(key); },
+    () => { if (publishedPreviewRequests.get(key) === request) publishedPreviewRequests.delete(key); },
+  );
+  return request;
 }
 
 /**

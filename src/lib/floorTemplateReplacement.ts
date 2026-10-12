@@ -102,8 +102,33 @@ export function prepareFloorTemplateReplacement(
   const preservedExteriorFurniture = (current.furniture ?? [])
     .filter((item) => !!item.exteriorZoneId && preservedZoneIds.has(item.exteriorZoneId))
     .map((item) => ({ ...item }));
+  // A visual template replacement deliberately leaves Campus navigation
+  // arrays untouched. Remember linked nodes whose physical owner is replaced
+  // so a later structure reload does not mistake that intentional retention
+  // for an ordinary deleted-object orphan.
+  const retainedNavigationNodeIds = new Set(current.templatePreservedNavigationNodeIds ?? []);
+  const nextOwnerIds = {
+    rooms: new Set((instantiated.rooms ?? []).map((item) => item.id)),
+    doors: new Set([...(instantiated.doors ?? []), ...preservedDoors].map((item) => item.id)),
+    stairs: new Set(preservedExteriorStairs.map((item) => item.id)),
+    ramps: new Set((instantiated.ramps ?? []).map((item) => item.id)),
+    elevators: new Set((instantiated.elevators ?? []).map((item) => item.id)),
+  };
+  for (const node of navNodes) {
+    if (node.floorId !== current.id || node.buildingId !== current.buildingId) continue;
+    if ((node.roomId && !nextOwnerIds.rooms.has(node.roomId))
+      || (node.doorId && !nextOwnerIds.doors.has(node.doorId))
+      || (node.stairId && !nextOwnerIds.stairs.has(node.stairId))
+      || (node.rampId && !nextOwnerIds.ramps.has(node.rampId))
+      || (node.elevatorId && !nextOwnerIds.elevators.has(node.elevatorId))) {
+      retainedNavigationNodeIds.add(node.id);
+    }
+  }
   const nextFloor: FloorPlan = {
     ...instantiated,
+    ...(retainedNavigationNodeIds.size > 0
+      ? { templatePreservedNavigationNodeIds: [...retainedNavigationNodeIds] }
+      : {}),
     // Keep the source canvas dimensions until the caller runs the canonical
     // resize/projection seam.  This lets hosted Veranda Furniture and other
     // edge-attached records compute their delta from the old boundary to the

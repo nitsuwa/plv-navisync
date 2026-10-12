@@ -9,6 +9,7 @@ import {
   createCampus,
   listCampuses,
   listComingSoonCampuses,
+  listPublishedCampusVersionStatus,
   listPublishedCampusSnapshots,
   mergePublishedCampusAppearance,
   normalizeCampusCode,
@@ -486,6 +487,21 @@ describe("mergePublishedCampusAppearance (legacy snapshot compatibility)", () =>
 
 describe("listPublishedCampusSnapshots (student snapshot boundary)", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("reads only lightweight published version metadata for refresh checks", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ campus_id: "c-published", latest_published_version_id: "v-7", published_at: "2026-10-01T00:00:00Z" }],
+      error: null,
+    });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
+
+    await expect(listPublishedCampusVersionStatus()).resolves.toEqual([{
+      campus_id: "c-published",
+      latest_published_version_id: "v-7",
+      published_at: "2026-10-01T00:00:00Z",
+    }]);
+    expect(rpc).toHaveBeenCalledWith("list_published_campus_version_status");
+  });
 
   it("hydrates the configured campus appearance before returning a published snapshot", async () => {
     const snapshot = {

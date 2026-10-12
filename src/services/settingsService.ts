@@ -97,8 +97,17 @@ export function normalizePublicPlatformSettings(settings: Record<string, unknown
 }
 
 /** Read and normalize public student-facing controls in one settings request. */
-export async function getPublicPlatformSettings(): Promise<PublicPlatformSettings> {
-  return normalizePublicPlatformSettings(await getPublicSettings());
+let publicPlatformSettingsRequest: Promise<PublicPlatformSettings> | null = null;
+
+export function getPublicPlatformSettings(): Promise<PublicPlatformSettings> {
+  if (publicPlatformSettingsRequest) return publicPlatformSettingsRequest;
+  const request = getPublicSettings().then(normalizePublicPlatformSettings);
+  publicPlatformSettingsRequest = request;
+  void request.then(
+    () => { if (publicPlatformSettingsRequest === request) publicPlatformSettingsRequest = null; },
+    () => { if (publicPlatformSettingsRequest === request) publicPlatformSettingsRequest = null; },
+  );
+  return request;
 }
 
 async function currentUserId(): Promise<string | null> {

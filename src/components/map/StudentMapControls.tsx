@@ -1,6 +1,8 @@
 import {
+  Box,
   ChevronLeft,
   Crosshair,
+  Map,
   MapPin,
   Navigation,
   QrCode,
@@ -35,6 +37,32 @@ export interface StudentMapControlsProps {
   onTogglePin?: () => void;
   onResetView?: () => void;
   onBackToCampus?: () => void;
+  campusViewMode?: "2d" | "3d";
+  campusViewToggleVisible?: boolean;
+  onToggleCampusViewMode?: () => void;
+  mapOverlayOpen?: boolean;
+  keepUtilityActionsVisible?: boolean;
+}
+
+export function StudentMapModeToggle({ mode, onToggle }: { mode: "2d" | "3d"; onToggle: () => void }) {
+  const switchTo3D = mode === "2d";
+  const label = switchTo3D ? "Switch to 3D view" : "Switch to 2D view";
+  const Icon = switchTo3D ? Box : Map;
+
+  return (
+    <button
+      type="button"
+      data-testid="student-campus-view-mode-toggle"
+      data-dock="map-control-bottom-right"
+      data-view-mode-target={switchTo3D ? "3d" : "2d"}
+      aria-label={label}
+      title={switchTo3D ? "Switch to 3D" : "Switch to 2D"}
+      onClick={onToggle}
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
+    >
+      <Icon aria-hidden="true" className="h-[18px] w-[18px]" />
+    </button>
+  );
 }
 
 export function StudentMapControls({
@@ -49,7 +77,6 @@ export function StudentMapControls({
   notificationBellVisible = false,
   pinning = false,
   youAreHere = false,
-  hasSelectedRoom = false,
   searchResults,
   onSearchChange,
   onSearchFocus,
@@ -61,13 +88,25 @@ export function StudentMapControls({
   onTogglePin,
   onResetView,
   onBackToCampus,
+  campusViewMode,
+  campusViewToggleVisible = false,
+  onToggleCampusViewMode,
+  mapOverlayOpen = false,
+  keepUtilityActionsVisible = false,
 }: StudentMapControlsProps) {
   const [destinationFilter, setDestinationFilter] = useState<DestinationFilter>("all");
   const searchPlaceholder = isFloorMode
     ? "Search rooms, offices, and labs"
     : "Search buildings, offices, and rooms";
   const pinLabel = pinning ? "Cancel drop pin" : youAreHere ? "Move dropped pin" : "Drop pin";
-  const utilityControlsVisible = !directionsMode && !searchFocused && (!isFloorMode || !hasSelectedRoom);
+  // Info cards are overlays on the map, not modal blockers. Keep map actions
+  // available in the remaining exposed map area and move the stack above the
+  // card using mapOverlayOpen; only actual map modes/search focus suppress it.
+  const utilityControlsVisible = !navigationActive && !directionsMode && !searchFocused && (!mapOverlayOpen || eventMode || keepUtilityActionsVisible);
+  // Renderer switching must stay available while Route Planner / Event Map
+  // owns the lower map surface. Other utility actions still yield to it.
+  const mapModeToggleVisible = campusViewToggleVisible && Boolean(campusViewMode && onToggleCampusViewMode);
+  const utilityPositionClass = "bottom-3 md:bottom-6";
 
   const handleClearSearch = () => {
     setDestinationFilter("all");
@@ -128,26 +167,38 @@ export function StudentMapControls({
 
       {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
 
-      {utilityControlsVisible && (
+      {(utilityControlsVisible || mapModeToggleVisible) && (
         <div
           data-testid="student-map-utility-controls"
           data-no-drag
           data-profile-open={profileOpen ? "true" : "false"}
           data-event-mode={eventMode ? "true" : "false"}
+          data-map-overlay-open={mapOverlayOpen ? "true" : "false"}
+          data-navigation-active={navigationActive ? "true" : "false"}
+          data-floor-mode={isFloorMode ? "true" : "false"}
           aria-hidden={profileOpen}
           inert={profileOpen ? ("" as never) : undefined}
-          className={cn("student-map-utility-stack pointer-events-auto absolute right-3 flex flex-col items-end gap-1.5 md:bottom-auto md:top-20", eventMode ? "top-3 bottom-auto" : "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]")}
+          className={cn(
+            "student-map-utility-stack pointer-events-auto absolute right-3 flex flex-col items-end gap-1.5",
+            utilityPositionClass,
+          )}
+          style={{
+            right: "var(--student-map-utility-right-inset, calc(0.75rem + env(safe-area-inset-right, 0px)))",
+            bottom: "var(--student-map-utility-bottom-inset, calc(0.75rem + env(safe-area-inset-bottom, 0px)))",
+          }}
         >
-          {!navigationActive && (
+          {mapModeToggleVisible && campusViewMode && onToggleCampusViewMode && <StudentMapModeToggle mode={campusViewMode} onToggle={onToggleCampusViewMode} />}
+          {utilityControlsVisible && <div data-testid="student-map-utility-actions" className="flex flex-col items-end gap-1.5">{onResetView && (
             <button
               type="button"
-              onClick={onOpenDirections}
-              aria-label="Open directions"
-              aria-expanded={directionsMode}
-              title="Open directions"
+              data-testid="student-map-recenter-button"
+              data-dock="map-control-bottom-right"
+              onClick={onResetView}
+              aria-label="Recenter map"
+              title="Recenter map"
               className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
             >
-              <Navigation className="h-[18px] w-[18px]" />
+              <Crosshair className="h-[18px] w-[18px]" />
             </button>
           )}
           {onScanLocation && !navigationActive && (
@@ -159,6 +210,18 @@ export function StudentMapControls({
               className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
             >
               <QrCode className="h-[18px] w-[18px]" />
+            </button>
+          )}
+          {!navigationActive && (
+            <button
+              type="button"
+              onClick={onOpenDirections}
+              aria-label="Open directions"
+              aria-expanded={directionsMode}
+              title="Open directions"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
+            >
+              <Navigation className="h-[18px] w-[18px]" />
             </button>
           )}
           {!isFloorMode && onTogglePin && (
@@ -173,19 +236,7 @@ export function StudentMapControls({
               <MapPin className="h-[18px] w-[18px]" />
             </button>
           )}
-          {onResetView && (
-            <button
-              type="button"
-              data-testid="student-map-recenter-button"
-              data-dock="map-control-top-right"
-              onClick={onResetView}
-              aria-label="Recenter map"
-              title="Recenter map"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/50 bg-card/95 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 hover:shadow-lg active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 dark:border-white/10 md:h-10 md:w-10"
-            >
-              <Crosshair className="h-[18px] w-[18px]" />
-            </button>
-          )}
+          </div>}
         </div>
       )}
     </div>

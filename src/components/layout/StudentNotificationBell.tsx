@@ -5,12 +5,12 @@ import { AnimatePresence, motion } from "motion/react";
 import type { CampusEventOverlay } from "../map-builder/types";
 import { normalizeReportStatus, type IssueReport, type ReportStatus } from "../../services/reportService";
 import { reportService } from "../../services/reportService";
-import { eventOverlayService } from "../../services/eventOverlayService";
 import { loadStudentPreferences, type StudentNotificationPreferences } from "../../services/studentPreferencesService";
 import { eventReviewFingerprint, hasEventHandoverWork } from "../../lib/studentEventUpdates";
 import { visibleEventCards } from "../../lib/eventMapView";
 import { formatEventDate } from "../../lib/eventPublication";
 import { usePublishedCampus } from "../../hooks/usePublishedCampus";
+import { usePublishedEventPreviews } from "../../hooks/usePublishedEventPreviews";
 import type { PublicEventPreview } from "../../types/eventPreview";
 import type { EventOrganizationHandoverSummary } from "../../types/eventOrganization";
 import { cn } from "../../lib/utils";
@@ -213,22 +213,31 @@ function StudentNotificationFeed({
   const isSection = presentation === "section";
   const [open, setOpen] = useState(false);
   const [reports, setReports] = useState<IssueReport[]>([]);
-  const [publishedEvents, setPublishedEvents] = useState<PublicEventPreview[]>([]);
-  const [publishedEventsLoading, setPublishedEventsLoading] = useState(false);
   const [eventClockMs, setEventClockMs] = useState(() => Date.now());
-  const [eventServerOffsetMs, setEventServerOffsetMs] = useState(0);
   const [preferences, setPreferences] = useState<StudentNotificationPreferences | null>(null);
   const [reportError, setReportError] = useState(false);
-  const [publishedEventsError, setPublishedEventsError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [readIds, setReadIds] = useState(() => loadReadIds(ownerId));
-  const eventRequestId = useRef(0);
+  const reportRequestInFlight = useRef(false);
+  const lastReportRefreshAt = useRef(0);
+  const publishedEventFeed = usePublishedEventPreviews({
+    campusId,
+    enabled: Boolean(campusId && preferences !== null && preferences.campusEvents !== false),
+  });
+  const publishedEvents = publishedEventFeed.events;
+  const publishedEventsLoading = publishedEventFeed.loading;
+  const publishedEventsError = Boolean(publishedEventFeed.error);
+  const eventServerOffsetMs = publishedEventFeed.serverOffsetMs;
 
-  const refreshReports = useCallback(async () => {
+  const refreshReports = useCallback(async (force = true) => {
     if (reportsSnapshot !== undefined) {
       onRetryReports?.();
       return;
     }
+    const now = Date.now();
+    if (reportRequestInFlight.current || (!force && now - lastReportRefreshAt.current < 5_000)) return;
+    reportRequestInFlight.current = true;
+    lastReportRefreshAt.current = now;
     try {
       const result = await reportService.getStudentReports();
       setReports(result);
@@ -236,35 +245,15 @@ function StudentNotificationFeed({
     } catch {
       setReportError(true);
     } finally {
+      reportRequestInFlight.current = false;
       setLoading(false);
     }
   }, [onRetryReports, reportsSnapshot]);
 
-  const refreshPublishedEvents = useCallback(async () => {
-    if (!campusId || preferences?.campusEvents === false) {
-      setPublishedEvents([]);
-      setPublishedEventsLoading(false);
-      setPublishedEventsError(false);
-      return;
-    }
-    const requestId = ++eventRequestId.current;
-    setPublishedEventsLoading(true);
-    try {
-      const feed = await eventOverlayService.listPublishedEventPreviews(campusId);
-      if (requestId !== eventRequestId.current) return;
-      const receivedAt = Date.now();
-      const serverOffset = Date.parse(feed.serverNow) - receivedAt;
-      setEventClockMs(receivedAt);
-      setEventServerOffsetMs(Number.isFinite(serverOffset) ? serverOffset : 0);
-      setPublishedEvents(feed.events);
-      setPublishedEventsLoading(false);
-      setPublishedEventsError(false);
-    } catch {
-      if (requestId !== eventRequestId.current) return;
-      setPublishedEventsLoading(false);
-      setPublishedEventsError(true);
-    }
-  }, [campusId, preferences?.campusEvents]);
+  const refreshPublishedEvents = useCallback((force = true) => {
+    if (!campusId || preferences === null || preferences.campusEvents === false) return Promise.resolve();
+    return publishedEventFeed.refresh(force);
+  }, [campusId, preferences?.campusEvents, publishedEventFeed.refresh]);
 
   useEffect(() => {
     let mounted = true;
@@ -281,10 +270,10 @@ function StudentNotificationFeed({
       if (mounted) setPreferences(value);
     });
     const interval = reportsSnapshot === undefined ? window.setInterval(() => {
-      if (document.visibilityState !== "hidden") refreshWhileMounted();
-    }, 30_000) : undefined;
+      if (document.visibilityState !== "hidden") void refreshReports(false);
+    }, 60_000) : undefined;
     const refreshOnFocus = () => {
-      if (reportsSnapshot === undefined && document.visibilityState !== "hidden") refreshWhileMounted();
+      if (reportsSnapshot === undefined && document.visibilityState !== "hidden") void refreshReports(false);
     };
     window.addEventListener("focus", refreshOnFocus);
     document.addEventListener("visibilitychange", refreshOnFocus);
@@ -295,29 +284,6 @@ function StudentNotificationFeed({
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
   }, [ownerId, refreshReports, reportsSnapshot, reportsSnapshotError, reportsSnapshotLoading]);
-
-  useEffect(() => {
-    let mounted = true;
-    const refreshWhileMounted = () => {
-      if (mounted) void refreshPublishedEvents();
-    };
-    refreshWhileMounted();
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") refreshWhileMounted();
-    }, 30_000);
-    const refreshOnFocus = () => {
-      if (document.visibilityState !== "hidden") refreshWhileMounted();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    return () => {
-      mounted = false;
-      eventRequestId.current += 1;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-    };
-  }, [refreshPublishedEvents]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setEventClockMs(Date.now()), 15_000);
@@ -409,7 +375,7 @@ function StudentNotificationFeed({
           if (!open) {
             void refreshReports();
             void refreshEventUpdates();
-            void refreshPublishedEvents();
+            void refreshPublishedEvents(false);
           }
           setOpen(!open);
         }}

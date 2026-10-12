@@ -39,6 +39,8 @@ function createStore(ownerId: string) {
   let serverStates: Map<string, { isCurrent: boolean; isRead: boolean }> | undefined;
   let serverReceipts: Map<string, string> | undefined;
   const readRequests = new Map<string, Promise<ReadResult>>();
+  let refreshInFlight: Promise<void> | null = null;
+  let lastAutomaticRefreshAt = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   const listeners = new Set<() => void>();
   const memoryRead = new Map<string, string>();
@@ -60,72 +62,85 @@ function createStore(ownerId: string) {
     snapshot = { ...snapshot, ...patch, events, unreadIds, unreadCount: unreadIds.size + (patch.handoverUpdates ?? snapshot.handoverUpdates).filter(item => !item.isRead && hasEventHandoverWork(item)).length };
     listeners.forEach(listener => listener());
   };
-  const refresh = async (retrySync = true) => {
-    if (!listeners.size) return;
+  const refresh = (retrySync = true): Promise<void> => {
+    if (!listeners.size) return Promise.resolve();
+    if (refreshInFlight) return refreshInFlight;
+    const now = Date.now();
+    if (!retrySync && !snapshot.loading && now - lastAutomaticRefreshAt < 5_000) return Promise.resolve();
+    if (!retrySync) lastAutomaticRefreshAt = now;
     const request = ++generation;
-    if (!snapshot.events.length && !snapshot.error) publish({ loading: true });
-    try {
-      const nextContexts = await eventOrganizationService.listMyEventOrganizations();
-      if (request !== generation || !listeners.size) return;
-      const nextScope = nextContexts.map(item => `${item.organizationId}:${item.grantId}`).sort().join('|');
-      if (scopeKey !== nextScope) {
-        scopeKey = nextScope;
-        contexts = nextContexts;
-        serverStates = undefined;
-        serverReceipts = undefined;
-        memoryRead.clear();
-        readRequests.clear();
-        ++lifecycle;
-        publish({ events: [], handoverUpdates: [], loading: true, receiptError: '' });
-      } else contexts = nextContexts;
+    const task = (async () => {
+      if (!snapshot.events.length && !snapshot.error) publish({ loading: true });
+      try {
+        const nextContexts = await eventOrganizationService.listMyEventOrganizations();
+        if (request !== generation || !listeners.size) return;
+        const nextScope = nextContexts.map(item => `${item.organizationId}:${item.grantId}`).sort().join('|');
+        if (scopeKey !== nextScope) {
+          scopeKey = nextScope;
+          contexts = nextContexts;
+          serverStates = undefined;
+          serverReceipts = undefined;
+          memoryRead.clear();
+          readRequests.clear();
+          ++lifecycle;
+          publish({ events: [], handoverUpdates: [], loading: true, receiptError: '' });
+        } else contexts = nextContexts;
 
-      const [organizationResults, legacyEvents] = await Promise.all([
-        Promise.all(nextContexts.map(async context => {
-          const result = await eventOverlayService.listOrganizationEvents(context.organizationId, { limit: 500, offset: 0, includeArchived: false });
-          return result.events.filter(event => event.organizationId === context.organizationId);
-        })),
-        eventOverlayService.listEventOverlays({ allCampuses: true, createdByUserId: ownerId, strict: true }),
-      ]);
-      if (request !== generation || !listeners.size) return;
-      const accessibleBoundEvents = organizationResults.flat();
-      const ownLegacyEvents = legacyEvents.filter(event => !event.organizationId && event.createdByUserId === ownerId);
-      const events = [...accessibleBoundEvents, ...ownLegacyEvents];
-      let receiptError = '';
-      serverStates = undefined;
-      serverReceipts = undefined;
-      try {
-        const states = await eventNotificationService.getStates(ownerId, 'org_review', events, retrySync);
+        const [organizationResults, legacyEvents] = await Promise.all([
+          Promise.all(nextContexts.map(async context => {
+            const result = await eventOverlayService.listOrganizationEvents(context.organizationId, { limit: 500, offset: 0, includeArchived: false });
+            return result.events.filter(event => event.organizationId === context.organizationId);
+          })),
+          eventOverlayService.listEventOverlays({ allCampuses: true, createdByUserId: ownerId, strict: true }),
+        ]);
         if (request !== generation || !listeners.size) return;
-        serverStates = states;
-        serverReceipts = new Map(events.filter(event => { const state = states.get(event.id); return state?.isCurrent && state.isRead; }).map(event => [eventKey(event), eventReviewFingerprint(event)!]));
-      } catch (cause) {
+        const accessibleBoundEvents = organizationResults.flat();
+        const ownLegacyEvents = legacyEvents.filter(event => !event.organizationId && event.createdByUserId === ownerId);
+        const events = [...accessibleBoundEvents, ...ownLegacyEvents];
+        let receiptError = '';
+        serverStates = undefined;
+        serverReceipts = undefined;
+        try {
+          const states = await eventNotificationService.getStates(ownerId, 'org_review', events, retrySync);
+          if (request !== generation || !listeners.size) return;
+          serverStates = states;
+          serverReceipts = new Map(events.filter(event => { const state = states.get(event.id); return state?.isCurrent && state.isRead; }).map(event => [eventKey(event), eventReviewFingerprint(event)!]));
+        } catch (cause) {
+          if (request !== generation || !listeners.size) return;
+          serverStates = undefined;
+          serverReceipts = undefined;
+          if (cause instanceof EventNotificationSyncUnavailable) {
+            // Legacy creator-owned reads can still fall back to this browser.
+            // Bound-event eligibility is server-only to avoid resurrecting old approvals.
+            receiptError = cause.message;
+          } else receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        }
+
+        let handoverUpdates: EventOrganizationHandoverSummary[] = [];
+        try {
+          handoverUpdates = await Promise.all(nextContexts.map(async context => {
+            const summary = await eventOrganizationService.getHandoverSummary(context.grantId);
+            return { ...summary, isRead: summary.isRead || memoryHandoverRead.has(context.grantId) || localHandoverRead(ownerId, context.grantId) };
+          }));
+        } catch (cause) {
+          if (request !== generation || !listeners.size) return;
+          receiptError ||= cause instanceof Error ? cause.message : 'Handover status could not sync. Please retry.';
+        }
+        if (request !== generation || !listeners.size) return;
+        publish({ events, handoverUpdates, loading: false, error: '', receiptError });
+      } catch (error) {
         if (request !== generation || !listeners.size) return;
         serverStates = undefined;
         serverReceipts = undefined;
-        if (cause instanceof EventNotificationSyncUnavailable) {
-          // Legacy creator-owned reads can still fall back to this browser.
-          // Bound-event eligibility is server-only to avoid resurrecting old approvals.
-          receiptError = cause.message;
-        } else receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        publish({ events: [], handoverUpdates: [], loading: false, error: error instanceof Error ? error.message : "Could not load event updates. Please retry." });
       }
-      let handoverUpdates: EventOrganizationHandoverSummary[] = [];
-      try {
-        handoverUpdates = await Promise.all(nextContexts.map(async context => {
-          const summary = await eventOrganizationService.getHandoverSummary(context.grantId);
-          return { ...summary, isRead: summary.isRead || memoryHandoverRead.has(context.grantId) || localHandoverRead(ownerId, context.grantId) };
-        }));
-      } catch (cause) {
-        if (request !== generation || !listeners.size) return;
-        receiptError ||= cause instanceof Error ? cause.message : 'Handover status could not sync. Please retry.';
-      }
-      if (request !== generation || !listeners.size) return;
-      publish({ events, handoverUpdates, loading: false, error: '', receiptError });
-    } catch (error) {
-      if (request !== generation || !listeners.size) return;
-      serverStates = undefined;
-      serverReceipts = undefined;
-      publish({ events: [], handoverUpdates: [], loading: false, error: error instanceof Error ? error.message : "Could not load event updates. Please retry." });
-    }
+    })();
+    refreshInFlight = task;
+    void task.then(
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+    );
+    return task;
   };
   const onFocus = () => { if (document.visibilityState !== "hidden") void refresh(false); };
   const updateRead = () => { if (serverReceipts) void refresh(false); else publish(); };
@@ -139,7 +154,7 @@ function createStore(ownerId: string) {
     listeners.add(listener);
     if (listeners.size === 1) {
       void refresh(false);
-      timer = setInterval(onFocus, 15000);
+      timer = setInterval(onFocus, 60000);
       window.addEventListener("focus", onFocus);
       window.addEventListener("online", onFocus);
       document.addEventListener("visibilitychange", onFocus);
@@ -151,6 +166,9 @@ function createStore(ownerId: string) {
       if (listeners.size) return;
       ++generation;
       ++lifecycle; readRequests.clear(); serverReceipts = undefined; serverStates = undefined;
+      refreshInFlight = null;
+      // Actor-scoped fallback receipts survive ordinary route changes, like the
+      // browser receipt cache. They hold no event list and expire on reload.
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("online", onFocus);

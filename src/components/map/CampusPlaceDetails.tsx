@@ -76,7 +76,7 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
   const share = async () => {
     try {
       const result = await shareCampusPlaceLink(place.name || "Campus place", campusPlaceDeepLink(place.id, campusId));
-      if (result === "copied") toast.success("Link copied.");
+      if (result === "copied") toast.success("Link copied.", { duration: 3000, position: "top-center" });
     } catch { toast.error("Link could not be shared", "Please try again."); }
   };
 

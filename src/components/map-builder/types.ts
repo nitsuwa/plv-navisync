@@ -487,6 +487,9 @@ export interface FloorPlan {
   exteriorZones?: FloorExteriorZone[];
   entranceSteps?: FloorEntranceSteps[];
   entranceRamps?: FloorEntranceRamp[];
+  /** Navigation nodes intentionally retained as waypoints after a visual
+   * template replaces their linked physical object. */
+  templatePreservedNavigationNodeIds?: string[];
 }
 
 export type FloorExtensionSide = "top" | "bottom" | "left" | "right";
@@ -665,6 +668,7 @@ export interface FloorUndoEntry {
   exteriorZones?: FloorExteriorZone[];
   entranceSteps?: FloorEntranceSteps[];
   entranceRamps?: FloorEntranceRamp[];
+  templatePreservedNavigationNodeIds?: string[];
   /** B5 Phase 2: floor-scoped nav graph snapshot for undo/redo integration. */
   navNodes?: NavigationNode[];
   navEdges?: NavigationEdge[];

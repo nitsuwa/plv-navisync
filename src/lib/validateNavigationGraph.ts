@@ -161,6 +161,9 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
   const nodes = campus.navNodes ?? [];
   const edges = campus.navEdges ?? [];
   const buildings = campus.buildings ?? [];
+  const templatePreservedNavigationNodeIds = new Set(buildings.flatMap((building) =>
+    (building.floors ?? []).flatMap((floor) => floor.templatePreservedNavigationNodeIds ?? []),
+  ));
 
   const nodeMap = nodeById(nodes);
   const nodeIds = new Set(nodes.map((n) => n.id));
@@ -447,10 +450,13 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
       const floor = building?.floors.find((f) => f.id === node.floorId);
       const door = floor?.doors?.find((d) => d.id === node.doorId);
       if (!door) {
+        const retainedByTemplateReplacement = templatePreservedNavigationNodeIds.has(node.id);
         issues.push({
           type: "nav_broken_edge",
-          severity: "error",
-          message: `Navigation node "${node.name}" references a door that no longer exists.`,
+          severity: retainedByTemplateReplacement ? "warning" : "error",
+          message: retainedByTemplateReplacement
+            ? `Navigation node "${node.name}" was retained by a Floor template replacement; reconnect it to a current Door or leave it as a waypoint.`
+            : `Navigation node "${node.name}" references a door that no longer exists.`,
           nodeId: node.id,
           buildingId: node.buildingId,
           floorId: node.floorId,
@@ -464,10 +470,13 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
       const floor = building?.floors.find((f) => f.id === node.floorId);
       const room = floor?.rooms?.find((r) => r.id === node.roomId);
       if (!room) {
+        const retainedByTemplateReplacement = templatePreservedNavigationNodeIds.has(node.id);
         issues.push({
           type: "nav_broken_edge",
-          severity: "error",
-          message: `Navigation node "${node.name}" references a room that no longer exists.`,
+          severity: retainedByTemplateReplacement ? "warning" : "error",
+          message: retainedByTemplateReplacement
+            ? `Navigation node "${node.name}" was retained by a Floor template replacement; reconnect it to a current Room or leave it as a waypoint.`
+            : `Navigation node "${node.name}" references a room that no longer exists.`,
           nodeId: node.id,
           buildingId: node.buildingId,
           floorId: node.floorId,

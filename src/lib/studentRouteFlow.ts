@@ -1,4 +1,4 @@
-import type { PlannedRoute, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
+import type { PlannedRoute, RouteContextHandoff, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
 import type { FloorPlan, NavigationNode } from "../components/map-builder/types";
 import { pointAlongPolyline } from "./geo";
 
@@ -9,6 +9,16 @@ export type StudentCameraMode = "follow" | "explore";
 export interface StudentRouteFocusTarget {
   context: "campus" | "floor";
   point: { x: number; y: number };
+}
+
+/** User-facing Floor name, preferring the published label over graph indices. */
+export function studentRouteFloorLabel(
+  segment?: Pick<RouteIndoorSegment, "floorNumber" | "floorLabel"> | null,
+  fallback = "the next Floor",
+): string {
+  if (!segment) return fallback;
+  return segment.floorLabel
+    || (segment.floorNumber === undefined ? fallback : segment.floorNumber === 1 ? "Ground Floor" : `Floor ${segment.floorNumber}`);
 }
 
 /** Resolve Recenter from the same route progress used by the moving marker. */
@@ -132,9 +142,7 @@ export function studentFacingRouteSteps(route: PlannedRoute): RouteStep[] {
       : -1;
     if (targetWalkIndex <= index + 1) return;
     for (let skipped = index + 1; skipped < targetWalkIndex; skipped += 1) hidden.add(skipped);
-    const targetFloor = targetSegment.floorNumber === undefined
-      ? "the connected Floor"
-      : targetSegment.floorNumber === 1 ? "Ground Floor" : `Floor ${targetSegment.floorNumber}`;
+    const targetFloor = studentRouteFloorLabel(targetSegment, "the connected Floor");
     const label = resolved.label.trim() || "elevator";
     authoredSteps[index] = {
       ...step,
@@ -170,6 +178,96 @@ export function studentFacingRouteSteps(route: PlannedRoute): RouteStep[] {
       );
       if (duplicateStartIndex >= 0) hidden.add(duplicateStartIndex);
     });
+
+    // Graph-generated SOS itineraries can encode the final floor-to-campus
+    // boundary as a synthetic "Start from Exterior Stair …" row instead of
+    // an "Already at …" row. Keep that authored handoff actionable, and use
+    // its context indices so the following walk/arrival resolve to Campus.
+    const handoffs = route.contextHandoffs ?? [];
+    const exitHandoffIndex = handoffs.findIndex((handoff) => handoff.kind === "exit_building"
+      && route.contextLegs?.[handoff.fromContextLegIndex]?.kind === "floor"
+      && route.contextLegs?.[handoff.toContextLegIndex]?.kind === "campus");
+    const exitHandoff = exitHandoffIndex >= 0 ? handoffs[exitHandoffIndex] : undefined;
+    if (exitHandoff) {
+      const matchedHandoffSteps = new Map<number, number>();
+      handoffs.forEach((handoff, handoffIndex) => {
+        const transitionStepIndex = route.steps.findIndex((_, index) => {
+          const transition = routeTransitionForStep(route, route.steps, index);
+          if (transition?.kind !== handoff.kind) return false;
+          const handoffNodeId = handoff.detail?.nodeId ?? handoff.nodeId;
+          return handoffNodeId
+            ? transition.detail?.nodeId === handoffNodeId
+            : transition.handoff?.fromContextLegIndex === handoff.fromContextLegIndex;
+        });
+        if (transitionStepIndex >= 0) matchedHandoffSteps.set(transitionStepIndex, handoffIndex);
+      });
+
+      const firstVerticalTransition = [...matchedHandoffSteps.entries()]
+        .filter(([, handoffIndex]) => handoffs[handoffIndex]?.kind === "stairs" || handoffs[handoffIndex]?.kind === "elevator")
+        .sort(([left], [right]) => left - right)[0];
+      if (firstVerticalTransition) {
+        const [transitionStepIndex, handoffIndex] = firstVerticalTransition;
+        const startIndex = transitionStepIndex - 1;
+        const startStep = authoredSteps[startIndex];
+        const approachStep = authoredSteps[startIndex - 1];
+        const handoffLabel = handoffs[handoffIndex].label.toLocaleLowerCase().replace(/[.!?]+$/g, "").trim();
+        const startLabel = startStep?.instruction.replace(/^start from\s+/i, "").replace(/[.!?]+$/g, "").toLocaleLowerCase().trim();
+        if (startStep && /^start from\s+/i.test(startStep.instruction)
+          && approachStep?.icon === "walk"
+          && startLabel === handoffLabel) {
+          // This start row follows the indoor approach to the first stair and
+          // otherwise leaves Follow paused before the actual transition.
+          // The walk already supplies that location; the stair step is next.
+          hidden.add(startIndex);
+        }
+      }
+
+      const lastPriorTransitionStep = [...matchedHandoffSteps.keys()]
+        .filter((stepIndex) => matchedHandoffSteps.get(stepIndex) !== exitHandoffIndex)
+        .reduce((last, stepIndex) => Math.max(last, stepIndex), -1);
+      const normalizedExitLabel = exitHandoff.label.toLocaleLowerCase().replace(/[.!?]+$/g, "").trim();
+      const syntheticExitStepIndex = authoredSteps.reduce((match, step, index) => {
+        if (index <= lastPriorTransitionStep || !/^start from\s+/i.test(step.instruction)) return match;
+        const startLabel = step.instruction.replace(/^start from\s+/i, "").replace(/[.!?]+$/g, "").toLocaleLowerCase().trim();
+        return startLabel === normalizedExitLabel ? index : match;
+      }, -1);
+      if (syntheticExitStepIndex >= 0) {
+        const exitLabel = exitHandoff.label.trim() || "the emergency exit";
+        authoredSteps[syntheticExitStepIndex] = {
+          ...authoredSteps[syntheticExitStepIndex],
+          icon: "enter",
+          instruction: `Exit via ${exitLabel} to Campus.`,
+          contextLegIndex: exitHandoff.fromContextLegIndex,
+          contextHandoffIndex: exitHandoffIndex,
+        };
+        matchedHandoffSteps.set(syntheticExitStepIndex, exitHandoffIndex);
+      }
+
+      // A route may have several zero-walk stair floors. Associate each
+      // transition with its exact source context, then carry the destination
+      // context forward to the next step. This keeps Previous/Next, Follow,
+      // the visible Floor, and the final outdoor leg on the same itinerary.
+      let contextLegIndex = 0;
+      authoredSteps.forEach((step, index) => {
+        const handoffIndex = matchedHandoffSteps.get(index);
+        if (handoffIndex !== undefined) {
+          const handoff = handoffs[handoffIndex];
+          contextLegIndex = handoff.fromContextLegIndex;
+          authoredSteps[index] = {
+            ...step,
+            contextLegIndex: handoff.fromContextLegIndex,
+            contextHandoffIndex: handoffIndex,
+          };
+          contextLegIndex = handoff.toContextLegIndex;
+          return;
+        }
+        if (step.contextLegIndex !== undefined) {
+          contextLegIndex = step.contextLegIndex;
+          return;
+        }
+        authoredSteps[index] = { ...step, contextLegIndex };
+      });
+    }
   }
   const visible = authoredSteps.filter((step, index) => !hidden.has(index)).filter((step) => {
     const instruction = step.instruction.trim();
@@ -322,11 +420,17 @@ export function routeTransitionForStep(
   route: PlannedRoute,
   steps: readonly RouteStep[],
   stepIndex: number,
-): { kind: StudentRouteTransitionKind; detail?: RouteTransitionDetail } | null {
+): { kind: StudentRouteTransitionKind; detail?: RouteTransitionDetail; handoff?: RouteContextHandoff } | null {
   const step = steps[stepIndex];
   if (!step) return null;
+  const handoff = step.contextHandoffIndex === undefined
+    ? undefined
+    : route.contextHandoffs?.[step.contextHandoffIndex];
   if (step.icon === "enter") {
-    return { kind: /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building" };
+    return {
+      kind: /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building",
+      ...(handoff ? { handoff } : {}),
+    };
   }
   if (step.icon !== "stairs" && step.icon !== "elevator") return null;
 
@@ -344,16 +448,16 @@ export function routeTransitionForStep(
   // Stair" on several Floors). Keep each one associated with its route-order
   // occurrence instead of repeatedly resolving the first identical label.
   if (orderedMatch && instruction.includes(orderedMatch.label.trim().toLocaleLowerCase())) {
-    return { kind, detail: resolveDirectElevatorTarget(route, orderedMatch) };
+    return { kind, detail: resolveDirectElevatorTarget(route, orderedMatch), ...(handoff ? { handoff } : {}) };
   }
-  if (namedMatches.length === 1) return { kind, detail: resolveDirectElevatorTarget(route, namedMatches[0]) };
+  if (namedMatches.length === 1) return { kind, detail: resolveDirectElevatorTarget(route, namedMatches[0]), ...(handoff ? { handoff } : {}) };
   if (namedMatches.length > 1) {
     const orderedNamedMatch = namedMatches.find((detail) => detail.nodeId === orderedMatch?.nodeId);
-    if (orderedNamedMatch) return { kind, detail: resolveDirectElevatorTarget(route, orderedNamedMatch) };
+    if (orderedNamedMatch) return { kind, detail: resolveDirectElevatorTarget(route, orderedNamedMatch), ...(handoff ? { handoff } : {}) };
   }
   // Legacy instructions may omit an authored marker label. Preserve route
   // order so repeated stairs/elevators still resolve to their correct shaft.
-  return { kind, ...(orderedMatch ? { detail: resolveDirectElevatorTarget(route, orderedMatch) } : {}) };
+  return { kind, ...(orderedMatch ? { detail: resolveDirectElevatorTarget(route, orderedMatch) } : {}), ...(handoff ? { handoff } : {}) };
 }
 
 /** Collapse zero-walk intermediate stops when the same authored elevator
@@ -556,9 +660,13 @@ export function studentRouteTransitionCues(
       const isExit = transition.kind === "exit_building";
       let point: { x: number; y: number } | undefined;
       if (!isExit && context.kind === "campus") {
-        point = campusPoints.at(-1);
+        point = transition.handoff?.sourcePoint
+          ?? (source.contextLegIndex === undefined ? undefined : route.contextLegs?.[source.contextLegIndex]?.waypoints.at(-1))
+          ?? campusPoints.at(-1);
       } else {
-        point = isExit && context.kind === "floor" ? source.segment?.waypoints.at(-1) : undefined;
+        point = isExit && context.kind === "floor"
+          ? transition.handoff?.sourcePoint ?? source.segment?.waypoints.at(-1)
+          : undefined;
       }
       if (point) cues.push({ id: step.id, kind: transition.kind, label: step.instruction, point });
       return;
@@ -591,6 +699,7 @@ export interface StudentRouteSeekTarget {
   phase: "outdoor" | "origin-indoor" | "destination-indoor";
   segment: RouteIndoorSegment | null;
   segmentIndex: number;
+  contextLegIndex?: number;
   /** Progress within the selected authored segment; walking steps begin at 0. */
   segmentProgress: number;
   /** Canonical progress on the outdoor route, used when the selected context is Campus. */
@@ -619,6 +728,27 @@ export function studentRouteSeekTarget(
 ): StudentRouteSeekTarget {
   const safeIndex = Math.max(0, Math.min(steps.length - 1, stepIndex));
   const indoorSegments = route.indoorSegments ?? [];
+  const authoredLegs = route.contextLegs;
+  const authoredLegIndex = steps[safeIndex]?.contextLegIndex;
+  if (authoredLegs && authoredLegIndex !== undefined) {
+    const leg = authoredLegs[authoredLegIndex];
+    if (leg) {
+      const segment = leg.kind === "floor" && leg.segmentIndex !== undefined
+        ? indoorSegments[leg.segmentIndex] ?? null
+        : null;
+      const step = steps[safeIndex];
+      const atEnd = step.icon !== "walk" && step.icon !== "start";
+      return {
+        context: leg.kind,
+        phase: leg.kind === "campus" ? "outdoor" : segment?.afterOutdoor ? "destination-indoor" : "origin-indoor",
+        segment,
+        segmentIndex: segment ? leg.segmentIndex! : -1,
+        contextLegIndex: authoredLegIndex,
+        segmentProgress: atEnd ? 1 : 0,
+        routeProgress: atEnd ? 1 : 0,
+      };
+    }
+  }
   const walkStepIndexes = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
   const explicitCampusWalkOrdinal = walkStepIndexes.findIndex((index) => /\bcampus path\b/i.test(steps[index]?.instruction ?? ""));
   // Authored itinerary order is the order in which the planner emitted the
@@ -695,6 +825,26 @@ export function studentRouteSeekTarget(
 }
 
 /**
+ * Resolve the presentation context after inspecting a planned transition in
+ * Explore. This deliberately reuses the canonical transition/step resolvers;
+ * callers may display the returned target without writing the Follow cursor.
+ */
+export function studentRouteExploreTransitionTarget(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  transitionStepIndex: number,
+): { transition: NonNullable<ReturnType<typeof routeTransitionForStep>>; targetStepIndex: number; target: StudentRouteSeekTarget } | null {
+  const transition = routeTransitionForStep(route, steps, transitionStepIndex);
+  if (!transition || steps.length === 0) return null;
+  const targetStepIndex = Math.min(steps.length - 1, Math.max(0, transitionStepIndex) + 1);
+  return {
+    transition,
+    targetStepIndex,
+    target: studentRouteSeekTarget(route, steps, targetStepIndex),
+  };
+}
+
+/**
  * Resolve a fractional cursor between canonical route-step boundaries. Within
  * one authored leg, progress interpolates along that leg's existing geometry.
  * At a Building/Floor handoff, the cursor stays at the source boundary, then
@@ -715,7 +865,8 @@ export function studentRoutePlaybackTarget(
   const to = studentRouteSeekTarget(route, steps, toIndex);
   const sameLeg = from.context === to.context
     && from.phase === to.phase
-    && from.segmentIndex === to.segmentIndex;
+    && from.segmentIndex === to.segmentIndex
+    && from.contextLegIndex === to.contextLegIndex;
   if (!sameLeg) return { ...(fraction < 0.5 ? from : to), position: bounded };
   return {
     ...from,
@@ -732,22 +883,34 @@ export function studentRoutePositionForLeg(
   phase: StudentRouteSeekTarget["phase"],
   segment: RouteIndoorSegment | null,
   progress: number,
+  currentPosition = 0,
+  contextLegIndex?: number,
 ): number {
   const walkIndices = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
+  const matchingWalks: number[] = [];
   for (const stepIndex of walkIndices) {
     const target = studentRouteSeekTarget(route, steps, stepIndex);
-    if (target.phase === phase && target.segmentIndex === (segment ? (route.indoorSegments ?? []).indexOf(segment) : -1)) {
-      // The current walk owns every position strictly before its endpoint.
-      // At the endpoint the next canonical step becomes active exactly once.
-      // Capping at .999 kept the walk highlighted forever and led the UI to
-      // compensate by showing the next transition early using a loose .78
-      // progress threshold.
-      const boundedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-      const cursor = boundedProgress >= 1 ? stepIndex + 1 : stepIndex + boundedProgress;
-      return Math.min(Math.max(0, steps.length - 1), cursor);
+    if (target.phase === phase
+      && target.segmentIndex === (segment ? (route.indoorSegments ?? []).indexOf(segment) : -1)
+      && (contextLegIndex === undefined || target.contextLegIndex === contextLegIndex)) {
+      matchingWalks.push(stepIndex);
     }
   }
-  return 0;
+
+  // Some published routes contain authored indoor segments that have no
+  // matching student-facing instruction (for example, a connector segment
+  // emitted by the graph). When that happens, resetting to step zero makes
+  // the player, instruction, and visible Floor disagree at a context handoff.
+  // Keep the canonical cursor already established by the route transition.
+  const boundedCurrent = Math.max(0, Math.min(Math.max(0, steps.length - 1), Number.isFinite(currentPosition) ? currentPosition : 0));
+  const stepIndex = matchingWalks.find((candidate) => candidate >= Math.floor(boundedCurrent));
+  if (stepIndex === undefined) return boundedCurrent;
+
+  // The current walk owns every position strictly before its endpoint. At
+  // the endpoint the next canonical step becomes active exactly once.
+  const boundedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+  const cursor = boundedProgress >= 1 ? stepIndex + 1 : stepIndex + boundedProgress;
+  return Math.min(Math.max(0, steps.length - 1), cursor);
 }
 
 /** Put a seek at the beginning of the selected instruction. A tiny interior
@@ -777,10 +940,12 @@ export function studentRouteFacts(route: PlannedRoute, preference: "best" | "sta
   if (transitions.length === 0 && route.transitions.some((label) => /elevator/i.test(label))) facts.push("Elevator");
   if (transitions.length === 0 && route.transitions.some((label) => /stairs?/i.test(label))) facts.push("Stairs");
 
-  const entries = route.steps.filter((step) => step.icon === "enter").length;
+  const entries = route.steps.filter((step) => step.icon === "enter" && !/^\s*exit\b/i.test(step.instruction)).length;
   if (entries > 0) facts.push(`${entries} building ${entries === 1 ? "entry" : "entries"}`);
-  const floors = [...new Set(indoorSegments.map((segment) => segment.floorNumber).filter((value): value is number => Number.isFinite(value)))];
-  if (floors.length > 1) facts.push(`Floor ${floors[0]} → Floor ${floors[floors.length - 1]}`);
+  const floors = [...new Set(indoorSegments.map((segment) => segment.floorLabel
+    || (segment.floorNumber === undefined ? undefined : `Floor ${segment.floorNumber}`))
+    .filter((value): value is string => Boolean(value)))];
+  if (floors.length > 1) facts.push(`${floors[0]} → ${floors[floors.length - 1]}`);
   if (route.mode === "accessible") facts.push("Accessible");
   else if (route.mode === "emergency") facts.push("Emergency route");
   else if (preference !== "best") facts.push(preference === "stairs" ? "Prefers stairs" : "Prefers elevator");

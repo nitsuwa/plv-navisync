@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Bookmark, Flag, Settings, HelpCircle, LogOut,
-  ChevronRight, MapPin, X, User, Sun, Moon,
+  ChevronRight, MapPin, X, User, Sun, Moon, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { useTheme } from "../../hooks/useTheme";
+import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/utils";
 
 interface MoreSheetProps {
@@ -18,6 +19,8 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
   const navigate = useNavigate();
   const { username, role, signOut } = useStudentAuth();
   const { theme, toggleTheme } = useTheme();
+  const { error: showError } = useToast();
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -29,9 +32,17 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
   }, [open]);
 
   const handleLogout = async () => {
-    await signOut();
-    onClose();
-    navigate("/");
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+      onClose();
+      navigate("/");
+    } catch {
+      showError("This browser could not clear the saved session. Please retry.");
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   const initials = username.slice(0, 2).toUpperCase();
@@ -137,10 +148,12 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
             <div className="px-5 pb-8 border-t border-border/50 pt-2">
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-destructive/30 text-destructive text-sm font-bold hover:bg-destructive/8 transition-colors"
+                disabled={signingOut}
+                aria-busy={signingOut}
+                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-destructive/30 text-destructive text-sm font-bold hover:bg-destructive/8 transition-colors disabled:opacity-60"
               >
-                <LogOut className="h-4 w-4" />
-                Sign Out
+                {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                {signingOut ? "Signing out…" : "Sign Out"}
               </button>
             </div>
           </motion.div>

@@ -148,6 +148,7 @@ export function readonlyFloorPlanViewport(
 }
 import { roomOutlinePoints, roomShapePath } from "../../lib/roomShape";
 import { sortFloorItemsByLocalZ } from "../../lib/floorRenderLayers";
+import { readonlyWallJunctions } from "../../lib/readonlyWallJunctions";
 
 // ── Room rendering ──────────────────────────────────────────────────────────
 
@@ -528,6 +529,7 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
   // Keep geometry filtering/sorting tied to authored data, not camera commits
   // or lightweight hover/selection changes.
   const visibleWalls = useMemo(() => sortFloorItemsByLocalZ((floor.walls || []).filter((w) => w.visible !== false)), [floor.walls]);
+  const wallJoints = useMemo(() => readonlyWallJunctions(visibleWalls, floor.showWallJunctions), [floor.showWallJunctions, visibleWalls]);
   const visibleDoors = useMemo(() => sortFloorItemsByLocalZ((floor.doors || []).filter((d) => d.visible !== false)), [floor.doors]);
   const visibleWindows = useMemo(() => sortFloorItemsByLocalZ((floor.windows || []).filter((w) => w.visible !== false)), [floor.windows]);
   const visibleStairs = useMemo(() => sortFloorItemsByLocalZ((floor.stairs || []).filter((s) => s.visible !== false)), [floor.stairs]);
@@ -725,6 +727,23 @@ export const ReadonlyFloorPlanScene = memo(function ReadonlyFloorPlanScene({
       <g data-semantic-layer="walls">
         {visibleWalls.map((wall) => (
           <WallVisual key={wall.id} wall={wall} />
+        ))}
+        {wallJoints.map((joint) => (
+          <g
+            key={`wall-joint-${joint.x}-${joint.y}`}
+            data-testid="readonly-wall-joint-cap"
+            data-wall-joint-key={`${Math.round(joint.x * 100) / 100},${Math.round(joint.y * 100) / 100}`}
+            data-wall-joint-wall-ids={joint.wallIds.join(" ")}
+            pointerEvents="none"
+            aria-hidden="true"
+          >
+            <rect x={joint.x - joint.radius} y={joint.y - joint.radius}
+              width={joint.radius * 2} height={joint.radius * 2}
+              fill={joint.casingColor} opacity={0.96} />
+            <rect x={joint.x - Math.max(1, joint.radius - 1)} y={joint.y - Math.max(1, joint.radius - 1)}
+              width={Math.max(2, (joint.radius - 1) * 2)} height={Math.max(2, (joint.radius - 1) * 2)}
+              fill={joint.color} />
+          </g>
         ))}
       </g>
 

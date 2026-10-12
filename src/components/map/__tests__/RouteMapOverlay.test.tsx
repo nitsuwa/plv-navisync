@@ -96,6 +96,29 @@ describe("RouteMapOverlay", () => {
     expect(container.querySelector('[data-testid="route-outer-casing"]')).toBeInTheDocument();
   });
 
+  it("writes high-frequency Follow progress into stable SVG nodes", () => {
+    const lineWriter: { current: ((progress: number) => void) | null } = { current: null };
+    const markerWriter: { current: ((progress: number) => void) | null } = { current: null };
+    const { container } = render(<svg>
+      <RouteMapOverlay points={points} mode="standard" walkProgress={0.2} animated layer="line" progressFrameWriterRef={lineWriter} />
+      <RouteMapOverlay points={points} mode="standard" walkProgress={0.2} animated layer="markers" progressFrameWriterRef={markerWriter} />
+    </svg>);
+    const routeBase = container.querySelector('[data-testid="route-outer-casing"]');
+    const completed = container.querySelector('[data-testid="completed-route-line"]');
+    const remaining = container.querySelector('[data-testid="remaining-route-line"]');
+    const current = container.querySelector("[data-route-current-position]");
+
+    lineWriter.current?.(0.55);
+    markerWriter.current?.(0.55);
+
+    expect(container.querySelector('[data-testid="route-outer-casing"]')).toBe(routeBase);
+    expect(completed).toHaveAttribute("data-progress", "0.55");
+    expect(completed).toHaveAttribute("stroke-dasharray", "137.5 250");
+    expect(remaining).toHaveAttribute("stroke-dasharray", "112.5 250");
+    expect(remaining).toHaveAttribute("stroke-dashoffset", "-137.5");
+    expect(current).toHaveAttribute("transform", "translate(80,87.5)");
+  });
+
   it("keeps directional flow moving through route Preview without showing a player", () => {
     const { container } = render(<svg><RouteMapOverlay points={points} mode="standard" animated layer="line" /></svg>);
     expect(container.querySelector('[data-testid="route-direction-flow"]')).toBeInTheDocument();

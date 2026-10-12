@@ -24,6 +24,8 @@ function createStore(adminId: string) {
   let lifecycle = 0;
   let serverReceipts: Map<string, string> | undefined;
   const readRequests = new Map<string, Promise<'saved' | 'local' | 'changed' | 'failed'>>();
+  let refreshInFlight: Promise<void> | null = null;
+  let lastAutomaticRefreshAt = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   const listeners = new Set<() => void>();
   const publish = (patch: Partial<Snapshot> = {}) => {
@@ -33,27 +35,39 @@ function createStore(adminId: string) {
     snapshot = { ...snapshot, ...patch, events, unreadIds, unreadCount: unreadIds.size, pendingCount: events.length };
     listeners.forEach(listener => listener());
   };
-  const refresh = async (retrySync = true) => {
-    if (!listeners.size) return;
+  const refresh = (retrySync = true): Promise<void> => {
+    if (!listeners.size) return Promise.resolve();
+    if (refreshInFlight) return refreshInFlight;
+    const now = Date.now();
+    if (!retrySync && now - lastAutomaticRefreshAt < 5_000) return Promise.resolve();
+    if (!retrySync) lastAutomaticRefreshAt = now;
     const request = ++generation;
-    try {
-      const events = await eventOverlayService.listEventOverlays({ allCampuses: true, status: 'pending', strict: true });
-      if (request !== generation || !listeners.size) return;
-      const pending = events.filter(event => event.status === 'pending').sort((a, b) => latestSubmissionTime(b) - latestSubmissionTime(a));
-      let receiptError = '';
+    const task = (async () => {
       try {
-        const states = await eventNotificationService.getStates(adminId, 'admin_submission', pending, retrySync);
+        const events = await eventOverlayService.listEventOverlays({ allCampuses: true, status: 'pending', strict: true });
         if (request !== generation || !listeners.size) return;
-        serverReceipts = new Map(pending.filter(event => { const state = states.get(event.id); return state?.isCurrent && state.isRead; }).map(event => [event.id, eventSubmissionFingerprint(event)!]));
-      } catch (cause) {
-        if (request !== generation || !listeners.size) return;
-        if (cause instanceof EventNotificationSyncUnavailable) serverReceipts = undefined;
-        receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        const pending = events.filter(event => event.status === 'pending').sort((a, b) => latestSubmissionTime(b) - latestSubmissionTime(a));
+        let receiptError = '';
+        try {
+          const states = await eventNotificationService.getStates(adminId, 'admin_submission', pending, retrySync);
+          if (request !== generation || !listeners.size) return;
+          serverReceipts = new Map(pending.filter(event => { const state = states.get(event.id); return state?.isCurrent && state.isRead; }).map(event => [event.id, eventSubmissionFingerprint(event)!]));
+        } catch (cause) {
+          if (request !== generation || !listeners.size) return;
+          if (cause instanceof EventNotificationSyncUnavailable) serverReceipts = undefined;
+          receiptError = cause instanceof Error ? cause.message : 'Read status could not sync. Please retry.';
+        }
+        publish({ events: pending, loading: false, error: '', receiptError });
+      } catch (error) {
+        if (request === generation && listeners.size) publish({ loading: false, error: error instanceof Error ? error.message : 'Could not load event submissions. Please retry.' });
       }
-      publish({ events: pending, loading: false, error: '', receiptError });
-    } catch (error) {
-      if (request === generation && listeners.size) publish({ loading: false, error: error instanceof Error ? error.message : 'Could not load event submissions. Please retry.' });
-    }
+    })();
+    refreshInFlight = task;
+    void task.then(
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+      () => { if (refreshInFlight === task) refreshInFlight = null; },
+    );
+    return task;
   };
   const refreshPreferences = async () => {
     try {
@@ -69,7 +83,7 @@ function createStore(adminId: string) {
     listeners.add(listener);
     if (listeners.size === 1) {
       void refresh(false); void refreshPreferences();
-      timer = setInterval(onFocus, 15000);
+      timer = setInterval(onFocus, 60000);
       window.addEventListener('focus', onFocus);
       document.addEventListener('visibilitychange', onFocus);
       window.addEventListener(ADMIN_SUBMISSION_READ_EVENT, onRead);
@@ -79,7 +93,7 @@ function createStore(adminId: string) {
     return () => {
       listeners.delete(listener);
       if (listeners.size) return;
-      ++generation; ++lifecycle; clearInterval(timer); readRequests.clear(); serverReceipts = undefined;
+      ++generation; ++lifecycle; refreshInFlight = null; clearInterval(timer); readRequests.clear(); serverReceipts = undefined;
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener(ADMIN_SUBMISSION_READ_EVENT, onRead);

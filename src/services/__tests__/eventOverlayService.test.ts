@@ -96,6 +96,20 @@ describe("event overlay service", () => {
     await expect(eventOverlayService.reuseOrganizationEvent(source, organization, "New fair", "50000000-0000-4000-8000-000000000001")).rejects.toThrow(/source layout changed/i);
   });
 
+  it("coalesces concurrent published event preview reads for the same campus", async () => {
+    const { client } = makeClient();
+    vi.mocked(client.rpc).mockResolvedValue({ data: { serverNow: "2026-10-08T02:00:00.000Z", events: [] }, error: null });
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const [first, second] = await Promise.all([
+      eventOverlayService.listPublishedEventPreviews("campus-1"),
+      eventOverlayService.listPublishedEventPreviews("campus-1"),
+    ]);
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+  });
+
   it('reports an expired-session read instead of pretending the event was deleted',async()=>{
     const {client,mapElements}=makeClient();
     mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);

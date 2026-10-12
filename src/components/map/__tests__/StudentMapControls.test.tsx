@@ -57,7 +57,8 @@ describe("StudentMapControls", () => {
     expect(screen.getByTestId("student-map-controls")).toHaveClass("map-layer-controls");
     expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-search-panel")).toHaveClass("right-16");
-    expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]");
+    expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-3", "md:bottom-6", "flex-col", "items-end");
+    expect(screen.getByTestId("student-map-utility-controls")).toHaveStyle({ bottom: "var(--student-map-utility-bottom-inset, calc(0.75rem + env(safe-area-inset-bottom, 0px)))" });
     expect(screen.getByRole("button", { name: "Open directions" })).toBeInTheDocument();
     expect(within(screen.getByTestId("student-map-utility-controls")).getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
@@ -98,17 +99,115 @@ describe("StudentMapControls", () => {
 
     const recenter = screen.getByRole("button", { name: "Recenter map" });
     expect(recenter).toHaveAttribute("data-testid", "student-map-recenter-button");
-    expect(recenter).toHaveAttribute("data-dock", "map-control-top-right");
+    expect(recenter).toHaveAttribute("data-dock", "map-control-bottom-right");
     expect(screen.queryByRole("button", { name: /Drop pin|Move dropped pin|Cancel drop pin/i })).not.toBeInTheDocument();
     fireEvent.click(recenter);
     expect(onResetView).toHaveBeenCalledOnce();
+  });
+
+  it("aligns the single view-mode icon above the utility actions", () => {
+    render(<StudentMapControls {...props({
+      campusViewMode: "3d",
+      campusViewToggleVisible: true,
+      onToggleCampusViewMode: vi.fn(),
+      onResetView: vi.fn(),
+      onScanLocation: vi.fn(),
+    })} />);
+    const stack = screen.getByTestId("student-map-utility-controls");
+    expect(stack.className).toContain("items-end");
+    expect(stack.className).toContain("flex-col");
+    expect(within(stack).getAllByRole("button")[0]).toHaveAttribute("aria-label", "Switch to 2D view");
+    const actions = within(stack).getByTestId("student-map-utility-actions");
+    expect(within(actions).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Recenter map", "Scan location QR", "Open directions",
+    ]);
+  });
+
+  it("keeps the view-mode button reachable above route overlays while yielding other utility actions", () => {
+    const onToggleCampusViewMode = vi.fn();
+    const viewProps = props({ campusViewMode: "2d", campusViewToggleVisible: true, onToggleCampusViewMode });
+    const { rerender } = render(<StudentMapControls {...viewProps} />);
+    const toggle = screen.getByRole("button", { name: "Switch to 3D view" });
+    expect(toggle).toHaveAttribute("data-testid", "student-campus-view-mode-toggle");
+    expect(toggle).toHaveAttribute("data-dock", "map-control-bottom-right");
+    expect(toggle).toHaveAttribute("title", "Switch to 3D");
+    expect(toggle).toHaveClass("h-11", "w-11", "rounded-xl", "md:h-10", "md:w-10");
+    expect(screen.getAllByTestId("student-campus-view-mode-toggle")).toHaveLength(1);
+    expect(screen.getByTestId("student-map-utility-controls").firstElementChild?.contains(toggle)).toBe(true);
+    fireEvent.click(toggle);
+    expect(onToggleCampusViewMode).toHaveBeenCalledOnce();
+
+    rerender(<StudentMapControls {...props({ ...viewProps, mapOverlayOpen: true })} />);
+    const overlayStack = screen.getByTestId("student-map-utility-controls");
+    expect(overlayStack).toHaveAttribute("data-map-overlay-open", "true");
+    expect(screen.getByRole("button", { name: "Switch to 3D view" })).toBeInTheDocument();
+    expect(overlayStack).toHaveClass("bottom-3", "md:bottom-6");
+    expect(screen.queryByRole("button", { name: "Open directions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recenter map" })).not.toBeInTheDocument();
+  });
+
+  it("offers the opposite map renderer with one accessible icon control in either mode", () => {
+    const onToggleCampusViewMode = vi.fn();
+    const { rerender } = render(<StudentMapControls {...props({ campusViewMode: "2d", campusViewToggleVisible: true, onToggleCampusViewMode })} />);
+    const switchTo3D = screen.getByRole("button", { name: "Switch to 3D view" });
+    expect(switchTo3D).toHaveAttribute("title", "Switch to 3D");
+    expect(switchTo3D).toHaveAttribute("data-view-mode-target", "3d");
+    expect(switchTo3D.querySelector("svg")).toBeInTheDocument();
+
+    rerender(<StudentMapControls {...props({ campusViewMode: "3d", campusViewToggleVisible: true, onToggleCampusViewMode })} />);
+    const switchTo2D = screen.getByRole("button", { name: "Switch to 2D view" });
+    expect(switchTo2D).toHaveAttribute("title", "Switch to 2D");
+    expect(switchTo2D).toHaveAttribute("data-view-mode-target", "2d");
+    expect(screen.getAllByTestId("student-campus-view-mode-toggle")).toHaveLength(1);
+  });
+
+  it("keeps the indoor renderer toggle in the utility cluster above the exposed sheet area", () => {
+    render(<StudentMapControls {...props({
+      isFloorMode: true,
+      mapOverlayOpen: true,
+      campusViewMode: "3d",
+      campusViewToggleVisible: true,
+      onToggleCampusViewMode: vi.fn(),
+    })} />);
+
+    const stack = screen.getByTestId("student-map-utility-controls");
+    expect(stack).toHaveAttribute("data-floor-mode", "true");
+    expect(stack).toHaveAttribute("data-map-overlay-open", "true");
+    expect(stack).toHaveClass("bottom-3", "md:bottom-6", "flex-col", "items-end");
+    expect(within(stack).getByRole("button", { name: "Switch to 2D view" })).toBeInTheDocument();
+  });
+
+  it("docks only the view switch above compact Follow panels and below the indoor floor control", () => {
+    const onToggleCampusViewMode = vi.fn();
+    const shared = {
+      campusViewMode: "2d" as const,
+      campusViewToggleVisible: true,
+      onToggleCampusViewMode,
+      navigationActive: true,
+      onResetView: vi.fn(),
+      onScanLocation: vi.fn(),
+      onTogglePin: vi.fn(),
+    };
+    const { rerender } = render(<StudentMapControls {...props(shared)} />);
+
+    const outdoorStack = screen.getByTestId("student-map-utility-controls");
+    expect(outdoorStack).toHaveAttribute("data-navigation-active", "true");
+    expect(outdoorStack).toHaveClass("bottom-3", "md:bottom-6", "flex-col", "items-end");
+    expect(within(outdoorStack).getByTestId("student-campus-view-mode-toggle")).toHaveAttribute("aria-label", "Switch to 3D view");
+    expect(screen.queryByRole("button", { name: "Recenter map" })).not.toBeInTheDocument();
+
+    rerender(<StudentMapControls {...props({ ...shared, isFloorMode: true })} />);
+    const indoorStack = screen.getByTestId("student-map-utility-controls");
+    expect(indoorStack).toHaveAttribute("data-floor-mode", "true");
+    expect(indoorStack).toHaveClass("bottom-3", "md:bottom-6");
+    expect(within(indoorStack).getByTestId("student-campus-view-mode-toggle")).toHaveAttribute("aria-label", "Switch to 3D view");
   });
 
   it("keeps the utility stack anchored while yielding its controls to Profile", () => {
     render(<StudentMapControls {...props({ profileOpen: true, onResetView: vi.fn() })} />);
 
     const stack = screen.getByTestId("student-map-utility-controls");
-    expect(stack).toHaveClass("absolute", "right-3", "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]", "md:top-20");
+    expect(stack).toHaveClass("absolute", "right-3", "bottom-3", "md:bottom-6", "flex-col", "items-end");
     expect(stack).toHaveAttribute("data-profile-open", "true");
     expect(within(stack).getByTestId("student-map-recenter-button")).toBeInTheDocument();
   });

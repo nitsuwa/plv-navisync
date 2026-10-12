@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 import { useReducedMotion } from "../../hooks";
@@ -17,6 +17,8 @@ interface RouteMapOverlayProps {
   showStartMarker?: boolean;
   /** True only when THIS polyline ends at the true final destination (B). */
   showEndMarker?: boolean;
+  /** Renderer-owned Follow updates avoid reconciling the containing map scene each frame. */
+  progressFrameWriterRef?: { current: ((progress: number) => void) | null };
 }
 
 /** One shared lap duration for every chevron on a route. Identical duration
@@ -126,8 +128,9 @@ export function routeProgressGeometry(points: readonly Pt[], progress: number): 
 }
 
 /** Student route strokes and their markers are separate layers when embedded in authored map SVGs. */
-export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fading = false, walkProgress, animated = true, layer = "all", showStartMarker = true, showEndMarker = true }: RouteMapOverlayProps) {
+export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fading = false, walkProgress, animated = true, layer = "all", showStartMarker = true, showEndMarker = true, progressFrameWriterRef }: RouteMapOverlayProps) {
   const reducedMotion = useReducedMotion();
+  const rootRef = useRef<SVGGElement | null>(null);
 
   // Camera transforms do not change authored route geometry. Keep the SVG
   // point serialization stable across camera/UI renders and playback progress.
@@ -135,6 +138,7 @@ export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fad
   const color = mode === "accessible" ? "#16a34a" : mode === "emergency" ? "#dc2626" : "#1e40af";
   const showLine = layer !== "markers";
   const showMarkers = layer !== "line";
+  const optimizedProgress = Boolean(progressFrameWriterRef);
   const progress = typeof walkProgress === "number" ? Math.max(0, Math.min(1, walkProgress)) : null;
   const flowEnabled = animated && !reducedMotion;
   const progressGeometry = useMemo(
@@ -160,19 +164,72 @@ export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fad
     if (length <= 0) return "";
     return routeChevronPath(chevronPoints, length / chevronCount, 9);
   }, [chevronPoints, chevronCount]);
+
+  const routeSegments = useMemo(() => {
+    let distance = 0;
+    return points.slice(1).map((to, index) => {
+      const from = points[index];
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      const segment = { from, to, start: distance, length, end: distance + length };
+      distance += length;
+      return segment;
+    });
+  }, [points]);
+  const totalRouteLength = routeSegments.at(-1)?.end ?? 0;
+
+  const writeProgressFrame = useCallback((nextProgress: number) => {
+    const root = rootRef.current;
+    if (!root || points.length < 2 || totalRouteLength <= 0) return;
+    const progress = Math.max(0, Math.min(1, nextProgress));
+    const targetDistance = totalRouteLength * progress;
+    let position = points[points.length - 1];
+    if (progress <= 0) position = points[0];
+    else if (progress < 1) {
+      const segment = routeSegments.find((candidate) => candidate.length > 0 && candidate.end >= targetDistance);
+      if (segment) {
+        const ratio = Math.max(0, Math.min(1, (targetDistance - segment.start) / segment.length));
+        position = {
+          x: segment.from.x + (segment.to.x - segment.from.x) * ratio,
+          y: segment.from.y + (segment.to.y - segment.from.y) * ratio,
+        };
+      }
+    }
+    const completed = root.querySelector<SVGPolylineElement>('[data-testid="completed-route-line"]');
+    completed?.setAttribute("stroke-dasharray", `${targetDistance} ${totalRouteLength}`);
+    completed?.setAttribute("data-progress", String(progress));
+    const remainingLine = root.querySelector<SVGPolylineElement>('[data-testid="remaining-route-line"]');
+    remainingLine?.setAttribute("stroke-dasharray", `${totalRouteLength - targetDistance} ${totalRouteLength}`);
+    remainingLine?.setAttribute("stroke-dashoffset", String(-targetDistance));
+    remainingLine?.setAttribute("data-progress", String(progress));
+    const current = root.querySelector<SVGGElement>("[data-route-current-position]");
+    current?.setAttribute("transform", `translate(${position.x},${position.y})`);
+    current?.setAttribute("data-progress", String(progress));
+  }, [points, routeSegments, totalRouteLength]);
+
+  useLayoutEffect(() => {
+    if (!progressFrameWriterRef) return;
+    progressFrameWriterRef.current = writeProgressFrame;
+    if (typeof walkProgress === "number") writeProgressFrame(walkProgress);
+    return () => {
+      if (progressFrameWriterRef.current === writeProgressFrame) progressFrameWriterRef.current = null;
+    };
+  }, [progressFrameWriterRef, walkProgress, writeProgressFrame]);
   if (points.length < 2) return null;
 
   return (
-    <g data-route-group data-route-layer={layer} data-student-marker-layer={showMarkers ? "route" : undefined} className={cn("transition-opacity duration-300", fading && "opacity-0")} pointerEvents="none">
+    <g ref={rootRef} data-route-group data-route-layer={layer} data-student-marker-layer={showMarkers ? "route" : undefined} className={cn("transition-opacity duration-300", fading && "opacity-0")} pointerEvents="none">
       {showLine && <g data-route-strokes>
         <polyline data-testid="route-outer-casing" points={pathStr} fill="none" stroke="#60a5fa" strokeWidth={11} strokeLinecap="round" strokeLinejoin="round" opacity={0.88}
           vectorEffect="non-scaling-stroke" />
         <polyline points={pathStr} fill="none" stroke="white" strokeWidth={8.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.98}
           vectorEffect="non-scaling-stroke" />
-        {progressGeometry && progress !== null && progress > 0 && progressGeometry.completedPoints.length > 1 && <polyline data-testid="completed-route-line" data-progress={progress}
-          points={completedPathStr} fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round"
+        {progressGeometry && progress !== null && (optimizedProgress || progress > 0 && progressGeometry.completedPoints.length > 1) && <polyline data-testid="completed-route-line" data-progress={progress}
+          points={optimizedProgress ? pathStr : completedPathStr} fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round"
+          strokeDasharray={optimizedProgress ? `${totalRouteLength * progress} ${totalRouteLength}` : undefined}
           opacity={0.56} vectorEffect="non-scaling-stroke" />}
-        <polyline data-testid="remaining-route-line" points={remainingPathStr} fill="none" stroke={color} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round"
+        <polyline data-testid="remaining-route-line" points={optimizedProgress && progress !== null ? pathStr : remainingPathStr} fill="none" stroke={color} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round"
+          strokeDasharray={optimizedProgress && progress !== null ? `${totalRouteLength * (1 - progress)} ${totalRouteLength}` : undefined}
+          strokeDashoffset={optimizedProgress && progress !== null ? -totalRouteLength * progress : undefined}
           opacity={0.98} vectorEffect="non-scaling-stroke" />
         {!flowEnabled && chevronPath && <g data-testid="route-direction-chevrons" data-travel-direction="start-to-destination" data-chevron-count={chevronCount}>
           <path d={chevronPath} fill="none" stroke="#0f172a" strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} vectorEffect="non-scaling-stroke" />

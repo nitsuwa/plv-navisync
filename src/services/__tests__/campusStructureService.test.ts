@@ -22,7 +22,9 @@ const campus = {
     floors: [{ id: ids.floor, buildingId: ids.building, number: 1, label: "Ground Floor",
       rooms: [{ id: ids.room, buildingId: ids.building, floorId: ids.floor, name: "ENG 101", type: "classroom",
         x: 5, y: 6, w: 80, h: 50, accessibility: true, accessNodeId: ids.nodeB, accessDoorId: "door-1" }],
-      paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }] }],
+      paths: [], walls: [{ id: "wall-1", x1: 5, y1: 6, x2: 85, y2: 6, thickness: 4, color: "#64748b" }],
+      doors: [{ id: "door-1", x: 45, y: 6, width: 18, wallId: "wall-1", direction: "left", color: "#b45309" }],
+      windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] }] }],
   markers: [], paths: [], navNodes: [
     { id: ids.nodeA, name: "Entrance", type: "entrance", x: 1, y: 2, buildingId: ids.building, accessible: true, color: "green" },
     { id: ids.nodeB, name: "Room access", type: "room_access", x: 5, y: 6, buildingId: ids.building, floorId: ids.floor, accessible: true, color: "blue" },
@@ -61,11 +63,13 @@ describe("campus structure mapping", () => {
     const payload = serializeCampusStructure(campus);
     expect(payload.buildings).toHaveLength(1);
     expect(payload.floors).toHaveLength(1);
-    expect(payload.map_elements).toHaveLength(1);
+    expect(payload.map_elements).toHaveLength(3);
     expect(payload.navigation_nodes).toHaveLength(2);
     expect(payload.navigation_edges).toHaveLength(1);
     expect(payload.buildings[0]).toMatchObject({ category: "academic", rotation: 15, is_accessible: true });
     expect(payload.map_elements[0]).toMatchObject({ element_type: "classroom", floor_id: ids.floor, is_accessible: true });
+    expect(payload.map_elements.find((row) => row.element_type === "wall")).toMatchObject({ id: "wall-1", floor_id: ids.floor });
+    expect(payload.map_elements.find((row) => row.element_type === "door")).toMatchObject({ id: "door-1", floor_id: ids.floor });
   });
 
   it("round-trips canvas ground appearance through the existing structure JSON channel", () => {
@@ -111,12 +115,12 @@ describe("campus structure mapping", () => {
         ...campus.buildings[0],
         floors: [{
           ...campus.buildings[0].floors[0],
-          doors: [{ id: "door-unnamed", x: 20, y: 20, width: 18, direction: "left", color: "#b45309", label: "   " }],
+          doors: [...campus.buildings[0].floors[0].doors, { id: "door-unnamed", x: 20, y: 20, width: 18, direction: "left", color: "#b45309", label: "   " }],
         }],
       }],
     } as Campus;
     const payload = serializeCampusStructure(withUnnamedDoor);
-    const door = payload.map_elements.find((row) => row.element_type === "door");
+    const door = payload.map_elements.find((row) => row.element_type === "door" && row.id === "door-unnamed");
     expect(door).toMatchObject({ id: "door-unnamed", name: "Door" });
     expect(String(door?.name).trim()).not.toBe("");
     expect(payload.map_elements.every((row) => String(row.name ?? "").trim().length > 0)).toBe(true);
@@ -303,6 +307,7 @@ describe("campus structure mapping", () => {
         floors: [{
           ...campus.buildings[0].floors[0],
           rooms: [],
+          doors: [],
           walls: [{ id: ids.room, x1: 10, y1: 20, x2: 110, y2: 20, thickness: 4, color: "#64748b" }],
         }],
       }],
@@ -361,6 +366,7 @@ describe("campus structure mapping", () => {
         floors: [{
           ...campus.buildings[0].floors[0],
           rooms: [],
+          doors: [],
           walls: [{ id: ids.room, x1: 10, y1: 20, x2: 110, y2: 20, thickness: 4, color: "#64748b", x: Number.NaN, y: Number.NaN }],
         }],
       }],
@@ -397,8 +403,8 @@ describe("campus structure mapping", () => {
     const fullFloor = {
       ...campus.buildings[0].floors[0],
       rooms: campus.buildings[0].floors[0].rooms,
-      walls: [{ id: "wl1", x1: 0, y1: 0, x2: 40, y2: 0, thickness: 4, color: "#64748b" }],
-      doors: [{ id: "dr1", x: 5, y: 5, width: 8, direction: "left", color: "#d97706" }],
+      walls: [...campus.buildings[0].floors[0].walls, { id: "wl1", x1: 0, y1: 0, x2: 40, y2: 0, thickness: 4, color: "#64748b" }],
+      doors: [...campus.buildings[0].floors[0].doors, { id: "dr1", x: 5, y: 5, width: 8, direction: "left", color: "#d97706" }],
       windows: [{ id: "wn1", x: 10, y: 10, width: 12, height: 4, color: "#7dd3fc" }],
       furniture: [{ id: "fn1", type: "desk", name: "Desk", category: "seating", x: 15, y: 15, width: 20, height: 12, rotation: 0, color: "#aaa" }],
       stairs: [{ id: "st1", x: 20, y: 20, width: 16, height: 12, direction: "both", label: "Stairs" }],
