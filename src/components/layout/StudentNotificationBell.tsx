@@ -7,6 +7,7 @@ import { normalizeReportStatus, type IssueReport, type ReportStatus } from "../.
 import { reportService } from "../../services/reportService";
 import { loadStudentPreferences, type StudentNotificationPreferences } from "../../services/studentPreferencesService";
 import { eventReviewFingerprint, hasEventHandoverWork } from "../../lib/studentEventUpdates";
+import { STUDENT_REPORT_SUBMITTED_EVENT } from "../../lib/studentReportNotifications";
 import { visibleEventCards } from "../../lib/eventMapView";
 import { formatEventDate } from "../../lib/eventPublication";
 import { usePublishedCampus } from "../../hooks/usePublishedCampus";
@@ -70,6 +71,13 @@ const REPORT_STATUS_PRESENTATION: Record<ReportStatus, { label: string; classNam
   resolved: { label: "Resolved", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
   rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
 };
+const REPORT_STATUS_FILTER_OPTIONS: Array<{ value: ReportStatus | "all"; label: string }> = [
+  { value: "all", label: "All notifications" },
+  ...Object.entries(REPORT_STATUS_PRESENTATION).map(([value, status]) => ({
+    value: value as ReportStatus,
+    label: status.label,
+  })),
+];
 
 function readStorageKey(ownerId: string) {
   return `${READ_IDS_PREFIX}${encodeURIComponent(ownerId)}`;
@@ -99,23 +107,34 @@ function formatNotificationDate(value: string): string {
 }
 
 function reportUpdateNotifications(reports: IssueReport[], readIds: Set<string>): StudentNotification[] {
-  return reports.flatMap((report) => (report.updates ?? [])
-    .filter((update) => update.text.trim().toLowerCase() !== "report submitted"
-      && Number.isFinite(new Date(update.date).getTime())
-      && new Date(update.date).getTime() >= new Date(report.createdAt).getTime())
-    .map((update) => {
-      const id = `report:${report.id}:${update.date}:${update.text}`;
-      return {
-        id,
-        kind: "report" as const,
-        title: report.title || "Report update",
-        message: update.text,
-        date: update.date,
-        href: `/student/reports?reportId=${encodeURIComponent(report.id)}`,
-        unread: !readIds.has(id),
-        reportStatus: normalizeReportStatus(report.status),
-      };
-    }));
+  return reports.flatMap((report) => {
+    const createdAt = new Date(report.createdAt).getTime();
+    const updates = report.updates ?? [];
+    const submissionUpdate = updates.find((update) => {
+      const text = update.text.trim().toLowerCase();
+      return Number.isFinite(createdAt)
+        && new Date(update.date).getTime() === createdAt
+        && (text === "report submitted" || text === "status changed to pending");
+    });
+
+    return updates
+      .filter((update) => Number.isFinite(new Date(update.date).getTime())
+        && new Date(update.date).getTime() >= createdAt)
+      .map((update) => {
+        const isSubmission = update === submissionUpdate;
+        const id = `report:${report.id}:${update.date}:${update.text}`;
+        return {
+          id,
+          kind: "report" as const,
+          title: report.title || "Report update",
+          message: isSubmission ? "Report submitted" : update.text,
+          date: update.date,
+          href: `/student/reports?reportId=${encodeURIComponent(report.id)}`,
+          unread: !readIds.has(id),
+          reportStatus: isSubmission ? "pending" : normalizeReportStatus(report.status),
+        };
+      });
+  });
 }
 
 function eventReviewNotifications(
@@ -218,6 +237,7 @@ function StudentNotificationFeed({
   const [reportError, setReportError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [readIds, setReadIds] = useState(() => loadReadIds(ownerId));
+  const [reportStatusFilter, setReportStatusFilter] = useState<ReportStatus | "all">("all");
   const reportRequestInFlight = useRef(false);
   const lastReportRefreshAt = useRef(0);
   const publishedEventFeed = usePublishedEventPreviews({
@@ -277,11 +297,13 @@ function StudentNotificationFeed({
     };
     window.addEventListener("focus", refreshOnFocus);
     document.addEventListener("visibilitychange", refreshOnFocus);
+    window.addEventListener(STUDENT_REPORT_SUBMITTED_EVENT, refreshWhileMounted);
     return () => {
       mounted = false;
       if (interval !== undefined) window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", refreshOnFocus);
+      window.removeEventListener(STUDENT_REPORT_SUBMITTED_EVENT, refreshWhileMounted);
     };
   }, [ownerId, refreshReports, reportsSnapshot, reportsSnapshotError, reportsSnapshotLoading]);
 
@@ -335,10 +357,19 @@ function StudentNotificationFeed({
     ];
     return items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
   }, [eventClockMs, eventServerOffsetMs, eventUpdates, handoverUpdates, isStudentOrg, preferences, publishedEvents, readIds, reports, reportsSnapshot, unreadEventIds]);
+  const filteredNotifications = useMemo(() => {
+    if (!isSection || reportStatusFilter === "all") return notifications;
+    return notifications.filter((item) => item.kind === "report" && item.reportStatus === reportStatusFilter);
+  }, [isSection, notifications, reportStatusFilter]);
   const unreadCount = notifications.filter((item) => item.unread).length;
-  const displayedNotifications = isSection ? notifications : notifications.slice(0, MAX_NOTIFICATIONS);
+  const displayedNotifications = isSection ? filteredNotifications : notifications.slice(0, MAX_NOTIFICATIONS);
   const displayedReportsLoading = reportsSnapshot === undefined ? loading : reportsSnapshotLoading;
   const displayedReportError = reportsSnapshot === undefined ? reportError : reportsSnapshotError;
+  const includeNonReportNotifications = !isSection || reportStatusFilter === "all";
+  const displayedNotificationsLoading = displayedReportsLoading
+    || (includeNonReportNotifications && Boolean(campusId) && publishedEventsLoading);
+  const displayedNotificationsError = displayedReportError
+    || (includeNonReportNotifications && (Boolean(eventUpdatesError) || publishedEventsError));
 
   const markReportRead = (id: string) => {
     setReadIds((current) => {
@@ -409,15 +440,20 @@ function StudentNotificationFeed({
                 ? ""
                 : mapTrigger
                   ? "fixed z-[70] max-h-[min(72vh,34rem)] w-[min(23rem,calc(100vw-1.5rem))] shadow-2xl"
-                  : "absolute right-0 top-full z-[70] mt-2 max-h-[min(72vh,34rem)] w-[min(23rem,calc(100vw-1.5rem))] shadow-2xl",
+                  : "student-notification-popover absolute right-0 top-full z-[70] mt-2 max-h-[min(72vh,34rem)] w-[min(23rem,calc(100vw-1.5rem))] shadow-2xl",
             )}
-            style={mapTrigger ? {
-              top: "calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem)",
-              right: "max(0.5rem, env(safe-area-inset-right, 0px))",
+            style={!isSection ? {
+              // Leave room for the sticky header, mobile navigation, and device safe areas.
+              // The notification list can then scroll inside the panel on short screens.
+              maxHeight: "min(72dvh, 34rem, calc(100dvh - 9rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)))",
+              ...(mapTrigger ? {
+                top: "calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem)",
+                right: "max(0.5rem, env(safe-area-inset-right, 0px))",
+              } : {}),
             } : undefined}
           >
             <header className={cn(
-              "flex items-center justify-between gap-3",
+              "flex shrink-0 items-center justify-between gap-3",
               isSection ? "mb-3" : "border-b border-border px-4 py-3",
             )}>
               <div className={cn("min-w-0", isSection && "flex items-center gap-2.5")}>
@@ -442,13 +478,31 @@ function StudentNotificationFeed({
               </button>
             </header>
 
+            {isSection && (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-card/40 px-3 py-2">
+                <label htmlFor="student-notification-status-filter" className="shrink-0 text-xs font-semibold text-muted-foreground">
+                  Report status
+                </label>
+                <select
+                  id="student-notification-status-filter"
+                  aria-label="Filter notifications by report status"
+                  value={reportStatusFilter}
+                  onChange={(event) => setReportStatusFilter(event.target.value as ReportStatus | "all")}
+                  className="h-9 min-w-0 max-w-[70%] rounded-lg border border-border/60 bg-background px-3 text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {REPORT_STATUS_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className={cn(
-              "min-h-20 flex-1 overflow-y-auto overscroll-contain",
-              isSection && "max-h-[34rem] min-h-0",
+              isSection ? "w-full" : "min-h-0 flex-1 overflow-y-auto overscroll-contain",
             )}>
-              {(displayedReportsLoading || (Boolean(campusId) && publishedEventsLoading)) && notifications.length === 0 ? (
+              {displayedNotificationsLoading && displayedNotifications.length === 0 ? (
                 <p role="status" className="px-4 py-8 text-center text-xs text-muted-foreground">Loading updates…</p>
-              ) : notifications.length ? (
+              ) : displayedNotifications.length ? (
                 <ul aria-label={isSection ? "All notifications" : "Recent notifications"} className={cn(
                   isSection ? "space-y-2.5" : "divide-y divide-border/70",
                 )}>
@@ -480,17 +534,19 @@ function StudentNotificationFeed({
                             <Icon className={cn("h-4 w-4", isSection && "h-[18px] w-[18px]")} aria-hidden="true" />
                           </span>
                           <span className="min-w-0 flex-1">
-                              <span className="flex items-start justify-between gap-2">
-                                <span className={cn("line-clamp-1 font-bold text-foreground", isSection ? "text-sm" : "text-xs")}>{item.title}</span>
+                            <span className="flex min-w-0 items-start gap-2">
+                              <span className={cn("min-w-0 flex-1 line-clamp-1 font-bold text-foreground", isSection ? "text-sm" : "text-xs")}>{item.title}</span>
+                              <span className="flex shrink-0 items-center gap-2">
                                 {item.reportStatus && <span aria-label={`Report status: ${REPORT_STATUS_PRESENTATION[item.reportStatus].label}`} className={cn(
                                   "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold",
                                   REPORT_STATUS_PRESENTATION[item.reportStatus].className,
                                 )}>{REPORT_STATUS_PRESENTATION[item.reportStatus].label}</span>}
                                 {item.phase && <span className={cn(
-                                "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide",
-                                item.phase === "ongoing" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-primary/10 text-primary",
-                              )}>{item.phase}</span>}
-                              {item.unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                                  "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide",
+                                  item.phase === "ongoing" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-primary/10 text-primary",
+                                )}>{item.phase}</span>}
+                                {item.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                              </span>
                             </span>
                             <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{item.message}</span>
                             <time className="mt-1.5 block text-[10px] font-medium text-muted-foreground/80" dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
@@ -500,7 +556,7 @@ function StudentNotificationFeed({
                     );
                   })}
                 </ul>
-              ) : displayedReportError || eventUpdatesError || publishedEventsError ? (
+              ) : displayedNotificationsError ? (
                 <div className={cn("px-4 py-7 text-center", isSection && "rounded-2xl border border-border/60 bg-card/50")}>
                   <p className="text-xs font-semibold text-foreground">Updates are temporarily unavailable.</p>
                   <button type="button" onClick={() => { void refreshReports(); void refreshEventUpdates(); void refreshPublishedEvents(); }} className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline">
@@ -510,8 +566,16 @@ function StudentNotificationFeed({
               ) : (
                 <div className={cn("px-4 py-8 text-center", isSection && "rounded-2xl border border-dashed border-border/60 bg-card/40")}>
                   <span className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-muted-foreground"><Bell className="h-4 w-4" aria-hidden="true" /></span>
-                  <p className="mt-2 text-xs font-bold text-foreground">You’re all caught up</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">Report updates and upcoming campus events will appear here.</p>
+                  <p className="mt-2 text-xs font-bold text-foreground">
+                    {isSection && reportStatusFilter !== "all"
+                      ? `No ${REPORT_STATUS_PRESENTATION[reportStatusFilter].label.toLowerCase()} reports`
+                      : "You’re all caught up"}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {isSection && reportStatusFilter !== "all"
+                      ? "Choose another report status to see matching notifications."
+                      : "Report updates and upcoming campus events will appear here."}
+                  </p>
                 </div>
               )}
             </div>

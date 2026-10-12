@@ -54,7 +54,7 @@ describe("RegistrationPage Student ID availability", () => {
     expect(mocks.signUp).not.toHaveBeenCalled();
   });
 
-  it("allows valid registration to continue and finish when the availability RPC is missing", async () => {
+  it("allows valid registration to continue without a warning when the availability RPC is missing", async () => {
     mocks.rpc.mockResolvedValue({
       data: null,
       error: {
@@ -66,8 +66,8 @@ describe("RegistrationPage Student ID availability", () => {
     fillStudentDetails();
 
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(await screen.findByText(/we couldn't check availability right now/i)).toBeInTheDocument();
     expect(await screen.findByLabelText("Password")).toBeInTheDocument();
+    expect(screen.queryByText(/we couldn't check availability right now/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "campus-pass-2026" } });
     fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "campus-pass-2026" } });
