@@ -9,7 +9,10 @@ import type { EventOrganization, EventRepresentativeGrant, SaveEventOrganization
 import { RepresentativeAssignmentDialog } from "./RepresentativeAssignmentDialog";
 const dialogViewport = { maxHeight: "calc(100dvh - max(.75rem, env(safe-area-inset-top, 0px)) - max(.75rem, env(safe-area-inset-bottom, 0px)))" };
 
-interface AdminOrganizationsPanelProps { profiles: ManagedProfile[]; }
+interface AdminOrganizationsPanelProps {
+  profiles: ManagedProfile[];
+  onOrganizationsChange?: (organizations: EventOrganization[]) => void;
+}
 
 function currentGrant(organization: EventOrganization): EventRepresentativeGrant | undefined {
   return organization.grants.find((grant) => !grant.endedAt);
@@ -147,7 +150,7 @@ function RevokeRepresentativeDialog({ organization, grant, onClose, onConfirm, o
   </div>;
 }
 
-export function AdminOrganizationsPanel({ profiles }: AdminOrganizationsPanelProps) {
+export function AdminOrganizationsPanel({ profiles, onOrganizationsChange }: AdminOrganizationsPanelProps) {
   const [organizations, setOrganizations] = useState<EventOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,9 +168,10 @@ export function AdminOrganizationsPanel({ profiles }: AdminOrganizationsPanelPro
     try {
       const data = await eventOrganizationService.listOrganizations();
       setOrganizations(data); setLoaded(true); setLoadError(null);
+      onOrganizationsChange?.(data);
     } catch (error) { setLoadError(error); }
     finally { setLoading(false); setRefreshing(false); }
-  }, []);
+  }, [onOrganizationsChange]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

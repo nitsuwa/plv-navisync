@@ -230,6 +230,37 @@ describe("AdminUsersPage role-aware account forms", () => {
     expect(screen.getByRole("combobox", { name: "Role" }).textContent).toContain("Administrator");
   });
 
+  it("shows the representative's assigned organization separately from Department", async () => {
+    const assignedOrganization = {
+      id: "org-vits", code: "VITS", name: "Valenzuela Information Technology Society", isActive: true,
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      grants: [{
+        id: "grant-vits", organizationId: "org-vits", representativeId: "org-user", representativeName: "Demo Student Org",
+        academicYear: "2026–2027", startsAt: "2026-01-01T00:00:00Z", expiresAt: "2027-12-31T00:00:00Z",
+        grantedBy: "root", endedAt: null, endedBy: null, endReason: null, profileActive: true, profileRole: "student_org",
+      }],
+    };
+    mocks.listManagedProfiles.mockResolvedValue({
+      invitationMetadataAvailable: true,
+      profiles: [{
+        id: "org-user", role: "student_org", account_status: "active", first_name: "Demo Student", last_name: "Org",
+        email: "demo.org@example.test", student_number: null, department: "", avatar_path: null, is_active: true,
+        last_login_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      }],
+    });
+    mocks.listOrganizations.mockResolvedValue([assignedOrganization]);
+
+    render(<AdminUsersPage />);
+    await screen.findByText(assignedOrganization.name);
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Actions for Demo Student Org" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
+
+    const assignedField = await screen.findByLabelText("Assigned organization") as HTMLInputElement;
+    expect(assignedField).toHaveValue(assignedOrganization.name);
+    expect(assignedField).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Department (optional)")).toHaveValue("");
+  });
+
   it("applies filters immediately and marks the selected role/status chips", async () => {
     const common = { account_status: "active" as const, student_number: null, department: null, avatar_path: null, is_active: true, last_login_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
     mocks.listManagedProfiles.mockResolvedValue({ invitationMetadataAvailable: true, profiles: [

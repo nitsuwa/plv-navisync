@@ -220,7 +220,8 @@ export function EventProposalModal({
   const selectedCampus = campuses.find((campus) => campus.id === campusId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [organizer, setOrganizer] = useState("");
+  const defaultOrganizer = organization?.organizationName ?? "";
+  const [organizer, setOrganizer] = useState(defaultOrganizer);
   const [locations, setLocations] = useState<EventLocationRef[]>([]);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [error, setError] = useState("");
@@ -230,7 +231,11 @@ export function EventProposalModal({
   const requestIdRef = useRef(crypto.randomUUID());
   const uploadedPosterRef = useRef<{file:File;url:string;path:string} | null>(null);
   const toast = useToast();
-  const dirty = Boolean(title.trim() || description.trim() || organizer.trim() || posterFile || locations.length > 0);
+  const dirty = Boolean(title.trim() || description.trim() || organizer.trim() !== defaultOrganizer.trim() || posterFile || locations.length > 0);
+
+  useEffect(() => {
+    setOrganizer(defaultOrganizer);
+  }, [defaultOrganizer]);
 
   const releaseUnusedPoster = () => {
     const unused = uploadedPosterRef.current;

@@ -27,6 +27,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../app/components/ui/dropdown-menu";
 import { AdminOrganizationsPanel } from "../components/events/AdminOrganizationsPanel";
+import type { EventOrganization } from "../types/eventOrganization";
 
 type FilterRole = ManagedRole | "all";
 type FilterStatus = ManagedAccountStatus | "all";
@@ -114,6 +115,7 @@ export function AdminUsersPage() {
   const toast = useToast();
   const isSuperAdmin = isSuperAdminRole(currentProfile?.role ?? "");
   const [users, setUsers] = useState<ManagedProfile[]>([]);
+  const [organizations, setOrganizations] = useState<EventOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -128,6 +130,19 @@ export function AdminUsersPage() {
   const [form, setForm] = useState<UserForm>(emptyForm);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
+  const handleOrganizationsChange = useCallback((next: EventOrganization[]) => setOrganizations(next), []);
+  const activeOrganizationNamesByRepresentative = useMemo(() => {
+    const namesByRepresentative = new Map<string, Set<string>>();
+    const now = Date.now();
+    for (const organization of organizations) {
+      const grant = organization.grants.find((candidate) => !candidate.endedAt);
+      if (!organization.isActive || !grant || Date.parse(grant.expiresAt) <= now || !grant.profileActive || grant.profileRole !== "student_org") continue;
+      const names = namesByRepresentative.get(grant.representativeId) ?? new Set<string>();
+      names.add(organization.name);
+      namesByRepresentative.set(grant.representativeId, names);
+    }
+    return new Map([...namesByRepresentative].map(([profileId, names]) => [profileId, [...names].sort((left, right) => left.localeCompare(right))]));
+  }, [organizations]);
   const hasLoadedRef = useRef(false);
   const prefersReducedMotion = useReducedMotion();
   const transitionDuration = prefersReducedMotion ? 0 : 0.18;
@@ -365,7 +380,7 @@ export function AdminUsersPage() {
         <div><p className="font-bold">Backend setup required</p><p className="mt-0.5 text-xs leading-relaxed">Existing profiles are loaded. Invitation tracking and invitations require the latest database update; account status currently uses Active / Inactive only.</p></div>
       </div>}
 
-      <AdminOrganizationsPanel profiles={users} />
+      <AdminOrganizationsPanel profiles={users} onOrganizationsChange={handleOrganizationsChange} />
 
       <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.06 } } }} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
@@ -439,7 +454,8 @@ export function AdminUsersPage() {
             <motion.section key={form.role} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }} className="space-y-3">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">{form.role === "student" ? "Student details" : form.role === "student_org" ? "Organization details" : "Admin details"}</p>
               {form.role === "student" && <FormField label="Student ID" id="student-number" value={form.studentNumber} onChange={(studentNumber) => { setForm((value) => ({ ...value, studentNumber: formatStudentNumberInput(studentNumber) })); setFormErrors((errors) => ({ ...errors, studentNumber: "" })); }} error={formErrors.studentNumber} maxLength={7} inputMode="numeric" placeholder="23-3314" helper="Use the format NN-NNNN." required />}
-              <FormField label={form.role === "admin" || form.role === "super_admin" ? "Department / Office (optional)" : form.role === "student_org" ? "Organization / Department (optional)" : "Department / Program (optional)"} id="department" value={form.department} onChange={(department) => setForm((value) => ({ ...value, department }))} maxLength={120} />
+              {editTarget && form.role === "student_org" && (activeOrganizationNamesByRepresentative.get(editTarget.id)?.length ?? 0) > 0 && <div className="space-y-1.5"><label htmlFor="assigned-organization" className="block text-sm font-medium">Assigned organization</label><input id="assigned-organization" value={activeOrganizationNamesByRepresentative.get(editTarget.id)!.join(", ")} readOnly className="h-11 w-full rounded-xl border border-border bg-muted/60 px-3 text-sm text-muted-foreground" /><p className="text-xs text-muted-foreground">From the active representative assignment. Manage it in Student Organizations above.</p></div>}
+              <FormField label={form.role === "admin" || form.role === "super_admin" ? "Department / Office (optional)" : form.role === "student_org" ? "Department (optional)" : "Department / Program (optional)"} id="department" value={form.department} onChange={(department) => setForm((value) => ({ ...value, department }))} maxLength={120} />
               {form.role === "student_org" && <p className="rounded-xl bg-muted/55 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">Grant Student Organization access only after the organization has been verified.</p>}
               {form.role === "super_admin" && <p className="rounded-xl border border-amber-300/60 bg-amber-50/70 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">Super Admins can manage administrator access and privileged accounts.</p>}
             </motion.section>
