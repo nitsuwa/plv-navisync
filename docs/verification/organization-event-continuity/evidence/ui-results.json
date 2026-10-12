@@ -1,0 +1,170 @@
+{
+  "mode": "controlled HTTP fixtures in the real application browser; no live Supabase mutations",
+  "checks": [
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 320x568",
+      "status": "PASS"
+    },
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 390x844",
+      "status": "PASS"
+    },
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 390x420",
+      "status": "PASS"
+    },
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 740x390",
+      "status": "PASS"
+    },
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 768x1024",
+      "status": "PASS"
+    },
+    {
+      "name": "Create proposal validation, nested dismissal and reachable actions 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization workspace, history and reuse dialog 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Revoked access removes protected workspace 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Representative handover modal and focus 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Organization form and revoke controls 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Legacy admin review link and canonical tabs 1440x900",
+      "status": "PASS"
+    },
+    {
+      "name": "Ordinary student cannot open organization workspace",
+      "status": "PASS"
+    },
+    {
+      "name": "Missing organization RPC is visible and does not grant fallback creation",
+      "status": "PASS"
+    },
+    {
+      "name": "Actual 200% browser zoom reflow and reachable proposal action",
+      "status": "PASS"
+    }
+  ],
+  "pageErrors": [],
+  "unknownRequests": [],
+  "retainedLiveRecords": 0,
+  "liveRequestsForwarded": 0,
+  "actualZoom": {
+    "factor": 2,
+    "width": 720,
+    "height": 450
+  }
+}

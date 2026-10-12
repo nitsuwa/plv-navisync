@@ -14,6 +14,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      event_organizations: {
+        Row: { id: string; code: string; name: string; is_active: boolean; created_at: string; updated_at: string }
+        Insert: { id?: string; code: string; name: string; is_active?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; code?: string; name?: string; is_active?: boolean; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      event_organization_grants: {
+        Row: { id: string; organization_id: string; representative_id: string; academic_year: string; starts_at: string; expires_at: string; granted_by: string; ended_at: string | null; ended_by: string | null; end_reason: string | null }
+        Insert: { id?: string; organization_id: string; representative_id: string; academic_year: string; starts_at?: string; expires_at: string; granted_by: string; ended_at?: string | null; ended_by?: string | null; end_reason?: string | null }
+        Update: { id?: string; organization_id?: string; representative_id?: string; academic_year?: string; starts_at?: string; expires_at?: string; granted_by?: string; ended_at?: string | null; ended_by?: string | null; end_reason?: string | null }
+        Relationships: [
+          { foreignKeyName: 'event_organization_grants_organization_id_fkey'; columns: ['organization_id']; isOneToOne: false; referencedRelation: 'event_organizations'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_representative_id_fkey'; columns: ['representative_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_granted_by_fkey'; columns: ['granted_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_grants_ended_by_fkey'; columns: ['ended_by']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+        ]
+      }
+      event_organization_handover_receipts: {
+        Row: { viewer_id: string; grant_id: string; read_at: string }
+        Insert: { viewer_id: string; grant_id: string; read_at?: string }
+        Update: { viewer_id?: string; grant_id?: string; read_at?: string }
+        Relationships: [
+          { foreignKeyName: 'event_organization_handover_receipts_viewer_id_fkey'; columns: ['viewer_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_handover_receipts_grant_id_fkey'; columns: ['grant_id']; isOneToOne: false; referencedRelation: 'event_organization_grants'; referencedColumns: ['id'] },
+        ]
+      }
+      event_organization_audit: {
+        Row: { id: string; organization_id: string; actor_id: string; action: string; before_data: Json | null; after_data: Json | null; created_at: string }
+        Insert: { id?: string; organization_id: string; actor_id: string; action: string; before_data?: Json | null; after_data?: Json | null; created_at?: string }
+        Update: { id?: string; organization_id?: string; actor_id?: string; action?: string; before_data?: Json | null; after_data?: Json | null; created_at?: string }
+        Relationships: [
+          { foreignKeyName: 'event_organization_audit_organization_id_fkey'; columns: ['organization_id']; isOneToOne: false; referencedRelation: 'event_organizations'; referencedColumns: ['id'] },
+          { foreignKeyName: 'event_organization_audit_actor_id_fkey'; columns: ['actor_id']; isOneToOne: false; referencedRelation: 'profiles'; referencedColumns: ['id'] },
+        ]
+      }
       activity_logs: {
         Row: {
           action: string
@@ -769,6 +804,8 @@ export type Database = {
       }
       map_elements: {
         Row: {
+          organization_id: string | null
+          reused_from_event_id: string | null
           archived_at: string | null
           building_id: string | null
           campus_id: string
@@ -797,6 +834,8 @@ export type Database = {
           z_index: number
         }
         Insert: {
+          organization_id?: string | null
+          reused_from_event_id?: string | null
           archived_at?: string | null
           building_id?: string | null
           campus_id: string
@@ -825,6 +864,8 @@ export type Database = {
           z_index?: number
         }
         Update: {
+          organization_id?: string | null
+          reused_from_event_id?: string | null
           archived_at?: string | null
           building_id?: string | null
           campus_id?: string
@@ -1510,6 +1551,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_my_event_organizations: {
+        Args: Record<PropertyKey, never>
+        Returns: { organization_id: string; organization_name: string; grant_id: string; academic_year: string; expires_at: string }[]
+      }
+      get_event_organization_handover: { Args: { p_expected_grant_id: string }; Returns: Json }
+      ack_event_organization_handover: { Args: { p_expected_grant_id: string }; Returns: string }
+      get_event_edit_access: { Args: { p_event_id: string }; Returns: Json }
+      get_organization_event: { Args: { p_event_id: string }; Returns: Json }
+      list_organization_events: { Args: { p_organization_id: string; p_academic_year?: string | null; p_search?: string; p_limit?: number; p_offset?: number; p_include_archived?: boolean }; Returns: Json }
+      reuse_organization_event: { Args: { p_source_id: string; p_expected_source_updated_at: string; p_organization_id: string; p_expected_grant_id: string; p_title: string; p_academic_year: string; p_request_id: string }; Returns: Json }
+      is_event_poster_referenced: { Args: { p_path: string }; Returns: boolean }
+      can_upload_event_poster: { Args: Record<PropertyKey, never>; Returns: boolean }
+      can_read_event_poster: { Args: { p_path: string }; Returns: boolean }
+      create_organization_event: { Args: { p_event_id: string; p_organization_id: string; p_expected_grant_id: string; p_campus_id: string; p_academic_year: string; p_metadata: Json }; Returns: Json }
+      mutate_organization_event: { Args: { p_event_id: string; p_expected_updated_at: string; p_expected_grant_id: string; p_command: string; p_changes: Json }; Returns: Json }
+      set_organization_event_feedback_pin_addressed: { Args: { p_overlay_id: string; p_expected_updated_at: string; p_expected_grant_id: string; p_location_id: string; p_pin_id: string; p_addressed: boolean; p_note: string }; Returns: Json }
+      admin_bind_event_organization: { Args: { p_event_id: string; p_organization_id: string; p_academic_year: string; p_expected_updated_at: string }; Returns: Json }
+      admin_correct_event_organization: { Args: { p_event_id: string; p_organization_id: string; p_academic_year: string; p_expected_organization_id: string; p_expected_updated_at: string; p_reason: string }; Returns: Json }
+      admin_preview_event_organization_reconciliation: { Args: Record<PropertyKey, never>; Returns: Json }
+      has_event_organization_access: { Args: { p_organization_id: string }; Returns: boolean }
+      admin_list_event_organizations: { Args: Record<PropertyKey, never>; Returns: Json }
+      admin_save_event_organization: { Args: { p_id: string | null; p_code: string; p_name: string; p_is_active: boolean; p_expected_updated_at: string | null }; Returns: Json }
+      admin_set_event_representative: { Args: { p_organization_id: string; p_profile_id: string; p_academic_year: string; p_expires_at: string; p_expected_grant_id: string | null }; Returns: Json }
+      admin_revoke_event_representative: { Args: { p_organization_id: string; p_expected_grant_id: string; p_reason: string }; Returns: undefined }
       save_pending_event_layout: {
         Args: { p_overlay_id: string; p_expected_updated_at: string; p_locations: Json }
         Returns: Json

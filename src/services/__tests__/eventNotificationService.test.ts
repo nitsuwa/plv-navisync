@@ -18,6 +18,11 @@ describe('event server read receipts', () => {
     await eventNotificationService.acknowledge('org','org_review',review);
     expect(rpc).toHaveBeenCalledWith('ack_event_notification',{p_expected_user_id:'org',p_stream:'org_review',p_event_id:'event',p_payload:['submitted','approved','Note',{z:'last',a:'first'}]});
   });
+  it('allows the active successor to acknowledge an organization event created by a former representative',async()=>{
+    const review = {...pending,status:'approved',organizationId:'org-it',createdByUserId:'former-rep',adminComment:'Please review'} as CampusEventOverlay;
+    await eventNotificationService.acknowledge('successor','org_review',review);
+    expect(rpc).toHaveBeenCalledWith('ack_event_notification',expect.objectContaining({p_expected_user_id:'successor',p_stream:'org_review',p_event_id:'event'}));
+  });
   it('does not repeatedly request absent RPCs until explicit retry',async()=>{
     rpc.mockResolvedValue({data:null,error:{code:'PGRST202',message:'Could not find the function public.get_event_notification_states'}});
     await expect(eventNotificationService.getStates('admin','admin_submission',[pending])).rejects.toBeInstanceOf(EventNotificationSyncUnavailable);

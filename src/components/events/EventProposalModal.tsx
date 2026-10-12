@@ -10,6 +10,7 @@ import type { CampusEventOverlay, EventLocationRef } from "../map-builder/types"
 import type { EventBuildingOption } from "../../lib/eventLocationData";
 import { EventLocationPicker } from "./EventLocationPicker";
 import { useToast } from "../../hooks/useToast";
+import type { EventOrganizationContext } from "../../types/eventOrganization";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 
 const inputClass =
@@ -201,12 +202,14 @@ export function EventProposalModal({
   buildings,
   campuses = [],
   initialCampusId,
+  organization,
   onClose,
   onCreate,
 }: {
   buildings: EventBuildingOption[];
   campuses?: { id: string; name: string; buildings: EventBuildingOption[] }[];
   initialCampusId?: string;
+  organization?: EventOrganizationContext;
   onClose: () => void;
   onCreate: (data: { title: string; description: string; organizer: string; locations: EventLocationRef[]; posterUrl?: string; campusId?: string; requestId?: string }) => Promise<void>;
 }) {
@@ -217,7 +220,8 @@ export function EventProposalModal({
   const selectedCampus = campuses.find((campus) => campus.id === campusId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [organizer, setOrganizer] = useState("");
+  const defaultOrganizer = organization?.organizationName ?? "";
+  const [organizer, setOrganizer] = useState(defaultOrganizer);
   const [locations, setLocations] = useState<EventLocationRef[]>([]);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [error, setError] = useState("");
@@ -227,7 +231,11 @@ export function EventProposalModal({
   const requestIdRef = useRef(crypto.randomUUID());
   const uploadedPosterRef = useRef<{file:File;url:string;path:string} | null>(null);
   const toast = useToast();
-  const dirty = Boolean(title.trim() || description.trim() || organizer.trim() || posterFile || locations.length > 0);
+  const dirty = Boolean(title.trim() || description.trim() || organizer.trim() !== defaultOrganizer.trim() || posterFile || locations.length > 0);
+
+  useEffect(() => {
+    setOrganizer(defaultOrganizer);
+  }, [defaultOrganizer]);
 
   const releaseUnusedPoster = () => {
     const unused = uploadedPosterRef.current;
@@ -333,6 +341,7 @@ export function EventProposalModal({
     >
       {step === 1 ? (
         <>
+          {organization && <div role="status" className="mb-4 rounded-xl border border-primary/15 bg-primary/5 px-3.5 py-3"><p className="text-xs font-bold text-foreground">Creating for {organization.organizationName}</p><p className="mt-1 text-xs text-muted-foreground">Academic year {organization.academicYear} · This starts as a draft and still needs fresh admin approval.</p></div>}
           <DetailsFields title={title} description={description} organizer={organizer} posterFile={posterFile} onPosterChange={changePoster} disabled={saving} onChange={(field, value) => { if (field === "title") setTitle(value); if (field === "description") setDescription(value); if (field === "organizer") setOrganizer(value); setError(""); }} />
           {error && <p role="alert" className="text-xs text-destructive mt-3">{error}</p>}
         </>

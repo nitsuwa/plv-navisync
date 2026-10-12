@@ -302,7 +302,7 @@ export function AdminEventsPage() {
     return (
       <div className="space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground">Campus Events</h1>
+          <h2 className="text-xl font-extrabold text-foreground">Campus Events</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Create and manage campus events that appear on the map.</p>
         </div>
         <EmptyState
@@ -325,7 +325,7 @@ export function AdminEventsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground">Campus Events</h1>
+          <h2 className="text-xl font-extrabold text-foreground">Campus Events</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Create and manage campus events. Published events appear on the student map during their time window.
           </p>

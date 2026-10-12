@@ -10,7 +10,10 @@ export class EventNotificationChanged extends Error {}
 const unavailable = new WeakSet<object>();
 const missingMessage = 'Read marks are saved in this browser only. Sync across devices is unavailable. Please retry later.';
 function payload(actor: string, stream: EventNotificationStream, event: CampusEventOverlay): Json | null {
-  if (stream === 'org_review' && event.createdByUserId !== actor) throw new Error('Only the event owner can read this review.');
+  // Bound events are owned by their verified organization, not by the person
+  // who originally submitted them. The RPC verifies the active grant. Keep
+  // the creator check only for legacy events that have not been reconciled.
+  if (stream === 'org_review' && !event.organizationId && event.createdByUserId !== actor) throw new Error('Only the event owner can read this review.');
   const fingerprint = stream === 'admin_submission' ? eventSubmissionFingerprint(event) : eventReviewFingerprint(event);
   if (!fingerprint) return null;
   const parts: Json[] = JSON.parse(fingerprint);

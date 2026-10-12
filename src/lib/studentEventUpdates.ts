@@ -1,4 +1,9 @@
 import type { CampusEventOverlay } from "../components/map-builder/types";
+import type { EventOrganizationHandoverSummary } from "../types/eventOrganization";
+
+export function hasEventHandoverWork(update: Pick<EventOrganizationHandoverSummary, "pendingCount" | "unfinishedCount" | "openFeedbackCount">): boolean {
+  return update.pendingCount > 0 || update.unfinishedCount > 0 || update.openFeedbackCount > 0;
+}
 
 export const EVENT_REVIEW_READ_EVENT = "plv-event-review-read";
 const PREFIX = "plv-navisync:event-review-seen:v1:";

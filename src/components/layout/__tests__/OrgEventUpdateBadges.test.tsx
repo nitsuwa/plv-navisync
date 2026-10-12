@@ -11,7 +11,7 @@ vi.mock("../../../services/reportService", () => ({ reportService: { getStudentR
 describe("Student Org event navigation badges", () => {
   it("exposes the same unread layout count in desktop and mobile navigation", () => {
     render(<MemoryRouter><Navbar /><MobileBottomNav /></MemoryRouter>);
-    const desktop = screen.getByRole("link", { name: "My Events, 2 unread layout updates" });
+    const desktop = screen.getByRole("link", { name: "Organization Events, 2 unread layout updates" });
     const mobile = screen.getByRole("link", { name: "Events, 2 unread layout updates" });
     expect(within(desktop).getByTestId("event-unread-count")).toHaveTextContent("2");
     expect(within(mobile).getByTestId("event-unread-count")).toHaveTextContent("2");

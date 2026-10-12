@@ -8223,6 +8223,8 @@ const buildingFill = (id: string) =>
               markEventRead={studentEventUpdates.markRead}
               eventUpdatesError={studentEventUpdates.error}
               refreshEventUpdates={studentEventUpdates.refresh}
+              handoverUpdates={studentEventUpdates.handoverUpdates}
+              markHandoverRead={studentEventUpdates.markHandoverRead}
               campusId={activeCampus?.id ?? null}
             />
           </div>

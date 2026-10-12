@@ -28,6 +28,8 @@ import {
   normalizeEventOverlayLocations,
 } from "../lib/eventOverlayModel";
 import { floorLookupId, publishedEventBuildingOptions } from "../lib/eventLocationData";
+import { prepareEventReuseRequest } from "../lib/eventOrganizationReuse";
+import type { EventOrganizationContext } from "../types/eventOrganization";
 
 import { getStudentEventPhase, isValidEventInstant, validateEventDates } from "../lib/eventPublication";
 
@@ -46,6 +48,7 @@ export type EventOverlayLocationInput =
 
 export interface EventOverlayInput {
   requestId?: string;
+  organization?: import('../types/eventOrganization').EventOrganizationContext;
   title: string;
   description?: string;
   organizer: string;
@@ -60,6 +63,7 @@ export interface EventOverlayFilters {
   campusId?: string;
   strict?: boolean;
   allCampuses?: boolean;
+  organizationId?: string;
 }
 
 // ── Mock fallback data ──────────────────────────────────────────────────────
@@ -101,34 +105,41 @@ function overlayFromMetadata(
   id: string,
   campusId?: string | null,
   updatedAt?: string | null,
+  organizationId?: string | null,
+  createdAt?: string | null,
 ): CampusEventOverlay {
+  const legacyUi = isRecord(metadata.ui) ? metadata.ui : {};
+  const field = (key: string): unknown => metadata[key] ?? legacyUi[key];
   const overlay: CampusEventOverlay = {
     id,
+    organizationId: organizationId || undefined,
+    createdAt: createdAt || undefined,
+    academicYear: typeof field("academicYear")==='string'?field("academicYear") as string:undefined,
     updatedAt: updatedAt || undefined,
     campusId: campusId || undefined,
-    title: (metadata.title as string) || "Untitled Event",
-    description: (metadata.description as string) || "",
-    dateStart: metadata.dateStart as string | undefined,
-    dateEnd: metadata.dateEnd as string | undefined,
-    organizer: (metadata.organizer as string) || "",
-    markers: (metadata.markers as CampusEventOverlay["markers"]) || [],
-    locationRef: metadata.locationRef as CampusEventOverlay["locationRef"],
-    locations: metadata.locations as EventOverlayLocation[] | undefined,
+    title: typeof field("title")==='string'?field("title") as string:"Untitled Event",
+    description: typeof field("description")==='string'?field("description") as string:"",
+    dateStart: field("dateStart") as string | undefined,
+    dateEnd: field("dateEnd") as string | undefined,
+    organizer: typeof field("organizer")==='string'?field("organizer") as string:"",
+    markers: (field("markers") as CampusEventOverlay["markers"]) || [],
+    locationRef: field("locationRef") as CampusEventOverlay["locationRef"],
+    locations: field("locations") as EventOverlayLocation[] | undefined,
     restrictedAreas:
-      (metadata.restrictedAreas as CampusEventOverlay["restrictedAreas"]) || [],
-    isActive: (metadata.isActive as boolean) ?? true,
-    status: (["draft", "pending", "approved", "disapproved"].includes(String(metadata.status)) ? metadata.status : "draft") as EventOverlayStatus,
-    lastEditedAt: typeof metadata.lastEditedAt === "string" ? metadata.lastEditedAt : undefined,
-    revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
-    submittedAt: typeof metadata.submittedAt === "string" ? metadata.submittedAt : undefined,
-    publicationAt: metadata.publicationAt as string | undefined,
-    locationFeedback: metadata.locationFeedback as Record<string, string> | undefined,
-    feedbackResolutions: metadata.feedbackResolutions as CampusEventOverlay["feedbackResolutions"],
-    adminComment: metadata.adminComment as string | undefined,
-    eventFurniture: (metadata.eventFurniture as FloorFurniture[]) || [],
-    eventLabels: (metadata.eventLabels as FloorLabel[]) || [],
-    posterUrl: metadata.posterUrl as string | undefined,
-    createdByUserId: metadata.createdByUserId as string | undefined,
+      (field("restrictedAreas") as CampusEventOverlay["restrictedAreas"]) || [],
+    isActive: (field("isActive") as boolean) ?? true,
+    status: (["draft", "pending", "approved", "disapproved"].includes(String(field("status"))) ? field("status") : "draft") as EventOverlayStatus,
+    lastEditedAt: typeof field("lastEditedAt") === "string" ? field("lastEditedAt") as string : undefined,
+    revision: typeof field("revision") === "number" ? field("revision") as number : undefined,
+    submittedAt: typeof field("submittedAt") === "string" ? field("submittedAt") as string : undefined,
+    publicationAt: field("publicationAt") as string | undefined,
+    locationFeedback: field("locationFeedback") as Record<string, string> | undefined,
+    feedbackResolutions: field("feedbackResolutions") as CampusEventOverlay["feedbackResolutions"],
+    adminComment: field("adminComment") as string | undefined,
+    eventFurniture: (field("eventFurniture") as FloorFurniture[]) || [],
+    eventLabels: (field("eventLabels") as FloorLabel[]) || [],
+    posterUrl: field("posterUrl") as string | undefined,
+    createdByUserId: field("createdByUserId") as string | undefined,
   };
   return {
     ...overlay,
@@ -349,6 +360,18 @@ export async function createEventOverlay(
   // Use the shared Map Builder UUID identity source for the event and its row.
   const id = input.requestId ?? genId("event-overlay");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error('Invalid creation attempt. Close and reopen the proposal.');
+  if(input.organization){
+    const organization=input.organization;
+    const {data,error}=await supabase.rpc('create_organization_event',{
+      p_event_id:id,p_organization_id:organization.organizationId,p_expected_grant_id:organization.grantId,
+      p_campus_id:campusId,p_academic_year:organization.academicYear,
+      p_metadata:{title:input.title,description:input.description??'',locations,...(input.posterUrl?{posterUrl:input.posterUrl}:{})} as unknown as Json,
+    });
+    if(error)throw eventCommandError(error);
+    const created=overlayFromAdminResult(data);
+    if(created.id!==id||created.organizationId!==organization.organizationId||created.createdByUserId!==createdByUserId)throw new Error('The proposal assignment could not be confirmed. Refresh your organization events before retrying.');
+    return created;
+  }
   const overlay: CampusEventOverlay = {
     id,
     title: input.title,
@@ -432,13 +455,14 @@ export async function updateEventOverlayDetails(
     locations: EventLocationRef[];
     posterUrl?: string;
   },
-  expectedUpdatedAt?: string
+  expectedUpdatedAt?: string,
+  expectedGrantId?: string,
 ): Promise<void> {
   const supabase = getSupabase();
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, metadata, name, updated_at")
+    .select("*")
     .eq("id", overlayId)
     .single();
 
@@ -488,6 +512,14 @@ export async function updateEventOverlayDetails(
     updatedMetadata.posterUrl = input.posterUrl;
   }
 
+  if(existing.organization_id){
+    await mutateOrganizationEvent(overlayId,expectedUpdatedAt??existing.updated_at,expectedGrantId,'details',{
+      title:input.title,description:input.description,organizer:input.organizer,locations:updatedLocations,
+      ...(input.posterUrl!==undefined?{posterUrl:input.posterUrl}:{}),
+    } as unknown as Json);
+    return;
+  }
+
   let detailsWrite = supabase.from("map_elements")
     .update({
       name: input.title,
@@ -516,13 +548,14 @@ export async function updateEventOverlayDetails(
 export async function updateEventOverlayLayout(
   overlayId: string,
   locations: EventOverlayLocation[],
-  expectedUpdatedAt?: string
+  expectedUpdatedAt?: string,
+  expectedGrantId?: string,
 ): Promise<CampusEventOverlay | undefined> {
   const supabase = getSupabase();
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, name, metadata, updated_at")
+    .select("*")
     .eq("id", overlayId)
     .single();
 
@@ -534,6 +567,11 @@ export async function updateEventOverlayLayout(
 
   const existingMetadata = existing.metadata as Record<string, unknown>;
   const existingStatus = (existingMetadata.status || "draft") as EventOverlayStatus;
+  if(existing.organization_id){
+    if(!['draft','disapproved','pending'].includes(existingStatus))throw new Error('Approved event layouts remain locked.');
+    await validateSavedLocations(existing.campus_id,locations);
+    return mutateOrganizationEvent(overlayId,expectedUpdatedAt??existing.updated_at,expectedGrantId,'layout',{locations} as unknown as Json);
+  }
   if (existingStatus === "pending") {
     await validateSavedLocations(existing.campus_id, locations);
     const { data, error } = await supabase.rpc("save_pending_event_layout", {
@@ -583,13 +621,14 @@ export async function updateEventOverlayLayout(
 export async function submitEventOverlayLayout(
   overlayId: string,
   locations: EventOverlayLocation[],
-  expectedUpdatedAt?: string
+  expectedUpdatedAt?: string,
+  expectedGrantId?: string,
 ): Promise<void> {
   const supabase = getSupabase();
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, name, metadata, updated_at")
+    .select("*")
     .eq("id", overlayId)
     .single();
 
@@ -607,6 +646,10 @@ export async function submitEventOverlayLayout(
   }
 
   await validateSavedLocations(existing.campus_id, locations);
+  if(existing.organization_id){
+    await mutateOrganizationEvent(overlayId,expectedUpdatedAt??existing.updated_at,expectedGrantId,'submit',{locations} as unknown as Json);
+    return;
+  }
   const updatedMetadata = {
     ...applyLocationCompatibilityFields(metadata, locations),
     status: "pending",
@@ -636,11 +679,12 @@ export async function submitEventOverlayLayout(
  * List event overlays with optional filters.
  * Returns all overlays for the active campus.
  */
-export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, locationId: string, pinId: string, addressed: boolean, note: string): Promise<CampusEventOverlay> {
+export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, locationId: string, pinId: string, addressed: boolean, note: string, expectedGrantId?: string): Promise<CampusEventOverlay> {
   const latest = await getEventOverlay(overlay.id);
   if (!latest || !latest.updatedAt || latest.locationFeedback?.[locationId] !== overlay.locationFeedback?.[locationId]) throw new Error("Feedback changed. Refresh before updating the checklist.");
-  const { data, error } = await getSupabase().rpc("set_event_feedback_pin_addressed", {
-    p_overlay_id: overlay.id, p_expected_updated_at: latest.updatedAt, p_location_id: locationId,
+  if(latest.organizationId&&!expectedGrantId)throw new Error('Your representative assignment is missing. Refresh the organization workspace before updating feedback.');
+  const { data, error } = await getSupabase().rpc(latest.organizationId?'set_organization_event_feedback_pin_addressed':"set_event_feedback_pin_addressed", {
+    p_overlay_id: overlay.id, p_expected_updated_at: latest.updatedAt, ...(latest.organizationId?{p_expected_grant_id:expectedGrantId}:{}), p_location_id: locationId,
     p_pin_id: pinId, p_addressed: addressed, p_note: note,
   });
   if (error) throw eventCommandError(error);
@@ -673,11 +717,12 @@ export async function listEventOverlays(
   try {
     let query = supabase
       .from("map_elements")
-      .select("id, campus_id, metadata, name, updated_at")
+      .select("*")
       .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
       .is("archived_at", null);
     if (campusId) query = query.eq("campus_id", campusId);
-    if (filters.createdByUserId) query = query.eq("metadata->>createdByUserId", filters.createdByUserId);
+    if(filters.organizationId)query=query.eq('organization_id',filters.organizationId);
+    else if (filters.createdByUserId) query = query.eq("metadata->>createdByUserId", filters.createdByUserId);
     const result = query.order("created_at", { ascending: false });
 
     const { data, error } = await result;
@@ -688,7 +733,9 @@ export async function listEventOverlays(
         (row.metadata as Record<string, unknown>) || {},
         row.id,
         row.campus_id,
-        row.updated_at
+        row.updated_at,
+        row.organization_id,
+        row.created_at,
       )
     );
 
@@ -696,7 +743,7 @@ export async function listEventOverlays(
     if (filters.status && filters.status !== "all") {
       overlays = overlays.filter((o) => o.status === filters.status);
     }
-    if (filters.createdByUserId) {
+    if (filters.createdByUserId && !filters.organizationId) {
       overlays = overlays.filter(
         (o) => o.createdByUserId === filters.createdByUserId
       );
@@ -713,7 +760,7 @@ export async function listEventOverlays(
 
     return overlays;
   } catch (error) {
-    if (filters.strict) throw error;
+    if (filters.strict || filters.organizationId) throw error;
     if (filters.campusId) return [];
     // Fallback to mock data when not connected
     let overlays = [...MOCK_OVERLAYS];
@@ -733,15 +780,22 @@ export async function listEventOverlays(
  * Get a single event overlay by ID.
  */
 export async function getEventOverlay(
-  overlayId: string
+  overlayId: string,
+  includeArchived=false,
 ): Promise<CampusEventOverlay | null> {
   const supabase = getSupabase();
 
+  if(includeArchived){
+    const {data,error}=await supabase.rpc('get_organization_event',{p_event_id:overlayId});
+    if(error)throw eventCommandError(error);
+    return overlayFromAdminResult(data);
+  }
+
   const { data, error } = await supabase
     .from("map_elements")
-    .select("id, campus_id, metadata, updated_at")
+    .select("*")
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
     .is("archived_at", null)
     .single();
 
@@ -758,6 +812,8 @@ export async function getEventOverlay(
     data.id,
     data.campus_id,
     data.updated_at,
+    data.organization_id,
+    data.created_at,
   );
 }
 
@@ -830,8 +886,17 @@ export async function listEventRevisions(overlayId: string): Promise<EventRevisi
   return Array.isArray(data) ? data as unknown as EventRevision[] : [];
 }
 
-export async function withdrawEventSubmission(overlayId: string, expectedUpdatedAt: string): Promise<CampusEventOverlay> {
-  const { data, error } = await getSupabase().rpc("withdraw_event_submission", {
+export async function withdrawEventSubmission(overlayId: string, expectedUpdatedAt: string, expectedGrantId?:string): Promise<CampusEventOverlay> {
+  const supabase=getSupabase();
+  const {data:existing,error:readError}=await supabase.from('map_elements').select('organization_id,updated_at').eq('id',overlayId).or('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay').maybeSingle();
+  if(readError)throw eventCommandError(readError);
+  if(!existing)throw new Error('This event is unavailable or your access changed. Refresh the event list.');
+  if(existing.organization_id){
+    if(!expectedGrantId)throw new Error('Your representative assignment is missing. Refresh the organization workspace before withdrawing.');
+    if(!existing.updated_at||Date.parse(existing.updated_at)!==Date.parse(expectedUpdatedAt))throw new Error('This event changed. Refresh before withdrawing the latest submission.');
+    return mutateOrganizationEvent(overlayId,expectedUpdatedAt,expectedGrantId,'withdraw',{} as Json);
+  }
+  const { data, error } = await supabase.rpc("withdraw_event_submission", {
     p_overlay_id: overlayId, p_expected_updated_at: expectedUpdatedAt,
   });
   if (error) throw eventCommandError(error);
@@ -843,7 +908,130 @@ function overlayFromAdminResult(value: unknown): CampusEventOverlay {
       typeof value.updatedAt !== "string" || !isRecord(value.metadata)) {
     throw new Error("The event change was not confirmed. Refresh the event list before continuing.");
   }
-  return overlayFromMetadata(value.metadata, value.id, value.campusId, value.updatedAt);
+  return {
+    ...overlayFromMetadata(value.metadata,value.id,value.campusId,value.updatedAt,
+      typeof value.organizationId==='string'?value.organizationId:null,
+      typeof value.createdAt==='string'?value.createdAt:null),
+    creatorName:typeof value.creatorName==='string'?value.creatorName:undefined,
+    archivedAt:typeof value.archivedAt==='string'?value.archivedAt:undefined,
+    reusedFromEventId:typeof value.reusedFromEventId==='string'?value.reusedFromEventId:undefined,
+  };
+}
+
+export interface LegacyEventReconciliationItem {
+  eventId: string;
+  campusId: string;
+  title: string;
+  status: string;
+  creatorUserId: string | null;
+  creatorName: string | null;
+  organizerLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  academicYear: string | null;
+  suggestedOrganizationId: string | null;
+  suggestedOrganizationName: string | null;
+  validation: "academic_year_required" | "suggestion_requires_confirmation" | "ambiguous_organizer_label" | "choose_verified_organization";
+}
+
+export async function listLegacyEventReconciliation(): Promise<LegacyEventReconciliationItem[]> {
+  const {data,error}=await getSupabase().rpc("admin_preview_event_organization_reconciliation");
+  if(error)throw eventCommandError(error);
+  if(!Array.isArray(data))throw new Error("Legacy event reconciliation could not be confirmed. Refresh and retry.");
+  return data.map(value=>{
+    if(!isRecord(value)||typeof value.eventId!=="string"||typeof value.campusId!=="string"||typeof value.title!=="string"||
+      typeof value.status!=="string"||typeof value.createdAt!=="string"||typeof value.updatedAt!=="string"||
+      !["academic_year_required","suggestion_requires_confirmation","ambiguous_organizer_label","choose_verified_organization"].includes(String(value.validation))) {
+      throw new Error("Legacy event reconciliation contains an invalid row. Refresh and retry.");
+    }
+    return {
+      eventId:value.eventId,campusId:value.campusId,title:value.title,status:value.status,
+      creatorUserId:typeof value.creatorUserId==="string"?value.creatorUserId:null,
+      creatorName:typeof value.creatorName==="string"?value.creatorName:null,
+      organizerLabel:typeof value.organizerLabel==="string"?value.organizerLabel:null,
+      createdAt:value.createdAt,updatedAt:value.updatedAt,archivedAt:typeof value.archivedAt==="string"?value.archivedAt:null,
+      academicYear:typeof value.academicYear==="string"?value.academicYear:null,
+      suggestedOrganizationId:typeof value.suggestedOrganizationId==="string"?value.suggestedOrganizationId:null,
+      suggestedOrganizationName:typeof value.suggestedOrganizationName==="string"?value.suggestedOrganizationName:null,
+      validation:value.validation as LegacyEventReconciliationItem["validation"],
+    };
+  });
+}
+
+export async function bindLegacyEventOrganization(input:{eventId:string;organizationId:string;academicYear:string;expectedUpdatedAt:string}):Promise<CampusEventOverlay>{
+  const {data,error}=await getSupabase().rpc("admin_bind_event_organization",{
+    p_event_id:input.eventId,p_organization_id:input.organizationId,p_academic_year:input.academicYear,p_expected_updated_at:input.expectedUpdatedAt,
+  });
+  if(error)throw eventCommandError(error);
+  return overlayFromAdminResult(data);
+}
+
+export async function correctEventOrganization(input:{eventId:string;organizationId:string;academicYear:string;expectedOrganizationId:string;expectedUpdatedAt:string;reason:string}):Promise<CampusEventOverlay>{
+  const {data,error}=await getSupabase().rpc("admin_correct_event_organization",{
+    p_event_id:input.eventId,p_organization_id:input.organizationId,p_academic_year:input.academicYear,
+    p_expected_organization_id:input.expectedOrganizationId,p_expected_updated_at:input.expectedUpdatedAt,p_reason:input.reason,
+  });
+  if(error)throw eventCommandError(error);
+  return overlayFromAdminResult(data);
+}
+
+async function mutateOrganizationEvent(eventId:string,expectedUpdatedAt:string|undefined,expectedGrantId:string|undefined,command:string,changes:Json):Promise<CampusEventOverlay>{
+  if(!expectedGrantId||!expectedUpdatedAt)throw new Error('Your representative assignment is missing or changed. Refresh the organization workspace before saving.');
+  const {data,error}=await getSupabase().rpc('mutate_organization_event',{p_event_id:eventId,p_expected_updated_at:expectedUpdatedAt,p_expected_grant_id:expectedGrantId,p_command:command,p_changes:changes});
+  if(error)throw eventCommandError(error);
+  return overlayFromAdminResult(data);
+}
+
+export interface EventEditAccess {
+  organizationId:string|null;
+  grantId:string|null;
+  isArchived:boolean;
+  canEditContent:boolean;
+  canAddressFeedback:boolean;
+}
+export async function getEventEditAccess(eventId:string):Promise<EventEditAccess>{
+  const {data,error}=await getSupabase().rpc('get_event_edit_access',{p_event_id:eventId});
+  if(error)throw eventCommandError(error);
+  if(!isRecord(data)||typeof data.canEditContent!=='boolean'||typeof data.canAddressFeedback!=='boolean'||typeof data.isArchived!=='boolean')throw new Error('Event access could not be confirmed. Refresh and retry.');
+  return {organizationId:typeof data.organizationId==='string'?data.organizationId:null,grantId:typeof data.grantId==='string'?data.grantId:null,isArchived:data.isArchived,canEditContent:data.canEditContent,canAddressFeedback:data.canAddressFeedback};
+}
+export async function listOrganizationEvents(organizationId:string,options:{academicYear?:string;search?:string;limit?:number;offset?:number;includeArchived?:boolean}={}):Promise<{events:CampusEventOverlay[];total:number}>{
+  const {data,error}=await getSupabase().rpc('list_organization_events',{p_organization_id:organizationId,p_academic_year:options.academicYear??null,p_search:options.search??'',p_limit:options.limit??50,p_offset:options.offset??0,p_include_archived:options.includeArchived??false});
+  if(error)throw eventCommandError(error);
+  if(!isRecord(data)||!Array.isArray(data.events)||typeof data.total!=='number'||!Number.isInteger(data.total)||data.total<0)throw new Error('Event history could not be confirmed. Please retry.');
+  return {events:data.events.map(overlayFromAdminResult),total:data.total};
+}
+
+export async function reuseOrganizationEvent(
+  source: CampusEventOverlay,
+  organization: EventOrganizationContext,
+  title: string,
+  requestId: string,
+): Promise<CampusEventOverlay> {
+  const request = prepareEventReuseRequest(source, organization, title, requestId);
+  const client = getSupabase();
+  const { data: authData, error: authError } = await client.auth.getUser();
+  if (authError || !authData.user) throw new Error("Sign in again before reusing this event layout.");
+  const { data, error } = await client.rpc("reuse_organization_event", {
+    p_source_id: request.sourceId,
+    p_expected_source_updated_at: request.expectedSourceUpdatedAt,
+    p_organization_id: request.organizationId,
+    p_expected_grant_id: request.expectedGrantId,
+    p_title: request.title,
+    p_academic_year: request.academicYear,
+    p_request_id: request.requestId,
+  });
+  if (error) throw eventCommandError(error);
+  const created = overlayFromAdminResult(data);
+  if (created.organizationId !== organization.organizationId || created.createdByUserId !== authData.user.id ||
+      created.reusedFromEventId !== source.id || created.status !== "draft" || created.title !== request.title ||
+      created.academicYear !== request.academicYear || created.campusId !== source.campusId ||
+      created.dateStart || created.dateEnd || created.publicationAt || created.submittedAt || created.adminComment ||
+      created.locationFeedback || created.feedbackResolutions) {
+    throw new Error("The new draft could not be confirmed. Retry this same request safely.");
+  }
+  return created;
 }
 
 export async function manageEventPublication(
@@ -901,24 +1089,35 @@ export function listPublishedEventPreviews(campusId: string): Promise<PublicEven
 /**
  * Delete an event overlay (called by admin or the creator).
  */
-export async function deleteEventOverlay(overlayId: string): Promise<void> {
+export async function deleteEventOverlay(overlayId: string,expectedGrantId?:string): Promise<void> {
   const supabase = getSupabase();
 
   const { data: existing, error: fetchError } = await supabase
     .from("map_elements")
-    .select("id, campus_id, name, metadata")
+    .select("*")
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
     .maybeSingle();
   if (fetchError) throw fetchError;
+  if(!existing)throw new Error('This event is unavailable or your access changed. Refresh the event list.');
 
-  const { error } = await supabase
+  if(existing.organization_id && !expectedGrantId)throw new Error('Your representative assignment is missing. Refresh the organization workspace before deleting this event.');
+  if(existing.organization_id && expectedGrantId){
+    const {data,error}=await supabase.rpc('mutate_organization_event',{p_event_id:overlayId,p_expected_updated_at:existing.updated_at,p_expected_grant_id:expectedGrantId,p_command:'delete',p_changes:{}});
+    if(error)throw eventCommandError(error);
+    if(!isRecord(data)||data.id!==overlayId||data.deleted!==true)throw new Error('Event deletion could not be confirmed. Refresh before retrying.');
+    return;
+  }
+
+  const { data:deleted,error } = await supabase
     .from("map_elements")
     .delete()
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay");
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
+    .select('id').maybeSingle();
 
   if (error) throw error;
+  if(!deleted)throw new Error('The event was not deleted. Your access may have changed; refresh before retrying.');
 
   await logActivity({
     action: "event_overlay.delete",
@@ -976,6 +1175,12 @@ export async function getActiveApprovedOverlays(): Promise<
 // ── Service export ──────────────────────────────────────────────────────────
 
 export const eventOverlayService = {
+  getEventEditAccess,
+  listOrganizationEvents,
+  reuseOrganizationEvent,
+  listLegacyEventReconciliation,
+  bindLegacyEventOrganization,
+  correctEventOrganization,
   createEventOverlay,
   listEventRevisions,
   withdrawEventSubmission,

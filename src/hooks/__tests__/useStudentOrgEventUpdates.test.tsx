@@ -5,12 +5,38 @@ import { eventOverlayService } from "../../services/eventOverlayService";
 import type { CampusEventOverlay } from "../../components/map-builder/types";
 import { eventReviewFingerprint, eventReviewSeenPrefix } from "../../lib/studentEventUpdates";
 import { eventNotificationService, EventNotificationSyncUnavailable } from '../../services/eventNotificationService';
+import { eventOrganizationService } from '../../services/eventOrganizationService';
 vi.mock('../../services/eventNotificationService',async(importOriginal)=>({...await importOriginal<typeof import('../../services/eventNotificationService')>(),eventNotificationService:{getStates:vi.fn(),acknowledge:vi.fn()}}));
-vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: { listEventOverlays: vi.fn() } }));
+vi.mock('../../services/eventOrganizationService',async(importOriginal)=>({...await importOriginal<typeof import('../../services/eventOrganizationService')>(),eventOrganizationService:{listMyEventOrganizations:vi.fn(),getHandoverSummary:vi.fn(),acknowledgeHandover:vi.fn()}}));
+vi.mock("../../services/eventOverlayService", async(importOriginal) => ({ ...await importOriginal<typeof import('../../services/eventOverlayService')>(), eventOverlayService: { listEventOverlays: vi.fn(), listOrganizationEvents: vi.fn() } }));
 const event = { id: "one", createdByUserId: "org-hook", title: "Fair", status: "approved", submittedAt: "2026-10-06T00:00:00Z" } as CampusEventOverlay;
-beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([event]); vi.mocked(eventNotificationService.getStates).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); vi.mocked(eventNotificationService.acknowledge).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); });
+beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([event]); vi.mocked(eventNotificationService.getStates).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); vi.mocked(eventNotificationService.acknowledge).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); vi.mocked(eventOrganizationService.listMyEventOrganizations).mockResolvedValue([]); vi.mocked(eventOrganizationService.getHandoverSummary).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); vi.mocked(eventOrganizationService.acknowledgeHandover).mockRejectedValue(new EventNotificationSyncUnavailable('Browser only')); });
 afterEach(() => vi.restoreAllMocks());
 describe("shared Student Org review updates", () => {
+  it.each([0, 1])("keeps the handover badge consistent when %i pending tasks remain", async (pendingCount: number) => {
+    const context = { organizationId: "org-badge", organizationName: "IT Organization", grantId: "grant-badge", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z" };
+    vi.mocked(eventOrganizationService.listMyEventOrganizations).mockResolvedValue([context]);
+    vi.mocked(eventOverlayService.listOrganizationEvents).mockResolvedValue({ events: [], total: 0 });
+    vi.mocked(eventOrganizationService.getHandoverSummary).mockResolvedValue({ ...context, pendingCount, unfinishedCount: 0, openFeedbackCount: 0, isRead: false, startsAt: "2026-10-09T00:00:00Z" });
+    const view = renderHook(() => useStudentOrgEventUpdates(`badge-${pendingCount}`, true));
+    await waitFor(() => expect(view.result.current.handoverUpdates).toHaveLength(1));
+    expect(view.result.current.unreadCount).toBe(pendingCount > 0 ? 1 : 0);
+    view.unmount();
+  });
+  it('loads successor review updates and a per-grant handover summary for organization-owned events', async () => {
+    const context = { organizationId: 'org-it', organizationName: 'IT Organization', grantId: 'grant-new', academicYear: '2026–2027', expiresAt: '2027-06-30T00:00:00Z' };
+    const inherited = { ...event, id: 'inherited', organizationId: 'org-it', createdByUserId: 'former-rep' } as CampusEventOverlay;
+    vi.mocked(eventOrganizationService.listMyEventOrganizations).mockResolvedValue([context]);
+    vi.mocked(eventOverlayService.listOrganizationEvents).mockResolvedValue({ events: [inherited], total: 1 });
+    vi.mocked(eventNotificationService.getStates).mockResolvedValue(new Map([['inherited', { isCurrent: true, isRead: false }]]));
+    vi.mocked(eventOrganizationService.getHandoverSummary).mockResolvedValue({ ...context, pendingCount: 1, unfinishedCount: 1, openFeedbackCount: 0, isRead: false, startsAt: '2026-10-09T00:00:00Z' });
+    const view = renderHook(() => useStudentOrgEventUpdates('successor', true));
+    await waitFor(() => expect(view.result.current.events.map(item => item.id)).toEqual(['inherited']));
+    expect(view.result.current.unreadIds.has('inherited')).toBe(true);
+    expect(view.result.current.handoverUpdates).toEqual([expect.objectContaining({ grantId: 'grant-new', isRead: false })]);
+    expect(eventNotificationService.getStates).toHaveBeenCalledWith('successor', 'org_review', [inherited], false);
+    view.unmount();
+  });
   it('retains actor-scoped session-only read marks across a map route round trip',async()=>{
     const item={...event,createdByUserId:'org-session-route'};
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([item]);
@@ -55,8 +81,11 @@ describe("shared Student Org review updates", () => {
   });
   it("ignores the previous account's late response after switching owners", async () => {
     let resolveOld!: (events: CampusEventOverlay[]) => void;
-    vi.mocked(eventOverlayService.listEventOverlays).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; })).mockResolvedValueOnce([{ ...event, id: "new-owner", createdByUserId: "org-new" }]);
+    vi.mocked(eventOverlayService.listEventOverlays).mockImplementation(({ createdByUserId } = {}) => createdByUserId === 'org-old'
+      ? new Promise(resolve => { resolveOld = resolve; })
+      : Promise.resolve([{ ...event, id: "new-owner", createdByUserId: "org-new" }]) as never);
     const view = renderHook(({ owner }) => useStudentOrgEventUpdates(owner, true), { initialProps: { owner: "org-old" } });
+    await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
     view.rerender({ owner: "org-new" });
     await waitFor(() => expect(view.result.current.events[0]?.id).toBe("new-owner"));
     await act(async () => resolveOld([{ ...event, createdByUserId: "org-old" }]));
@@ -68,6 +97,7 @@ describe("shared Student Org review updates", () => {
       const view = renderHook(() => useStudentOrgEventUpdates("org-poll", true));
       vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...event, createdByUserId: "org-poll" }]);
       await act(async () => { await view.result.current.refresh(); });
+      expect(view.result.current.events).toHaveLength(1);
       await act(async () => { await view.result.current.markRead(view.result.current.events[0]); });
       const before = vi.mocked(eventOverlayService.listEventOverlays).mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(15000); });

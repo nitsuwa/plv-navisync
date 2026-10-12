@@ -652,10 +652,10 @@ describe("CampusMapPage event overlays", () => {
     expect(within(planner).queryByTestId("selected-room-planner-context")).not.toBeInTheDocument();
     expect(within(planner).queryByRole("button", { name: "Report this room" })).not.toBeInTheDocument();
 
-    const mapFloorPicker = within(screen.getByTestId("student-floor-picker"));
-    fireEvent.click(mapFloorPicker.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
+    const floorPicker = within(screen.getByTestId("student-floor-picker"));
+    fireEvent.click(floorPicker.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
     fireEvent.click(screen.getByRole("option", { name: /Floor 2/ }));
-    expect(mapFloorPicker.getByRole("button", { name: "Choose floor. Current floor: Floor 2" })).toBeInTheDocument();
+    expect(floorPicker.getByRole("button", { name: "Choose floor. Current floor: Floor 2" })).toBeInTheDocument();
     expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
     expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
     expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Choose destination");

@@ -3,6 +3,7 @@ import { getSupabase } from "../../lib/supabase";
 import { campusService, resolveActiveCampusId } from "../campusService";
 import { eventOverlayService } from "../eventOverlayService";
 import { writeEventFeedback } from "../../lib/eventFeedbackPins";
+import type { CampusEventOverlay } from "../../components/map-builder/types";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 vi.mock("../campusService", () => ({
@@ -21,18 +22,26 @@ const floorLocation = {
 
 function makeClient(rows: unknown[] = []) {
   const filters: Array<{ column: string; value: unknown }> = [];
-  const matchingRows=()=>rows.filter(row=>filters.every(filter=>filter.column!=='archived_at'||((row as {archived_at?:string|null}).archived_at??null)===filter.value));
+  const orFilters: string[] = [];
+  const matchingRows=()=>rows.filter(row=>filters.every(filter=>{
+    const record=row as Record<string,unknown>;
+    return filter.column==='archived_at'
+      ? (record.archived_at??null)===filter.value
+      : filter.column==='id'||filter.column==='element_type'
+        ? record[filter.column]===filter.value
+        : true;
+  }));
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn((column: string, value: unknown) => {
       filters.push({ column, value });
       return query;
     }),
-    or: vi.fn(() => query),
+    or: vi.fn((filter:string) => { orFilters.push(filter); return query; }),
     is: vi.fn((column:string,value:unknown)=>{filters.push({column,value});return query;}),
     order: vi.fn(async()=>({ data: matchingRows(), error: null })),
     single: vi.fn(async()=>({ data: matchingRows()[0] ?? null, error: null })),
-    maybeSingle: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
+    maybeSingle: vi.fn(async()=>({ data: matchingRows()[0] ?? null, error: null })),
   };
   const mapElements = {
     insert: vi.fn((payload: unknown) => ({
@@ -40,6 +49,7 @@ function makeClient(rows: unknown[] = []) {
     })),
     select: vi.fn(() => query),
     update: vi.fn((_payload: unknown) => query),
+    delete: vi.fn(() => query),
   };
   const activityLogs = { insert: vi.fn().mockResolvedValue({ data: null, error: null }) };
   return {
@@ -50,6 +60,7 @@ function makeClient(rows: unknown[] = []) {
       from: vi.fn((table: string) => table === "map_elements" ? mapElements : activityLogs),
     },
     filters,
+    orFilters,
   };
 }
 
@@ -69,6 +80,68 @@ function publishedCampus(id: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("event overlay service", () => {
+  it("hydrates legacy nested event fields in organization history", async () => {
+    const { client } = makeClient();
+    client.rpc.mockResolvedValue({ data: {
+      events: [{
+        id: "legacy-event-row", campusId: "campus-1", organizationId: "org-1",
+        createdAt: "2026-09-29T10:15:39.460662Z", updatedAt: "2026-09-30T13:42:20.804809Z",
+        metadata: {
+          kind: "event_overlay", academicYear: "2025–2026",
+          ui: {
+            id: "legacy-event-row", kind: "event_overlay", title: "TEST: College Week 2026",
+            description: "Legacy event details", organizer: "OSA", status: "approved",
+            createdByUserId: "legacy-representative", isActive: true,
+            locations: [{ id: "grounds", locationRef: campusLocation, eventFurniture: [], eventLabels: [] }],
+            eventFurniture: [{ id: "booth-1", type: "booth", name: "Booth 1", x: 10, y: 20, width: 30, height: 20 }],
+            eventLabels: [{ id: "label-1", text: "Stage", x: 40, y: 50 }],
+          },
+        },
+      }],
+      total: 1,
+    }, error: null } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const result = await eventOverlayService.listOrganizationEvents("org-1");
+
+    expect(result.events[0]).toMatchObject({
+      title: "TEST: College Week 2026",
+      description: "Legacy event details",
+      organizer: "OSA",
+      status: "approved",
+      createdByUserId: "legacy-representative",
+      academicYear: "2025–2026",
+      eventFurniture: [{ id: "booth-1", name: "Booth 1" }],
+      eventLabels: [{ id: "label-1", text: "Stage" }],
+    });
+  });
+
+  it("reuses a layout through the server and confirms fresh draft provenance", async () => {
+    const { client } = makeClient();
+    const source = { id: "10000000-0000-4000-8000-000000000001", organizationId: "org-1", updatedAt: "2026-10-08T12:00:00Z", campusId: "campus-1", title: "Past fair", description: "Original", organizer: "IT", status: "approved", dateStart: "2025-03-15T01:00:00Z", posterUrl: "https://example.test/old.png", locations: [{ id: "ground", locationRef: campusLocation, eventFurniture: [{ id: "booth", x: 1, y: 2 }], eventLabels: [] }] } as unknown as CampusEventOverlay;
+    const organization = { organizationId: "org-1", organizationName: "IT Organization", grantId: "30000000-0000-4000-8000-000000000001", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z" };
+    client.rpc.mockResolvedValue({ data: { id: "40000000-0000-4000-8000-000000000001", campusId: "campus-1", organizationId: "org-1", creatorName: "New Rep", createdAt: "2026-10-09T00:00:00Z", updatedAt: "2026-10-09T00:00:00Z", reusedFromEventId: source.id, metadata: { createdByUserId: "org-1", status: "draft", title: "New fair", academicYear: "2026–2027", locations: [] } }, error: null } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    const result = await eventOverlayService.reuseOrganizationEvent(source, organization, "New fair", "50000000-0000-4000-8000-000000000001");
+    expect(result).toMatchObject({ id: "40000000-0000-4000-8000-000000000001", status: "draft", reusedFromEventId: source.id });
+    expect(client.rpc).toHaveBeenCalledWith("reuse_organization_event", {
+      p_source_id: source.id, p_expected_source_updated_at: source.updatedAt, p_organization_id: "org-1",
+      p_expected_grant_id: organization.grantId, p_title: "New fair", p_academic_year: "2026–2027",
+      p_request_id: "50000000-0000-4000-8000-000000000001",
+    });
+    expect(JSON.stringify(client.rpc.mock.calls[0][1])).not.toContain("dateStart");
+    expect(JSON.stringify(client.rpc.mock.calls[0][1])).not.toContain("posterUrl");
+  });
+
+  it("shows stale source and handover conflicts as actionable reuse errors", async () => {
+    const { client } = makeClient();
+    const source = { id: "10000000-0000-4000-8000-000000000001", organizationId: "org-1", updatedAt: "2026-10-08T12:00:00Z", campusId: "campus-1", title: "Past fair" } as never;
+    const organization = { organizationId: "org-1", organizationName: "IT Organization", grantId: "30000000-0000-4000-8000-000000000001", academicYear: "2026–2027", expiresAt: "2027-06-30T00:00:00Z" };
+    client.rpc.mockResolvedValue({ data: null, error: { code: "40001", message: "The source layout changed. Refresh before reusing it." } } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+    await expect(eventOverlayService.reuseOrganizationEvent(source, organization, "New fair", "50000000-0000-4000-8000-000000000001")).rejects.toThrow(/source layout changed/i);
+  });
+
   it("coalesces concurrent published event preview reads for the same campus", async () => {
     const { client } = makeClient();
     vi.mocked(client.rpc).mockResolvedValue({ data: { serverNow: "2026-10-08T02:00:00.000Z", events: [] }, error: null });
@@ -88,6 +161,36 @@ describe("event overlay service", () => {
     mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await expect(eventOverlayService.getEventOverlay('event-1')).rejects.toThrow(/session.*expired.*sign in/i);
+  });
+  it('loads a legacy event whose event kind is stored in metadata instead of element_type',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',campus_id:'campus-1',updated_at:'2026-10-09T00:00:00Z',
+      metadata:{kind:'event_overlay',ui:{title:'Legacy event',description:'Nested payload',organizer:'OSA',status:'draft',createdByUserId:'rep-1'}}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const event=await eventOverlayService.getEventOverlay(legacy.id);
+
+    expect(event).toMatchObject({id:'legacy-event',title:'Legacy event',description:'Nested payload',organizer:'OSA',createdByUserId:'rep-1'});
+    expect(orFilters).toContain('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay');
+  });
+  it('finds a metadata-kind legacy event before withdrawing it',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',organization_id:null,updated_at:'2026-10-09T00:00:00Z',metadata:{kind:'event_overlay'}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    await expect(eventOverlayService.withdrawEventSubmission(legacy.id,legacy.updated_at)).resolves.toMatchObject({id:'event-1'});
+
+    expect(orFilters).toContain('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay');
+  });
+  it('finds and deletes a metadata-kind legacy event',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',organization_id:null,updated_at:'2026-10-09T00:00:00Z',campus_id:'campus-1',metadata:{kind:'event_overlay',title:'Legacy event'}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    await expect(eventOverlayService.deleteEventOverlay(legacy.id)).resolves.toBeUndefined();
+
+    expect(orFilters).toHaveLength(2);
+    expect(orFilters.every(filter=>filter==='element_type.eq.event_overlay,metadata->>kind.eq.event_overlay')).toBe(true);
   });
   it('keeps a transient read failure actionable instead of returning an empty event',async()=>{
     const {client,mapElements}=makeClient();
@@ -253,7 +356,7 @@ describe("event overlay service", () => {
   });
 
   it("withdraws through a revision checked command and does not delete the layout", async () => {
-    const { client, mapElements } = makeClient();
+    const { client, mapElements } = makeClient([{id:"event-1",element_type:"event_overlay",organization_id:null,updated_at:"2026-10-03T00:00:00Z",metadata:{status:"pending"}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await eventOverlayService.withdrawEventSubmission("event-1", "2026-10-03T00:00:00Z");
     expect(client.rpc).toHaveBeenCalledWith("withdraw_event_submission", { p_overlay_id: "event-1", p_expected_updated_at: "2026-10-03T00:00:00Z" });
@@ -377,7 +480,7 @@ describe("event overlay service", () => {
   });
 
   it("rejects publication at or after the event end", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-08T00:00:00.000Z"));
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-07T00:00:00Z"));
     const {client, mapElements} = makeClient([{id:"event-1",metadata:{status:"pending",dateStart:"2026-10-01T01:00:00Z",dateEnd:"2026-10-01T03:00:00Z"}}]);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await expect(eventOverlayService.reviewEventOverlay("event-1", "approved", undefined, {expectedUpdatedAt:"2026-10-02T00:00:00.000Z",dateStart:"2026-10-08T01:00:00Z",dateEnd:"2026-10-09T01:00:00Z",publicationMode:"schedule",publicationAt:"2026-10-09T01:00:00Z"})).rejects.toThrow(/before the event ends/i);

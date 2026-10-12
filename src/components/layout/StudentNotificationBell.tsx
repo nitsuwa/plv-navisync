@@ -6,12 +6,13 @@ import type { CampusEventOverlay } from "../map-builder/types";
 import { normalizeReportStatus, type IssueReport, type ReportStatus } from "../../services/reportService";
 import { reportService } from "../../services/reportService";
 import { loadStudentPreferences, type StudentNotificationPreferences } from "../../services/studentPreferencesService";
-import { eventReviewFingerprint } from "../../lib/studentEventUpdates";
+import { eventReviewFingerprint, hasEventHandoverWork } from "../../lib/studentEventUpdates";
 import { visibleEventCards } from "../../lib/eventMapView";
 import { formatEventDate } from "../../lib/eventPublication";
 import { usePublishedCampus } from "../../hooks/usePublishedCampus";
 import { usePublishedEventPreviews } from "../../hooks/usePublishedEventPreviews";
 import type { PublicEventPreview } from "../../types/eventPreview";
+import type { EventOrganizationHandoverSummary } from "../../types/eventOrganization";
 import { cn } from "../../lib/utils";
 
 export interface StudentNotificationBellProps {
@@ -22,6 +23,8 @@ export interface StudentNotificationBellProps {
   markEventRead: (event: CampusEventOverlay) => unknown;
   eventUpdatesError?: string;
   refreshEventUpdates: () => Promise<void>;
+  handoverUpdates?: EventOrganizationHandoverSummary[];
+  markHandoverRead?: (grantId: string) => unknown;
   containerRef?: RefObject<HTMLDivElement | null>;
 }
 
@@ -45,7 +48,7 @@ interface StudentNotificationFeedProps extends StudentNotificationBellProps {
 
 interface StudentNotification {
   id: string;
-  kind: "report" | "event-review" | "campus-event";
+  kind: "report" | "event-review" | "event-handover" | "campus-event";
   title: string;
   message: string;
   date: string;
@@ -54,6 +57,7 @@ interface StudentNotification {
   event?: CampusEventOverlay;
   phase?: "upcoming" | "ongoing";
   reportStatus?: ReportStatus;
+  handover?: EventOrganizationHandoverSummary;
 }
 
 const READ_IDS_PREFIX = "plv-student-notification-read:v1:";
@@ -115,8 +119,8 @@ function reportUpdateNotifications(reports: IssueReport[], readIds: Set<string>)
 }
 
 function eventReviewNotifications(
-  events: CampusEventOverlay[],
-  unreadIds: ReadonlySet<string>,
+  events: CampusEventOverlay[] = [],
+  unreadIds: ReadonlySet<string> = new Set(),
 ): StudentNotification[] {
   return events.flatMap((event) => {
     const fingerprint = eventReviewFingerprint(event);
@@ -133,10 +137,31 @@ function eventReviewNotifications(
       title: event.title || "Event layout update",
       message,
       date: event.updatedAt ?? event.submittedAt ?? event.publicationAt ?? "",
-      href: "/student/events",
+      href: `/student/events${event.organizationId ? `?organizationId=${encodeURIComponent(event.organizationId)}` : ""}`,
       unread: unreadIds.has(event.id),
       event,
     }];
+  });
+}
+
+function handoverNotifications(updates: EventOrganizationHandoverSummary[] = []): StudentNotification[] {
+  return updates.filter(hasEventHandoverWork).map((update) => {
+    // The server's unfinished total includes pending submissions.
+    const total = Math.max(update.unfinishedCount, update.pendingCount);
+    const work = total === 1 ? "1 unfinished event" : `${total} unfinished events`;
+    const pending = update.pendingCount === 1 ? "1 pending submission" : `${update.pendingCount} pending submissions`;
+    const feedback = update.openFeedbackCount === 1 ? "1 open feedback pin" : `${update.openFeedbackCount} open feedback pins`;
+    const summary = [total > 0 ? `${work}${update.pendingCount > 0 ? ` (${pending})` : ""}` : "", update.openFeedbackCount > 0 ? feedback : ""].filter(Boolean).join(" · ");
+    return {
+      id: `event-handover:${update.grantId}`,
+      kind: "event-handover" as const,
+      title: `${update.organizationName} event handover`,
+      message: `${update.academicYear} · ${summary}. Review your organization’s current work.`,
+      date: update.startsAt,
+      href: `/student/events?organizationId=${encodeURIComponent(update.organizationId)}&handover=${encodeURIComponent(update.grantId)}`,
+      unread: !update.isRead,
+      handover: update,
+    };
   });
 }
 
@@ -180,6 +205,7 @@ export function StudentNotificationsSection(props: StudentNotificationsSectionPr
 
 function StudentNotificationFeed({
   ownerId, isStudentOrg, eventUpdates, unreadEventIds, markEventRead,
+  handoverUpdates = [], markHandoverRead,
   eventUpdatesError, refreshEventUpdates, containerRef, campusId, presentation,
   mapTrigger = false,
   reportsSnapshot, reportsSnapshotLoading = false, reportsSnapshotError = false, onRetryReports,
@@ -305,9 +331,10 @@ function StudentNotificationFeed({
       ...(preferences?.reportStatus === false ? [] : reportUpdateNotifications(reportsSnapshot ?? reports, readIds)),
       ...(preferences?.campusEvents === false ? [] : publishedEventNotifications(publishedEvents, eventClockMs + eventServerOffsetMs, readIds)),
       ...(!isStudentOrg || preferences?.campusEvents === false ? [] : eventReviewNotifications(eventUpdates, unreadEventIds)),
+      ...(!isStudentOrg ? [] : handoverNotifications(handoverUpdates)),
     ];
     return items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-  }, [eventClockMs, eventServerOffsetMs, eventUpdates, isStudentOrg, preferences, publishedEvents, readIds, reports, reportsSnapshot, unreadEventIds]);
+  }, [eventClockMs, eventServerOffsetMs, eventUpdates, handoverUpdates, isStudentOrg, preferences, publishedEvents, readIds, reports, reportsSnapshot, unreadEventIds]);
   const unreadCount = notifications.filter((item) => item.unread).length;
   const displayedNotifications = isSection ? notifications : notifications.slice(0, MAX_NOTIFICATIONS);
   const displayedReportsLoading = reportsSnapshot === undefined ? loading : reportsSnapshotLoading;
@@ -330,6 +357,7 @@ function StudentNotificationFeed({
     window.dispatchEvent(new CustomEvent(NOTIFICATION_READ_EVENT, { detail: { ownerId, ids: [...next] } }));
     notifications.forEach((item) => {
       if (item.kind === "event-review" && item.event && item.unread) markEventRead(item.event);
+      if (item.kind === "event-handover" && item.handover && item.unread) markHandoverRead?.(item.handover.grantId);
     });
   };
 
@@ -432,6 +460,7 @@ function StudentNotificationFeed({
                         to={item.href}
                           onClick={() => {
                             if (item.kind === "report" || item.kind === "campus-event") markReportRead(item.id);
+                            else if (item.kind === "event-handover" && item.handover) markHandoverRead?.(item.handover.grantId);
                             else if (item.event) markEventRead(item.event);
                             if (!isSection) setOpen(false);
                           }}

@@ -10,8 +10,8 @@ import { AdminSidebar } from '../AdminSidebar';
 describe('admin event queue navigation', () => {
   it('keeps pending review work visible after notifications are read in expanded and collapsed navigation', () => {
     const page = render(<MemoryRouter><AdminSidebar /></MemoryRouter>);
-    expect(screen.getByRole('link', { name: /Event Layouts, 2 pending reviews/i })).toHaveTextContent('2');
+    expect(screen.getByRole('link', { name: /Events, 2 pending reviews/i })).toHaveTextContent('2');
     page.rerender(<MemoryRouter><AdminSidebar collapsed /></MemoryRouter>);
-    expect(screen.getByRole('link', { name: /Event Layouts, 2 pending reviews/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Events, 2 pending reviews/i })).toBeInTheDocument();
   });
 });

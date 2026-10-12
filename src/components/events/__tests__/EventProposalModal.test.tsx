@@ -20,6 +20,41 @@ vi.mock("../../../lib/supabase", () => ({
 const buildings = [{ buildingId: "science", buildingName: "Science Building", floors: [{ number: 1, label: "Floor 1" }] }];
 
 describe("EventProposalModal", () => {
+  const assignedOrganization = {
+    organizationId: "org-vits",
+    organizationName: "Valenzuela Information Technology Society",
+    grantId: "grant-vits",
+    academicYear: "2026–2027",
+    expiresAt: "2027-12-31T00:00:00Z",
+  };
+
+  it("prefills the proposal organizer from the selected organization and submits it", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(<EventProposalModal organization={assignedOrganization} buildings={buildings} onClose={vi.fn()} onCreate={onCreate} />);
+
+    const organizationField = screen.getByLabelText(/organization name/i) as HTMLInputElement;
+    expect(organizationField).toHaveValue(assignedOrganization.organizationName);
+    expect(organizationField).not.toHaveAttribute("readonly");
+    fireEvent.change(organizationField, { target: { value: "VITS Council" } });
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "VITS Fair" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ organizer: "VITS Council" })));
+  });
+
+  it("does not mark the prefilled organization name as an unsaved user edit", () => {
+    const onClose = vi.fn();
+    render(<EventProposalModal organization={assignedOrganization} buildings={buildings} onClose={onClose} onCreate={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog", { name: /discard this proposal/i })).not.toBeInTheDocument();
+  });
+
   it('returns focus to the opener after discarding through a nested confirmation',async()=>{
     function Harness(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Create an event</button>{open&&<EventProposalModal buildings={buildings} onClose={()=>setOpen(false)} onCreate={vi.fn()}/>}</>;}
     render(<Harness/>);

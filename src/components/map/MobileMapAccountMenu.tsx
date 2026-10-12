@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
-import { Bookmark, ChevronDown, Flag, LogIn, LogOut, Loader2, Settings, UserRound } from "lucide-react";
+import { Bookmark, CalendarDays, ChevronDown, Flag, LogIn, LogOut, Loader2, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
 import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/utils";
@@ -17,7 +17,7 @@ interface MobileMapAccountMenuProps {
 }
 
 export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: MobileMapAccountMenuProps) {
-  const { isStudent, loading, username, role, profile, signOut } = useStudentAuth();
+  const { isStudent, isStudentOrg, loading, username, role, profile, signOut } = useStudentAuth();
   const [internalOpen, setInternalOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -212,6 +212,9 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
                   <Link role="menuitem" to="/student/reports" onClick={() => changeOpen(false)} className={menuItemClass}>
                     <Flag className="h-4 w-4 shrink-0 text-muted-foreground" /> My Reports
                   </Link>
+                  {isStudentOrg && <Link role="menuitem" to="/student/events" onClick={() => changeOpen(false)} className={menuItemClass}>
+                    <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" /> Organization Events
+                  </Link>}
                 </>
               ) : (
                 <Link role="menuitem" to="/register" onClick={() => changeOpen(false)} className={menuItemClass}>

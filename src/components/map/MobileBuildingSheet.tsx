@@ -323,6 +323,8 @@ export function MobileBuildingSheet({
           campusId={campusId}
           hasFloorPlans={hasFloorPlans}
           saved={saved}
+          savedStateLoading={savedStateLoading}
+          savedStateUnavailable={savedStateUnavailable}
           studentAuth={studentAuth}
           showQR={showQR}
           showSecondaryActions={sheetState !== "peek"}

@@ -114,7 +114,7 @@ describe("Admin activity notifications", () => {
     expect(screen.getByText(/Science Council/)).toBeInTheDocument();
     expect(mocks.markSubmissionRead).not.toHaveBeenCalled();
     fireEvent.click(action);
-    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/event-layouts?review=qa-one');
+    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/events?view=review&review=qa-one');
   });
 
   it('protects unsaved map work before following a submission notification', async () => {
@@ -127,6 +127,6 @@ describe("Admin activity notifications", () => {
     fireEvent.click(await screen.findByRole('button', { name: /Review Student Fair/i }));
     expect(mocks.navigate).not.toHaveBeenCalled();
     continueNavigation?.();
-    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/event-layouts?review=qa-one');
+    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/events?view=review&review=qa-one');
   });
 });

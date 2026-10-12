@@ -1,0 +1,249 @@
+{
+  "status": "PASS",
+  "engine": "PGlite PostgreSQL; real baseline and organization event migrations; disposable single-session fixture",
+  "checks": [
+    {
+      "name": "active representative cannot mutate a legacy event with no creator attribution"
+    },
+    {
+      "name": "admin correction preserves original author and status"
+    },
+    {
+      "name": "admin pending total is unchanged by acknowledgement"
+    },
+    {
+      "name": "admin review result retains organization and original creator context"
+    },
+    {
+      "name": "administrator deletion is also blocked while a poster is referenced"
+    },
+    {
+      "name": "another organization cannot read private review receipts"
+    },
+    {
+      "name": "another organization cannot reuse the source event"
+    },
+    {
+      "name": "approval made during the current grant is unread"
+    },
+    {
+      "name": "approved layout remains locked"
+    },
+    {
+      "name": "approved organization event cannot be deleted"
+    },
+    {
+      "name": "archived record has a protected read-only history path"
+    },
+    {
+      "name": "archived records are excluded from current work"
+    },
+    {
+      "name": "binding is relational"
+    },
+    {
+      "name": "binding keeps historical original creators"
+    },
+    {
+      "name": "binding keeps original revision history and adds no fake edit rows"
+    },
+    {
+      "name": "binding preserves all four approval states"
+    },
+    {
+      "name": "binding preserves existing content revision numbers"
+    },
+    {
+      "name": "changed reuse source requires refresh"
+    },
+    {
+      "name": "correction stores an explicit audit reason"
+    },
+    {
+      "name": "current representative can list a poster through organization access"
+    },
+    {
+      "name": "current successor has the verified organization and year"
+    },
+    {
+      "name": "edit access reports actual successor grant"
+    },
+    {
+      "name": "explicit archived history filter includes its row"
+    },
+    {
+      "name": "former uploader cannot delete a poster still referenced by event history"
+    },
+    {
+      "name": "generic campus save leaves bound event records unchanged"
+    },
+    {
+      "name": "generic campus save still updates non-event map elements"
+    },
+    {
+      "name": "handover acknowledgement is private to and remembered by the current grant"
+    },
+    {
+      "name": "handover reports one pending submission and all unfinished organization work"
+    },
+    {
+      "name": "handover summarizes unresolved feedback pins"
+    },
+    {
+      "name": "history search returns matching event"
+    },
+    {
+      "name": "later administrator feedback becomes a new unread notification"
+    },
+    {
+      "name": "legacy feedback RPC cannot skip the current representative token"
+    },
+    {
+      "name": "legacy pending-save RPC cannot skip the current representative token"
+    },
+    {
+      "name": "legacy reconciliation suggests a match but never binds the event"
+    },
+    {
+      "name": "legacy withdrawal RPC cannot skip the current representative token"
+    },
+    {
+      "name": "new event rejects a non-text description before insertion"
+    },
+    {
+      "name": "non-event elements cannot carry organization ownership"
+    },
+    {
+      "name": "non-event published structure remains visible"
+    },
+    {
+      "name": "ordinary student cannot preview legacy organization mappings"
+    },
+    {
+      "name": "ordinary student cannot read private event content"
+    },
+    {
+      "name": "other organization cannot see inherited events"
+    },
+    {
+      "name": "other organization history RPC denied"
+    },
+    {
+      "name": "other organization private event RPC denied"
+    },
+    {
+      "name": "outgoing cannot directly read bound private events"
+    },
+    {
+      "name": "outgoing cannot directly read revision history"
+    },
+    {
+      "name": "outgoing pending save denied"
+    },
+    {
+      "name": "outgoing representative cannot read successor review receipts"
+    },
+    {
+      "name": "outgoing revision RPC denied"
+    },
+    {
+      "name": "outgoing withdrawal denied"
+    },
+    {
+      "name": "ownership correction does not fabricate a layout revision"
+    },
+    {
+      "name": "pending organization event cannot be deleted"
+    },
+    {
+      "name": "poster reference check sees history and reused drafts"
+    },
+    {
+      "name": "previous organization loses corrected event"
+    },
+    {
+      "name": "public approved event stays visible without private feedback or owner fields"
+    },
+    {
+      "name": "public poster reference and original event remain unchanged"
+    },
+    {
+      "name": "publication result retains organization and original creator context"
+    },
+    {
+      "name": "rebinding an assigned event rejected"
+    },
+    {
+      "name": "retry creates one fresh date-free draft"
+    },
+    {
+      "name": "retry with identical request ID returns the same single draft"
+    },
+    {
+      "name": "reuse blocks a venue removed from current published map"
+    },
+    {
+      "name": "reuse copies only supported layout fields and generates fresh location and item IDs"
+    },
+    {
+      "name": "reuse creates a new organization-owned draft with actual successor attribution"
+    },
+    {
+      "name": "reuse resets schedule approval feedback and uses a fresh revision"
+    },
+    {
+      "name": "reuse starts a separate revision history and leaves source revisions untouched"
+    },
+    {
+      "name": "revoked representative cannot reuse after handover"
+    },
+    {
+      "name": "same reuse request ID cannot carry a different payload"
+    },
+    {
+      "name": "stale assignment cannot mutate current work"
+    },
+    {
+      "name": "successor can delete a fresh organization-owned draft"
+    },
+    {
+      "name": "successor can withdraw inherited pending proposal"
+    },
+    {
+      "name": "successor cannot bypass RPC using direct update"
+    },
+    {
+      "name": "successor cannot change historical academic year"
+    },
+    {
+      "name": "successor cannot change original creator"
+    },
+    {
+      "name": "successor does not receive old approval as a new review notification"
+    },
+    {
+      "name": "successor edit preserves original creator"
+    },
+    {
+      "name": "successor feedback action records actual actor"
+    },
+    {
+      "name": "successor pending save retains pending status"
+    },
+    {
+      "name": "successor receives an unread handover scoped to the new grant"
+    },
+    {
+      "name": "successor sees all inherited event states"
+    },
+    {
+      "name": "successor sees existing revision history"
+    },
+    {
+      "name": "work created by the incoming representative after appointment is not a handover alert"
+    },
+    {
+      "name": "SQL handoff preflight/postflight queries and readiness checks"
+    }
+  ]
+}

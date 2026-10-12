@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link2 } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
+import { appUrl } from "../../lib/appUrl";
 
 /**
  * Scannable QR deep link to a building or an individual room.
@@ -31,7 +32,6 @@ export function LocationQR({
   const url = useMemo(() => {
     // A room QR scopes the room ID to its building and floor, avoiding any
     // ambiguity if room identifiers are reused in another building.
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const params = new URLSearchParams({ locationId: roomId ?? buildingId });
     if (roomId) {
       params.set("locationType", "room");
@@ -40,7 +40,7 @@ export function LocationQR({
       if (floorNumber !== undefined) params.set("floorNumber", String(floorNumber));
     }
     if (campusId) params.set("campusId", campusId);
-    return `${origin}/map?${params.toString()}`;
+    return appUrl(`/map?${params.toString()}`);
   }, [buildingId, campusId, floorId, floorNumber, roomId]);
 
   const copyLink = async () => {

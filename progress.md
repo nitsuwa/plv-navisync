@@ -1,5 +1,11 @@
 # Progress Log
 
+## October 9 — Organization Event Continuity
+
+Read both approved documents and execution/database/TDD instructions. No AGENTS.md was found in the repository or ancestor directories. Original untracked plan/spec preserved. User requested current-checkout implementation; initial managed worktree contained no production changes and was archived. Created local implementation branch. Baseline checks started before code changes.
+
+Task 1: migration/schema/access helpers, atomic grant/replace/revoke, admin CRUD/list RPCs, typed service, and generated table/RPC contracts implemented. Red observed before implementation. 22 PGlite and 23 native PostgreSQL checks passed; separate connections confirmed waiting on organization locks, stale replacement rejection, and rollback restoring the old grant. Targeted Vitest run: 4 files/62 tests passed. One pre-existing publication test used a now-past fixed date; stabilized Date.now fixture after observing the failure. Dependency setup repaired from frozen lockfile; no package file changes. Type comparison in progress. Task 2 must move bound-event writes into RPCs that lock organization before event, because a row trigger on a direct UPDATE obtains the event lock too late to enforce that ordering safely.
+
 ## Poster catalog assertions confirmed
 
 - User supplied successful SQL Editor screenshot for `event_poster_storage_assertions.sql`: public bucket, 5 MB limit, JPEG/PNG/WebP constraints and named policy presence PASS, transaction rolled back. Recorded separately from functional role tests; removed catalog check from current pending acceptance.

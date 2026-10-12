@@ -81,10 +81,9 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
         <div className="space-y-3 p-4">
           <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-black">
             <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" aria-label="Camera preview for scanning a location QR" />
-            <div className="pointer-events-none absolute inset-[16%] rounded-2xl border-2 border-white/90 shadow-[0_0_0_999px_rgba(0,0,0,0.18)]" />
             {!cameraError && (
               <p className="absolute inset-x-2 bottom-2 rounded-full bg-black/60 px-3 py-1.5 text-center text-[11px] font-semibold text-white">
-                Center the full QR code in the frame
+                Keep the full QR code visible in the camera view
               </p>
             )}
             {cameraError && (

@@ -24,13 +24,13 @@ import { useAdminEventSubmissions } from "../../hooks/useAdminEventSubmissions";
 
 // Core admin navigation — focused on essential workflows.
 // Buildings, Floor Plans, Routes, Locations, and Accessibility are managed
-// inside the Map Builder workspace via its layer system. Event Layouts remains
-// available for reviewing submitted venue layouts.
+// inside the Map Builder workspace via its layer system. Events combines
+// organization layout review with the legacy campus listings manager.
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/admin-dashboard", icon: LayoutDashboard },
   { label: "Map Builder", path: "/admin-dashboard/map-builder", icon: Map },
   { label: "Reports", path: "/admin-dashboard/reports", icon: Flag },
-  { label: "Event Layouts", path: "/admin-dashboard/event-layouts", icon: CalendarDays },
+  { label: "Events", path: "/admin-dashboard/events?view=review", icon: CalendarDays },
   { label: "Users", path: "/admin-dashboard/users", icon: Users },
   {
     label: "Activity Logs",
@@ -75,7 +75,7 @@ function NavItem({
         onNavigate();
       }}
       title={collapsed ? label : undefined}
-      aria-label={badge ? `${label}, ${badge} pending ${label === 'Event Layouts' ? (badge === 1 ? 'review' : 'reviews') : (badge === 1 ? 'report' : 'reports')}` : collapsed ? label : undefined}
+      aria-label={badge ? `${label}, ${badge} pending ${label === 'Events' ? (badge === 1 ? 'review' : 'reviews') : (badge === 1 ? 'report' : 'reports')}` : collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex items-center rounded-xl text-sm font-semibold transition-all duration-150 relative active:scale-[0.97]",
@@ -159,12 +159,13 @@ export function AdminSidebar({
   const navItems = NAV_ITEMS.map((item) =>
     item.label === "Reports" && pendingReports > 0
       ? { ...item, badge: pendingReports }
-      : item.label === "Event Layouts" && pendingCount > 0 ? { ...item, badge: pendingCount } : item
+      : item.label === "Events" && pendingCount > 0 ? { ...item, badge: pendingCount } : item
   );
 
   const isActive = (path: string) => {
-    return location.pathname === path
-      || (path === "/admin-dashboard/event-layouts" && location.pathname.startsWith(`${path}/`));
+    const canonicalPath = path.split("?")[0];
+    return location.pathname === canonicalPath
+      || (canonicalPath === "/admin-dashboard/events" && location.pathname.startsWith("/admin-dashboard/event-layouts/"));
   };
 
   /**

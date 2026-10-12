@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type { Building } from "../../../types";
 import type { StudentAuthState } from "../../../hooks/useStudentAuth";
 import { MobileMapAccountMenu } from "../MobileMapAccountMenu";
 import { MobileBuildingSheet } from "../MobileBuildingSheet";
+
+const authState = vi.hoisted(() => ({ isStudentOrg: false }));
 
 const building: Building = {
   id: "b1", name: "Science Hall", code: "SCI", description: "", category: "academic", floor_count: 3,
@@ -15,6 +17,7 @@ const building: Building = {
 vi.mock("../../../hooks/useStudentAuth", () => ({
   useStudentAuth: () => ({
     isStudent: true,
+    isStudentOrg: authState.isStudentOrg,
     loading: false,
     username: "Demo Student",
     role: "student",
@@ -23,6 +26,7 @@ vi.mock("../../../hooks/useStudentAuth", () => ({
 }));
 
 describe("MobileMapAccountMenu", () => {
+  beforeEach(() => { authState.isStudentOrg = false; });
   it("reserves a compact 48px profile target beside the full-width responsive search", () => {
     render(
       <MemoryRouter>
@@ -74,6 +78,13 @@ describe("MobileMapAccountMenu", () => {
     expect(within(menu).getByRole("menuitem", { name: "My Reports" })).toHaveAttribute("href", "/student/reports");
     expect(within(menu).getByRole("menuitem", { name: "Settings" })).toHaveAttribute("href", "/student/settings");
     expect(within(menu).getByRole("menuitem", { name: "Sign Out" })).toBeInTheDocument();
+  });
+
+  it("shows Organization Events in the account menu for an active Student Org role", () => {
+    authState.isStudentOrg = true;
+    render(<MemoryRouter><MobileMapAccountMenu /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: /user menu/i }));
+    expect(screen.getByRole("menuitem", { name: "Organization Events" })).toHaveAttribute("href", "/student/events");
   });
 
   it("swallows the click paired with an outside pointer so the map beneath is not activated", () => {

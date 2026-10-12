@@ -942,6 +942,13 @@ export interface EventOverlayLocation {
 
 export interface CampusEventOverlay {
   id: string;
+  /** Authoritative organization FK hydrated from the row/RPC, never metadata. */
+  organizationId?: string;
+  academicYear?: string;
+  createdAt?: string;
+  creatorName?: string;
+  archivedAt?: string;
+  reusedFromEventId?: string;
   /** Server revision used for conflict-safe administrator review/publication. */
   updatedAt?: string;
   /** Campus whose published map snapshot anchors this event proposal. */
