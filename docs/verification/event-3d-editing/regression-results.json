@@ -1,0 +1,234 @@
+{
+  "success": true,
+  "totalTests": 336,
+  "passed": 336,
+  "failed": 0,
+  "pending": 0,
+  "durationSeconds": 166,
+  "files": [
+    {
+      "file": "src/lib/__tests__/event3dEditing.test.ts",
+      "status": "passed",
+      "passed": 13,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/event3dLayout.test.ts",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/eventLayoutGeometry.test.ts",
+      "status": "passed",
+      "passed": 22,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/floorGeometry.test.ts",
+      "status": "passed",
+      "passed": 27,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/student3dInput.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/studentRoute3dPresentation.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/AdminEventMapPreviewDialog.focus.test.tsx",
+      "status": "passed",
+      "passed": 1,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/AdminEventPublicationDialog.test.tsx",
+      "status": "passed",
+      "passed": 10,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/AdminOrganizationsPanel.test.tsx",
+      "status": "passed",
+      "passed": 12,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/eventAssets.test.tsx",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventEditorTutorial.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFeedbackChecklist.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFeedbackPinList.test.tsx",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3dEditing.test.tsx",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.test.tsx",
+      "status": "passed",
+      "passed": 122,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFurnitureSummary.test.tsx",
+      "status": "passed",
+      "passed": 1,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventItemInspector.fixed.test.tsx",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventLayoutIssues.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventLocationPicker.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventLocationSelect.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventLocationSwitcher.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventPlacementDock.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventProposalModal.test.tsx",
+      "status": "passed",
+      "passed": 19,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventRevisionHistory.test.tsx",
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventSelectionOverlay.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventStudentVisibility.test.tsx",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventSubmissionReview.test.tsx",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/OrganizationEventHistory.test.tsx",
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/ReuseOrganizationEventDialog.test.tsx",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/useEvent3DInteraction.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/useEventViewportMotion.test.tsx",
+      "status": "passed",
+      "passed": 10,
+      "failed": 0,
+      "failures": []
+    }
+  ]
+}

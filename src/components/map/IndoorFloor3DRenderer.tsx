@@ -15,7 +15,8 @@ import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements 
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
-import { EventAsset3DLayer } from "../events/EventAsset3DLayer";
+import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
+import type { Event3DEditing } from "../../lib/event3dEditing";
 import { EventPreviewCamera } from "../events/EventPreviewCamera";
 import type { Event3DCameraRequest } from "../../lib/event3dLayout";
 
@@ -51,6 +52,7 @@ interface IndoorFloor3DRendererProps {
   eventFurniture?: readonly FloorFurniture[];
   showDiningFurniture?: boolean;
   eventLabels?: readonly FloorLabel[];
+  eventEditing?: Event3DEditing;
   previewCamera?: Event3DCameraRequest;
   eventMarker?: { point: Pt; label: string } | null;
   activeTransition?: { point: Pt; label: string; onActivate?: () => void } | null;
@@ -1790,7 +1792,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
         && !(props.showDiningFurniture && shouldRenderStudentCanteenDiningFurniture(item)))
         .map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
       {props.showDiningFurniture && floor.furniture?.length ? <StudentCanteenDiningFurnitureLayer items={floor.furniture} viewport={viewport} /> : null}
-      <EventAsset3DLayer furniture={props.eventFurniture} labels={props.eventLabels} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
+      <Event3DSceneLayout furniture={props.eventFurniture} labels={props.eventLabels} editing={props.eventEditing} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
       {props.eventMarker && <Html position={pointToWorld(props.eventMarker.point, viewport, 0.3)} center distanceFactor={9} zIndexRange={[90, 0]}>
         <div className="rounded-xl border border-orange-200 bg-white/95 px-2 py-1.5 text-[10px] font-extrabold text-orange-800 shadow-lg">◉ {props.eventMarker.label}</div>
       </Html>}

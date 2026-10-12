@@ -79,6 +79,8 @@ import { EventLayoutIssues } from "./EventLayoutIssues";
 import { EventEditorTutorial } from "./EventEditorTutorial";
 import { EventItemInspector } from "./EventItemInspector";
 import { EventLayout3DPreview } from "./EventLayout3DPreview";
+import { Event3DEditorControls } from "./Event3DEditorControls";
+import { event3DSelectionIds, mergeEvent3DChanges, type Event3DEditing, type Event3DEditTool, type Event3DLayout } from "../../lib/event3dEditing";
 import { EventSelectionOverlay } from "./EventSelectionOverlay";
 import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
@@ -400,6 +402,10 @@ export function EventFloorEditor({
   // ── State ──────────────────────────────────────────────────────────────
   const [initialEventLayout] = useState(() => getInitialEventLayout(overlay, readOnly));
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [threeTool, setThreeTool] = useState<Event3DEditTool>("move");
+  const [threeBusy, setThreeBusy] = useState(false);
+  const [threePoint, setThreePoint] = useState<{ x: number; y: number } | null>(null);
+  const [threeError, setThreeError] = useState<string | null>(null);
   useEffect(() => { if (onFeedbackPoint) setViewMode("2d"); }, [onFeedbackPoint]);
   const [activeTool, setActiveTool] = useState<EventTool>("select");
   const tutorialPreviousToolRef = useRef<EventTool | null>(null);
@@ -1709,6 +1715,47 @@ export function EventFloorEditor({
     pushHistory(eventFurniture, nextLabels);
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedLabel]);
 
+  const selectThreeItem = useCallback((id: string) => {
+    const ids = event3DSelectionIds({ furniture: latestFurnitureRef.current, labels: latestLabelsRef.current }, id);
+    setSelectedIds(ids); setSelectedId(ids.length ? id : null);
+    setSelectedType(ids.length ? latestFurnitureRef.current.some(item => item.id === id) ? "furniture" : "label" : null);
+    setThreeError(null);
+  }, []);
+  const commitThreeGeometry = useCallback((start: Event3DLayout, next: Event3DLayout) => {
+    if (readOnly || JSON.stringify(start) === JSON.stringify(next)) return;
+    const current = { furniture: latestFurnitureRef.current, labels: latestLabelsRef.current };
+    const merged = mergeEvent3DChanges(current, start, next);
+    if (!merged) { setThreeError("This item changed or is locked. Select it again before editing."); return; }
+    const changed = merged.furniture.filter(item => item !== current.furniture.find(before => before.id === item.id));
+    if (changed.length) {
+      const assessment = assessEventPlacement({ proposed: changed, existing: merged.furniture.filter(item => !changed.some(change => change.id === item.id)), canvasWidth: canvasW, canvasHeight: canvasH, blockedRegions: protectedRegions, blockOverlaps: false });
+      if (!assessment.canPlace) { setThreeError(assessment.blockingReason); return; }
+    }
+    setFurniturePreview(merged.furniture); setLabelsPreview(merged.labels); pushHistory(merged.furniture, merged.labels); setThreeError(null);
+  }, [readOnly, canvasW, canvasH, protectedRegions, pushHistory, setFurniturePreview, setLabelsPreview]);
+  const updateThreeFurniture = useCallback((changes: Partial<FloorFurniture>) => {
+    if (readOnly || !selectedFurniture || selectedFurniture.locked || threeBusy) return;
+    if (changes.width !== undefined && (!Number.isFinite(changes.width) || changes.width < 8)) return;
+    if (changes.height !== undefined && (!Number.isFinite(changes.height) || changes.height < 8)) return;
+    const start = { furniture: latestFurnitureRef.current, labels: latestLabelsRef.current };
+    const candidate = constrainFurnitureToFloor({ ...selectedFurniture, ...changes }, canvasW, canvasH);
+    commitThreeGeometry(start, { furniture: start.furniture.map(item => item.id === candidate.id ? candidate : item), labels: start.labels });
+  }, [readOnly, selectedFurniture, threeBusy, canvasW, canvasH, commitThreeGeometry]);
+  const threeCandidate = useMemo(() => threeTool === "place-item" && threePoint ? buildEventAssetCandidate({ template: activeTemplate, point: threePoint, existing: eventFurniture, canvasWidth: canvasW, canvasHeight: canvasH, grid: floorPlan.gridSize || 20, zoom: 1, snapEnabled, blockedRegions: protectedRegions }) : null, [threeTool, threePoint, activeTemplate, eventFurniture, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions]);
+  const placeThreeItem = useCallback(() => {
+    if (readOnly || threeBusy || !threePoint) return;
+    if (threeTool === "place-item" && threeCandidate) {
+      if (!commitFurnitureCandidate(threeCandidate.item, threeCandidate.assessment)) return;
+    } else if (threeTool === "place-label") placeLabel(Math.max(0, Math.min(canvasW, threePoint.x)), Math.max(0, Math.min(canvasH - 14, threePoint.y)));
+    else return;
+    setThreePoint(null); setThreeTool("move"); setThreeError(null);
+  }, [readOnly, threeBusy, threePoint, threeTool, threeCandidate, commitFurnitureCandidate, placeLabel, canvasW, canvasH]);
+  const threeEditing: Event3DEditing | undefined = readOnly ? undefined : {
+    tool: threeTool, selectedIds, bounds: { width: canvasW, height: canvasH }, grid: snapEnabled ? floorPlan.gridSize || 20 : 0,
+    placement: threeCandidate ? { furniture: [{ ...threeCandidate.item, color: threeCandidate.assessment.canPlace ? threeCandidate.item.color : "#ef4444" }], labels: [] } : threeTool === "place-label" && threePoint ? { furniture: [], labels: [{ id: "3d-label-preview", ...threePoint, text: "Event Label", fontSize: 14, color: "#1f2937", rotation: 0 }] } : undefined,
+    onSelect: selectThreeItem, onPlacementPoint: point => { setThreePoint(point); setThreeError(null); }, onCommit: commitThreeGeometry, onBusyChange: setThreeBusy,
+  };
+
   const renameEventObject = useCallback((id: string, kind: "furniture" | "labels", proposedName: string) => {
     if (readOnly) return;
     const name = proposedName.trim();
@@ -2493,7 +2540,7 @@ export function EventFloorEditor({
   }, [activeTool, deleteSelected, undo, redo, readOnly, viewMode, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
 
   // ── Save / Submit handlers ─────────────────────────────────────────────
-  const busy = saving || submittingLocal || isSaving || isSubmitting;
+  const busy = saving || submittingLocal || isSaving || isSubmitting || threeBusy;
 
   const handleSave = async () => {
     finishInteractionRef.current("save");
@@ -2691,7 +2738,7 @@ export function EventFloorEditor({
             aria-label="Undo"
             title="Undo"
             onClick={undo}
-            disabled={historyIndex <= 0 || viewMode === "3d"}
+            disabled={historyIndex <= 0 || threeBusy}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Undo2 className="h-3.5 w-3.5" />
@@ -2701,7 +2748,7 @@ export function EventFloorEditor({
             aria-label="Redo"
             title="Redo"
             onClick={redo}
-            disabled={historyIndex >= history.length - 1 || viewMode === "3d"}
+            disabled={historyIndex >= history.length - 1 || threeBusy}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Redo2 className="h-3.5 w-3.5" />
@@ -2709,7 +2756,7 @@ export function EventFloorEditor({
           {/* Delete */}
           <button
             onClick={deleteSelected}
-            disabled={!selectedId || viewMode === "3d"}
+            disabled={!selectedId || threeBusy}
             aria-label="Delete selected items"
             title="Delete selected items (Del)"
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
@@ -2747,13 +2794,14 @@ export function EventFloorEditor({
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2">
         <div role="group" aria-label="Event layout view" className="flex gap-1 rounded-xl bg-muted p-1">
-          {(["2d", "3d"] as const).map(mode => <button key={mode} type="button" aria-label={mode === "2d" ? "2D layout" : "3D preview"} aria-pressed={viewMode === mode} disabled={mode === "3d" && Boolean(onFeedbackPoint)} onClick={() => {
+          {(["2d", "3d"] as const).map(mode => <button key={mode} type="button" aria-label={mode === "2d" ? "2D layout" : readOnly ? "3D preview" : "3D layout"} aria-pressed={viewMode === mode} disabled={mode === "3d" && Boolean(onFeedbackPoint)} onClick={() => {
             finishInteractionRef.current("switch");
             finishInlineLabelEdit();
             commitObjectRename();
             setInspectorOpen(false); setObjectListOpen(false); setAssetCatalogOpen(false); setPresetMenuOpen(false); setPresetPreview(null); setMoveHereArmedIds(null); setMoveHerePreview(null);
+            setThreePoint(null); setThreeError(null);
             setViewMode(mode);
-          }} className={cn("min-h-9 rounded-lg px-3 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40", viewMode === mode ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>{mode === "2d" ? "2D layout" : "3D preview"}</button>)}
+          }} className={cn("min-h-9 rounded-lg px-3 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40", viewMode === mode ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>{mode === "2d" ? "2D layout" : readOnly ? "3D preview" : "3D layout"}</button>)}
         </div>
         {onFeedbackPoint && <p className="text-xs text-muted-foreground">Place feedback pins in 2D.</p>}
       </div>
@@ -2848,7 +2896,7 @@ export function EventFloorEditor({
         </div>}
 
       {/* Canvas */}
-      {viewMode === "3d" && <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onReturnTo2D={() => setViewMode("2d")} />}
+      {viewMode === "3d" && <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} editing={threeEditing} editingBusy={threeBusy} onReturnTo2D={() => setViewMode("2d")} editorTools={!readOnly && <Event3DEditorControls tool={threeTool} onToolChange={tool => { setThreeTool(tool); setThreePoint(null); setThreeError(null); }} template={activeTemplate.type} onTemplateChange={type => { setActiveTemplate(getEventFurnitureTemplate(type)); }} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onSelect={selectThreeItem} onFurnitureChange={updateThreeFurniture} onLabelChange={changes => updateSelectedLabel({ ...changes, ...(changes.x !== undefined ? { x: Math.max(0, Math.min(canvasW, changes.x)) } : {}), ...(changes.y !== undefined ? { y: Math.max(0, Math.min(canvasH - (selectedLabel?.fontSize || 14), changes.y)) } : {}) })} onToggleLock={selectedFurniture ? toggleSelectedLock : toggleSelectedLabelLock} onDuplicate={duplicateSelection} placementPoint={threePoint} canPlace={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)} onPlace={placeThreeItem} busy={threeBusy} snap={snapEnabled} onSnapChange={() => setSnapEnabled(value => !value)} error={threeError || threeCandidate?.assessment.blockingReason || null} />} />}
       <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1" style={viewMode === "3d" ? { display: "none" } : undefined}>
       <div
         ref={canvasRef}
@@ -3748,7 +3796,7 @@ export function EventFloorEditor({
           <span>
             {eventFurniture.length} furniture · {eventLabels.length} labels
           </span>
-          <span className="capitalize">{viewMode === "3d" ? "3D preview" : `Tool: ${effectiveTool}`}</span>
+          <span className="capitalize">{viewMode === "3d" ? readOnly ? "3D preview" : "3D editing" : `Tool: ${effectiveTool}`}</span>
         </div>
         <div className="flex items-center gap-2">
           {overlay.status && (
@@ -3776,7 +3824,7 @@ export function EventFloorEditor({
               {panStatus}
             </span>
             {readOnly && <span className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Read-only</span>}
-            <span className="hidden sm:inline">{viewMode === "3d" ? "Preview only · Edit your arrangement in 2D" : readOnly
+            <span className="hidden sm:inline">{viewMode === "3d" ? readOnly ? "Read-only 3D preview" : "Edit event additions · Published base map stays read-only" : readOnly
               ? "Published base map and submitted additions"
               : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}</span>
           </span>

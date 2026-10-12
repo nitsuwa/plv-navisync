@@ -295,3 +295,13 @@ Announcements and Today's Schedule/classes are intentionally excluded from this 
 ## October 8, 2026 — final event context/recovery findings
 
 Resolved defects and evidence are in docs/verification/event-final-audit/README.md. Event/map/venue identity now stays explicit across campus/floor and collapsed states. Owner+event keyed editor sessions reject foreign data and stale completions. Event reads distinguish expired/transport failures from missing records. Measured compact header/error and complete floor bounds drive fit; detail disclosure preserves manual zoom. Admin pin drafts retain map space and reachable form controls on320px instead of clipping/overlap. UI changes use existing palette and all previous dirty work is preserved. Verification is browser/control-fixture scoped, with native200% Edge zoom; physical devices and second liveOrg account are not certified.
+# October 12 — direct event editing in 3D
+
+- User authorized both direct 3D editing and GitHub main integration, with manual testing after all work.
+- Latest remote main is `377763a`; merge `f242aa0` retains teammate canteen/route focus and event previews. All 156 combined map/route/preview tests pass, including the prior failing public map test file.
+- Existing EventFloorEditor owns state/history/autosave; keep in-scene gesture previews local until release to avoid half-finished autosaves.
+- EventItemInspector currently presents fixed-size furniture. Add separate 3D controls for resize rather than changing the 2D inspector's existing contract.
+- Teammate migration `20261012033256_cache_event_safe_published_snapshots.sql` caches the existing event-free publication projection. It is separate from 3D editing; no live SQL has been run.
+- Restoring OrbitControls can change the camera through residual damping; compute the final pointer ray before restoring controls. Track all pressed pointers and suppress editing until every finger lifts after multi-touch cancellation.
+- Outdoor WorldCamera reacts to canvas resizing and competed with EventPreviewCamera when selection controls expanded. Event previews must use one camera owner; public route navigation keeps its existing WorldCamera.
+- Native TypeScript comparison against f242aa0 has no increased file/code diagnostic counts. The repo still has substantial existing errors; the production Vite build succeeds independently.

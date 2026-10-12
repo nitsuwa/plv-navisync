@@ -1,5 +1,20 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 12, 2026 — Direct event editing in 3D and main integration
+
+Current authorized task: finish direct event editing in 3D, then commit/push/merge into GitHub main so the user can test the complete flow once. Work in the existing checkout; preserve unrelated local files. The approved scope is place, select, move, rotate and resize event additions in 3D using the same 2D data, history and persistence; admin/public views stay read-only.
+
+- [x] Finish latest-main integration (`origin/main` 377763a); preserve teammate pathfinding, canteen furniture and route-focus changes. Merge `f242aa0`, 156 tests passed.
+- [x] Write the focused specification and implementation plan (`docs/superpowers/plans/2026-10-12-event-3d-editing.md`).
+- [x] Add failing geometry/editor tests, then implement transactional 3D interactions and accessible controls.
+- [x] Verify indoor/outdoor, persistence, history, lock/group boundaries, admin read-only and device fallback; review before merging. Focused 40 tests, 13 editing browser checks and 10 preview regressions pass; production build passes. Broad tests still running.
+- [ ] Commit feature, fetch again, integrate any intervening main changes, and push a normal fast-forward update to main. No PR requested.
+- [x] Prepare one manual test guide and identify the separately imported optional teammate SQL migration in `docs/verification/event-3d-editing/README.md`.
+
+**Next Step:** finish broad verification, record existing unrelated failures, commit, fetch and publish the combined feature to main.
+
+**Errors:** sandbox blocked Git fetch/index writes; elevated retries used. Latest-main merge conflicted in two renderer blocks; combined both features explicitly. No live database SQL was executed.
+
 ## October 9, 2026 — Organization Event Continuity implementation
 
 - Approved plan: `docs/superpowers/plans/2026-10-09-organization-event-continuity.md`.

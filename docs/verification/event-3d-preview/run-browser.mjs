@@ -20,8 +20,8 @@ try {
   report.initialButtons = await page.getByRole('button').allTextContents();
   await page.screenshot({ path: `${out}/indoor-2d.png` });
   const transform = await page.getByTestId('event-canvas-content').getAttribute('style');
-  await page.getByRole('button', { name: '3D preview', exact: true }).click();
-  const preview = page.getByRole('region', { name: 'Event 3D preview' });
+  await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
+  const preview = page.getByRole('region', { name: /^Event 3D (editor|preview)$/ });
   await preview.locator('canvas').waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForTimeout(1500);
   assert.equal(await preview.getByRole('listitem').count(), 15);
@@ -39,23 +39,23 @@ try {
   assert.equal(await page.getByTestId('event-canvas-content').getAttribute('style'), transform);
   report.checks.push('Switching back preserves the 2D viewport');
   await page.getByRole('button', { name: 'Outdoor fixture', exact: true }).click();
-  await page.getByRole('button', { name: '3D preview', exact: true }).click();
+  await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
   await preview.locator('canvas').waitFor({ state: 'visible' });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/outdoor-3d-desktop.png` });
   report.checks.push('Outdoor campus renders the same event additions');
   await page.getByRole('button', { name: 'Toggle admin review', exact: true }).click();
-  await page.getByRole('button', { name: '3D preview', exact: true }).click();
+  await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
   await preview.locator('canvas').waitFor({ state: 'visible' });
   assert.equal(await page.getByRole('button', { name: 'Save Draft', exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Toggle feedback placement', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '3D preview', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: /^3D (layout|preview)$/ }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '2D layout', exact: true }).getAttribute('aria-pressed'), 'true');
   report.checks.push('Admin review is read-only and feedback placement forces 2D');
   await page.getByRole('button', { name: 'Toggle feedback placement', exact: true }).click();
   await page.getByRole('button', { name: 'Indoor fixture', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: '3D preview', exact: true }).click();
+  await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
   await preview.locator('canvas').waitFor({ state: 'visible' });
   await page.waitForTimeout(1000);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
@@ -75,7 +75,7 @@ try {
   for (const scenario of ['tent', 'remote-stage']) {
     await page.goto(`${fixtureUrl}?case=${scenario}`);
     await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: '3D preview', exact: true }).click();
+    await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
     await preview.locator('canvas').waitFor({ state: 'visible' });
     await page.waitForTimeout(800);
     await page.screenshot({ path: `${out}/${scenario}-focus.png` });
@@ -83,7 +83,7 @@ try {
   }
   await page.addInitScript(() => Object.defineProperty(window, 'WebGLRenderingContext', { value: undefined }));
   await page.goto(fixtureUrl);
-  await page.getByRole('button', { name: '3D preview', exact: true }).click();
+  await page.getByRole('button', { name: /^3D (layout|preview)$/ }).click();
   await page.getByRole('button', { name: 'Return to 2D', exact: true }).click();
   assert.equal(await page.locator('[data-testid="event-editor-workspace"] [data-event-item]').count(), 15);
   report.checks.push('Unsupported graphics device preserves the layout and returns to 2D');

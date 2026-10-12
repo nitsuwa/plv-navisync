@@ -1,0 +1,27 @@
+{
+  "baselineCommit": "f242aa0396491360ac8c6a92513db6b2c4e8d2af",
+  "baselineDiagnostics": 1041,
+  "currentDiagnostics": 1040,
+  "increasedFileCodeCounts": [],
+  "exactMessageAdditions": [
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '({ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 27 more ... | { ...' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 1
+    },
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '{ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 27 more ... | { ....' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 3
+    }
+  ],
+  "unchangedSourceMessageDifferences": [
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '({ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 27 more ... | { ...' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 1
+    },
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '{ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 27 more ... | { ....' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 3
+    }
+  ],
+  "comparison": "Same installed dependencies. File/code multiplicities and exact messages compared ignoring line numbers. Unchanged source verified against Git; native compiler may vary truncated union display order."
+}

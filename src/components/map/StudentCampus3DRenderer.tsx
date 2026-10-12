@@ -6,7 +6,8 @@ import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutE
 import * as THREE from "three";
 import type { ReadonlyOutdoorCampus } from "../../lib/readonlyOutdoorCampus";
 import type { CampusDecorAsset, CampusPath, FloorFurniture, FloorLabel } from "../map-builder/types";
-import { EventAsset3DLayer } from "../events/EventAsset3DLayer";
+import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
+import type { Event3DEditing } from "../../lib/event3dEditing";
 import { EventPreviewCamera } from "../events/EventPreviewCamera";
 import { event3DOutdoorTargetBounds, type Event3DCameraRequest } from "../../lib/event3dLayout";
 import { DECOR_ASSET_MAP } from "../map-builder/constants";
@@ -52,6 +53,7 @@ interface StudentCampus3DRendererProps {
   eventVenues?: EventVenue[];
   eventFurniture?: readonly FloorFurniture[];
   eventLabels?: readonly FloorLabel[];
+  eventEditing?: Event3DEditing;
   previewCamera?: Event3DCameraRequest;
   selectedEventLocationId?: string | null;
   darkMode?: boolean;
@@ -2168,7 +2170,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </group>;
     })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}
-    <EventAsset3DLayer furniture={props.eventFurniture} labels={props.eventLabels} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
+    <Event3DSceneLayout furniture={props.eventFurniture} labels={props.eventLabels} editing={props.eventEditing} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
     {hasRoute && routes.map((segment, index) => <group key={segment.id}>
       <MemoPathSurface path={segment} route halo />
       <MemoPathSurface path={segment} route />
@@ -2188,7 +2190,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
     <EventPreviewCamera request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
-  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
+  {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />}
   </>;
 }
 

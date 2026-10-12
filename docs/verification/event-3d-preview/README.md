@@ -1,6 +1,6 @@
 # Event 3D preview handoff
 
-Implemented locally on 2026-10-12. Organizers can plot in **2D layout** and switch to **3D preview** to inspect the current arrangement. Admin review uses the same preview. This feature has not been committed or pushed.
+Historical preview-phase report from 2026-10-12, committed as `247d23b`. Direct organizer editing now extends this phase: use the combined [3D editing and manual test guide](../event-3d-editing/README.md) for current behavior and delivery status. The results below describe the original preview verification.
 
 ## Included
 
@@ -57,4 +57,4 @@ The script requires Playwright available locally or via `PLAYWRIGHT_MODULE`. On 
 
 ## Later phases
 
-Direct manipulation in 3D, first-person walking, layout image/PDF export, and inventory/capacity estimates are not included in this phase. First verify this preview using the steps above; choose the next feature after the organizer/admin feedback. Inventory and capacity would need separately defined quantities and measurement rules.
+Direct manipulation in 3D is now included in the subsequent editing phase linked above. First-person walking, layout image/PDF export, and inventory/capacity estimates remain outside the delivered scope. Inventory and capacity would need separately defined quantities and measurement rules.
