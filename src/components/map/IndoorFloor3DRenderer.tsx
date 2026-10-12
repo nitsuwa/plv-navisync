@@ -7,7 +7,7 @@ import * as THREE from "three";
 import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
-import { clampIndoorPriorityRoomLabel, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
 import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
 import type { Pt } from "../../lib/routePlanner";
@@ -25,6 +25,7 @@ declare module "react" {
 interface FloorViewport { width: number; height: number; offsetX: number; offsetY: number }
 interface IndoorFloor3DRendererProps {
   floor: FloorPlan;
+  hasLowerServedFloor?: boolean;
   floorLabel: string;
   darkMode?: boolean;
   viewport: FloorViewport;
@@ -66,6 +67,7 @@ const FLOOR_SCALE = 0.025;
 const WALL_HEIGHT = 2.9;
 const FLOOR_SURFACE_Y = 0.012;
 const EMPTY_FLOOR_ROUTE: readonly Pt[] = Object.freeze([]);
+const EMPTY_POLYGONS: readonly Pt[][] = Object.freeze([]);
 const EMPTY_STRING_SET: ReadonlySet<string> = new Set();
 
 interface WallOcclusionEntry {
@@ -761,7 +763,7 @@ function Landing({ width, depth, z, y, color = "#d8dfe2" }: { width: number; dep
   return <mesh position={[0, y - 0.04, z]} castShadow receiveShadow><boxGeometry args={[width, 0.08, depth]} /><meshStandardMaterial color={color} roughness={0.82} /></mesh>;
 }
 
-function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = false }: { stair: StairVisualItem; viewport: FloorViewport; floor: FloorPlan; labelRegistry: RoomLabelRegistry; entranceModel?: boolean }) {
+function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = false, hasLowerServedFloor = floor.number > 1 }: { stair: StairVisualItem; viewport: FloorViewport; floor: FloorPlan; labelRegistry: RoomLabelRegistry; entranceModel?: boolean; hasLowerServedFloor?: boolean }) {
   if (stair.visible === false) return null;
   if (stair.exteriorEmergencyStairId) return <ExteriorEmergencyStairModel stair={stair as FloorStairs} viewport={viewport} floor={floor} />;
   const position = pointToWorld({ x: stair.x + stair.width / 2, y: stair.y + stair.height / 2 }, viewport, FLOOR_SURFACE_Y);
@@ -814,11 +816,15 @@ function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = fal
     </group>;
   }
 
+  // A down-only module terminates at the lowest served Floor. Do not flip it
+  // into an upward flight there; the authored exit remains in navigation.
+  if (!shouldRenderIndoorDownStairModule(stair.direction, hasLowerServedFloor)) return null;
+
   const yaw = -(stair.rotation ?? 0) * Math.PI / 180;
 
   // The first published Floor is ground level; never project a stair run
   // through the terrain when its authored direction is ambiguous/downward.
-  const descending = shouldRenderDescendingIndoorStair(floor.number, stair.direction);
+  const descending = shouldRenderDescendingIndoorStair(floor.number, stair.direction, hasLowerServedFloor);
   const sign = descending ? -1 : 1;
   const halfRise = 0.62 * sign;
   const fullRise = 1.24 * sign;
@@ -1191,6 +1197,17 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   })),
   [floor.doors, props.activeExitDoorId, props.interactiveExitDoorIds, props.routeRelevantExitDoorIds]);
   const openBelowPolygons = useMemo(() => rooms.filter((entry) => entry.openBelow).map((entry) => entry.points), [rooms]);
+  const hasLowerServedFloor = props.hasLowerServedFloor ?? floor.number > 1;
+  const descendingStairOpenings = useMemo(() => (floor.stairs ?? [])
+    .filter((stair) => stair.visible !== false && stair.direction === "down" && !stair.exteriorEmergencyStairId
+      && shouldRenderDescendingIndoorStair(floor.number, stair.direction, hasLowerServedFloor))
+    .map((stair) => descendingIndoorStairOpeningPolygon(
+      stair,
+      Math.max(0.92, stair.width * FLOOR_SCALE),
+      Math.max(1.15, stair.height * FLOOR_SCALE),
+      FLOOR_SCALE,
+    )), [floor.number, floor.stairs, hasLowerServedFloor]);
+  const floorBaseOpenings = useMemo(() => [...openBelowPolygons, ...descendingStairOpenings], [descendingStairOpenings, openBelowPolygons]);
   const roomLevels = useMemo(() => rooms.map(({ room, points }) => {
     const centerPoint = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
     return rooms.filter((candidate) => candidate.room.id !== room.id && polygonArea(candidate.points) > polygonArea(points)
@@ -1200,6 +1217,10 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     .filter((candidate) => candidate.room.id !== room.id && polygonArea(candidate.points) < polygonArea(points)
       && candidate.points.every((point) => pointInPolygon(point, points)))
     .map((candidate) => candidate.points)), [rooms]);
+  const roomFloorHoles = useMemo(() => rooms.map(({ points }, index) => [
+    ...(nestedRoomPolygons[index] ?? []),
+    ...descendingStairOpenings.filter((polygon) => polygon.every((point) => pointInPolygon(point, points))),
+  ]), [descendingStairOpenings, nestedRoomPolygons, rooms]);
   const visualWalkProgress = props.walkProgressRef?.current ?? props.walkProgress;
   const humanPoint = props.humanVisible && visualWalkProgress !== undefined
     ? sampleRoute(visualWalkProgress, routeSamplePointRef.current)
@@ -1562,9 +1583,9 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     <ambientLight intensity={props.darkMode ? 0.9 : 1.08} />
     <directionalLight position={[5, 12, 7]} intensity={props.darkMode ? 0.9 : 0.98} />
     <group>
-      {baseRegions.map((region, index) => <MemoFloorBase key={`base-${index}`} region={region} floor={floor} viewport={viewport} index={index} holes={openBelowPolygons} darkMode={props.darkMode} />)}
+      {baseRegions.map((region, index) => <MemoFloorBase key={`base-${index}`} region={region} floor={floor} viewport={viewport} index={index} holes={floorBaseOpenings} darkMode={props.darkMode} />)}
       {floor.paths?.map((path) => <MemoFloorPath key={`path-${path.id}`} path={path} viewport={viewport} darkMode={props.darkMode} />)}
-      {rooms.map(({ room, openBelow }, index) => openBelow ? null : <MemoRoomFloor key={`room-${room.id}`} room={room} viewport={viewport} level={roomLevels[index] ?? 0} holes={nestedRoomPolygons[index] ?? []}
+      {rooms.map(({ room, openBelow }, index) => openBelow ? null : <MemoRoomFloor key={`room-${room.id}`} room={room} viewport={viewport} level={roomLevels[index] ?? 0} holes={roomFloorHoles[index] ?? EMPTY_POLYGONS}
         darkMode={props.darkMode}
         selected={room.id === props.selectedRoomId} destination={room.id === props.destinationRoomId}
         labelPriority={indoorRoomLabelPriority({
@@ -1608,7 +1629,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {floor.doors?.map((door) => <MemoDoorModel key={`door-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
       {rendererDoorOpenings.filter((door) => door.id.startsWith("visual-emergency-access-") || (door.isEmergencyExit && door.openingType === "open_passage")).map((door) => <EmergencyDoorwayFrame key={`emergency-frame-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
       {exitCueDoors.map((door) => <IndoorExitCue key={`exit-cue-${door.id}`} door={door} viewport={viewport} routeRelevant={Boolean(props.routeRelevantExitDoorIds?.has(door.id))} onActivate={props.onExitDoorClick} />)}
-      {floor.stairs?.map((stair) => <MemoStairModel key={`stairs-${stair.id}`} stair={stair} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} />)}
+      {floor.stairs?.map((stair) => <MemoStairModel key={`stairs-${stair.id}`} stair={stair} viewport={viewport} floor={floor} hasLowerServedFloor={hasLowerServedFloor} labelRegistry={roomLabelRegistry} />)}
       {floor.elevators?.map((elevator) => <MemoElevatorModel key={`elevator-${elevator.id}`} elevator={elevator} viewport={viewport} />)}
       {floor.ramps?.map((ramp) => <MemoRampModel key={`ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
       {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}

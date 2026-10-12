@@ -59,8 +59,45 @@ export function indoorRoomLabelPriority(state: { selected?: boolean; destination
 
 /** A first published Floor is grade in Student indoor 3D. Do not draw an
  * authored down-facing stair into empty space unless a higher Floor is shown. */
-export function shouldRenderDescendingIndoorStair(floorNumber: number, direction?: string): boolean {
-  return floorNumber > 1 && (direction === "down" || direction === "reverse");
+export function shouldRenderDescendingIndoorStair(
+  floorNumber: number,
+  direction?: string,
+  hasLowerServedFloor = floorNumber > 1,
+): boolean {
+  return hasLowerServedFloor && (direction === "down" || direction === "reverse");
+}
+
+/** A down-only module has no run to render at the lowest served Floor. */
+export function shouldRenderIndoorDownStairModule(direction: string | undefined, hasLowerServedFloor: boolean): boolean {
+  return direction !== "down" || hasLowerServedFloor;
+}
+
+/** Renderer-only opening under a descending stair run. Width and depth are
+ * the actual 3D stair dimensions; a small clearance keeps the treads and
+ * stringers from intersecting the floor surface without changing authored data. */
+export function descendingIndoorStairOpeningPolygon(
+  stair: Pick<FloorStairs, "x" | "y" | "width" | "height" | "rotation">,
+  visualWidth: number,
+  visualDepth: number,
+  floorScale: number,
+  clearance = 0.08,
+): { x: number; y: number }[] {
+  const scale = Number.isFinite(floorScale) && floorScale > 0 ? floorScale : 1;
+  const width = Math.max(0, visualWidth) / scale + Math.max(0, clearance) / scale;
+  const height = Math.max(0, visualDepth) / scale + Math.max(0, clearance) / scale;
+  const center = { x: stair.x + stair.width / 2, y: stair.y + stair.height / 2 };
+  const angle = -(stair.rotation ?? 0) * Math.PI / 180;
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return [
+    { x: -width / 2, y: -height / 2 },
+    { x: width / 2, y: -height / 2 },
+    { x: width / 2, y: height / 2 },
+    { x: -width / 2, y: height / 2 },
+  ].map((point) => ({
+    x: center.x + point.x * cosine - point.y * sine,
+    y: center.y + point.x * sine + point.y * cosine,
+  }));
 }
 
 /** Keep selected, destination, and active route labels inside the visible viewport without
