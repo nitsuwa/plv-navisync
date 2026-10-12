@@ -1,0 +1,101 @@
+{
+  "success": true,
+  "totalTests": 233,
+  "passed": 233,
+  "failed": 0,
+  "pending": 0,
+  "durationSeconds": 123,
+  "files": [
+    {
+      "file": "src/pages/__tests__/CampusMapPage.eventOverlayService.test.tsx",
+      "status": "passed",
+      "passed": 44,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/hooks/__tests__/usePublishedCampus.resilience.test.tsx",
+      "status": "passed",
+      "passed": 11,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/event3dEditing.test.ts",
+      "status": "passed",
+      "passed": 13,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/event3dLayout.test.ts",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/indoor3dGeometry.test.ts",
+      "status": "passed",
+      "passed": 24,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/routePlanner.test.ts",
+      "status": "passed",
+      "passed": 39,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/student3dCameraFocus.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/student3dInput.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/studentCampus3dPresentation.test.ts",
+      "status": "passed",
+      "passed": 18,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/lib/__tests__/studentRouteFlow.test.ts",
+      "status": "passed",
+      "passed": 49,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3dEditing.test.tsx",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "file": "src/components/events/__tests__/useEvent3DInteraction.test.tsx",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "failures": []
+    }
+  ]
+}

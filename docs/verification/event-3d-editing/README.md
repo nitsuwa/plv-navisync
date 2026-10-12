@@ -12,6 +12,8 @@ Base campus/building content remains read-only. All 14 event asset types reuse t
 
 **No new SQL query, migration or dependency is required for the 3D feature.** The separately imported teammate migration `20261012033256_cache_event_safe_published_snapshots.sql` is an optional performance deployment for the existing published-snapshot RPC. It was not executed against the live database during this task and is not required to enable 3D editing. Coordinate that separate deployment with your teammate rather than rerunning earlier migrations.
 
+The latest upstream merge also supplies historical migration files and two timestamp renames. Those match upstream main; this feature adds no migration difference against it. Live migration-history compatibility was not checked. Coordinate any CLI database deployment separately instead of applying every file blindly.
+
 ## One complete organizer test
 
 1. Create a proposal. Confirm the assigned organization name is prefilled, enter a title/description, and continue to requested locations. Open indoor plotting.
@@ -38,16 +40,18 @@ Base campus/building content remains read-only. All 14 event asset types reuse t
 ## Automated evidence and limits
 
 - Core new geometry/editor/native-pointer and preview tests: **40/40 passed**.
+- Final merged 3D/public-map/route/publication regression checks: **233/233 passed** across 13 files, including all 44 current public-map cases. See [final-focused-results.json](final-focused-results.json).
 - Broader event editor/admin/proposal/geometry suite: **336/336 passed** across 32 files. See [regression-results.json](regression-results.json). Counts overlap the core run and are not added together.
 - Preview regression browser checks: **10/10 passed**, including graphics fallback, tall-item framing, remote outdoor items, read-only admin and view switching. See the [preview report](../event-3d-preview/evidence/browser-results.json).
 - Real WebGL browser editing checks: **13/13 passed**, including indoor/outdoor drag, rotate, resize, placement, labels, history, save synchronization, groups/locks, actual Chromium two-touch cancellation, mobile and admin boundaries. See [browser-results.json](evidence/browser-results.json).
 - Independent source review found no remaining material issue after fixing final-pointer camera ordering and multi-touch cancellation. Browser testing also found and fixed competing outdoor preview camera ownership.
 - Desktop/mobile screenshots: [indoor](evidence/indoor-3d-editing.png), [outdoor](evidence/outdoor-3d-editing.png), [mobile](evidence/mobile-3d-editing.png).
 
-- Production build passed: 3,642 modules, 41.73 seconds; existing large-chunk warning remains.
-- Broad TypeScript checking remains failing on existing repository issues: baseline `f242aa0` has 1,041 diagnostics versus 1,040 current, with no increased file/code diagnostic counts. There are no new production diagnostics. See [typecheck-comparison.json](typecheck-comparison.json).
+- Final merged production build passed: 3,643 modules, 1 minute 27 seconds; existing large-chunk warning remains.
+- Final TypeScript comparison with latest main `75096c5`: **1,047 baseline / 1,047 merged diagnostics**, with no increased file/code diagnostic counts. Existing repository type errors remain; this feature adds no production or test diagnostic counts. See [typecheck-comparison.json](typecheck-comparison.json).
+- Whole-repo verification is **not fully green**: its broad attempt reported 526 failures and two worker memory crashes. Representative non-3D failures were reproduced on untouched upstream main. Exact results and limits are in the verification report; unrelated legacy cleanup remains separate.
 
-Full-suite and Git delivery results are recorded in the final verification report. Software WebGL fixtures do not establish physical Android/iOS GPU performance, every real campus layout, or live publication behavior; the combined manual steps above cover those remaining checks.
+Full-suite and Git integration details are recorded in the [final verification report](verification-report.md). Software WebGL fixtures do not establish physical Android/iOS GPU performance, every real campus layout, or live publication behavior; the combined manual steps above cover those remaining checks.
 
 ## Reproduce isolated browser checks
 

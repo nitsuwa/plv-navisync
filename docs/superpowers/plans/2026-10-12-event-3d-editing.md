@@ -57,13 +57,13 @@ Files: create `src/components/events/Event3DSceneLayout.tsx`, `Event3DEditorCont
 - [x] Provide move/rotate/resize modes and visible transform handles; add accessible selection, geometry/text controls, duplicate/delete/locks and 3D undo/redo.
 - [x] Connect placements through existing placement assessment; merge validated scene changes into the latest event state and push one history step. Reject stale/locked/protected changes with visible feedback.
 - [x] Update the previous preview tests/copy to distinguish editable 3D from read-only preview, preserving fallback and pin behavior.
-- [ ] Run new and existing event editor/admin/map tests.
+- [x] Run new and existing event editor/admin/map tests.
 
 ## Task 4 — Verification and GitHub delivery
 
 - [x] Extend the isolated local fixture/browser runner to exercise real placement, drag, rotate, resize, labels, locks, cancellation, history and 2D/save synchronization in indoor/outdoor scenes and mobile.
 - [x] Inspect screenshots and verify no live database requests/writes.
-- [ ] Run broad relevant tests, full suite, production build, diff checks and a baseline type diagnostic comparison. Document existing unrelated failures precisely.
+- [x] Run broad relevant tests, full suite, production build, diff checks and a baseline type diagnostic comparison. Document existing unrelated failures precisely.
 - [x] Dispatch independent code review per requesting-code-review; repair material findings and rerun affected checks.
 - [x] Write a combined manual test guide, noting the separately imported optional campus snapshot cache migration.
 - [ ] Stage/commit only the feature and related records, fetch origin again, integrate/reverify new changes if any, fast-forward local main, and push main normally.

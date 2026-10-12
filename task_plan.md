@@ -7,11 +7,11 @@ Current authorized task: finish direct event editing in 3D, then commit/push/mer
 - [x] Finish latest-main integration (`origin/main` 377763a); preserve teammate pathfinding, canteen furniture and route-focus changes. Merge `f242aa0`, 156 tests passed.
 - [x] Write the focused specification and implementation plan (`docs/superpowers/plans/2026-10-12-event-3d-editing.md`).
 - [x] Add failing geometry/editor tests, then implement transactional 3D interactions and accessible controls.
-- [x] Verify indoor/outdoor, persistence, history, lock/group boundaries, admin read-only and device fallback; review before merging. Focused 40 tests, 13 editing browser checks and 10 preview regressions pass; production build passes. Broad tests still running.
+- [x] Verify indoor/outdoor, persistence, history, lock/group boundaries, admin read-only and device fallback; review before merging. Final merged focused233, editing browser13 and preview10 checks pass; build passes. Whole repo has526 reported failures and2 worker memory crashes; representative10 failures reproduced on untouched upstream.
 - [ ] Commit feature, fetch again, integrate any intervening main changes, and push a normal fast-forward update to main. No PR requested.
 - [x] Prepare one manual test guide and identify the separately imported optional teammate SQL migration in `docs/verification/event-3d-editing/README.md`.
 
-**Next Step:** finish broad verification, record existing unrelated failures, commit, fetch and publish the combined feature to main.
+**Next Step:** commit final evidence, fetch again, fast-forward local main and push normally. No new feature SQL is needed.
 
 **Errors:** sandbox blocked Git fetch/index writes; elevated retries used. Latest-main merge conflicted in two renderer blocks; combined both features explicitly. No live database SQL was executed.
 
