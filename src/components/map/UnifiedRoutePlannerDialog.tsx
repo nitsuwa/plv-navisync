@@ -5,7 +5,7 @@ import type { SearchResult } from "../../hooks/useCampusSearch";
 import { searchDestinationResults, type DestinationFilter } from "../../lib/destinationSearch";
 import type { CampusPlaceDest, RoomDest } from "../../lib/combinedPathfinding";
 import type { PlannedRoute, RouteMode, StandardRoutePreference } from "../../lib/routePlanner";
-import { studentFacingRouteSteps, studentRouteFacts, type StudentCameraMode, type StudentRoutePhase } from "../../lib/studentRouteFlow";
+import { studentFacingRouteSteps, studentRouteFacts, type StudentCameraMode, type StudentRoutePhase, type StudentRoutePrimaryAction } from "../../lib/studentRouteFlow";
 import type { Building } from "../../types";
 import { useEscToClose } from "../../hooks/useEscToClose";
 import { cn } from "../../lib/utils";
@@ -30,6 +30,8 @@ export interface UnifiedRoutePlannerDialogProps {
   onCameraModeChange?: (mode: StudentCameraMode) => void;
   collapsed?: boolean;
   playbackPaused?: boolean;
+  primaryAction?: StudentRoutePrimaryAction;
+  primaryActionDisabled?: boolean;
   transitionBusy?: boolean;
   transitionAwaitingAction?: boolean;
   transitionPrompt?: string | null;
@@ -172,7 +174,7 @@ export function UnifiedRoutePlannerDialog({
   standardPreference = "best", onStandardPreferenceChange,
   mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, onChooseOnMap, onConfirmMapSelection, onClearMapSelectionCandidate, selectionError = null,
   suspendedForBuilding = false, suspendedForFloorPicker = false,
-  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, transitionAwaitingAction = false,
+  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, transitionAwaitingAction = false, primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
   transitionPrompt = null, onContinueTransition,
   currentStepIndex = 0, navigationSteps = [], playbackSpeed = 1, onPlaybackSpeedChange, onStartNavigation, onEditRoute,
   onPause, onResume, onPreviousStep, onNextStep,
@@ -652,8 +654,8 @@ export function UnifiedRoutePlannerDialog({
                 ) : (
                   <>
                     <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} aria-label="Previous step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                    {transitionAwaitingAction ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy} aria-label="Continue through the active route transition" className="flex h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : <button type="button" onClick={playbackPaused ? onResume : onPause} disabled={transitionBusy} aria-label={playbackPaused ? "Resume navigation" : "Pause navigation"} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{playbackPaused ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
-                    {!transitionAwaitingAction && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
+                    {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label="Continue through the active route transition" className="flex h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="flex h-10 flex-1 items-center justify-center rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={transitionBusy || primaryActionDisabled} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
+                    {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
                     {speedControl(true)}
                   </>
                 )}
@@ -669,8 +671,10 @@ export function UnifiedRoutePlannerDialog({
           <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
-            className={cn("min-h-0 flex-none overscroll-contain px-3.5 py-2 md:max-h-[calc(100dvh-14rem)] md:px-4 md:py-4",
-              navigatingPhase ? "flex flex-col gap-2 overflow-y-auto" : "space-y-2 overflow-y-auto md:flex-none md:space-y-3",
+            className={cn("min-h-0 overscroll-contain px-3.5 py-2 md:max-h-[calc(100dvh-14rem)] md:px-4 md:py-4",
+              navigatingPhase || previewPhase
+                ? "flex flex-1 flex-col gap-2 overflow-y-auto"
+                : "flex-none space-y-2 overflow-y-auto md:flex-none md:space-y-3",
               isMobileViewport && phase === "planning" && !activeEndpoint && !mapSelectionEndpoint && mobileSheetState !== "expanded" && "hide-scrollbar-mobile")}
             style={isMobileViewport && !activeEndpoint && !mapSelectionEndpoint
               ? { flex: "0 1 auto", maxHeight: `max(0px, calc(var(--student-map-mobile-panel-max-height, 60dvh) - ${phase === "planning" ? "8rem" : "7rem"}))` }
@@ -716,8 +720,8 @@ export function UnifiedRoutePlannerDialog({
                   <>
                     <div className="grid grid-cols-4 gap-2">
                       <button type="button" onClick={onPreviousStep} disabled={transitionBusy || safeStepIndex <= 0} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous</button>
-                      {transitionAwaitingAction ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : <button type="button" onClick={playbackPaused ? onResume : onPause} disabled={transitionBusy} aria-label={playbackPaused ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{playbackPaused ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
-                      {!transitionAwaitingAction && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>}
+                      {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={transitionBusy || primaryActionDisabled} aria-label={primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
+                      {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || safeStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>}
                       {speedControl()}
                     </div>
                     <div className="flex gap-2">

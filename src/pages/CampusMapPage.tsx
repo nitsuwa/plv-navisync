@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 
 import {
-  Search, Building2, X,
+  Search, Building2, X, ArrowDown, ArrowUp, MoveVertical,
   Accessibility, AlertTriangle, Navigation, Bookmark,
   Clock, ChevronRight, ChevronLeft, ChevronDown,
   Share2, CalendarDays, MapPin, Compass,
@@ -65,7 +65,7 @@ import {
   type MobileBuildingSheetState,
   StudentMapControls,
 } from "../components/map";
-import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFloorLabel, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
+import { authoredFloorTransitionPoint, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteExploreTransitionTarget, studentRouteFloorLabel, studentRouteFocusAtProgress, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteShouldPauseAtZeroWalkVerticalAccess, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteVerticalTransitionGroupId, studentRoutePrimaryAction, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
 import { studentAccountService } from "../services/studentAccountService";
 import { studentMobilePanelAvailableHeight } from "../lib/studentMobilePanels";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
@@ -1026,6 +1026,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const playbackCursorRef = useRef(0);
   const [playbackCursor, setPlaybackCursor] = useState(0);
   const routeTransitionActivationRef = useRef<number | null>(null);
+  const autoVerticalTraversalSharedIdRef = useRef<string | null>(null);
+  const activateCurrentRouteTransitionRef = useRef<() => void>(() => {});
   // A physical route transition pauses at its source. Resume only when the
   // student was walking when they reached that transition; an explicit Pause
   // at the marker remains paused after activation.
@@ -3835,6 +3837,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   useEffect(() => {
     routeRef.current = route;
   }, [route]);
+  useEffect(() => {
+    autoVerticalTraversalSharedIdRef.current = null;
+  }, [route]);
 
 
   useEffect(() => {
@@ -4808,7 +4813,10 @@ const buildingFill = (id: string) =>
         ? originIndoorSegments[originIndoorSegmentIndex]
         : destinationIndoorSegments[destinationIndoorSegmentIndex];
       if (!route || !activeSegment) return null;
-      const cursor = studentRoutePositionForLeg(route, activePlaybackSteps, navigationPhase, activeSegment, progress, playbackCursorRef.current);
+      const currentStepTarget = studentRouteSeekTarget(route, activePlaybackSteps,
+        Math.floor(playbackCursorRef.current + 0.000001));
+      const contextLegIndex = currentStepTarget.segment === activeSegment ? currentStepTarget.contextLegIndex : undefined;
+      const cursor = studentRoutePositionForLeg(route, activePlaybackSteps, navigationPhase, activeSegment, progress, playbackCursorRef.current, contextLegIndex);
       const previousCursor = playbackCursorRef.current;
       playbackCursorRef.current = cursor;
       const crossedStepBoundary = Math.floor(cursor + 0.000001) !== Math.floor(previousCursor + 0.000001);
@@ -4909,7 +4917,11 @@ const buildingFill = (id: string) =>
       const kind = transition?.kind;
       if (floorChanges && canonicalNext.segment !== nextSegment) return;
       const direction = nextFloor >= (currentFloor ?? nextFloor) ? "up" : "down";
-      const label = nextFloor === 1 ? "Ground Floor" : `Floor ${nextFloor}`;
+      const label = studentRouteFloorLabel(nextSegment, nextFloor === 1 ? "Ground Floor" : `Floor ${nextFloor}`);
+      const pauseAtZeroWalkAccess = studentRouteShouldPauseAtZeroWalkVerticalAccess(
+        route, steps, nextStepIndex, autoVerticalTraversalSharedIdRef.current,
+      );
+      if (pauseAtZeroWalkAccess) autoVerticalTraversalSharedIdRef.current = null;
       const advance = () => {
         originIndoorTransitionRef.current = null;
         floorShiftDirectionRef.current = direction;
@@ -4925,8 +4937,12 @@ const buildingFill = (id: string) =>
         setNavigationTransitioning(false);
         if (transitionResumePlaybackRef.current) {
           transitionResumePlaybackRef.current = false;
-          setNavigationPauseReason(null);
-          dispatchStudentRouteUi({ type: "RESUME" });
+          if (pauseAtZeroWalkAccess) {
+            setNavigationPauseReason("transition");
+          } else {
+            setNavigationPauseReason(null);
+            dispatchStudentRouteUi({ type: "RESUME" });
+          }
         }
       };
       if (!floorChanges) {
@@ -5071,7 +5087,11 @@ const buildingFill = (id: string) =>
     const transitionKind = transition?.kind;
     if (floorChanges && canonicalNext.segment !== nextSegment) return;
     const direction = nextFloor >= (currentFloor ?? nextFloor) ? "up" : "down";
-    const nextFloorLabel = nextFloor === 1 ? "Ground Floor" : `Floor ${nextFloor}`;
+    const nextFloorLabel = studentRouteFloorLabel(nextSegment, nextFloor === 1 ? "Ground Floor" : `Floor ${nextFloor}`);
+    const pauseAtZeroWalkAccess = studentRouteShouldPauseAtZeroWalkVerticalAccess(
+      route, steps, nextStepIndex, autoVerticalTraversalSharedIdRef.current,
+    );
+    if (pauseAtZeroWalkAccess) autoVerticalTraversalSharedIdRef.current = null;
 
     const advanceToNextFloor = () => {
       destinationIndoorTransitionRef.current = null;
@@ -5089,8 +5109,12 @@ const buildingFill = (id: string) =>
       setNavigationTransitioning(false);
       if (transitionResumePlaybackRef.current) {
         transitionResumePlaybackRef.current = false;
-        setNavigationPauseReason(null);
-        dispatchStudentRouteUi({ type: "RESUME" });
+        if (pauseAtZeroWalkAccess) {
+          setNavigationPauseReason("transition");
+        } else {
+          setNavigationPauseReason(null);
+          dispatchStudentRouteUi({ type: "RESUME" });
+        }
       }
     };
 
@@ -5809,8 +5833,17 @@ const buildingFill = (id: string) =>
   const finalIndoorSegment = indoorDestinationSegment
     ?? [...routeIndoorSegments].reverse().find((segment) => segment.afterOutdoor);
   const indoorShowsEndMarker = routeEndsIndoors && waypointsMatchRoute(finalIndoorSegment);
+  const activeRouteContextLegIndex = route && activeIndoorSegment
+    ? (() => {
+        const stepIndex = studentRouteUi.phase === "preview"
+          ? routePreviewStepIndex
+          : Math.floor(playbackCursor + 0.000001);
+        const target = studentRouteSeekTarget(route, routeNavigationSteps, stepIndex);
+        return target.segment === activeIndoorSegment ? target.contextLegIndex : undefined;
+      })()
+    : undefined;
   const activeRouteProgress = isFloorMode && route && activeIndoorSegment
-    ? studentRouteProgressForIndoorSegment(route, routeNavigationSteps, activeIndoorSegment, indoorWalkProgress)
+    ? studentRouteProgressForIndoorSegment(route, routeNavigationSteps, activeIndoorSegment, indoorWalkProgress, activeRouteContextLegIndex)
     : walkProgress;
   // Explore step inspection renders the inspected step's position without
   // ever mutating real playback progress (Return to Follow resumes from the
@@ -5874,12 +5907,28 @@ const buildingFill = (id: string) =>
   const activeRouteTransition = useMemo(() => route && activeTransitionStepIndex >= 0
     ? routeTransitionForStep(route, routeNavigationSteps, activeTransitionStepIndex)
     : null, [activeTransitionStepIndex, route, routeNavigationSteps]);
+  const routeStepSeeking = stepSeekTargetRef.current !== null;
+  const activeRoutePrimaryAction = studentRoutePrimaryAction({
+    phase: studentRouteUi.phase,
+    playback: studentRouteUi.playback,
+    hasAuthoredTransition: Boolean(activeRouteTransition),
+    isArrival: routeNavigationSteps[activeRouteStepIndex]?.icon === "arrive",
+  });
   const transitionAwaitingAction = Boolean(studentRouteUi.phase === "navigating"
     && studentRouteUi.camera === "follow"
-    && studentRouteUi.playback === "paused"
-    && navigationPauseReason === "transition"
-    && activeRouteTransition
+    && activeRoutePrimaryAction === "continue-transition"
+    && !routeStepSeeking
     && !routeTransitionBusy);
+  const guidedAccessTransitionCue = useMemo(() => {
+    if (!route || studentRouteUi.phase !== "navigating" || studentRouteUi.camera !== "follow"
+      || studentRouteUi.playback !== "paused" || navigationPauseReason !== "transition" || routeStepSeeking
+      || !studentRouteShouldPauseAtZeroWalkVerticalAccess(route, routeNavigationSteps, activeRouteStepIndex)) return null;
+    const transitionStepIndex = activeRouteStepIndex + 1;
+    const transition = routeTransitionForStep(route, routeNavigationSteps, transitionStepIndex);
+    if ((transition?.kind !== "stairs" && transition?.kind !== "elevator") || !transition.detail) return null;
+    const cue = studentRouteTransitionCues.find((candidate) => candidate.id === transition.detail?.nodeId);
+    return cue ? { cue, transitionStepIndex } : null;
+  }, [activeRouteStepIndex, navigationPauseReason, route, routeNavigationSteps, routeStepSeeking, studentRouteTransitionCues, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
   const transitionPrompt = useMemo(() => {
     if (!transitionAwaitingAction || !route || !activeRouteTransition) return null;
     const detail = activeRouteTransition.detail;
@@ -6081,7 +6130,8 @@ const buildingFill = (id: string) =>
     }
   }, [activeCampus?.buildings, activeOutdoorEntranceBuildingId, floorView, focusRouteStartView, openFloorPlan, previewActiveTransitionCue, roomDestination?.floorNumber, roomOrigin?.floorNumber, route, routeNavigationSteps, studentRouteUi.phase]);
   const activateCurrentRouteTransition = useCallback(() => {
-    if (studentRouteUi.phase !== "navigating" || studentRouteUi.camera !== "follow" || !route || !activeRouteTransition || routeTransitionBusy) return;
+    if (studentRouteUi.phase !== "navigating" || studentRouteUi.camera !== "follow" || !route || !activeRouteTransition || routeTransitionBusy
+      || stepSeekTargetRef.current !== null || routeTransitionActivationRef.current === activeRouteStepIndex) return;
     const transitionStepIndex = activeRouteStepIndex;
     const transition = routeTransitionForStep(route, routeNavigationSteps, transitionStepIndex);
     if (transition?.kind !== activeRouteTransition.kind) return;
@@ -6102,6 +6152,11 @@ const buildingFill = (id: string) =>
       const targetBuildingId = nextTarget.segment?.buildingId ?? route.destinationRoom?.buildingId ?? activeOutdoorEntranceBuildingId;
       const building = MOCK_BUILDINGS.find((candidate) => candidate.id === targetBuildingId);
       if (!building) return;
+      autoVerticalTraversalSharedIdRef.current = null;
+      routeTransitionActivationRef.current = transitionStepIndex;
+      const pauseAtZeroWalkAccess = studentRouteShouldPauseAtZeroWalkVerticalAccess(
+        route, routeNavigationSteps, nextStepIndex,
+      );
       setStairLoading({ dir: "up", label: `Entering ${building.name}` });
       setNavigationTransitioning(true);
       stepSeekTransitionTimerRef.current = setTimeout(() => {
@@ -6115,6 +6170,7 @@ const buildingFill = (id: string) =>
             roomDestination?.floorNumber ?? building.floors?.[0]?.number ?? 1);
           if (segmentIndex < 0 || floor === undefined) {
             setNavigationTransitioning(false);
+            routeTransitionActivationRef.current = null;
             return;
           }
           setDestinationIndoorSegments(segments);
@@ -6146,6 +6202,7 @@ const buildingFill = (id: string) =>
             const floor = indoorSegmentFloorNumber(segment, publishedBuilding, roomDestination?.floorNumber ?? building.floors?.[0]?.number ?? 1);
             if (floor === undefined) {
               setNavigationTransitioning(false);
+              routeTransitionActivationRef.current = null;
               return;
             }
             setDestinationIndoorSegments(segments);
@@ -6167,9 +6224,14 @@ const buildingFill = (id: string) =>
         setNavigationTransitioning(false);
         if (transitionResumePlaybackRef.current) {
           transitionResumePlaybackRef.current = false;
-          setNavigationPauseReason(null);
-          dispatchStudentRouteUi({ type: "RESUME" });
+          if (pauseAtZeroWalkAccess) {
+            setNavigationPauseReason("transition");
+          } else {
+            setNavigationPauseReason(null);
+            dispatchStudentRouteUi({ type: "RESUME" });
+          }
         }
+        routeTransitionActivationRef.current = null;
       }, reducedMotion ? 0 : 420);
       return;
     }
@@ -6189,6 +6251,9 @@ const buildingFill = (id: string) =>
     } else if (!sourceTarget.segment || nextTarget.context !== "campus") {
       return;
     }
+    autoVerticalTraversalSharedIdRef.current = isFloorHandoff
+      ? studentRouteVerticalTransitionGroupId(route, routeNavigationSteps, transitionStepIndex)
+      : null;
     // The authored step is now active at the human's exact segment boundary.
     // The route leg effect consumes this one-shot request and performs the
     // single Floor/Building handoff, including when playback is paused.
@@ -6203,6 +6268,22 @@ const buildingFill = (id: string) =>
       setIndoorWalkProgress(1);
     }
   }, [activeCampus?.buildings, activeRouteStepIndex, activeRouteTransition, activeOutdoorEntranceBuildingId, enterDestinationRouteFloor, navigationPhase, openFloorPlan, reducedMotion, roomDestination?.floorNumber, route, routeNavigationSteps, routeTransitionBusy, studentRouteUi.camera, studentRouteUi.phase]);
+  activateCurrentRouteTransitionRef.current = activateCurrentRouteTransition;
+  useEffect(() => {
+    if (!transitionAwaitingAction || !route || studentRouteUi.phase !== "navigating"
+      || studentRouteUi.camera !== "follow") return;
+    const activeGroup = studentRouteVerticalTransitionGroupId(route, routeNavigationSteps, activeRouteStepIndex);
+    const continuingGroup = autoVerticalTraversalSharedIdRef.current;
+    if (!continuingGroup) return;
+    if (activeGroup !== continuingGroup) {
+      autoVerticalTraversalSharedIdRef.current = null;
+      return;
+    }
+    // A same-shaft zero-walk floor is a continuous traversal, not a new
+    // decision point. The transition callback still performs the authored
+    // handoff and keeps the ordinary boundary animation/camera behavior.
+    activateCurrentRouteTransitionRef.current();
+  }, [activeRouteStepIndex, route, routeNavigationSteps, studentRouteUi.camera, studentRouteUi.phase, transitionAwaitingAction]);
   const handleStudentFloorDoorClick = useCallback((doorId: string) => {
     // In 3D Explore, an authored exit changes only the inspected renderer
     // context. The canonical Follow Floor/segment refs must remain available
@@ -6338,15 +6419,22 @@ const buildingFill = (id: string) =>
     // A user initiated seek supersedes any old auto-resume request left by a
     // transition the human reached before pressing Previous / Next.
     transitionResumePlaybackRef.current = false;
+    // A seek selects a new canonical step. Do not carry one-shot transition
+    // ownership or same-shaft auto-advance state across that boundary.
+    routeTransitionActivationRef.current = null;
+    autoVerticalTraversalSharedIdRef.current = null;
+    const destinationHasTransition = Boolean(routeTransitionForStep(route, routeNavigationSteps, safeIndex));
+    const destinationWaitsAtVerticalAccess = studentRouteShouldPauseAtZeroWalkVerticalAccess(
+      route, routeNavigationSteps, safeIndex,
+    );
+    setNavigationPauseReason(destinationHasTransition || destinationWaitsAtVerticalAccess ? "transition" : "manual");
     cancelAnimationFrame(stepSeekAnimRef.current ?? 0);
     stepSeekAnimRef.current = null;
     if (stepSeekTransitionTimerRef.current) clearTimeout(stepSeekTransitionTimerRef.current);
     stepSeekTransitionTimerRef.current = null;
-    if (studentRouteUi.playback === "playing") {
-      // A manual seek owns the cursor from this point on. Pause in the same
-      // action and cancel old clocks before the seek animation starts.
-      dispatchStudentRouteUi({ type: "PAUSE" });
-    }
+    // A manual seek owns the cursor from this point on. Pause even if playback
+    // was already paused, clearing any stale Explore resume state as well.
+    dispatchStudentRouteUi({ type: "SEEK_STEP" });
     const fromPosition = playbackCursorRef.current;
     stepSeekTargetRef.current = safeIndex;
     setInspectedRouteStepIndex(null);
@@ -6691,7 +6779,15 @@ const buildingFill = (id: string) =>
     return null;
   }, [activateCurrentRouteTransition, activeOutdoorEntranceBuildingId, activeOutdoorEntranceId, activeRouteStepIndex, activeRouteTransition?.kind, activeRouteTransitionPoint, campus3DActive, inspectGuidedRouteTransition, inspectRoutePreviewTransition, navigationPhase, previewActiveTransitionCue, routeNavigationSteps, studentRouteUi.camera, studentRouteUi.phase]);
   const indoor3DActiveTransition = useMemo(() => {
-    if (!indoor3DActive || !isFloorMode || !activeRouteTransitionPoint) return null;
+    if (!indoor3DActive || !isFloorMode) return null;
+    if (guidedAccessTransitionCue) {
+      return {
+        point: guidedAccessTransitionCue.cue.point,
+        label: guidedAccessTransitionCue.cue.label,
+        onActivate: () => seekRouteStep(guidedAccessTransitionCue.transitionStepIndex),
+      };
+    }
+    if (!activeRouteTransitionPoint) return null;
     if (studentRouteUi.phase === "preview" && previewActiveTransitionCue) {
       return {
         point: activeRouteTransitionPoint,
@@ -6716,7 +6812,7 @@ const buildingFill = (id: string) =>
       };
     }
     return null;
-  }, [activateCurrentRouteTransition, activeRouteStepIndex, activeRouteTransitionPoint, indoor3DActive, inspectGuidedRouteTransition, inspectRoutePreviewTransition, isFloorMode, previewActiveTransitionCue, routeNavigationSteps, studentRouteUi.camera, studentRouteUi.phase]);
+  }, [activateCurrentRouteTransition, activeRouteStepIndex, activeRouteTransitionPoint, guidedAccessTransitionCue, indoor3DActive, inspectGuidedRouteTransition, inspectRoutePreviewTransition, isFloorMode, previewActiveTransitionCue, routeNavigationSteps, seekRouteStep, studentRouteUi.camera, studentRouteUi.phase]);
   const campus3DEventVenues = useMemo(() => activeCampus ? buildEventVenues(activeCampus, venueEvents) : [], [activeCampus, venueEvents]);
   const handleCampus3DFallback = useCallback(() => {
     setCampus3DFallback(true);
@@ -6962,6 +7058,7 @@ const buildingFill = (id: string) =>
           <Suspense fallback={null}>
             <LazyIndoorFloor3DRenderer
               floor={activeFloorPlan}
+              hasLowerServedFloor={activeFloorOrdinal.index > 0}
               darkMode={darkMode}
               floorLabel={`${floorView?.building.name ?? "Building"} · ${currentFloor?.label ?? "Floor"}`}
               viewport={floorViewport}
@@ -7179,6 +7276,20 @@ const buildingFill = (id: string) =>
                   />
                   );
                 })}
+                {guidedAccessTransitionCue && isFloorMode && (
+                  <StudentRouteTransitionMarker
+                    key={`guided-access-${guidedAccessTransitionCue.cue.id}`}
+                    x={guidedAccessTransitionCue.cue.point.x}
+                    y={guidedAccessTransitionCue.cue.point.y}
+                    kind={guidedAccessTransitionCue.cue.kind}
+                    label={guidedAccessTransitionCue.cue.label}
+                    markerId={guidedAccessTransitionCue.cue.id}
+                    reducedMotion={reducedMotion}
+                    zoom={displayZoom}
+                    context={{ kind: "floor", buildingId: floorView.building.id, floorId: activeFloorPlan.id }}
+                    onActivate={() => seekRouteStep(guidedAccessTransitionCue.transitionStepIndex)}
+                  />
+                )}
                 {studentRouteUi.phase === "navigating" && activeRouteTransition && activeRouteTransitionPoint && isFloorMode && (
                   <StudentRouteTransitionMarker
                     x={activeRouteTransitionPoint.x}
@@ -7446,6 +7557,8 @@ const buildingFill = (id: string) =>
                 else recenterCurrentRouteStep();
               }}
               playbackPaused={studentRouteUi.playback === "paused"}
+              primaryAction={activeRoutePrimaryAction}
+              primaryActionDisabled={routeStepSeeking}
               transitionBusy={routeTransitionBusy}
               transitionAwaitingAction={transitionAwaitingAction}
               transitionPrompt={transitionPrompt}
@@ -8053,7 +8166,7 @@ const buildingFill = (id: string) =>
       {/* ══════════════ FLOOR SELECTOR (floor plan mode — always visible when in floor view) ══════════════ */}
 
       {/* ══════════════ MAP ZOOM / RESET CONTROLS ══════════════ */}
-      {isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && !routePanelVisible && (
+      {isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && (
         <div>
           <StudentFloorPicker
             buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
@@ -8122,10 +8235,12 @@ const buildingFill = (id: string) =>
               <button type="button" data-testid="collapsed-preview-start-navigation" onClick={startGuidedFromCollapsedPreview} className="min-h-10 flex-1 rounded-xl bg-primary px-3 text-[11px] font-extrabold text-primary-foreground">Start Navigation</button>
             ) : navigating && <>
               <button type="button" onClick={() => moveGuidedStep(-1)} disabled={routeTransitionBusy || activeRouteStepIndex <= 0} aria-label="Previous step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-              {!exploring && (transitionAwaitingAction
-                ? <button type="button" onClick={activateCurrentRouteTransition} disabled={routeTransitionBusy} aria-label="Continue through the active route transition" className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button>
-                : <button type="button" onClick={studentRouteUi.playback === "paused" ? resumeNavigation : pauseNavigation} disabled={routeTransitionBusy} aria-label={studentRouteUi.playback === "paused" ? "Resume navigation" : "Pause navigation"} className="flex h-10 min-w-16 flex-1 items-center justify-center gap-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{studentRouteUi.playback === "paused" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>)}
-              {!transitionAwaitingAction && <button type="button" onClick={continueGuidedNavigation} disabled={routeTransitionBusy || activeRouteStepIndex >= routeNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
+              {!exploring && (activeRoutePrimaryAction === "continue-transition"
+                ? <button type="button" onClick={activateCurrentRouteTransition} disabled={routeTransitionBusy || routeStepSeeking} aria-label="Continue through the active route transition" className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Continue</button>
+                : activeRoutePrimaryAction === "done"
+                  ? <button type="button" onClick={clearStudentRoute} disabled={routeTransitionBusy || routeStepSeeking} className="flex h-10 min-w-16 flex-1 items-center justify-center rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button>
+                  : <button type="button" onClick={activeRoutePrimaryAction === "resume" ? resumeNavigation : pauseNavigation} disabled={routeTransitionBusy || routeStepSeeking} aria-label={activeRoutePrimaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex h-10 min-w-16 flex-1 items-center justify-center gap-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{activeRoutePrimaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>)}
+              {(exploring || activeRoutePrimaryAction !== "continue-transition" && activeRoutePrimaryAction !== "done") && <button type="button" onClick={continueGuidedNavigation} disabled={routeTransitionBusy || activeRouteStepIndex >= routeNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
               {!exploring && <button type="button" data-testid="collapsed-playback-speed" aria-label={`Playback speed ${playbackSpeed} times. Change speed`} title="Change playback speed" onClick={() => setPlaybackSpeed((speed) => speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1)} className="h-10 min-w-11 shrink-0 rounded-xl border border-border bg-card px-2 text-[10px] font-extrabold text-primary">{playbackSpeed}×</button>}
             </>}
             <button type="button" onClick={() => dispatchStudentRouteUi({ type: "EXPAND" })} aria-label={arrived ? "Expand arrival details" : "Expand route panel"} className="min-h-10 shrink-0 rounded-xl border border-primary/20 bg-primary/5 px-3 text-[10px] font-extrabold text-primary">Expand</button>
@@ -8237,12 +8352,36 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ STAIR LOADING OVERLAY ══════════════ */}
-      {stairLoading && (
-        <div data-testid="route-floor-transition-status" data-no-drag className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+8rem)] z-[65] -translate-x-1/2 rounded-xl border border-primary/20 bg-card/95 px-3 py-2 text-center shadow-md backdrop-blur md:top-16">
-          <p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">{stairLoading.dir === "up" ? "Going up" : "Going down"}</p>
-          <p className="text-[11px] font-bold text-foreground">{stairLoading.label}</p>
-        </div>
-      )}
+      {stairLoading && (() => {
+        const elevator = /elevator/i.test(stairLoading.label);
+        const DirectionIcon = elevator ? MoveVertical : stairLoading.dir === "up" ? ArrowUp : ArrowDown;
+        const targetFloor = stairLoading.label.match(/\b(?:ground floor|floor\s+\d+)\b/i)?.[0];
+        const via = stairLoading.label.match(/\bvia\s+(.+)$/i)?.[1];
+        return (
+          <motion.div
+            data-testid="route-floor-transition-status"
+            data-no-drag
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.99 }}
+            transition={reducedMotion ? { duration: 0.01 } : { duration: 0.18, ease: "easeOut" }}
+            className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+8rem)] z-[65] flex w-[min(22rem,calc(100vw-1.5rem))] -translate-x-1/2 items-center gap-3 rounded-2xl border border-primary/25 bg-card/95 px-3.5 py-3 text-left shadow-[0_10px_30px_rgba(15,23,42,0.22)] backdrop-blur-xl md:top-16"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+              <DirectionIcon className={cn("h-5 w-5", !reducedMotion && !elevator && "animate-pulse")} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[9px] font-extrabold uppercase tracking-[0.14em] text-primary">{stairLoading.dir === "up" ? "Going up" : "Going down"}</span>
+              <span className="block truncate text-[13px] font-extrabold leading-tight text-foreground">{targetFloor ? `To ${targetFloor}` : stairLoading.label}</span>
+              {via && <span className="block truncate text-[10px] font-semibold text-muted-foreground">via {via}</span>}
+              {!via && elevator && <span className="block text-[10px] font-semibold text-muted-foreground">Elevator transition</span>}
+            </span>
+          </motion.div>
+        );
+      })()}
 
       {/* ══════════════ INDOOR ROUTE DIRECTIONS PANEL ══════════════ */}
       {/* A full journey owns all indoor/outdoor instructions, including room
