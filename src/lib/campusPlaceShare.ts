@@ -1,8 +1,10 @@
-export function campusPlaceDeepLink(placeId: string, campusId: string, origin = window.location.origin): string {
-  const url = new URL("/map", origin);
-  if (campusId) url.searchParams.set("campusId", campusId);
-  url.searchParams.set("placeId", placeId);
-  return url.toString();
+import { appUrl } from "./appUrl";
+
+export function campusPlaceDeepLink(placeId: string, campusId: string, origin?: string): string {
+  const params = new URLSearchParams();
+  if (campusId) params.set("campusId", campusId);
+  params.set("placeId", placeId);
+  return appUrl(`/map?${params.toString()}`, origin);
 }
 
 async function copyText(text: string): Promise<void> {

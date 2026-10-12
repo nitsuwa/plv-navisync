@@ -1,8 +1,8 @@
-export function buildingMapDeepLink(campusId: string, buildingId: string, origin = window.location.origin): string {
-  const url = new URL("/map", origin);
-  url.searchParams.set("campusId", campusId);
-  url.searchParams.set("buildingId", buildingId);
-  return url.toString();
+import { appUrl } from "./appUrl";
+
+export function buildingMapDeepLink(campusId: string, buildingId: string, origin?: string): string {
+  const params = new URLSearchParams({ campusId, buildingId });
+  return appUrl(`/map?${params.toString()}`, origin);
 }
 
 async function copyText(text: string): Promise<void> {

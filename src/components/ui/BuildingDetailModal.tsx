@@ -9,6 +9,8 @@ import type { Building } from "../../types";
 import { getOpenStatus } from "../../lib/buildingHours";
 import { cn } from "../../lib/utils";
 import { useToast } from "../../hooks/useToast";
+import { appUrl } from "../../lib/appUrl";
+import { shareBuildingLink } from "../../lib/buildingShare";
 
 // ── Status helpers ──────────────────────────────────────────────────────────
 const STATUS_COLOR = {
@@ -97,13 +99,11 @@ export function BuildingDetailModal({
 
   const handleShare = async () => {
     try {
-      const shareText = `${building.name} (${building.code}) — PLV NaviSync`;
-      if (navigator.share) {
-        await navigator.share({ title: building.name, text: shareText, url: `${window.location.origin}/buildings/${building.id}` });
-      } else {
-        await navigator.clipboard?.writeText(shareText);
-      }
-      success("Building link ready", "You can share this location with your classmates.");
+      const result = await shareBuildingLink({
+        buildingName: `${building.name} (${building.code})`,
+        url: appUrl(`/buildings/${encodeURIComponent(building.id)}${campusId ? `?campusId=${encodeURIComponent(campusId)}` : ""}`),
+      });
+      if (result !== "cancelled") success("Building link ready", "You can share this location with your classmates.");
     } catch {
       showError("Building link could not be shared");
     }

@@ -3,6 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Link2, QrCode } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
 import type { CampusMarker } from "../map-builder/types";
+import { appUrl } from "../../lib/appUrl";
 
 interface CampusGateQRProps {
   gate: CampusMarker;
@@ -13,10 +14,9 @@ interface CampusGateQRProps {
 export function CampusGateQR({ gate, campusId, locationId }: CampusGateQRProps) {
   const toast = useToast();
   const url = useMemo(() => {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const params = new URLSearchParams({ locationId });
     if (campusId) params.set("campusId", campusId);
-    return `${origin}/map?${params.toString()}`;
+    return appUrl(`/map?${params.toString()}`);
   }, [campusId, locationId]);
 
   const copyLink = async () => {
