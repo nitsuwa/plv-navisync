@@ -15,6 +15,9 @@ import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements 
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
+import { EventAsset3DLayer } from "../events/EventAsset3DLayer";
+import { EventPreviewCamera } from "../events/EventPreviewCamera";
+import type { Event3DCameraRequest } from "../../lib/event3dLayout";
 
 declare module "react" {
   namespace JSX {
@@ -45,6 +48,7 @@ interface IndoorFloor3DRendererProps {
   destinationRoomId?: string | null;
   eventFurniture?: readonly FloorFurniture[];
   eventLabels?: readonly FloorLabel[];
+  previewCamera?: Event3DCameraRequest;
   eventMarker?: { point: Pt; label: string } | null;
   activeTransition?: { point: Pt; label: string; onActivate?: () => void } | null;
   followMode?: boolean;
@@ -1250,11 +1254,11 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       minX: Math.min(first[0], second[0]) - padding,
       maxX: Math.max(first[0], second[0]) + padding,
       minY: FLOOR_SURFACE_Y + 0.04,
-      maxY: FLOOR_SURFACE_Y + 2.2,
+      maxY: Math.max(FLOOR_SURFACE_Y + 2.2, (props.previewCamera?.maxHeight ?? 0) / 2 + 0.025),
       minZ: Math.min(first[2], second[2]) - padding,
       maxZ: Math.max(first[2], second[2]) + padding,
     };
-  }, [viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
+  }, [viewport.height, viewport.offsetX, viewport.offsetY, viewport.width, props.previewCamera?.maxHeight]);
   useEffect(() => {
     const instance = controls.current;
     if (!instance) return;
@@ -1635,10 +1639,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
       {floor.entranceSteps?.filter((step) => step.visible !== false).map((step) => <MemoStairModel key={`entrance-step-${step.id}`} stair={step} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} entranceModel />)}
       {floor.furniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
-      {props.eventFurniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`event-furniture-${item.id}`} item={item} viewport={viewport} />)}
-      {props.eventLabels?.map((label) => <Html key={`event-label-${label.id}`} position={pointToWorld({ x: label.x, y: label.y }, viewport, 0.06)} center distanceFactor={10} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
-        <span className="rounded bg-orange-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">{label.text}</span>
-      </Html>)}
+      <EventAsset3DLayer furniture={props.eventFurniture} labels={props.eventLabels} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
       {props.eventMarker && <Html position={pointToWorld(props.eventMarker.point, viewport, 0.3)} center distanceFactor={9} zIndexRange={[90, 0]}>
         <div className="rounded-xl border border-orange-200 bg-white/95 px-2 py-1.5 text-[10px] font-extrabold text-orange-800 shadow-lg">◉ {props.eventMarker.label}</div>
       </Html>}
@@ -1668,6 +1669,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     </group>
     <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.2} maxPolarAngle={Math.PI / 3}
       enableRotate enablePan={!props.followMode || props.freeLook} enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
+    <EventPreviewCamera request={props.previewCamera} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
   </>;
 }
 

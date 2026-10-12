@@ -78,6 +78,7 @@ import { useEventViewportMotion } from "./useEventViewportMotion";
 import { EventLayoutIssues } from "./EventLayoutIssues";
 import { EventEditorTutorial } from "./EventEditorTutorial";
 import { EventItemInspector } from "./EventItemInspector";
+import { EventLayout3DPreview } from "./EventLayout3DPreview";
 import { EventSelectionOverlay } from "./EventSelectionOverlay";
 import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
@@ -398,6 +399,8 @@ export function EventFloorEditor({
 }: EventFloorEditorProps) {
   // ── State ──────────────────────────────────────────────────────────────
   const [initialEventLayout] = useState(() => getInitialEventLayout(overlay, readOnly));
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  useEffect(() => { if (onFeedbackPoint) setViewMode("2d"); }, [onFeedbackPoint]);
   const [activeTool, setActiveTool] = useState<EventTool>("select");
   const tutorialPreviousToolRef = useRef<EventTool | null>(null);
   const [activeTemplate, setActiveTemplate] = useState(
@@ -2374,7 +2377,7 @@ export function EventFloorEditor({
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || viewMode === "3d") return;
       if (e.key === "Escape" && objectListOpen && !editingObject) {
         e.preventDefault();
         setObjectListOpen(false);
@@ -2487,7 +2490,7 @@ export function EventFloorEditor({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [activeTool, deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
+  }, [activeTool, deleteSelected, undo, redo, readOnly, viewMode, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
 
   // ── Save / Submit handlers ─────────────────────────────────────────────
   const busy = saving || submittingLocal || isSaving || isSubmitting;
@@ -2681,14 +2684,14 @@ export function EventFloorEditor({
           </div>
         </div>
         {!readOnly && <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
-          {tutorialAccountId && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
+          {tutorialAccountId && viewMode === "2d" && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
           {/* Undo/Redo */}
           <button
             type="button"
             aria-label="Undo"
             title="Undo"
             onClick={undo}
-            disabled={historyIndex <= 0}
+            disabled={historyIndex <= 0 || viewMode === "3d"}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Undo2 className="h-3.5 w-3.5" />
@@ -2698,7 +2701,7 @@ export function EventFloorEditor({
             aria-label="Redo"
             title="Redo"
             onClick={redo}
-            disabled={historyIndex >= history.length - 1}
+            disabled={historyIndex >= history.length - 1 || viewMode === "3d"}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Redo2 className="h-3.5 w-3.5" />
@@ -2706,7 +2709,7 @@ export function EventFloorEditor({
           {/* Delete */}
           <button
             onClick={deleteSelected}
-            disabled={!selectedId}
+            disabled={!selectedId || viewMode === "3d"}
             aria-label="Delete selected items"
             title="Delete selected items (Del)"
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
@@ -2742,7 +2745,19 @@ export function EventFloorEditor({
       </div>
 
       {/* Toolbar */}
-      {!readOnly && <div className="flex min-w-0 flex-wrap items-center gap-1 px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2">
+        <div role="group" aria-label="Event layout view" className="flex gap-1 rounded-xl bg-muted p-1">
+          {(["2d", "3d"] as const).map(mode => <button key={mode} type="button" aria-label={mode === "2d" ? "2D layout" : "3D preview"} aria-pressed={viewMode === mode} disabled={mode === "3d" && Boolean(onFeedbackPoint)} onClick={() => {
+            finishInteractionRef.current("switch");
+            finishInlineLabelEdit();
+            commitObjectRename();
+            setInspectorOpen(false); setObjectListOpen(false); setAssetCatalogOpen(false); setPresetMenuOpen(false); setPresetPreview(null); setMoveHereArmedIds(null); setMoveHerePreview(null);
+            setViewMode(mode);
+          }} className={cn("min-h-9 rounded-lg px-3 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40", viewMode === mode ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>{mode === "2d" ? "2D layout" : "3D preview"}</button>)}
+        </div>
+        {onFeedbackPoint && <p className="text-xs text-muted-foreground">Place feedback pins in 2D.</p>}
+      </div>
+      {!readOnly && viewMode === "2d" && <div className="flex min-w-0 flex-wrap items-center gap-1 px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
         {EVENT_TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
@@ -2833,7 +2848,8 @@ export function EventFloorEditor({
         </div>}
 
       {/* Canvas */}
-      <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1">
+      {viewMode === "3d" && <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onReturnTo2D={() => setViewMode("2d")} />}
+      <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1" style={viewMode === "3d" ? { display: "none" } : undefined}>
       <div
         ref={canvasRef}
         data-event-tour="canvas"
@@ -3732,7 +3748,7 @@ export function EventFloorEditor({
           <span>
             {eventFurniture.length} furniture · {eventLabels.length} labels
           </span>
-          <span className="capitalize">Tool: {effectiveTool}</span>
+          <span className="capitalize">{viewMode === "3d" ? "3D preview" : `Tool: ${effectiveTool}`}</span>
         </div>
         <div className="flex items-center gap-2">
           {overlay.status && (
@@ -3760,7 +3776,7 @@ export function EventFloorEditor({
               {panStatus}
             </span>
             {readOnly && <span className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Read-only</span>}
-            <span className="hidden sm:inline">{readOnly
+            <span className="hidden sm:inline">{viewMode === "3d" ? "Preview only · Edit your arrangement in 2D" : readOnly
               ? "Published base map and submitted additions"
               : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}</span>
           </span>

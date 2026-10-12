@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "command": "node node_modules/vite/bin/vite.js build",
+  "exitCode": 0,
+  "modulesTransformed": 3638,
+  "durationSeconds": 51.90,
+  "warnings": ["Some chunks exceed 500 kB after minification"],
+  "previousAttempt": {
+    "command": "pnpm build",
+    "exitCode": 3221225477,
+    "note": "Windows process crash; final verification used the installed Vite build directly"
+  }
+}

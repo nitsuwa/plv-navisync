@@ -5,7 +5,10 @@ import { CalendarDays, DoorOpen, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 import type { ReadonlyOutdoorCampus } from "../../lib/readonlyOutdoorCampus";
-import type { CampusDecorAsset, CampusPath } from "../map-builder/types";
+import type { CampusDecorAsset, CampusPath, FloorFurniture, FloorLabel } from "../map-builder/types";
+import { EventAsset3DLayer } from "../events/EventAsset3DLayer";
+import { EventPreviewCamera } from "../events/EventPreviewCamera";
+import { event3DOutdoorTargetBounds, type Event3DCameraRequest } from "../../lib/event3dLayout";
 import { DECOR_ASSET_MAP } from "../map-builder/constants";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
@@ -45,6 +48,9 @@ interface StudentCampus3DRendererProps {
   selectedPlaceId?: string | null;
   showEvents?: boolean;
   eventVenues?: EventVenue[];
+  eventFurniture?: readonly FloorFurniture[];
+  eventLabels?: readonly FloorLabel[];
+  previewCamera?: Event3DCameraRequest;
   selectedEventLocationId?: string | null;
   darkMode?: boolean;
   reducedMotion?: boolean;
@@ -1999,15 +2005,15 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     const first = campusMapPointToWorld({ x: content.x - content.width / 2, y: content.y - content.height / 2 });
     const second = campusMapPointToWorld({ x: content.x + content.width / 2, y: content.y + content.height / 2 });
     const padding = Math.max(1.5, campusMapSizeToWorld(Math.max(content.width, content.height) * 0.12));
-    return {
+    return event3DOutdoorTargetBounds({
       minX: Math.min(first.x, second.x) - padding,
       maxX: Math.max(first.x, second.x) + padding,
       minY: -0.04,
       maxY: 0.8,
       minZ: Math.min(first.z, second.z) - padding,
       maxZ: Math.max(first.z, second.z) + padding,
-    };
-  }, [campus]);
+    }, campus.canvasW, campus.canvasH, STUDENT_CAMPUS_3D_SCALE, Boolean(props.previewCamera || props.eventFurniture?.length || props.eventLabels?.length), props.previewCamera?.maxHeight);
+  }, [campus, props.previewCamera, props.eventFurniture?.length, props.eventLabels?.length]);
   const pointerStart = useRef<{ x: number; y: number; id: number; button: number } | null>(null);
   const pointers = useRef(new Set<number>());
   const propsRef = useRef(props);
@@ -2124,6 +2130,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </group>;
     })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}
+    <EventAsset3DLayer furniture={props.eventFurniture} labels={props.eventLabels} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
     {hasRoute && routes.map((segment, index) => <group key={segment.id}>
       <MemoPathSurface path={segment} route halo />
       <MemoPathSurface path={segment} route />
@@ -2142,6 +2149,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
+    <EventPreviewCamera request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
   <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
   </>;
 }

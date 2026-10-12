@@ -7034,6 +7034,8 @@ const buildingFill = (id: string) =>
               selectedPlaceId={selectedCampusPlaceId}
               showEvents={showEventMaps}
               eventVenues={campus3DEventVenues}
+              eventFurniture={showEventMaps && selectedLocationIsVisible && selectedEventLocationData?.location.locationRef.type === "campus" ? selectedEventLocationData.location.eventFurniture : EMPTY_FLOOR_FURNITURE}
+              eventLabels={showEventMaps && selectedLocationIsVisible && selectedEventLocationData?.location.locationRef.type === "campus" ? selectedEventLocationData.location.eventLabels : EMPTY_FLOOR_LABELS}
               selectedEventLocationId={currentEventLocationId}
               darkMode={darkMode}
               reducedMotion={reducedMotion}
