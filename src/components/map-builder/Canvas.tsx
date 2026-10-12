@@ -14,7 +14,8 @@ import { outdoorGroupSelectionBounds, rotationDisplayAngle, transformControlMetr
 import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
-import { OutdoorBuildingVisual, OutdoorEmergencyStairVisual, OutdoorEntranceArtwork, OutdoorGroundAreaArtwork, OutdoorMarkerArtwork, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
+import { OutdoorBuildingVisual, OutdoorEmergencyStairVisual, OutdoorEntranceArtwork, OutdoorGroundAreaArtwork, OutdoorMarkerArtwork, StudentSuhayHusayDecorVisual, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
+import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { pathRenderStyle } from "../../lib/outdoorPathVisual";
@@ -948,6 +949,9 @@ function CanvasView({
     return owners;
   }, [pathPointCounts, paths]);
   const decorAssets = renderCampus.decorAssets ?? [];
+  // Keep Admin's landmark identity in sync with Student 2D/3D, including its
+  // legacy single-monument fallback.  The authored asset itself stays intact.
+  const suhayHusayDecorAssetId = useMemo(() => resolveSuhayHusayDecorAssetId(decorAssets), [decorAssets]);
   // Ground/area assets remain in the dedicated background layer (below paths
   // and foreground objects), but they still honour the same optional z-order
   // field as every other outdoor asset.  Previously this list was rendered in
@@ -2498,11 +2502,15 @@ function CanvasView({
                     transform={`rotate(${rot}, ${da.x}, ${da.y})`}
                   />
                 )}
-                <g transform={`translate(${da.x},${da.y}) rotate(${rot}) scale(${s})`}>
-                  <g transform={`translate(-${template.defaultWidth / 2},-${template.defaultHeight / 2})`}>
-                    <DecorAssetArt descriptor={template} />
+                {da.id === suhayHusayDecorAssetId ? (
+                  <StudentSuhayHusayDecorVisual asset={da} descriptor={template} interactive={false} />
+                ) : (
+                  <g transform={`translate(${da.x},${da.y}) rotate(${rot}) scale(${s})`}>
+                    <g transform={`translate(-${template.defaultWidth / 2},-${template.defaultHeight / 2})`}>
+                      <DecorAssetArt descriptor={template} />
+                    </g>
                   </g>
-                </g>
+                )}
 
                 {/* Selection handles — world space, rotation-aware cursors (not scaled with asset).
                     Only shown in select tool so an erase/other tool can click the asset directly. */}

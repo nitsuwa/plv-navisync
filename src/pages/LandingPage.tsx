@@ -451,7 +451,7 @@ function ReportDemo() {
       >
         <Flag className={`h-3.5 w-3.5 ${phase === "idle" ? "text-orange-500" : "text-muted-foreground/60"}`} />
         <span className="text-sm font-bold text-foreground/85">
-          {phase === "idle" && "Pin a broken facility"}
+          {phase === "idle" && "Report a broken facility"}
           {phase === "reporting" && "Submitting report..."}
           {phase === "submitted" && "Report submitted"}
           {phase === "resolved" && "Issue marked as resolved"}
@@ -533,7 +533,7 @@ const SCENARIOS = [
     id: "report",
     icon: Flag,
     title: "Report an Issue",
-    desc: "Pin a broken facility. Submit the report. Admin receives it. Issue gets resolved.",
+    desc: "Report a broken facility, submit the details, and Admin can resolve it.",
     demo: "report",
     color: "from-orange-500/10 to-orange-600/5",
     borderColor: "rgba(249,115,22,0.2)",
@@ -673,7 +673,7 @@ const STEPS = [
   { icon: Bookmark,   title: "Choose Your Spot",     desc: "Pick from suggested results. The building highlights on the campus map." },
   { icon: Route,      title: "Follow Navigation",    desc: "Get turn-by-turn directions with an animated route drawn in real time." },
   { icon: MapPin,     title: "Arrive Successfully",  desc: "Know exactly where you are. The map updates as you move through campus." },
-  { icon: Flag,       title: "Report Issues (Optional)", desc: "Found something broken? Pin it on the map so admin can fix it." },
+  { icon: Flag,       title: "Report Issues (Optional)", desc: "Found something broken? Report it on the map so Admin can fix it." },
 ];
 
 function HowItWorks() {
@@ -762,7 +762,7 @@ const SHOWCASE_ITEMS = [
   },
   {
     title: "Report Issues in Seconds",
-    desc: "Spot a broken facility or hazard? Pin it on the map, submit the report, and admin gets notified instantly. Track resolution progress.",
+    desc: "Spot a broken facility or hazard? Report it on the map, submit the details, and Admin gets notified. Track resolution progress.",
     features: ["One-tap issue reporting from the map", "Photo attachment for visual context", "Real-time status updates on your report"],
     demo: "report" as const,
     color: "#f59e0b",

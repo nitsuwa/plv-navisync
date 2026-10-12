@@ -1,4 +1,4 @@
-import type { PlannedRoute, RouteContextHandoff, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
+import type { PlannedRoute, RouteContextHandoff, RouteContextLeg, RouteIndoorSegment, RouteStep, RouteTransitionDetail } from "./routePlanner";
 import type { FloorPlan, NavigationNode } from "../components/map-builder/types";
 import { pointAlongPolyline } from "./geo";
 
@@ -15,8 +15,13 @@ export function studentRoutePrimaryAction(options: {
   playback: StudentPlaybackState;
   hasAuthoredTransition: boolean;
   isArrival?: boolean;
+  /** A previously authorized same-transition run was paused at a safe floor boundary. */
+  hasAuthorizedVerticalRun?: boolean;
 }): StudentRoutePrimaryAction {
   if (options.phase === "arrived" || options.isArrival) return "done";
+  if (options.phase === "navigating" && options.playback === "paused" && options.hasAuthorizedVerticalRun) {
+    return "resume";
+  }
   if (options.phase === "navigating" && options.playback === "paused" && options.hasAuthoredTransition) {
     return "continue-transition";
   }
@@ -64,7 +69,8 @@ export type StudentRouteUiAction =
   | { type: "OPEN_PLAN" }
   | { type: "FOUND_ROUTE" }
   | { type: "EDIT_ROUTE" }
-  | { type: "START_NAVIGATION" }
+  | { type: "CANCEL_ROUTE_EDIT"; restore: StudentRouteUiState }
+  | { type: "START_NAVIGATION"; waitAtTransition?: boolean }
   | { type: "SEEK_STEP" }
   | { type: "PAUSE" }
   | { type: "RESUME" }
@@ -93,8 +99,17 @@ export function studentRouteUiReducer(state: StudentRouteUiState, action: Studen
       return { ...state, phase: "preview", playback: "paused", resumePlaybackAfterExplore: null, camera: "explore", collapsed: false };
     case "EDIT_ROUTE":
       return { ...state, phase: "planning", playback: "paused", collapsed: false };
+    case "CANCEL_ROUTE_EDIT":
+      return state.phase === "planning" ? action.restore : state;
     case "START_NAVIGATION":
-      return { ...state, phase: "navigating", playback: "playing", resumePlaybackAfterExplore: null, camera: "follow", collapsed: true };
+      return {
+        ...state,
+        phase: "navigating",
+        playback: action.waitAtTransition ? "paused" : "playing",
+        resumePlaybackAfterExplore: null,
+        camera: "follow",
+        collapsed: true,
+      };
     case "SEEK_STEP":
       return state.phase === "navigating" && state.camera === "follow"
         ? { ...state, playback: "paused", resumePlaybackAfterExplore: null }
@@ -126,7 +141,7 @@ export function studentRouteUiReducer(state: StudentRouteUiState, action: Studen
     case "END_NAVIGATION":
       return { ...state, phase: "preview", playback: "paused", resumePlaybackAfterExplore: null, camera: "explore", collapsed: false };
     case "ARRIVE":
-      return state.phase === "navigating" && state.playback === "playing"
+      return state.phase === "navigating"
         ? { ...state, phase: "arrived", playback: "paused", resumePlaybackAfterExplore: null }
         : state;
     case "CLEAR_ROUTE":
@@ -455,6 +470,33 @@ export function routeStepIndexForProgress(steps: RouteStep[], progress: number):
 
 export type StudentRouteTransitionKind = "enter_building" | "exit_building" | "stairs" | "elevator";
 
+function routeContextHandoffForStep(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  stepIndex: number,
+  kind: StudentRouteTransitionKind,
+  nodeId?: string,
+): RouteContextHandoff | undefined {
+  const explicitIndex = steps[stepIndex]?.contextHandoffIndex;
+  if (explicitIndex !== undefined) {
+    const explicit = route.contextHandoffs?.[explicitIndex];
+    if (explicit) return explicit;
+  }
+  const candidates = (route.contextHandoffs ?? []).filter((handoff) => handoff.kind === kind);
+  if (nodeId) {
+    const byNode = candidates.find((handoff) => (handoff.detail?.nodeId ?? handoff.nodeId) === nodeId);
+    if (byNode) return byNode;
+  }
+  const occurrence = steps.slice(0, Math.max(0, stepIndex)).filter((step) => {
+    if (kind === "enter_building" || kind === "exit_building") {
+      if (step.icon !== "enter") return false;
+      return (/^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building") === kind;
+    }
+    return step.icon === kind;
+  }).length;
+  return candidates[occurrence];
+}
+
 /** Resolve the authored transition associated with one human-facing instruction. */
 export function routeTransitionForStep(
   route: PlannedRoute,
@@ -463,12 +505,11 @@ export function routeTransitionForStep(
 ): { kind: StudentRouteTransitionKind; detail?: RouteTransitionDetail; handoff?: RouteContextHandoff } | null {
   const step = steps[stepIndex];
   if (!step) return null;
-  const handoff = step.contextHandoffIndex === undefined
-    ? undefined
-    : route.contextHandoffs?.[step.contextHandoffIndex];
   if (step.icon === "enter") {
+    const kind = /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building";
+    const handoff = routeContextHandoffForStep(route, steps, stepIndex, kind);
     return {
-      kind: /^\s*exit\b/i.test(step.instruction) ? "exit_building" : "enter_building",
+      kind,
       ...(handoff ? { handoff } : {}),
     };
   }
@@ -482,6 +523,9 @@ export function routeTransitionForStep(
     .filter((candidate) => candidate.icon === kind).length;
   const orderedDetails = details.filter((detail) => detail.kind === kind);
   const orderedMatch = orderedDetails[precedingSameKind];
+  const handoff = routeContextHandoffForStep(route, steps, stepIndex, kind, orderedMatch?.nodeId);
+  const detailForStep = originalStepIndex >= 0 ? orderedMatch : handoff?.detail ?? orderedMatch;
+  if (handoff && detailForStep) return { kind, detail: resolveDirectElevatorTarget(route, detailForStep), handoff };
   const namedMatches = orderedDetails.filter((detail) => detail.label.trim().length > 0
     && instruction.includes(detail.label.trim().toLocaleLowerCase()));
   // Authored stair/elevator labels are often repeated (for example, "Left
@@ -498,6 +542,28 @@ export function routeTransitionForStep(
   // Legacy instructions may omit an authored marker label. Preserve route
   // order so repeated stairs/elevators still resolve to their correct shaft.
   return { kind, ...(orderedMatch ? { detail: resolveDirectElevatorTarget(route, orderedMatch) } : {}), ...(handoff ? { handoff } : {}) };
+}
+
+/** Return the first authored Enter step when it is the route's first real
+ * action. A zero-distance doorway instruction is not an outdoor walking leg;
+ * Follow should wait at that physical boundary for Continue. */
+export function studentRouteInitialPhysicalTransitionStepIndex(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+): number | null {
+  const transitionIndex = steps.findIndex((_, index) => routeTransitionForStep(route, steps, index) !== null);
+  if (transitionIndex < 0 || routeTransitionForStep(route, steps, transitionIndex)?.kind !== "enter_building") return null;
+  const precedingWalks = steps.slice(0, transitionIndex).filter((step) => step.icon === "walk");
+  const hasMeaningfulApproach = precedingWalks.some((step) => {
+    const contextDistance = step.contextLegIndex === undefined
+      ? undefined
+      : route.contextLegs?.[step.contextLegIndex]?.distanceM;
+    const distance = step.distanceM ?? contextDistance;
+    // Unknown walking distance must be treated as a real approach. Only an
+    // explicitly zero-length authored segment can be skipped at route start.
+    return distance === undefined || distance > 0.1;
+  });
+  return hasMeaningfulApproach ? null : transitionIndex;
 }
 
 /** Collapse zero-walk intermediate stops when the same authored elevator
@@ -528,7 +594,7 @@ function resolveDirectElevatorTarget(route: PlannedRoute, transition: RouteTrans
   return last === transition ? transition : { ...transition, toFloorId: last.toFloorId };
 }
 
-/** Return the authored shaft identity when the route can continue through the
+/** Return the authored physical-run identity when the route can continue through the
  * next floor without a meaningful walk or a change of vertical connection.
  * Follow uses this to auto-advance only the mechanical middle of a continuous
  * stair/elevator journey; the full human-facing step list remains unchanged. */
@@ -539,8 +605,9 @@ export function studentRouteVerticalTransitionGroupId(
 ): string | null {
   const current = routeTransitionForStep(route, steps, stepIndex);
   const currentDetail = current?.detail;
+  const currentRunId = studentRouteVerticalTransitionRunId(route, steps, stepIndex);
   if ((current?.kind !== "stairs" && current?.kind !== "elevator")
-    || !currentDetail?.transitionSharedId || !currentDetail.toFloorId) return null;
+    || !currentRunId || !currentDetail?.toFloorId) return null;
 
   const nextFloorTarget = studentRouteSeekTarget(route, steps, stepIndex + 1);
   const nextSegment = nextFloorTarget.context === "floor" ? nextFloorTarget.segment : null;
@@ -553,15 +620,53 @@ export function studentRouteVerticalTransitionGroupId(
     if (!next) continue;
     const nextDetail = next.detail;
     if (next.kind !== current.kind || !nextDetail
-      || nextDetail.transitionSharedId !== currentDetail.transitionSharedId
+      || studentRouteVerticalTransitionRunId(route, steps, nextIndex) !== currentRunId
       || nextDetail.buildingId && currentDetail.buildingId && nextDetail.buildingId !== currentDetail.buildingId
       || nextDetail.fromFloorId && nextSegment.floorId && nextDetail.fromFloorId !== nextSegment.floorId) return null;
     const nextSource = studentRouteSeekTarget(route, steps, nextIndex);
     return nextSource.context === "floor" && nextSource.segment === nextSegment
-      ? currentDetail.transitionSharedId
+      ? currentRunId
       : null;
   }
   return null;
+}
+
+/** Return the physical identity used to authorize one uninterrupted vertical
+ * Follow run. Exterior Emergency Stairs use their owner ID because per-Floor
+ * shared IDs and display labels are not sufficient to prove the same assembly.
+ * Route mode affects path selection, not whether the same authored shaft can
+ * be traversed as one continuous Follow action. */
+export function studentRouteVerticalTransitionRunId(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  stepIndex: number,
+): string | null {
+  const transition = routeTransitionForStep(route, steps, stepIndex);
+  const detail = transition?.detail;
+  if (!transition || !detail) return null;
+  if (transition.kind === "stairs" && detail.exteriorEmergencyStairId) {
+    const source = studentRouteSeekTarget(route, steps, stepIndex);
+    const buildingId = detail.buildingId ?? source.segment?.buildingId ?? "";
+    return `exterior-emergency-stair:${buildingId}:${detail.exteriorEmergencyStairId}`;
+  }
+  return (transition.kind === "stairs" || transition.kind === "elevator")
+    && detail.transitionSharedId
+    ? detail.transitionSharedId
+    : null;
+}
+
+/** True when an already-confirmed same-assembly run may activate this exact
+ * authored transition, including the final transition in that run. The group
+ * id is established by the preceding transition; checking the current step's
+ * authored id lets the run finish without asking for one more Continue. */
+export function studentRouteVerticalTransitionContinuesRun(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  stepIndex: number,
+  continuingRunId?: string | null,
+): boolean {
+  if (!continuingRunId) return false;
+  return studentRouteVerticalTransitionRunId(route, steps, stepIndex) === continuingRunId;
 }
 
 /** Keep a zero-distance approach instruction visible when it leads to a new
@@ -571,7 +676,7 @@ export function studentRouteShouldPauseAtZeroWalkVerticalAccess(
   route: PlannedRoute,
   steps: readonly RouteStep[],
   stepIndex: number,
-  continuingSharedId?: string | null,
+  continuingRunId?: string | null,
 ): boolean {
   const step = steps[stepIndex];
   if (step?.icon !== "walk") return false;
@@ -580,8 +685,12 @@ export function studentRouteShouldPauseAtZeroWalkVerticalAccess(
     || !Number.isFinite(target.segment.distanceM) || (target.segment.distanceM ?? 0) > 0.1) return false;
   const nextTransition = routeTransitionForStep(route, steps, stepIndex + 1);
   if (nextTransition?.kind !== "stairs" && nextTransition?.kind !== "elevator") return false;
-  const nextGroup = studentRouteVerticalTransitionGroupId(route, steps, stepIndex + 1);
-  return !continuingSharedId || nextGroup !== continuingSharedId;
+  // Keep the final same-shaft handoff inside an already-confirmed run too.
+  // It has no following transition of its own, so asking whether it starts a
+  // new group incorrectly pauses at the zero-distance approach and shows a
+  // dead Resume action before the final floor change.
+  return !continuingRunId
+    || !studentRouteVerticalTransitionContinuesRun(route, steps, stepIndex + 1, continuingRunId);
 }
 
 export function routeStepIndexForAuthoredTransition(
@@ -778,6 +887,46 @@ export function studentRouteTransitionCues(
   return cues;
 }
 
+/** Pick the next authored transition cue on the context being inspected.
+ * Explore uses this view-only cue to move between route legs; it never seeks
+ * Follow playback or authorizes a physical transition. */
+export function studentRouteExploreTransitionCue(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  cues: readonly StudentRouteTransitionCue[],
+  inspectedStepIndex: number,
+): { cue: StudentRouteTransitionCue; transitionStepIndex: number } | null {
+  return studentRouteExploreTransitionCues(route, steps, cues, inspectedStepIndex)[0] ?? null;
+}
+
+/** Return every upcoming route-authored transition on the inspected leg. */
+export function studentRouteExploreTransitionCues(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  cues: readonly StudentRouteTransitionCue[],
+  inspectedStepIndex: number,
+): Array<{ cue: StudentRouteTransitionCue; transitionStepIndex: number }> {
+  if (steps.length === 0 || inspectedStepIndex < 0 || inspectedStepIndex >= steps.length) return [];
+  const inspected = studentRouteExploreInspectionTarget(route, steps, inspectedStepIndex);
+  const candidates = cues.flatMap((cue) => {
+    const transitionStepIndex = studentRouteTransitionCueStepIndex(route, steps, cue.id);
+    if (transitionStepIndex < inspectedStepIndex) return [];
+    const source = studentRouteSeekTarget(route, steps, transitionStepIndex);
+    if (source.context !== inspected.context) return [];
+    if (source.contextLegIndex !== undefined && inspected.contextLegIndex !== undefined
+      && source.contextLegIndex !== inspected.contextLegIndex) return [];
+    if (source.context === "floor" && inspected.context === "floor") {
+      if (source.segment?.buildingId !== inspected.segment?.buildingId) return [];
+      const sameFloor = source.segment?.floorId && inspected.segment?.floorId
+        ? source.segment.floorId === inspected.segment.floorId
+        : source.segment?.floorNumber === inspected.segment?.floorNumber;
+      if (!sameFloor) return [];
+    }
+    return [{ cue, transitionStepIndex }];
+  });
+  return candidates.sort((left, right) => left.transitionStepIndex - right.transitionStepIndex);
+}
+
 /** Position the route preview at the middle of a meaningful instruction. */
 export function routeProgressForStepIndex(steps: RouteStep[], index: number): number {
   if (steps.length < 2 || index <= 0) return 0;
@@ -807,6 +956,28 @@ export interface StudentRoutePlaybackTarget extends StudentRouteSeekTarget {
   position: number;
 }
 
+function studentRouteTargetForContextLeg(
+  route: PlannedRoute,
+  contextLegIndex: number,
+  atEnd: boolean,
+): StudentRouteSeekTarget | null {
+  const leg = route.contextLegs?.[contextLegIndex];
+  if (!leg) return null;
+  const segment = leg.kind === "floor" && leg.segmentIndex !== undefined
+    ? (route.indoorSegments ?? [])[leg.segmentIndex] ?? null
+    : null;
+  const progress = atEnd ? 1 : 0;
+  return {
+    context: leg.kind,
+    phase: leg.kind === "campus" ? "outdoor" : segment?.afterOutdoor ? "destination-indoor" : "origin-indoor",
+    segment,
+    segmentIndex: leg.kind === "floor" ? leg.segmentIndex ?? -1 : -1,
+    contextLegIndex,
+    segmentProgress: progress,
+    routeProgress: progress,
+  };
+}
+
 /** Clamp explicit Previous/Next requests against the full planned sequence. */
 export function studentRouteStepSeekIndex(currentIndex: number, delta: -1 | 1, totalSteps: number): number {
   return Math.max(0, Math.min(Math.max(0, totalSteps - 1), Math.trunc(currentIndex) + delta));
@@ -825,25 +996,36 @@ export function studentRouteSeekTarget(
   const safeIndex = Math.max(0, Math.min(steps.length - 1, stepIndex));
   const indoorSegments = route.indoorSegments ?? [];
   const authoredLegs = route.contextLegs;
+  const activeTransition = routeTransitionForStep(route, steps, safeIndex);
+  if (activeTransition?.kind === "enter_building" && activeTransition.handoff) {
+    const source = studentRouteTargetForContextLeg(route, activeTransition.handoff.fromContextLegIndex, true);
+    if (source?.context === "campus") return source;
+  }
   const authoredLegIndex = steps[safeIndex]?.contextLegIndex;
   if (authoredLegs && authoredLegIndex !== undefined) {
-    const leg = authoredLegs[authoredLegIndex];
-    if (leg) {
-      const segment = leg.kind === "floor" && leg.segmentIndex !== undefined
-        ? indoorSegments[leg.segmentIndex] ?? null
-        : null;
-      const step = steps[safeIndex];
-      const atEnd = step.icon !== "walk" && step.icon !== "start";
-      return {
-        context: leg.kind,
-        phase: leg.kind === "campus" ? "outdoor" : segment?.afterOutdoor ? "destination-indoor" : "origin-indoor",
-        segment,
-        segmentIndex: segment ? leg.segmentIndex! : -1,
-        contextLegIndex: authoredLegIndex,
-        segmentProgress: atEnd ? 1 : 0,
-        routeProgress: atEnd ? 1 : 0,
-      };
-    }
+    const step = steps[safeIndex];
+    const target = studentRouteTargetForContextLeg(
+      route,
+      authoredLegIndex,
+      step.icon !== "walk" && step.icon !== "start",
+    );
+    if (target) return target;
+  }
+  // When a cue click lands on the first row after a handoff, trust the
+  // authored destination leg even for legacy guidance rows without an
+  // explicit contextLegIndex. This keeps building entry on its entry floor
+  // and building exit on that building's outgoing Campus leg.
+  for (let previousIndex = safeIndex - 1; previousIndex >= 0; previousIndex -= 1) {
+    if (steps[previousIndex]?.icon === "walk") break;
+    const previousTransition = routeTransitionForStep(route, steps, previousIndex);
+    if (!previousTransition) continue;
+    const step = steps[safeIndex];
+    const destination = previousTransition.handoff
+      ? studentRouteTargetForContextLeg(route, previousTransition.handoff.toContextLegIndex,
+          safeIndex >= steps.length - 1 || step?.icon === "arrive")
+      : null;
+    if (destination) return destination;
+    break;
   }
   const walkStepIndexes = steps.flatMap((step, index) => step.icon === "walk" ? [index] : []);
   const explicitCampusWalkOrdinal = walkStepIndexes.findIndex((index) => /\bcampus path\b/i.test(steps[index]?.instruction ?? ""));
@@ -909,6 +1091,58 @@ export function studentRouteSeekTarget(
   if (matchingWalk) {
     return { ...matchingWalk, segmentProgress: 0, routeProgress: matchingWalk.context === "campus" ? 0 : progressAtStepStart };
   }
+
+  // Some short room-to-building routes finish immediately after the physical
+  // exit instruction. They have an authored Floor → Campus handoff but no
+  // separate Campus walk instruction, so the generic "nearest walk" fallback
+  // would incorrectly keep the arrival step on the source Floor. Resolve that
+  // boundary from the authored handoff instead of inferring context from the
+  // previous visible walking step.
+  let immediatelyPreviousExitIndex = -1;
+  for (let candidate = safeIndex - 1; candidate >= 0; candidate -= 1) {
+    if (steps[candidate]?.icon === "walk") break;
+    if (routeTransitionForStep(route, steps, candidate)?.kind === "exit_building") {
+      immediatelyPreviousExitIndex = candidate;
+      break;
+    }
+  }
+  if (immediatelyPreviousExitIndex >= 0) {
+    const sourceWalk = [...mapped].reverse().find((target) => target.stepIndex < immediatelyPreviousExitIndex);
+    const sourceLegIndex = sourceWalk
+      ? authoredLegs?.findIndex((leg) => leg.kind === "floor" && leg.segmentIndex === sourceWalk.segmentIndex) ?? -1
+      : -1;
+    const transition = routeTransitionForStep(route, steps, immediatelyPreviousExitIndex);
+    const handoff = transition?.handoff ?? route.contextHandoffs?.find((candidate) =>
+      candidate.kind === "exit_building"
+      && (sourceLegIndex >= 0
+        ? candidate.fromContextLegIndex === sourceLegIndex
+        : candidate.buildingId === sourceWalk?.segment?.buildingId),
+    );
+    const campusLegIndex = handoff?.toContextLegIndex
+      ?? authoredLegs?.findIndex((leg, index) => leg.kind === "campus" && (sourceLegIndex < 0 || index > sourceLegIndex))
+      ?? -1;
+    const atEnd = safeIndex >= steps.length - 1 || steps[safeIndex]?.icon === "arrive";
+    const handoffTarget = campusLegIndex >= 0
+      ? studentRouteTargetForContextLeg(route, campusLegIndex, atEnd)
+      : null;
+    if (handoffTarget?.context === "campus") return handoffTarget;
+
+    // The transition itself declares that the next context is Campus even for
+    // a legacy route that has no explicit context-leg record.
+    if (transition?.kind === "exit_building") {
+      const progress = atEnd ? 1 : 0;
+      return {
+        context: "campus",
+        phase: "outdoor",
+        segment: null,
+        segmentIndex: -1,
+        ...(handoff ? { contextLegIndex: handoff.toContextLegIndex } : {}),
+        segmentProgress: progress,
+        routeProgress: progress,
+      };
+    }
+  }
+
   const previous = [...mapped].reverse().find((target) => target.stepIndex < safeIndex);
   const next = mapped.find((target) => target.stepIndex > safeIndex);
   const selected = safeIndex === 0 && next ? next : previous ?? next ?? mapped.at(-1)!;
@@ -918,6 +1152,60 @@ export function studentRouteSeekTarget(
     segmentProgress: atSegmentEnd ? 1 : 0,
     routeProgress: selected.context === "campus" ? (atSegmentEnd ? 1 : 0) : 0,
   };
+}
+
+/** Resolve the one canonical endpoint target used by every Arrived presentation. */
+export function studentRouteArrivalTarget(
+  route: PlannedRoute | null | undefined,
+  steps: readonly RouteStep[],
+): StudentRouteSeekTarget | null {
+  if (!route || steps.length === 0 || steps.at(-1)?.icon !== "arrive") return null;
+  return studentRouteSeekTarget(route, steps, steps.length - 1);
+}
+
+/** Canonical arrival gate shared by playback completion and manual seeking.
+ * Animation callbacks do not own arrival: the route cursor, destination
+ * context and endpoint progress must all agree, with no physical handoff in
+ * flight. */
+export function studentRouteReachedFinalEndpoint(options: {
+  route: PlannedRoute | null | undefined;
+  steps: readonly RouteStep[];
+  cursor: number;
+  context: "campus" | "floor";
+  phase: string;
+  segment?: RouteIndoorSegment | null;
+  progress: number;
+  pendingTransition?: boolean;
+}): boolean {
+  const { route, steps } = options;
+  if (!route || steps.length === 0 || options.pendingTransition) return false;
+  const finalIndex = steps.length - 1;
+  const endpoint = studentRouteArrivalTarget(route, steps);
+  if (!endpoint || options.cursor < finalIndex - 0.000001
+    || routeTransitionForStep(route, steps, finalIndex)
+    || options.progress < 1 - 0.000001) return false;
+  if (endpoint.context !== options.context || endpoint.phase !== options.phase) return false;
+  if (endpoint.context === "campus") return options.phase === "outdoor";
+  if (!endpoint.segment || !options.segment) return false;
+  return endpoint.segment.buildingId === options.segment.buildingId
+    && (endpoint.segment.floorId && options.segment.floorId
+      ? endpoint.segment.floorId === options.segment.floorId
+      : endpoint.segment.floorNumber === options.segment.floorNumber);
+}
+
+/** Resolve the Campus polyline owned by the currently inspected canonical
+ * step. A building entry remains on its source-side Campus leg until Continue;
+ * after a building exit, the next Campus walk resolves to that building's own
+ * outgoing leg instead of reusing route-wide progress from an earlier leg. */
+export function studentRouteCampusMarkerTarget(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  stepIndex: number,
+): { contextLegIndex: number; leg: RouteContextLeg } | null {
+  const target = studentRouteSeekTarget(route, steps, stepIndex);
+  if (target.context !== "campus" || target.contextLegIndex === undefined) return null;
+  const leg = route.contextLegs?.[target.contextLegIndex];
+  return leg?.kind === "campus" ? { contextLegIndex: target.contextLegIndex, leg } : null;
 }
 
 /**
@@ -932,12 +1220,38 @@ export function studentRouteExploreTransitionTarget(
 ): { transition: NonNullable<ReturnType<typeof routeTransitionForStep>>; targetStepIndex: number; target: StudentRouteSeekTarget } | null {
   const transition = routeTransitionForStep(route, steps, transitionStepIndex);
   if (!transition || steps.length === 0) return null;
-  const targetStepIndex = Math.min(steps.length - 1, Math.max(0, transitionStepIndex) + 1);
+  const nextIndex = Math.min(steps.length - 1, Math.max(0, transitionStepIndex) + 1);
+  let targetStepIndex = nextIndex;
+  if (transition.handoff) {
+    for (let candidate = nextIndex; candidate < steps.length; candidate += 1) {
+      const candidateTarget = studentRouteSeekTarget(route, steps, candidate);
+      if (candidateTarget.contextLegIndex === transition.handoff.toContextLegIndex) {
+        targetStepIndex = candidate;
+        break;
+      }
+      // The first row after a physical handoff is its authored destination
+      // boundary; do not scan across a later route transition looking for a
+      // coincidentally matching Floor.
+      if (candidate > nextIndex && routeTransitionForStep(route, steps, candidate)) break;
+    }
+  }
   return {
     transition,
     targetStepIndex,
     target: studentRouteSeekTarget(route, steps, targetStepIndex),
   };
+}
+
+/** Resolve an Explore instruction selection to the context it describes.
+ * Selecting a physical transition row inspects its authored destination side;
+ * ordinary walk rows inspect their own route leg. */
+export function studentRouteExploreInspectionTarget(
+  route: PlannedRoute,
+  steps: readonly RouteStep[],
+  inspectedStepIndex: number,
+): StudentRouteSeekTarget {
+  const transition = studentRouteExploreTransitionTarget(route, steps, inspectedStepIndex);
+  return transition?.target ?? studentRouteSeekTarget(route, steps, inspectedStepIndex);
 }
 
 /**

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
 import type { Campus, FloorRoom } from "../types";
+import { ROOM_DOOR_EDGE_TYPE } from "../../../lib/indoorNavigationGraph";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -175,6 +176,180 @@ describe("B5 Phase 2 — Floor Editor indoor Navigation mode", () => {
     expect(screen.queryByRole("button", { name: /Add Waypoint/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Connect/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Remove/ })).toBeTruthy();
+  });
+
+  it("hides Room access spokes in both graph renderers while retaining multi-door routing edges", () => {
+    const linked = makeBaseCampus();
+    linked.buildings[0].floors[0].rooms = [{
+      id: "linked-room", name: "LIBRARY", type: "library", x: 20, y: 20, w: 90, h: 60,
+      floorId: "f1", buildingId: "b1", accessDoorId: "linked-door-a", accessDoorIds: ["linked-door-a", "linked-door-b"],
+    }];
+    linked.buildings[0].floors[0].doors = [{
+      id: "linked-door-a", x: 55, y: 80, width: 18, direction: "left", color: "#b45309", wallId: "room-wall", offset: 0.4,
+    }, {
+      id: "linked-door-b", x: 95, y: 80, width: 18, direction: "left", color: "#b45309", wallId: "room-wall", offset: 0.8,
+    }];
+    linked.navNodes = [
+      // Legacy anchor has no roomId/accessNodeId; its canonical room cue point
+      // is still enough to hide the relationship spokes from presentation.
+      { id: "linked-room-node", name: "LIBRARY", type: "room_access", x: 65, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "linked-door-node-a", name: "Library Door A", type: "hallway", x: 55, y: 80, buildingId: "b1", floorId: "f1", doorId: "linked-door-a", accessible: true, color: "#16a34a" },
+      { id: "linked-door-node-b", name: "Library Door B", type: "hallway", x: 95, y: 80, buildingId: "b1", floorId: "f1", doorId: "linked-door-b", accessible: true, color: "#16a34a" },
+      { id: "hall-node-a", name: "Hall A", type: "hallway", x: 55, y: 115, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "hall-node-b", name: "Hall B", type: "hallway", x: 95, y: 115, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    linked.navEdges = [
+      { id: "legacy-room-door-line-a", startNodeId: "linked-room-node", endNodeId: "linked-door-node-a", distance: 45, bidirectional: true, accessible: true },
+      { id: "typed-room-door-line-b", startNodeId: "linked-room-node", endNodeId: "linked-door-node-b", distance: 45, bidirectional: true, accessible: true, type: ROOM_DOOR_EDGE_TYPE },
+      { id: "hallway-edge-a", startNodeId: "linked-door-node-a", endNodeId: "hall-node-a", distance: 35, bidirectional: true, accessible: true, type: "hallway" },
+      { id: "hallway-edge-b", startNodeId: "linked-door-node-b", endNodeId: "hall-node-b", distance: 35, bidirectional: true, accessible: true, type: "hallway" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={linked} />);
+    container = rendered.container;
+    const changesBeforeViewOnlyToggles = onCampusChange.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    expect(container.querySelector('[data-nav-edge-id="legacy-room-door-line-a"]')).toBeNull();
+    expect(container.querySelector('[data-nav-edge-id="typed-room-door-line-b"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="nav-edge-hit"]')).toHaveLength(2);
+    expect(container.querySelector('[data-nav-edge-id="hallway-edge-a"]')).toBeTruthy();
+    expect(container.querySelector('[data-nav-edge-id="hallway-edge-b"]')).toBeTruthy();
+
+    // Switching to a Design tool leaves the authored navigation overlay
+    // visible in its read-only renderer.
+    fireEvent.click(screen.getByRole("button", { name: /^WallCreate room\/floor boundaries$/ }));
+    expect(screen.getByTestId("floor-nav-overlay").querySelector('[data-nav-edge-id="legacy-room-door-line-a"]')).toBeNull();
+    expect(screen.getByTestId("floor-nav-overlay").querySelector('[data-nav-edge-id="typed-room-door-line-b"]')).toBeNull();
+    expect(screen.getByTestId("floor-nav-overlay").querySelector('[data-nav-edge-id="hallway-edge-a"]')).toBeTruthy();
+    expect(onCampusChange.mock.calls.length).toBe(changesBeforeViewOnlyToggles);
+    expect(linked.buildings[0].floors[0].rooms[0].accessDoorIds).toEqual(["linked-door-a", "linked-door-b"]);
+    expect(linked.navEdges.map((edge) => edge.id)).toContain("legacy-room-door-line-a");
+    expect(linked.navEdges.map((edge) => edge.id)).toContain("typed-room-door-line-b");
+  });
+
+  it("suspends Connect preview during camera pan and resumes from fresh world coordinates", async () => {
+    const withNodes = makeBaseCampus();
+    withNodes.navNodes = [
+      { id: "pan-source", name: "A", type: "hallway", x: 40, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "pan-target", name: "B", type: "hallway", x: 120, y: 100, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withNodes} />);
+    container = rendered.container;
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+
+    const source = navNodes(container).find((node) => node.getAttribute("data-nav-node-id") === "pan-source")!;
+    const target = () => navNodes(container).find((node) => node.getAttribute("data-nav-node-id") === "pan-target")!;
+    fireEvent.mouseDown(source, { clientX: 40, clientY: 40, button: 0, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 40, clientY: 40, bubbles: true });
+    expect(container.querySelector('[data-testid="nav-connect-start"]')).toBeTruthy();
+
+    fireEvent.mouseMove(svg, { clientX: 120, clientY: 100, bubbles: true });
+    const firstPreview = await screen.findByTestId("floor-nav-connect-live-preview");
+    expect(firstPreview).toBeTruthy();
+    const changesBeforePan = onCampusChange.mock.calls.length;
+    const graphBeforePan = JSON.stringify({ nodes: withNodes.navNodes, edges: withNodes.navEdges });
+
+    // Middle-button camera pan owns this whole pointer stream. The armed
+    // source survives, while both the React and imperative previews are gone.
+    fireEvent.mouseDown(svg, { clientX: 150, clientY: 120, button: 1, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 190, clientY: 140, button: 1, bubbles: true });
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+    expect(container.querySelector('[data-testid="floor-nav-connect-preview"]')).toBeNull();
+    fireEvent.mouseUp(svg, { clientX: 190, clientY: 140, button: 1, bubbles: true });
+    expect(container.querySelector('[data-testid="nav-connect-start"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+    expect(onCampusChange.mock.calls.length).toBe(changesBeforePan);
+    expect(JSON.stringify({ nodes: withNodes.navNodes, edges: withNodes.navEdges })).toBe(graphBeforePan);
+
+    // After a fresh move, screen position (160,120) maps through the new
+    // +40,+20 camera pan to the original target world point (120,100).
+    fireEvent.mouseMove(svg, { clientX: 160, clientY: 120, bubbles: true });
+    const resumedPreview = await screen.findByTestId("floor-nav-connect-live-preview");
+    const previewLine = resumedPreview.querySelector("[data-connect-line]")!;
+    expect(previewLine.getAttribute("points")?.trim().split(/\s+/).at(-1)).toBe("120,100");
+
+    fireEvent.mouseDown(target(), { clientX: 160, clientY: 120, button: 0, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 160, clientY: 120, bubbles: true });
+    const latest = onCampusChange.mock.calls.at(-1)?.[0] as Campus;
+    expect(latest.navNodes).toHaveLength(2);
+    expect(latest.navNodes?.find((node) => node.id === "pan-source")).toMatchObject({ x: 40, y: 40 });
+    expect(latest.navNodes?.find((node) => node.id === "pan-target")).toMatchObject({ x: 120, y: 100 });
+    expect(latest.navEdges).toHaveLength(1);
+    expect(new Set([latest.navEdges?.[0].startNodeId, latest.navEdges?.[0].endNodeId])).toEqual(new Set(["pan-source", "pan-target"]));
+  });
+
+  it("keeps Connect preview suspended after Space-pan until the next pointer move", async () => {
+    const withNodes = makeBaseCampus();
+    withNodes.navNodes = [
+      { id: "space-source", name: "A", type: "hallway", x: 45, y: 45, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "space-target", name: "B", type: "hallway", x: 140, y: 90, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withNodes} />);
+    container = rendered.container;
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container).find((node) => node.getAttribute("data-nav-node-id") === "space-source")!;
+    fireEvent.mouseDown(source, { clientX: 45, clientY: 45, button: 0, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 45, clientY: 45, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 80, clientY: 80, bubbles: true });
+    await screen.findByTestId("floor-nav-connect-live-preview");
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.mouseDown(svg, { clientX: 100, clientY: 110, button: 0, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 130, clientY: 130, button: 0, bubbles: true });
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+    fireEvent.mouseUp(svg, { clientX: 130, clientY: 130, bubbles: true });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+    expect(container.querySelector('[data-testid="nav-connect-start"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+
+    fireEvent.mouseMove(svg, { clientX: 125, clientY: 115, bubbles: true });
+    const preview = await screen.findByTestId("floor-nav-connect-live-preview");
+    expect(preview.querySelector("[data-connect-line]")?.getAttribute("points")).toMatch(/45,45/);
+    expect(container.querySelectorAll('[data-testid="nav-edge"]')).toHaveLength(0);
+    expect(onCampusChange).not.toHaveBeenCalled();
+  });
+
+  it("temporarily returns from the Pan tool to the armed Connect source", async () => {
+    const withNodes = makeBaseCampus();
+    withNodes.navNodes = [
+      { id: "tool-pan-source", name: "A", type: "hallway", x: 40, y: 40, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "tool-pan-target", name: "B", type: "hallway", x: 120, y: 100, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    cleanup();
+    const rendered = render(<Harness onCampusChange={onCampusChange} initialCampus={withNodes} />);
+    container = rendered.container;
+    const svg = stubSvgRect(container);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    fireEvent.click(within(screen.getByTestId("floor-nav-toolbar")).getByRole("button", { name: "Connect" }));
+    const source = navNodes(container).find((node) => node.getAttribute("data-nav-node-id") === "tool-pan-source")!;
+    fireEvent.mouseDown(source, { clientX: 40, clientY: 40, button: 0, bubbles: true });
+    fireEvent.mouseUp(svg, { clientX: 40, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 100, clientY: 80, bubbles: true });
+    await screen.findByTestId("floor-nav-connect-live-preview");
+
+    fireEvent.click(container.querySelector('[data-tutorial="floor-pan-tool"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="nav-connect-start"]')).toBeTruthy();
+    fireEvent.mouseDown(svg, { clientX: 150, clientY: 120, button: 0, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 180, clientY: 140, button: 0, bubbles: true });
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+    fireEvent.mouseUp(svg, { clientX: 180, clientY: 140, button: 0, bubbles: true });
+
+    expect(container.querySelector('[data-testid="nav-connect-start"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="floor-nav-connect-live-preview"]')).toBeNull();
+    expect(container.querySelector('[data-tutorial="floor-select-tool"]')).toHaveAttribute("aria-pressed", "true");
+    expect(onCampusChange).not.toHaveBeenCalled();
+    fireEvent.mouseMove(svg, { clientX: 90, clientY: 80, bubbles: true });
+    const preview = await screen.findByTestId("floor-nav-connect-live-preview");
+    // The camera moved by (+30,+20) viewBox units, so the fresh pointer at
+    // (90,80) now resolves to world-space (60,60), not the old pre-pan point.
+    expect(preview.querySelector("[data-connect-line]")?.getAttribute("points")).toMatch(/60,60/);
   });
 
   it("shows a restrained canvas empty state and does NOT auto-open the Properties sidebar", () => {

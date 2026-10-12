@@ -1193,7 +1193,22 @@
   .map-layer-modal { z-index: var(--map-layer-modal); }
 
   .student-map-utility-stack {
-    transition: opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+    --student-map-utility-anchor-right: calc(0.75rem + env(safe-area-inset-right, 0px));
+    translate:
+      calc(var(--student-map-utility-anchor-right) - var(--student-map-utility-right-inset, var(--student-map-utility-anchor-right)))
+      calc(var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px))) - var(--student-map-utility-bottom-inset, var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px)))));
+    transition: translate 180ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+  }
+  .student-map-surface[data-utility-compact="true"] .student-map-utility-stack,
+  .student-map-surface[data-utility-compact="true"] [data-testid="student-map-utility-actions"] {
+    flex-direction: row;
+  }
+  /* Event Map anchors the utility stack from the top on narrow screens; its
+     vertical position is owned by that top offset, not the bottom-sheet inset. */
+  .student-map-utility-stack[data-event-mode="true"] {
+    translate:
+      calc(var(--student-map-utility-anchor-right) - var(--student-map-utility-right-inset, var(--student-map-utility-anchor-right)))
+      0px;
   }
   .student-map-utility-stack[data-profile-open="true"] {
     opacity: 0;

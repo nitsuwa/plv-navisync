@@ -183,8 +183,8 @@ export function StudentMapControls({
             utilityPositionClass,
           )}
           style={{
-            right: "var(--student-map-utility-right-inset, calc(0.75rem + env(safe-area-inset-right, 0px)))",
-            bottom: "var(--student-map-utility-bottom-inset, calc(0.75rem + env(safe-area-inset-bottom, 0px)))",
+            right: "var(--student-map-utility-anchor-right, calc(0.75rem + env(safe-area-inset-right, 0px)))",
+            bottom: "var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px)))",
           }}
         >
           {mapModeToggleVisible && campusViewMode && onToggleCampusViewMode && <StudentMapModeToggle mode={campusViewMode} onToggle={onToggleCampusViewMode} />}

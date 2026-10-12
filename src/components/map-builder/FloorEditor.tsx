@@ -3486,6 +3486,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const [navMultiSelected, setNavMultiSelected] = useState<string[]>([]);
   const [navDuplicateNodeId, setNavDuplicateNodeId] = useState<string | null>(null);
   const [navConnectStart, setNavConnectStart] = useState<string | null>(null);
+  // A selected Connect source can survive one explicit Pan-tool gesture. The
+  // pan owns the gesture; the source is restored to Connect when it ends.
+  const restoreConnectAfterPanRef = useRef(false);
   const [navPreview, setNavPreview] = useState<{ x: number; y: number } | null>(null);
   const [navTargetHover, setNavTargetHover] = useState<{
     kind: "room" | "door" | "stairs" | "elevator" | "ramp";
@@ -4548,7 +4551,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (element && element.textContent !== label) element.textContent = label;
     }
   }, []);
-  const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, getWorldUnitsForScreenPixels, startPan, movePan, endPan, zoomIn, zoomOut, zoomToFit, handleWheel } =
+  const { zoom, pan, panning, svgRef, containerRef, cameraTransformRef, getPoint, getWorldUnitsForScreenPixels, startPan: startCanvasPan, movePan, endPan, zoomIn, zoomOut, zoomToFit, handleWheel } =
     useCanvasControls(FP_W, FP_H, {
       insets: floorViewportInsets,
       worldBounds: renderFloorShapeBounds,
@@ -5050,9 +5053,45 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     () => indoorEdges.filter((edge) => edge.type !== ROOM_DOOR_EDGE_TYPE),
     [indoorEdges]
   );
+  // Room access nodes are destination anchors, not visible walking junctions.
+  // Some older floors persisted the Room's node through accessNodeId without
+  // carrying roomId on the node, so include both canonical references when
+  // suppressing their presentation-only spokes.
+  const roomAccessNodeIds = useMemo(() => new Set([
+    ...indoorNodes.filter((node) => node.roomId).map((node) => node.id),
+    ...rooms.map((room) => room.accessNodeId).filter((id): id is string => Boolean(id)),
+  ]), [indoorNodes, rooms]);
+  const roomAccessNodePositions = useMemo(() => new Set(
+    rooms.map((room) => {
+      const point = roomLinkedCuePosition(room);
+      return `${point.x},${point.y}`;
+    }),
+  ), [rooms]);
+  // Older authored graphs can contain an untyped Room-anchor connector. Treat
+  // any edge incident to a Room access anchor as presentation-only: authored
+  // routes keep the edge in the canonical graph, while the visible network
+  // starts at a Door/corridor node instead of crossing the Room interior.
+  const roomDoorRelationshipEdgeIds = useMemo(() => {
+    return new Set(indoorEdges.filter((edge) => {
+      if (edge.type === ROOM_DOOR_EDGE_TYPE) return true;
+      const start = indoorNodeById.get(edge.startNodeId);
+      const end = indoorNodeById.get(edge.endNodeId);
+      return Boolean(
+        start?.roomId || end?.roomId
+        || roomAccessNodeIds.has(edge.startNodeId) || roomAccessNodeIds.has(edge.endNodeId)
+        || (start && roomAccessNodePositions.has(`${start.x},${start.y}`))
+        || (end && roomAccessNodePositions.has(`${end.x},${end.y}`))
+        || start?.derivedOwnerType === "room" || end?.derivedOwnerType === "room",
+      );
+    }).map((edge) => edge.id));
+  }, [indoorEdges, indoorNodeById, roomAccessNodeIds, roomAccessNodePositions]);
+  const visibleIndoorEdges = useMemo(
+    () => walkableIndoorEdges.filter((edge) => !roomDoorRelationshipEdgeIds.has(edge.id)),
+    [roomDoorRelationshipEdgeIds, walkableIndoorEdges],
+  );
   const marqueeIndoorEdges = useMemo(
-    () => walkableIndoorEdges.filter((edge) => edge.type !== CROSS_FLOOR_EDGE_TYPE && !(edge.generatedFromPathIds?.length)),
-    [walkableIndoorEdges]
+    () => visibleIndoorEdges.filter((edge) => edge.type !== CROSS_FLOOR_EDGE_TYPE && !(edge.generatedFromPathIds?.length)),
+    [visibleIndoorEdges]
   );
   // Only ordinary, hand-authored indoor paths may be split by the Walking
   // Point tool.  Semantic Room↔Door links, floor transitions, and generated
@@ -5062,8 +5101,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     [marqueeIndoorEdges]
   );
   const waypointHitIndex = useMemo(
-    () => createNavigationHitTestIndex(freeIndoorNodes, walkableIndoorEdges, indoorNodePointMap),
-    [freeIndoorNodes, indoorNodePointMap, walkableIndoorEdges],
+    () => createNavigationHitTestIndex(freeIndoorNodes, visibleIndoorEdges, indoorNodePointMap),
+    [freeIndoorNodes, indoorNodePointMap, visibleIndoorEdges],
   );
   const editableWaypointHitIndex = useMemo(
     () => createNavigationHitTestIndex(freeIndoorNodes, editableIndoorEdges, indoorNodePointMap),
@@ -8909,6 +8948,8 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       toast.info("Calibrate floor scale first", "Measure uses the calibrated floor scale and will not fake meters.");
       return;
     }
+    const preserveConnectForPan = next === "pan" && showNavOverlay && navTool === "connect" && Boolean(navConnectStart);
+    restoreConnectAfterPanRef.current = preserveConnectForPan;
     restoreFloorGestureDomRef.current();
     dragging.current = null;
     openingDrag.current = null;
@@ -8939,11 +8980,13 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     setTestRouteMapPick(null);
     // Selecting a physical floor tool gives pointer ownership back to the
     // floor canvas while the navigation overlay remains visible.
-    setNavTool("select");
-    setNavConnectStart(null);
-    setNavPreview(null);
-    setNavConnectBends([]);
-    navConnectBendGroupsRef.current = [];
+    if (!preserveConnectForPan) {
+      setNavTool("select");
+      setNavConnectStart(null);
+      setNavPreview(null);
+      setNavConnectBends([]);
+      navConnectBendGroupsRef.current = [];
+    }
     setWallStart(null);
     setWallPreview(null);
     setWallSnapIndicator(null);
@@ -8956,7 +8999,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     setFurniturePlacementPreview(null);
     if (next !== "measure") setMeasureDraft({});
     setShowMoreTools(false);
-  }, [calibratedMetersPerUnit, clearExteriorPlacementPreviews, clearRoomDoorLinkState, toast]);
+  }, [calibratedMetersPerUnit, clearExteriorPlacementPreviews, clearRoomDoorLinkState, navConnectStart, navTool, showNavOverlay, toast]);
 
   const selectionsFromIds = useCallback((ids: string[]) =>
     ids.map((id) => selectionForId(id)).filter((value): value is FloorSelection => !!value),
@@ -11890,6 +11933,23 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     navEdgeHoverFrameRef.current = null;
     latestNavEdgeHoverRef.current = null;
   }, []);
+  // Pan owns the entire pointer stream. Keep the selected Connect source and
+  // any explicitly pinned bends, but discard every screen-derived candidate
+  // and preview. The next ordinary pointer move recalculates in current world
+  // coordinates after the camera transform settles.
+  const startPan = useCallback((event: Pick<MouseEvent, "clientX" | "clientY">) => {
+    if (navTool === "connect" && navConnectStart) {
+      cancelPendingNavHoverMove();
+      cancelPendingNavEdgeHover();
+      clearNavConnectLive();
+      setNavPreview(null);
+      setNavTargetHover(null);
+      setNavNodeHover(null);
+      setNavPathTargetHover(null);
+      setNavAlignGuides([]);
+    }
+    startCanvasPan(event);
+  }, [cancelPendingNavEdgeHover, cancelPendingNavHoverMove, navConnectStart, navTool, startCanvasPan]);
 
   // Authoring target under the pointer (rooms, doors, stairs/elevator/ramp) —
   // the indoor equivalent of the outdoor building-entrance target affordance.
@@ -12281,7 +12341,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   const navEraseAt = (pt: { x: number; y: number }) => {
     const hitNode = findNavNodeAtPoint(indoorNodes.filter((node) => !node.roomId), pt);
     if (hitNode) { deleteNavSelection({ type: "node", id: hitNode.id }); return; }
-    const hitEdge = walkableIndoorEdges.find((edge) => {
+    const hitEdge = visibleIndoorEdges.find((edge) => {
       const a = indoorNodes.find((n) => n.id === edge.startNodeId);
       const b = indoorNodes.find((n) => n.id === edge.endNodeId);
       if (!a || !b) return false;
@@ -12647,6 +12707,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // Test Route; the old guard made the eye button a no-op while the route
     // panel was open and left the editor in a stale overlay state.
     if (!next) {
+      restoreConnectAfterPanRef.current = false;
       cancelElevatorTransition();
       setLocalNavigationEnabled(false);
       setNavigationEnabled(false);
@@ -12691,6 +12752,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
   }, [showNavOverlay, toggleNavigation]);
 
   const selectNavTool = useCallback((id: "select" | "pan" | "waypoint" | "destination" | "connect" | "link" | "erase") => {
+    restoreConnectAfterPanRef.current = false;
     clearNavGesturePreview();
     clearNavConnectLive();
     updateNavPlacementLive(null);
@@ -14317,11 +14379,20 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       startPan(e);
       return;
     }
+    const target = e.target as SVGElement;
+    const isRawBg = target === svgRef.current || target.dataset.bg === "true"
+      || target.closest?.('[data-bg="true"]') != null;
+    // When Pan was chosen while Connect had an armed source, it temporarily
+    // owns this gesture. Do not let the still-visible Connect tool interpret
+    // a background drag or pointer movement as a connection destination.
+    if (restoreConnectAfterPanRef.current && tool === "pan" && navTool === "connect" && navConnectStart) {
+      if (isRawBg) startPan(e);
+      return;
+    }
     // B8 Phase 1: when a nav tool is active, route to nav handler.
     // Otherwise, fall through to physical object handling.
     const isNavToolActive = showNavOverlay && navTool !== "select" && navTool !== "pan";
     if (isNavToolActive) { handleNavSvgDown(e); return; }
-    const target = e.target as SVGElement;
     // "Empty canvas" = the svg itself or anything inside the decorative
     // background group (outer rect, grid lines, floor-area rects). Item <g>s are
     // siblings of that group, so object clicks never match and never deselect.
@@ -17385,6 +17456,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
     // a temporary pan release into an accidental Zone/Steps/Ramp commit.
     if (wasPanning) {
       dragging.current = null;
+      if (restoreConnectAfterPanRef.current && navTool === "connect" && navConnectStart) {
+        restoreConnectAfterPanRef.current = false;
+        setTool("select");
+      }
       return;
     }
         // Room Setup is a rigid authored transform. Its nav graph belongs to
@@ -22549,7 +22624,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                     );
                   })()}
                   {/* Edges — geometry derived from node positions, drawn under nodes */}
-                  {walkableIndoorEdges.map((edge) => {
+                  {visibleIndoorEdges.map((edge) => {
                     const a = indoorNodes.find((n) => n.id === edge.startNodeId);
                     const b = indoorNodes.find((n) => n.id === edge.endNodeId);
                     if (!a || !b) return null;
@@ -23103,7 +23178,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
                   editing ONLY floor objects (graph is not selectable/movable). */}
               {!navMode && showNavOverlay && !routePreview && (indoorNodes.length > 0 || indoorEdges.length > 0) && (
                 <g data-testid="floor-nav-overlay" className="pointer-events-none">
-                  {walkableIndoorEdges.map((edge) => {
+                  {visibleIndoorEdges.map((edge) => {
                     const pts = edgePolylinePoints(edge, indoorNodes);
                     if (!pts || pts.length < 2) return null;
                     // B5 Phase 2.11: the read-only overlay also flags an invalid
