@@ -39,7 +39,16 @@
       "name": "binding preserves existing content revision numbers"
     },
     {
+      "name": "binding promotes nested legacy creator and event fields"
+    },
+    {
       "name": "correction stores an explicit audit reason"
+    },
+    {
+      "name": "different representative cannot edit nested unbound legacy event"
+    },
+    {
+      "name": "different representative cannot read nested unbound legacy event"
     },
     {
       "name": "edit access reports actual successor grant"
@@ -57,6 +66,18 @@
       "name": "history search returns matching event"
     },
     {
+      "name": "hybrid legacy approved event RPC write requires administrator binding"
+    },
+    {
+      "name": "hybrid legacy event direct delete is blocked"
+    },
+    {
+      "name": "hybrid legacy event direct update is blocked"
+    },
+    {
+      "name": "hybrid legacy event is read only until administrator binding"
+    },
+    {
       "name": "legacy feedback RPC cannot skip the current representative token"
     },
     {
@@ -67,6 +88,48 @@
     },
     {
       "name": "legacy withdrawal RPC cannot skip the current representative token"
+    },
+    {
+      "name": "nested approved event direct delete is blocked"
+    },
+    {
+      "name": "nested approved event direct update is blocked"
+    },
+    {
+      "name": "nested approved event feedback RPC requires administrator binding"
+    },
+    {
+      "name": "nested approved event is read only regardless of nested status"
+    },
+    {
+      "name": "nested legacy rows remain unchanged after denied writes"
+    },
+    {
+      "name": "nested pending event direct delete is blocked"
+    },
+    {
+      "name": "nested pending event direct update is blocked"
+    },
+    {
+      "name": "nested pending event is read only regardless of nested status"
+    },
+    {
+      "name": "nested pending event withdrawal RPC requires administrator binding"
+    },
+    {
+      "name": "nested unbound draft RPC writes require administrator binding"
+    },
+    {
+      "name": "nested unbound draft direct delete is blocked"
+    },
+    {
+      "name": "nested unbound draft direct update is blocked"
+    },
+    {
+      "name": "nested unbound draft is read only until administrator binding"
+    },
+    {
+      "name": "nested unbound legacy event is visible to original creator"
     },
     {
       "name": "new event rejects a non-text description before insertion"

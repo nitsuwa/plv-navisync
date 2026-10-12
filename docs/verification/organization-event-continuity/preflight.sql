@@ -20,12 +20,24 @@ union all select 'event_notification_receipts',count(*) from public.event_notifi
 union all select 'event_poster_objects',count(*) from storage.objects where bucket_id='event_posters';
 
 select id,campus_id,created_at,updated_at,archived_at,
-  metadata->>'title' as title,metadata->>'createdByUserId' as original_creator,
-  metadata->>'status' as approval_status,metadata->>'dateStart' as event_start,
-  metadata->>'dateEnd' as event_end,metadata->>'publicationAt' as publication_at
+  coalesce(metadata->>'title',metadata#>>'{ui,title}',name) as title,
+  coalesce(metadata->>'createdByUserId',metadata#>>'{ui,createdByUserId}') as original_creator,
+  coalesce(metadata->>'status',metadata#>>'{ui,status}') as approval_status,
+  coalesce(metadata->>'dateStart',metadata#>>'{ui,dateStart}') as event_start,
+  coalesce(metadata->>'dateEnd',metadata#>>'{ui,dateEnd}') as event_end,
+  coalesce(metadata->>'publicationAt',metadata#>>'{ui,publicationAt}') as publication_at
 from public.map_elements
 where element_type='event_overlay' or metadata->>'kind'='event_overlay'
 order by created_at,id;
+
+-- Published campus-version baseline: compare these IDs, states, timestamps, and
+-- fingerprints with the same section in postflight.sql after applying migrations.
+select campus.id as campus_id,campus.latest_published_version_id as version_id,
+  version.state,version.published_at,md5(version.snapshot::text) as snapshot_fingerprint
+from public.campuses campus
+left join public.campus_versions version
+  on version.id=campus.latest_published_version_id and version.campus_id=campus.id
+order by campus.id;
 
 select id,public from storage.buckets where id='event_posters';
 -- Preserve the source-specific legacy listing counts using event-source-inventory.sql

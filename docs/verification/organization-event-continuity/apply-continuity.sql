@@ -1,11 +1,14 @@
 -- ORGANIZATION EVENT CONTINUITY: USER-RUN SUPABASE INSTALLATION
--- First save a recoverable database backup, then run preflight.sql.
--- Required dependencies must all be present. Save preflight results for comparison.
+-- Run preflight.sql first; required dependencies must all be present.
+-- Save the preflight results so event and published-campus data can be compared after apply.
 -- These are four unchanged migration files in their validated dependency order.
 -- Each migration has its own transaction. If any query fails, stop and report it;
 -- earlier completed migrations may remain applied. Do not enable assignments yet.
--- Run this installation ONCE. Do not repeat it after success or a partial failure;
--- the ownership guard deliberately rejects an already-adapted function definition.
+-- Run this installation once on a clean target. If any block fails, stop and
+-- inspect which transaction blocks committed before considering a retry.
+-- The access migration can be replayed only for a verified failure before its
+-- organization_id column committed; its function-source guards still reject an
+-- already-adapted function definition after a successful install.
 -- After the whole file succeeds, run postflight.sql and compare protected records.
 -- This package does not create organizations, representatives, or QA event records.
 -- It does not automatically bind historical events to an organization.
@@ -188,11 +191,51 @@ do $$ begin
   end if;
 end $$;
 
+-- Legacy map-builder rows keep the event payload under metadata.ui. Read those
+-- values for history/reconciliation, then promote them only on explicit admin binding.
+create or replace function private.event_metadata_value(p_metadata jsonb,p_key text)
+returns jsonb language sql immutable strict set search_path='' as $$
+  select coalesce(nullif(p_metadata->p_key,'null'::jsonb),nullif(p_metadata#>array['ui',p_key],'null'::jsonb));
+$$;
+revoke all on function private.event_metadata_value(jsonb,text) from public,anon,authenticated;
+
+create or replace function private.canonicalize_legacy_event_metadata(p_metadata jsonb,p_name text,p_event_id uuid,p_academic_year text)
+returns jsonb language sql immutable set search_path='' as $$
+  select coalesce(p_metadata,'{}'::jsonb)||jsonb_strip_nulls(jsonb_build_object(
+    'id',p_event_id::text,'kind','event_overlay',
+    'title',coalesce(nullif(private.event_metadata_value(p_metadata,'title')#>>'{}',''),nullif(p_name,''),'Untitled event'),
+    'description',private.event_metadata_value(p_metadata,'description'),
+    'organizer',private.event_metadata_value(p_metadata,'organizer'),
+    'createdByUserId',private.event_metadata_value(p_metadata,'createdByUserId'),
+    'status',case when private.event_metadata_value(p_metadata,'status')#>>'{}' in ('draft','pending','approved','disapproved')
+      then private.event_metadata_value(p_metadata,'status') else '"draft"'::jsonb end,
+    'isActive',coalesce(private.event_metadata_value(p_metadata,'isActive'),'true'::jsonb),
+    'academicYear',btrim(p_academic_year),
+    'dateStart',private.event_metadata_value(p_metadata,'dateStart'),
+    'dateEnd',private.event_metadata_value(p_metadata,'dateEnd'),
+    'submittedAt',private.event_metadata_value(p_metadata,'submittedAt'),
+    'publicationAt',private.event_metadata_value(p_metadata,'publicationAt'),
+    'lastEditedAt',private.event_metadata_value(p_metadata,'lastEditedAt'),
+    'revision',private.event_metadata_value(p_metadata,'revision'),
+    'markers',private.event_metadata_value(p_metadata,'markers'),
+    'locationRef',private.event_metadata_value(p_metadata,'locationRef'),
+    'locations',private.event_metadata_value(p_metadata,'locations'),
+    'restrictedAreas',private.event_metadata_value(p_metadata,'restrictedAreas'),
+    'locationFeedback',private.event_metadata_value(p_metadata,'locationFeedback'),
+    'feedbackResolutions',private.event_metadata_value(p_metadata,'feedbackResolutions'),
+    'adminComment',private.event_metadata_value(p_metadata,'adminComment'),
+    'eventFurniture',private.event_metadata_value(p_metadata,'eventFurniture'),
+    'eventLabels',private.event_metadata_value(p_metadata,'eventLabels'),
+    'posterUrl',private.event_metadata_value(p_metadata,'posterUrl')
+  ));
+$$;
+revoke all on function private.canonicalize_legacy_event_metadata(jsonb,text,uuid,text) from public,anon,authenticated;
+
 create or replace function private.event_actor_access(p_organization_id uuid,p_metadata jsonb)
 returns boolean language sql volatile security definer set search_path='' as $$
   select coalesce(auth.uid() is not null and case when p_organization_id is not null
     then private.event_organization_access(p_organization_id)
-    else public.is_student_org() and p_metadata->>'createdByUserId'=auth.uid()::text end,false);
+    else public.is_student_org() and (private.event_metadata_value(p_metadata,'createdByUserId')#>>'{}')=auth.uid()::text end,false);
 $$;
 revoke all on function private.event_actor_access(uuid,jsonb) from public,anon,authenticated;
 create or replace function public.can_access_event_overlay(p_overlay_id uuid)
@@ -218,11 +261,17 @@ create policy map_elements_insert_event_overlay_owner on public.map_elements for
   with check(organization_id is null and element_type='event_overlay' and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text);
 drop policy if exists map_elements_update_event_overlay_owner on public.map_elements;
 create policy map_elements_update_event_overlay_owner on public.map_elements for update to authenticated
-  using((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin() or (organization_id is null and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)))
-  with check((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin() or (organization_id is null and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)));
+  using((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin()
+    or (organization_id is not null and public.can_access_event_overlay(id))
+    or (organization_id is null and not coalesce(metadata?'ui',false) and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)))
+  with check((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin()
+    or (organization_id is not null and public.can_access_event_overlay(id))
+    or (organization_id is null and not coalesce(metadata?'ui',false) and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)));
 drop policy if exists map_elements_delete_event_overlay_owner on public.map_elements;
 create policy map_elements_delete_event_overlay_owner on public.map_elements for delete to authenticated
-  using((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin() or (organization_id is null and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)));
+  using((element_type='event_overlay' or metadata->>'kind'='event_overlay') and (public.is_admin()
+    or (organization_id is not null and public.can_access_event_overlay(id))
+    or (organization_id is null and not coalesce(metadata?'ui',false) and public.is_student_org() and metadata->>'createdByUserId'=auth.uid()::text)));
 drop policy if exists event_revision_read on public.event_layout_revisions;
 create policy event_revision_read on public.event_layout_revisions for select to authenticated using(public.can_access_event_overlay(event_id));
 
@@ -230,16 +279,19 @@ create or replace function private.event_row_result(p_event public.map_elements)
 returns jsonb language sql stable security definer set search_path='' as $$
   select jsonb_build_object('id',p_event.id,'campusId',p_event.campus_id,'updatedAt',p_event.updated_at,'createdAt',p_event.created_at,
     'organizationId',p_event.organization_id,'metadata',p_event.metadata,'creatorName',
-    (select concat_ws(' ',p.first_name,p.last_name) from public.profiles p where p.id::text=p_event.metadata->>'createdByUserId'));
+    (select concat_ws(' ',p.first_name,p.last_name) from public.profiles p where p.id::text=(private.event_metadata_value(p_event.metadata,'createdByUserId')#>>'{}')));
 $$;
 revoke all on function private.event_row_result(public.map_elements) from public,anon,authenticated;
 
 create or replace function private.lock_event_for_write(p_overlay_id uuid,p_expected_grant_id uuid,p_require_expected boolean)
 returns public.map_elements language plpgsql security definer set search_path='' as $$
-declare v_event public.map_elements%rowtype; v_org uuid; v_grant uuid;
+declare v_event public.map_elements%rowtype; v_org uuid; v_grant uuid; v_metadata jsonb;
 begin
-  select organization_id into v_org from public.map_elements where id=p_overlay_id and archived_at is null and (element_type='event_overlay' or metadata->>'kind'='event_overlay');
+  select organization_id,metadata into v_org,v_metadata from public.map_elements where id=p_overlay_id and archived_at is null and (element_type='event_overlay' or metadata->>'kind'='event_overlay');
   if not found then raise exception 'Event access changed or this event is unavailable.' using errcode='42501'; end if;
+  if v_org is null and coalesce(v_metadata?'ui',false) then
+    raise exception 'This legacy event is read-only until an administrator binds it to an organization.' using errcode='42501';
+  end if;
   if v_org is not null then
     perform 1 from public.event_organizations where id=v_org for update;
     if not private.event_organization_access(v_org) then raise exception 'Your organization access has ended.' using errcode='42501'; end if;
@@ -265,8 +317,8 @@ begin
   select * into v_event from public.map_elements where id=p_event_id;
   if v_event.organization_id is not null then select id into v_grant from public.event_organization_grants where organization_id=v_event.organization_id and representative_id=auth.uid() and ended_at is null; end if;
   return jsonb_build_object('organizationId',v_event.organization_id,'grantId',v_grant,'isArchived',v_event.archived_at is not null,
-    'canEditContent',v_event.archived_at is null and v_event.metadata->>'status' in ('draft','disapproved','pending'),
-    'canAddressFeedback',v_event.archived_at is null);
+    'canEditContent',v_event.archived_at is null and coalesce(v_event.organization_id is not null or (not coalesce(v_event.metadata?'ui',false) and v_event.metadata->>'createdByUserId'=auth.uid()::text),false) and v_event.metadata->>'status' in ('draft','disapproved','pending'),
+    'canAddressFeedback',v_event.archived_at is null and coalesce(v_event.organization_id is not null or (not coalesce(v_event.metadata?'ui',false) and v_event.metadata->>'createdByUserId'=auth.uid()::text),false));
 end $$;
 
 create or replace function public.get_organization_event(p_event_id uuid)
@@ -285,12 +337,12 @@ begin
   if auth.uid() is null or not (public.is_admin() or private.event_organization_access(p_organization_id)) then raise exception 'Organization event history access denied.' using errcode='42501'; end if;
   if p_limit is null or p_limit not between 1 and 100 or p_offset is null or p_offset not between 0 and 100000 or length(coalesce(p_search,''))>200 then raise exception 'Invalid history page.' using errcode='22023'; end if;
   select count(*) into v_total from public.map_elements e where organization_id=p_organization_id
-    and (p_include_archived or archived_at is null) and (p_academic_year is null or e.metadata->>'academicYear'=p_academic_year)
-    and position(lower(coalesce(p_search,'')) in lower(coalesce(e.metadata->>'title','')))>0;
+    and (p_include_archived or archived_at is null) and (p_academic_year is null or coalesce(e.metadata->>'academicYear',e.metadata#>>'{ui,academicYear}')=p_academic_year)
+    and position(lower(coalesce(p_search,'')) in lower(coalesce(private.event_metadata_value(e.metadata,'title')#>>'{}',e.name,'')))>0;
   select coalesce(jsonb_agg(private.event_row_result(e)||jsonb_build_object('archivedAt',e.archived_at) order by e.created_at desc,e.id),'[]'::jsonb) into v_events
     from (select * from public.map_elements e where organization_id=p_organization_id and (p_include_archived or archived_at is null)
-      and (p_academic_year is null or e.metadata->>'academicYear'=p_academic_year)
-      and position(lower(coalesce(p_search,'')) in lower(coalesce(e.metadata->>'title','')))>0
+      and (p_academic_year is null or coalesce(e.metadata->>'academicYear',e.metadata#>>'{ui,academicYear}')=p_academic_year)
+      and position(lower(coalesce(p_search,'')) in lower(coalesce(private.event_metadata_value(e.metadata,'title')#>>'{}',e.name,'')))>0
       order by created_at desc,id limit p_limit offset p_offset) e;
   return jsonb_build_object('events',v_events,'total',v_total);
 end $$;
@@ -331,7 +383,7 @@ end $$;
 
 -- Forward-adapt known guard/RPC definitions. Refuse unexpected source rather than silently weakening it.
 do $migration$
-declare v_definition text; v_name text; v_source text;
+declare v_definition text; v_name text; v_source text; v_pattern text; v_rewritten text;
 begin
   select pg_get_functiondef('public.guard_event_overlay_review()'::regprocedure) into v_definition;
   v_definition:=replace(v_definition,chr(13),'');
@@ -362,8 +414,8 @@ $guard$);
   foreach v_name in array array['public.save_pending_event_layout(uuid,timestamptz,jsonb)','public.withdraw_event_submission(uuid,timestamptz)','public.set_event_feedback_pin_addressed(uuid,timestamptz,text,text,boolean,text)'] loop
     select pg_get_functiondef(v_name::regprocedure) into v_definition;
     v_definition:=replace(v_definition,chr(13),'');
-    v_source:=$source$select * into v_event from public.map_elements where id = p_overlay_id and archived_at is null
-    and (element_type = 'event_overlay' or metadata->>'kind' = 'event_overlay') for update;$source$;
+    v_source:='select * into v_event from public.map_elements where id = p_overlay_id and archived_at is null'||chr(10)||
+      '    and (element_type = ''event_overlay'' or metadata->>''kind'' = ''event_overlay'') for update;';
     if position(v_source in v_definition)=0 then raise exception 'Event command lock source changed: %',v_name; end if;
     v_definition:=replace(v_definition,v_source,'v_event := private.lock_event_for_write(p_overlay_id,null,false);');
     v_source:='if not found or not public.is_student_org() or v_event.metadata->>''createdByUserId'' is distinct from auth.uid()::text then';
@@ -397,8 +449,8 @@ $guard$);
     'public.manage_event_publication(uuid,timestamptz,text,timestamptz)'] loop
     select pg_get_functiondef(v_name::regprocedure) into v_definition;
     v_definition:=replace(v_definition,chr(13),'');
-    v_source:=$return$return jsonb_build_object('id', v_event.id, 'campusId', v_event.campus_id,
-    'updatedAt', v_event.updated_at, 'metadata', v_event.metadata);$return$;
+    v_source:='return jsonb_build_object(''id'', v_event.id, ''campusId'', v_event.campus_id,'||chr(10)||
+      '    ''updatedAt'', v_event.updated_at, ''metadata'', v_event.metadata);';
     if position(v_source in v_definition)=0 then raise exception 'Admin event result source changed: %',v_name; end if;
     v_definition:=replace(v_definition,v_source,'perform set_config(''app.event_admin_command'',''off'',true); return private.event_row_result(v_event);');
     execute v_definition;
@@ -419,7 +471,7 @@ begin
   if p_academic_year is null or length(btrim(p_academic_year)) not between 1 and 40 then raise exception 'Enter the verified historical academic year.' using errcode='23514'; end if;
   v_before:=to_jsonb(v_event);
   perform set_config('app.event_org_bind_command','on',true);perform set_config('app.event_admin_command','on',true);
-  update public.map_elements set organization_id=p_organization_id,metadata=metadata||jsonb_build_object('academicYear',btrim(p_academic_year)),updated_at=clock_timestamp() where id=p_event_id returning * into v_event;
+  update public.map_elements set organization_id=p_organization_id,metadata=private.canonicalize_legacy_event_metadata(metadata,name,id,p_academic_year),updated_at=clock_timestamp() where id=p_event_id returning * into v_event;
   perform set_config('app.event_org_bind_command','off',true);perform set_config('app.event_admin_command','off',true);
   insert into public.event_organization_audit(organization_id,actor_id,action,before_data,after_data) values(p_organization_id,auth.uid(),'legacy_event_assigned',v_before,to_jsonb(v_event));
   return private.event_row_result(v_event);
@@ -447,7 +499,7 @@ begin
   v_before:=to_jsonb(v_event);
   perform set_config('app.event_org_bind_command','on',true);
   perform set_config('app.event_admin_command','on',true);
-  update public.map_elements set organization_id=p_organization_id,metadata=metadata||jsonb_build_object('academicYear',btrim(p_academic_year)),updated_at=clock_timestamp() where id=p_event_id returning * into v_event;
+  update public.map_elements set organization_id=p_organization_id,metadata=private.canonicalize_legacy_event_metadata(metadata,name,id,p_academic_year),updated_at=clock_timestamp() where id=p_event_id returning * into v_event;
   perform set_config('app.event_admin_command','off',true);
   perform set_config('app.event_org_bind_command','off',true);
   insert into public.event_organization_audit(organization_id,actor_id,action,before_data,after_data)
@@ -462,23 +514,23 @@ declare v_items jsonb;
 begin
   if auth.uid() is null or not public.is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
   select coalesce(jsonb_agg(jsonb_build_object(
-    'eventId',e.id,'campusId',e.campus_id,'title',coalesce(nullif(e.metadata->>'title',''),e.name,'Untitled event'),
-    'status',coalesce(e.metadata->>'status','draft'),'creatorUserId',e.metadata->>'createdByUserId',
-    'creatorName',nullif(concat_ws(' ',p.first_name,p.last_name),''),'organizerLabel',e.metadata->>'organizer',
-    'createdAt',e.created_at,'updatedAt',e.updated_at,'archivedAt',e.archived_at,'academicYear',nullif(btrim(e.metadata->>'academicYear'),''),
+    'eventId',e.id,'campusId',e.campus_id,'title',coalesce(nullif(private.event_metadata_value(e.metadata,'title')#>>'{}',''),e.name,'Untitled event'),
+    'status',coalesce(private.event_metadata_value(e.metadata,'status')#>>'{}','draft'),'creatorUserId',private.event_metadata_value(e.metadata,'createdByUserId')#>>'{}',
+    'creatorName',nullif(concat_ws(' ',p.first_name,p.last_name),''),'organizerLabel',private.event_metadata_value(e.metadata,'organizer')#>>'{}',
+    'createdAt',e.created_at,'updatedAt',e.updated_at,'archivedAt',e.archived_at,'academicYear',nullif(btrim(coalesce(e.metadata->>'academicYear',e.metadata#>>'{ui,academicYear}')),''),
     'suggestedOrganizationId',case when suggestion.match_count=1 then suggestion.organization_id end,
     'suggestedOrganizationName',case when suggestion.match_count=1 then suggestion.organization_name end,
-    'validation',case when nullif(btrim(e.metadata->>'academicYear'),'') is null then 'academic_year_required'
+    'validation',case when nullif(btrim(coalesce(e.metadata->>'academicYear',e.metadata#>>'{ui,academicYear}')),'') is null then 'academic_year_required'
       when suggestion.match_count=1 then 'suggestion_requires_confirmation'
       when suggestion.match_count>1 then 'ambiguous_organizer_label' else 'choose_verified_organization' end
   ) order by e.created_at asc,e.id),'[]'::jsonb) into v_items
   from public.map_elements e
-  left join public.profiles p on p.id::text=e.metadata->>'createdByUserId'
+  left join public.profiles p on p.id::text=private.event_metadata_value(e.metadata,'createdByUserId')#>>'{}'
   cross join lateral (
     select count(distinct o.id) as match_count,(array_agg(o.id order by o.id))[1] as organization_id,
       (array_agg(o.name order by o.id))[1] as organization_name
-    from public.event_organizations o where lower(btrim(o.name))=lower(btrim(coalesce(e.metadata->>'organizer','')))
-      or lower(btrim(o.code))=lower(btrim(coalesce(e.metadata->>'organizer','')))
+    from public.event_organizations o where lower(btrim(o.name))=lower(btrim(coalesce(private.event_metadata_value(e.metadata,'organizer')#>>'{}','')))
+      or lower(btrim(o.code))=lower(btrim(coalesce(private.event_metadata_value(e.metadata,'organizer')#>>'{}','')))
   ) suggestion
   where e.organization_id is null and (e.element_type='event_overlay' or e.metadata->>'kind'='event_overlay');
   return v_items;

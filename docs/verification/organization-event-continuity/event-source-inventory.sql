@@ -12,12 +12,12 @@ from public.event_locations
 order by source, status;
 
 select 'public.map_elements event overlays' as source,
-       coalesce(metadata->>'status', 'unknown') as status,
+       coalesce(metadata->>'status', metadata#>>'{ui,status}', 'unknown') as status,
        count(*) as rows
 from public.map_elements
 where element_type = 'event_overlay'
    or metadata->>'kind' = 'event_overlay'
-group by coalesce(metadata->>'status', 'unknown')
+group by coalesce(metadata->>'status', metadata#>>'{ui,status}', 'unknown')
 order by status;
 
 select 'public.event_layout_revisions' as source, count(*) as rows
@@ -26,12 +26,12 @@ from public.event_layout_revisions;
 -- POST-MIGRATION ONLY: run after 20261009130000_event_organization_ownership.sql
 -- and 20261009140000_event_organization_reuse.sql have been applied.
 select case when organization_id is null then 'unbound legacy overlay' else 'organization-bound overlay' end as ownership,
-       coalesce(metadata->>'status', 'unknown') as status,
+       coalesce(metadata->>'status', metadata#>>'{ui,status}', 'unknown') as status,
        count(*) as rows
 from public.map_elements
 where element_type = 'event_overlay'
    or metadata->>'kind' = 'event_overlay'
-group by organization_id is null, coalesce(metadata->>'status', 'unknown')
+group by organization_id is null, coalesce(metadata->>'status', metadata#>>'{ui,status}', 'unknown')
 order by ownership, status;
 
 select 'reused event drafts with provenance' as source, count(*) as rows

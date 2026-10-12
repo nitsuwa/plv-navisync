@@ -12,7 +12,7 @@ The implementation is local. The project owner applies SQL in Supabase. Do not e
 
 ## SQL to run, in this order
 
-For a single copy/paste, use `apply-continuity.sql`. It contains the four source files below unchanged, in the same order, with one transaction per migration. Run `preflight.sql` first and save its results; run `postflight.sql` afterward. Run the installation once: the ownership migration deliberately rejects an already-adapted guard definition. If the installation reports any error, stop and report it rather than retrying the complete package; earlier transactions may already have completed. Do not enable organization assignments until postflight and the protected-record comparison pass.
+For a single copy/paste, use `apply-continuity.sql`. It contains the four source files below unchanged, in the same order, with one transaction per migration. Run `preflight.sql` first and save its results; run `postflight.sql` afterward. The ownership migration deliberately rejects an already-adapted guard definition, so do not rerun after a successful install. If the installation reports an error, stop and inspect which transaction blocks committed before retrying. A retry is appropriate only for a reviewed recovery case where the failing transaction rolled back and no later block committed. Do not enable organization assignments until postflight and the protected-record comparison pass.
 
 1. `supabase/migrations/20261009120000_event_organization_access.sql`
 2. `supabase/migrations/20261009130000_event_organization_ownership.sql`

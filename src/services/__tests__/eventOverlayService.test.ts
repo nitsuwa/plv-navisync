@@ -22,18 +22,26 @@ const floorLocation = {
 
 function makeClient(rows: unknown[] = []) {
   const filters: Array<{ column: string; value: unknown }> = [];
-  const matchingRows=()=>rows.filter(row=>filters.every(filter=>filter.column!=='archived_at'||((row as {archived_at?:string|null}).archived_at??null)===filter.value));
+  const orFilters: string[] = [];
+  const matchingRows=()=>rows.filter(row=>filters.every(filter=>{
+    const record=row as Record<string,unknown>;
+    return filter.column==='archived_at'
+      ? (record.archived_at??null)===filter.value
+      : filter.column==='id'||filter.column==='element_type'
+        ? record[filter.column]===filter.value
+        : true;
+  }));
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn((column: string, value: unknown) => {
       filters.push({ column, value });
       return query;
     }),
-    or: vi.fn(() => query),
+    or: vi.fn((filter:string) => { orFilters.push(filter); return query; }),
     is: vi.fn((column:string,value:unknown)=>{filters.push({column,value});return query;}),
     order: vi.fn(async()=>({ data: matchingRows(), error: null })),
     single: vi.fn(async()=>({ data: matchingRows()[0] ?? null, error: null })),
-    maybeSingle: vi.fn().mockResolvedValue({ data: rows[0] ?? null, error: null }),
+    maybeSingle: vi.fn(async()=>({ data: matchingRows()[0] ?? null, error: null })),
   };
   const mapElements = {
     insert: vi.fn((payload: unknown) => ({
@@ -41,6 +49,7 @@ function makeClient(rows: unknown[] = []) {
     })),
     select: vi.fn(() => query),
     update: vi.fn((_payload: unknown) => query),
+    delete: vi.fn(() => query),
   };
   const activityLogs = { insert: vi.fn().mockResolvedValue({ data: null, error: null }) };
   return {
@@ -51,6 +60,7 @@ function makeClient(rows: unknown[] = []) {
       from: vi.fn((table: string) => table === "map_elements" ? mapElements : activityLogs),
     },
     filters,
+    orFilters,
   };
 }
 
@@ -70,6 +80,42 @@ function publishedCampus(id: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("event overlay service", () => {
+  it("hydrates legacy nested event fields in organization history", async () => {
+    const { client } = makeClient();
+    client.rpc.mockResolvedValue({ data: {
+      events: [{
+        id: "legacy-event-row", campusId: "campus-1", organizationId: "org-1",
+        createdAt: "2026-09-29T10:15:39.460662Z", updatedAt: "2026-09-30T13:42:20.804809Z",
+        metadata: {
+          kind: "event_overlay", academicYear: "2025–2026",
+          ui: {
+            id: "legacy-event-row", kind: "event_overlay", title: "TEST: College Week 2026",
+            description: "Legacy event details", organizer: "OSA", status: "approved",
+            createdByUserId: "legacy-representative", isActive: true,
+            locations: [{ id: "grounds", locationRef: campusLocation, eventFurniture: [], eventLabels: [] }],
+            eventFurniture: [{ id: "booth-1", type: "booth", name: "Booth 1", x: 10, y: 20, width: 30, height: 20 }],
+            eventLabels: [{ id: "label-1", text: "Stage", x: 40, y: 50 }],
+          },
+        },
+      }],
+      total: 1,
+    }, error: null } as never);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const result = await eventOverlayService.listOrganizationEvents("org-1");
+
+    expect(result.events[0]).toMatchObject({
+      title: "TEST: College Week 2026",
+      description: "Legacy event details",
+      organizer: "OSA",
+      status: "approved",
+      createdByUserId: "legacy-representative",
+      academicYear: "2025–2026",
+      eventFurniture: [{ id: "booth-1", name: "Booth 1" }],
+      eventLabels: [{ id: "label-1", text: "Stage" }],
+    });
+  });
+
   it("reuses a layout through the server and confirms fresh draft provenance", async () => {
     const { client } = makeClient();
     const source = { id: "10000000-0000-4000-8000-000000000001", organizationId: "org-1", updatedAt: "2026-10-08T12:00:00Z", campusId: "campus-1", title: "Past fair", description: "Original", organizer: "IT", status: "approved", dateStart: "2025-03-15T01:00:00Z", posterUrl: "https://example.test/old.png", locations: [{ id: "ground", locationRef: campusLocation, eventFurniture: [{ id: "booth", x: 1, y: 2 }], eventLabels: [] }] } as unknown as CampusEventOverlay;
@@ -115,6 +161,36 @@ describe("event overlay service", () => {
     mapElements.select().single.mockResolvedValue({data:null,error:{code:'PGRST301',message:'JWT expired'}} as never);
     vi.mocked(getSupabase).mockReturnValue(client as never);
     await expect(eventOverlayService.getEventOverlay('event-1')).rejects.toThrow(/session.*expired.*sign in/i);
+  });
+  it('loads a legacy event whose event kind is stored in metadata instead of element_type',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',campus_id:'campus-1',updated_at:'2026-10-09T00:00:00Z',
+      metadata:{kind:'event_overlay',ui:{title:'Legacy event',description:'Nested payload',organizer:'OSA',status:'draft',createdByUserId:'rep-1'}}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    const event=await eventOverlayService.getEventOverlay(legacy.id);
+
+    expect(event).toMatchObject({id:'legacy-event',title:'Legacy event',description:'Nested payload',organizer:'OSA',createdByUserId:'rep-1'});
+    expect(orFilters).toContain('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay');
+  });
+  it('finds a metadata-kind legacy event before withdrawing it',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',organization_id:null,updated_at:'2026-10-09T00:00:00Z',metadata:{kind:'event_overlay'}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    await expect(eventOverlayService.withdrawEventSubmission(legacy.id,legacy.updated_at)).resolves.toMatchObject({id:'event-1'});
+
+    expect(orFilters).toContain('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay');
+  });
+  it('finds and deletes a metadata-kind legacy event',async()=>{
+    const legacy={id:'legacy-event',element_type:'custom',organization_id:null,updated_at:'2026-10-09T00:00:00Z',campus_id:'campus-1',metadata:{kind:'event_overlay',title:'Legacy event'}};
+    const {client,orFilters}=makeClient([legacy]);
+    vi.mocked(getSupabase).mockReturnValue(client as never);
+
+    await expect(eventOverlayService.deleteEventOverlay(legacy.id)).resolves.toBeUndefined();
+
+    expect(orFilters).toHaveLength(2);
+    expect(orFilters.every(filter=>filter==='element_type.eq.event_overlay,metadata->>kind.eq.event_overlay')).toBe(true);
   });
   it('keeps a transient read failure actionable instead of returning an empty event',async()=>{
     const {client,mapElements}=makeClient();

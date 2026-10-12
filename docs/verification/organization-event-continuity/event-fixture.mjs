@@ -50,6 +50,27 @@ insert into map_elements(id,campus_id,element_type,name,metadata,updated_at) val
 insert into map_elements(id,campus_id,element_type,name,metadata,archived_at) values('20000000-0000-0000-0000-000000000007','10000000-0000-0000-0000-000000000001','event_overlay','Archived historical event',
   jsonb_build_object('kind','event_overlay','title','Archived historical event','organizer','IT','createdByUserId','00000000-0000-0000-0000-000000000002','status','approved','isActive',false,'dateStart','2025-01-01T09:00:00Z','dateEnd','2025-01-01T17:00:00Z','publicationAt','2024-12-01T00:00:00Z','revision',3,
     'locations',jsonb_build_array(jsonb_build_object('id','campus-grounds','locationRef',jsonb_build_object('type','campus','label','Campus Grounds'),'eventFurniture','[]'::jsonb,'eventLabels','[]'::jsonb))),clock_timestamp());
+insert into map_elements(id,campus_id,element_type,name,metadata,updated_at) values(
+  '20000000-0000-0000-0000-000000000009','10000000-0000-0000-0000-000000000001','custom','TEST: College Week 2026',
+  jsonb_build_object('kind','event_overlay','ui',jsonb_build_object(
+    'id','20000000-0000-0000-0000-000000000009','kind','event_overlay','title','TEST: College Week 2026',
+    'description','Legacy event details','organizer','OSA','status','draft',
+    'createdByUserId','00000000-0000-0000-0000-000000000002','isActive',true,
+    'revision',4,
+    'locations',jsonb_build_array(jsonb_build_object('id','grounds','locationRef',jsonb_build_object('type','campus','label','Campus Grounds'),'eventFurniture','[]'::jsonb,'eventLabels','[]'::jsonb)),
+    'eventFurniture',jsonb_build_array(jsonb_build_object('id','legacy-booth','name','Legacy Booth')),
+    'eventLabels',jsonb_build_array(jsonb_build_object('id','legacy-stage','text','Stage')))),
+  '2026-09-30T13:42:20.804809Z');
+insert into map_elements(id,campus_id,element_type,name,metadata,updated_at) values
+('20000000-0000-0000-0000-000000000010','10000000-0000-0000-0000-000000000001','custom','Nested approved event',
+  jsonb_build_object('kind','event_overlay','ui',jsonb_build_object('title','Nested approved event','status','approved','createdByUserId','00000000-0000-0000-0000-000000000002','locations','[]'::jsonb)),
+  '2026-09-30T13:42:20.804809Z'),
+('20000000-0000-0000-0000-000000000011','10000000-0000-0000-0000-000000000001','custom','Nested pending event',
+  jsonb_build_object('kind','event_overlay','ui',jsonb_build_object('title','Nested pending event','status','pending','createdByUserId','00000000-0000-0000-0000-000000000002','locations','[]'::jsonb)),
+  '2026-09-30T13:42:20.804809Z'),
+('20000000-0000-0000-0000-000000000012','10000000-0000-0000-0000-000000000001','custom','Hybrid approved event',
+  jsonb_build_object('kind','event_overlay','createdByUserId','00000000-0000-0000-0000-000000000002','ui',jsonb_build_object('title','Hybrid approved event','status','approved','locations','[]'::jsonb)),
+  '2026-09-30T13:42:20.804809Z');
 `;
 export const baselineEventMigrations=[
 '20260905120000_event_overlay_schema.sql',

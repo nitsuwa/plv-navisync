@@ -108,36 +108,38 @@ function overlayFromMetadata(
   organizationId?: string | null,
   createdAt?: string | null,
 ): CampusEventOverlay {
+  const legacyUi = isRecord(metadata.ui) ? metadata.ui : {};
+  const field = (key: string): unknown => metadata[key] ?? legacyUi[key];
   const overlay: CampusEventOverlay = {
     id,
     organizationId: organizationId || undefined,
     createdAt: createdAt || undefined,
-    academicYear: typeof metadata.academicYear==='string'?metadata.academicYear:undefined,
+    academicYear: typeof field("academicYear")==='string'?field("academicYear") as string:undefined,
     updatedAt: updatedAt || undefined,
     campusId: campusId || undefined,
-    title: typeof metadata.title==='string'?metadata.title:"Untitled Event",
-    description: typeof metadata.description==='string'?metadata.description:"",
-    dateStart: metadata.dateStart as string | undefined,
-    dateEnd: metadata.dateEnd as string | undefined,
-    organizer: typeof metadata.organizer==='string'?metadata.organizer:"",
-    markers: (metadata.markers as CampusEventOverlay["markers"]) || [],
-    locationRef: metadata.locationRef as CampusEventOverlay["locationRef"],
-    locations: metadata.locations as EventOverlayLocation[] | undefined,
+    title: typeof field("title")==='string'?field("title") as string:"Untitled Event",
+    description: typeof field("description")==='string'?field("description") as string:"",
+    dateStart: field("dateStart") as string | undefined,
+    dateEnd: field("dateEnd") as string | undefined,
+    organizer: typeof field("organizer")==='string'?field("organizer") as string:"",
+    markers: (field("markers") as CampusEventOverlay["markers"]) || [],
+    locationRef: field("locationRef") as CampusEventOverlay["locationRef"],
+    locations: field("locations") as EventOverlayLocation[] | undefined,
     restrictedAreas:
-      (metadata.restrictedAreas as CampusEventOverlay["restrictedAreas"]) || [],
-    isActive: (metadata.isActive as boolean) ?? true,
-    status: (["draft", "pending", "approved", "disapproved"].includes(String(metadata.status)) ? metadata.status : "draft") as EventOverlayStatus,
-    lastEditedAt: typeof metadata.lastEditedAt === "string" ? metadata.lastEditedAt : undefined,
-    revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
-    submittedAt: typeof metadata.submittedAt === "string" ? metadata.submittedAt : undefined,
-    publicationAt: metadata.publicationAt as string | undefined,
-    locationFeedback: metadata.locationFeedback as Record<string, string> | undefined,
-    feedbackResolutions: metadata.feedbackResolutions as CampusEventOverlay["feedbackResolutions"],
-    adminComment: metadata.adminComment as string | undefined,
-    eventFurniture: (metadata.eventFurniture as FloorFurniture[]) || [],
-    eventLabels: (metadata.eventLabels as FloorLabel[]) || [],
-    posterUrl: metadata.posterUrl as string | undefined,
-    createdByUserId: metadata.createdByUserId as string | undefined,
+      (field("restrictedAreas") as CampusEventOverlay["restrictedAreas"]) || [],
+    isActive: (field("isActive") as boolean) ?? true,
+    status: (["draft", "pending", "approved", "disapproved"].includes(String(field("status"))) ? field("status") : "draft") as EventOverlayStatus,
+    lastEditedAt: typeof field("lastEditedAt") === "string" ? field("lastEditedAt") as string : undefined,
+    revision: typeof field("revision") === "number" ? field("revision") as number : undefined,
+    submittedAt: typeof field("submittedAt") === "string" ? field("submittedAt") as string : undefined,
+    publicationAt: field("publicationAt") as string | undefined,
+    locationFeedback: field("locationFeedback") as Record<string, string> | undefined,
+    feedbackResolutions: field("feedbackResolutions") as CampusEventOverlay["feedbackResolutions"],
+    adminComment: field("adminComment") as string | undefined,
+    eventFurniture: (field("eventFurniture") as FloorFurniture[]) || [],
+    eventLabels: (field("eventLabels") as FloorLabel[]) || [],
+    posterUrl: field("posterUrl") as string | undefined,
+    createdByUserId: field("createdByUserId") as string | undefined,
   };
   return {
     ...overlay,
@@ -793,7 +795,7 @@ export async function getEventOverlay(
     .from("map_elements")
     .select("*")
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
     .is("archived_at", null)
     .single();
 
@@ -886,7 +888,7 @@ export async function listEventRevisions(overlayId: string): Promise<EventRevisi
 
 export async function withdrawEventSubmission(overlayId: string, expectedUpdatedAt: string, expectedGrantId?:string): Promise<CampusEventOverlay> {
   const supabase=getSupabase();
-  const {data:existing,error:readError}=await supabase.from('map_elements').select('organization_id,updated_at').eq('id',overlayId).eq('element_type','event_overlay').maybeSingle();
+  const {data:existing,error:readError}=await supabase.from('map_elements').select('organization_id,updated_at').eq('id',overlayId).or('element_type.eq.event_overlay,metadata->>kind.eq.event_overlay').maybeSingle();
   if(readError)throw eventCommandError(readError);
   if(!existing)throw new Error('This event is unavailable or your access changed. Refresh the event list.');
   if(existing.organization_id){
@@ -1094,7 +1096,7 @@ export async function deleteEventOverlay(overlayId: string,expectedGrantId?:stri
     .from("map_elements")
     .select("*")
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
     .maybeSingle();
   if (fetchError) throw fetchError;
   if(!existing)throw new Error('This event is unavailable or your access changed. Refresh the event list.');
@@ -1111,7 +1113,7 @@ export async function deleteEventOverlay(overlayId: string,expectedGrantId?:stri
     .from("map_elements")
     .delete()
     .eq("id", overlayId)
-    .eq("element_type", "event_overlay")
+    .or("element_type.eq.event_overlay,metadata->>kind.eq.event_overlay")
     .select('id').maybeSingle();
 
   if (error) throw error;
