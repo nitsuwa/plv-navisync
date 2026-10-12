@@ -167,9 +167,13 @@ describe("CampusMapPage event overlays", () => {
   });
 
   it("loads student event previews from the allowlisted feed when the panel opens", async () => {
-    renderCampusMap({ previewCampus });
+    // The shared preview cache intentionally survives a panel close. Use a
+    // unique campus key so this cold-load assertion is independent of the
+    // preceding Event Map test.
+    const campusId = `${previewCampus.id}-feed-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    renderCampusMap({ previewCampus: { ...previewCampus, id: campusId } });
     fireEvent.click(await screen.findByRole("button", { name: "Open event map" }));
-    await waitFor(() => expect(eventOverlayService.listPublishedEventPreviews).toHaveBeenCalledWith("campus-test"));
+    await waitFor(() => expect(eventOverlayService.listPublishedEventPreviews).toHaveBeenCalledWith(campusId));
   });
 
   it("uses the platform overlay setting in Student Preview", async () => {
@@ -284,7 +288,7 @@ describe("CampusMapPage event overlays", () => {
     expect(sheetActions.getByRole("button", { name: /Report/i })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "More building actions" })).toBeVisible();
     expect(sheetActions.getByRole("button", { name: "Report map issue" })).toBeVisible();
-    expect(utilityControls).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-start");
+    expect(utilityControls).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-end");
     expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-utility-bottom-inset")).toMatch(/px$/);
     expect(screen.getByTestId("student-map-surface").style.getPropertyValue("--student-map-controls-safe-top")).toMatch(/px$/);
 
@@ -466,7 +470,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(await screen.findByRole("button", { name: /user menu/i }));
     expect(await screen.findByRole("menu", { name: "Student account menu" })).toBeInTheDocument();
     expect(stack).toHaveAttribute("data-profile-open", "true");
-    expect(stack).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-start");
+    expect(stack).toHaveClass("right-3", "bottom-3", "md:bottom-6", "items-end");
     expect(screen.getByRole("button", { name: "Open event map" })).toBe(eventMap);
     expect(eventMap).toHaveAttribute("data-dock", "event-map-bottom-left");
     expect(surface.querySelector("svg > g[transform]")?.getAttribute("transform")).toBe(cameraBefore);
@@ -648,9 +652,10 @@ describe("CampusMapPage event overlays", () => {
     expect(within(planner).queryByTestId("selected-room-planner-context")).not.toBeInTheDocument();
     expect(within(planner).queryByRole("button", { name: "Report this room" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
+    const mapFloorPicker = within(screen.getByTestId("student-floor-picker"));
+    fireEvent.click(mapFloorPicker.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
     fireEvent.click(screen.getByRole("option", { name: /Floor 2/ }));
-    expect(screen.getByRole("button", { name: "Choose floor. Current floor: Floor 2" })).toBeInTheDocument();
+    expect(mapFloorPicker.getByRole("button", { name: "Choose floor. Current floor: Floor 2" })).toBeInTheDocument();
     expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
     expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
     expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Choose destination");

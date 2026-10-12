@@ -9,6 +9,27 @@ export function walkingAnimationDuration(distanceM: number, journeyDistanceM = d
   return Math.max(1, journeyDuration * 1.2 * distanceM / journeyDistance);
 }
 
+/**
+ * Time one canonical walk leg as its share of the same-context journey.
+ * RouteContextLeg/RouteIndoorSegment distances are already normalized meters,
+ * so this avoids charging every short leg a full route-sized animation. The
+ * progress remains continuous across all waypoints in the leg.
+ */
+export function navigationWalkDuration(
+  distanceM: number,
+  journeyDistanceM: number,
+  speedMultiplier: number = 1,
+): number {
+  if (!Number.isFinite(distanceM) || distanceM <= 0) return 1;
+  const journeyDistance = Number.isFinite(journeyDistanceM) && journeyDistanceM > 0
+    ? Math.max(distanceM, journeyDistanceM)
+    : distanceM;
+  const speed = Number.isFinite(speedMultiplier) && speedMultiplier > 0 ? speedMultiplier : 1;
+  const journeyDuration = Math.max(1600, Math.min(16000, journeyDistance * 80));
+  const legShare = distanceM / journeyDistance;
+  return Math.max(450, journeyDuration * legShare) / speed;
+}
+
 /** Route playback is a presentation pace derived from human instructions,
  * never from uncalibrated map units or estimated real-world walking speed. */
 export function guidedRouteProgressDuration(meaningfulStepCount: number): number {

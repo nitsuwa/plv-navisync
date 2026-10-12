@@ -183,6 +183,17 @@ describe("Student Campus 3D presentation helpers", () => {
     expect(Math.cos(angle)).toBeLessThan(0);
   });
 
+  it("keeps a diagonal approach from introducing a tilted gate yaw", () => {
+    const marker = { id: "gate", x: 0, y: 0, type: "gate", name: "Gate", color: "#2563eb" } as CampusMarker;
+    const campus = {
+      buildings: [{ ...building, x: 100, y: 0, width: 50, height: 20 }],
+      paths: [{ id: "diagonal-approach", type: "walkway", width: 12, color: "#fff", points: [{ x: 0, y: 0 }, { x: 40, y: 40 }] }],
+      canvasW: 200,
+      canvasH: 120,
+    } as unknown as ReadonlyOutdoorCampus;
+    expect(campusGateFacingRotation(marker, campus)).toBeCloseTo(Math.PI / 2);
+  });
+
   it("prefers an authored gate rotation when one is present", () => {
     const marker = { id: "gate", x: 0, y: 100, type: "gate", name: "Gate", color: "#2563eb", rotation: 90 } as CampusMarker;
     const campus = { buildings: [], paths: [], canvasW: 100, canvasH: 100 } as unknown as ReadonlyOutdoorCampus;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FloorDoor, FloorStairs, FloorWall, FloorWindow } from "../../components/map-builder/types";
-import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../indoor3dGeometry";
 
 const wall = (id: string, x1: number, y1: number, x2: number, y2: number): FloorWall => ({
   id, x1, y1, x2, y2, thickness: 4, color: "#ccc", visible: true,
@@ -107,6 +107,14 @@ describe("navigation-focused indoor furniture", () => {
     expect(shouldRenderIndoorLandmarkFurniture(item("study-table-4-seats"))).toBe(false);
     expect(shouldRenderIndoorLandmarkFurniture(item("large-table", { width: 120, height: 90 }))).toBe(true);
     expect(shouldRenderIndoorLandmarkFurniture(item("reception-counter", { visible: false }))).toBe(false);
+  });
+
+  it("allows authored dining tables and chairs as a Student 3D canteen-only presentation exception", () => {
+    expect(shouldRenderStudentCanteenDiningFurniture(item("dining-table-6-seats"))).toBe(true);
+    expect(shouldRenderStudentCanteenDiningFurniture(item("chair", { name: "Dining chair" }))).toBe(true);
+    expect(shouldRenderStudentCanteenDiningFurniture(item("table-tennis"))).toBe(false);
+    expect(shouldRenderStudentCanteenDiningFurniture(item("dining-table-4-seats", { visible: false }))).toBe(false);
+    expect(shouldRenderStudentCanteenDiningFurniture(item("service-counter"))).toBe(false);
   });
 
   it("returns evenly spaced seat angles without relying on Array.from callback extras", () => {

@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { guidedRouteProgressDuration, outdoorWalkingDistance, walkingAnimationDuration } from "../walkingAnimation";
+import { guidedRouteProgressDuration, navigationWalkDuration, outdoorWalkingDistance, walkingAnimationDuration } from "../walkingAnimation";
 
 describe("shared indoor and outdoor walking pace", () => {
   it("paces guided movement by meaningful route steps rather than map distance", () => {
     expect(guidedRouteProgressDuration(1)).toBe(6650);
     expect(guidedRouteProgressDuration(5)).toBeGreaterThan(guidedRouteProgressDuration(1));
     expect(guidedRouteProgressDuration(100)).toBe(16000);
+  });
+
+  it("allocates one shared journey pace proportionally to canonical leg distance", () => {
+    expect(navigationWalkDuration(20, 200)).toBe(1600);
+    expect(navigationWalkDuration(100, 200)).toBe(8000);
+    expect(navigationWalkDuration(20, 200)).toBeLessThan(navigationWalkDuration(100, 200));
+    expect(navigationWalkDuration(20, 20)).toBe(1600);
+  });
+
+  it("makes 2x speed double movement progress without changing transition policy", () => {
+    expect(navigationWalkDuration(80, 320, 2)).toBe(navigationWalkDuration(80, 320) / 2);
+    expect(navigationWalkDuration(0, 320, 2)).toBe(1);
   });
 
   it("uses equal milliseconds per meter for indoor and outdoor legs", () => {
