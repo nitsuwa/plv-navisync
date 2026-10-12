@@ -264,6 +264,10 @@ describe("student route state flow", () => {
     expect(studentRouteProgressForIndoorSegment(route, steps, segment, 0.4, 2)).toBeCloseTo(5.4 / steps.length);
     expect(steps.map((step) => step.id)).toContain("walk-first");
     expect(steps.map((step) => step.id)).toContain("walk-second");
+    expect(steps.map((step, index) => studentRouteSeekTarget(route, steps, index).contextLegIndex))
+      .toEqual([0, 0, 0, 1, 1, 2, 2]);
+    expect(steps.map((step, index) => studentRouteSeekTarget(route, steps, index).context))
+      .toEqual(["floor", "floor", "floor", "campus", "campus", "floor", "floor"]);
   });
 
   it("resolves step seeks to authored Campus, source Floor, and destination Floor boundaries", () => {

@@ -7,7 +7,7 @@ import * as THREE from "three";
 import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
-import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
 import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
 import type { Pt } from "../../lib/routePlanner";
@@ -45,8 +45,11 @@ interface IndoorFloor3DRendererProps {
   onExitDoorClick?: (doorId: string) => void;
   focusRoomId?: string | null;
   focusNonce?: number;
+  routeInspectionFocusPoint?: Pt | null;
+  routeInspectionFocusKey?: string;
   destinationRoomId?: string | null;
   eventFurniture?: readonly FloorFurniture[];
+  showDiningFurniture?: boolean;
   eventLabels?: readonly FloorLabel[];
   previewCamera?: Event3DCameraRequest;
   eventMarker?: { point: Pt; label: string } | null;
@@ -721,6 +724,110 @@ function Furniture({ item, viewport }: { item: FloorPlan["furniture"][number]; v
 }
 const MemoFurniture = memo(Furniture);
 
+type FurnitureInstanceBox = { position: [number, number, number]; rotation: number; scale: [number, number, number] };
+
+/** Batched, visual-only canteen furniture derived from the authored floor items. */
+function StudentCanteenDiningFurnitureLayer({ items, viewport }: { items: readonly FloorFurniture[]; viewport: FloorViewport }) {
+  const tableRef = useRef<THREE.InstancedMesh>(null);
+  const legRef = useRef<THREE.InstancedMesh>(null);
+  const seatRef = useRef<THREE.InstancedMesh>(null);
+  const backRef = useRef<THREE.InstancedMesh>(null);
+  const boxGeometry = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
+  const tableMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: "#8b6f4e", roughness: 0.78 }), []);
+  const frameMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: "#625d55", roughness: 0.78 }), []);
+  const seatMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: "#7e8585", roughness: 0.84 }), []);
+  const { tables, legs, seats, backs } = useMemo(() => {
+    const tables: FurnitureInstanceBox[] = [];
+    const legs: FurnitureInstanceBox[] = [];
+    const seats: FurnitureInstanceBox[] = [];
+    const backs: FurnitureInstanceBox[] = [];
+    const addBox = (target: FurnitureInstanceBox[], position: [number, number, number], scale: [number, number, number], rotation = 0) => {
+      target.push({ position, scale, rotation });
+    };
+    const addChair = (center: [number, number, number], rotation: number, width = 0.28, depth = 0.28, backSide = -1) => {
+      addBox(seats, [center[0], center[1] + 0.39, center[2]], [width, 0.08, depth], rotation);
+      addBox(backs, [center[0] + Math.sin(rotation) * backSide * depth * 0.42, center[1] + 0.57,
+        center[2] + Math.cos(rotation) * backSide * depth * 0.42], [width, 0.3, 0.055], rotation);
+    };
+
+    for (const item of items) {
+      if (!shouldRenderStudentCanteenDiningFurniture(item)) continue;
+      const identity = `${item.assetKey ?? ""} ${item.type} ${item.name}`.toLowerCase().replace(/[_-]+/g, " ");
+      const center = pointToWorld({ x: item.x + item.width / 2, y: item.y + item.height / 2 }, viewport, FLOOR_SURFACE_Y);
+      const rotation = -(item.rotation || 0) * Math.PI / 180;
+      if (/\b(table)\b/.test(identity)) {
+        const width = Math.max(0.42, Math.min(3, item.width * FLOOR_SCALE));
+        const depth = Math.max(0.38, Math.min(2.2, item.height * FLOOR_SCALE));
+        addBox(tables, [center[0], center[1] + 0.73, center[2]], [width, 0.1, depth], rotation);
+        for (const sideX of [-1, 1]) for (const sideZ of [-1, 1]) {
+          const localX = sideX * width * 0.42;
+          const localZ = sideZ * depth * 0.4;
+          const x = center[0] + Math.cos(rotation) * localX + Math.sin(rotation) * localZ;
+          const z = center[2] - Math.sin(rotation) * localX + Math.cos(rotation) * localZ;
+          addBox(legs, [x, center[1] + 0.35, z], [0.055, 0.7, 0.055], rotation);
+        }
+
+        const roundGroup = /round table|round-table/.test(identity);
+        const seatCount = roundGroup || /6 seat/.test(identity) ? 6 : /4 seat/.test(identity) ? 4 : 0;
+        if (seatCount === 6 && roundGroup) {
+          for (let index = 0; index < seatCount; index += 1) {
+            const angle = index * Math.PI * 2 / seatCount;
+            const localX = Math.cos(angle) * (width / 2 + 0.14);
+            const localZ = Math.sin(angle) * (depth / 2 + 0.14);
+            const x = center[0] + Math.cos(rotation) * localX + Math.sin(rotation) * localZ;
+            const z = center[2] - Math.sin(rotation) * localX + Math.cos(rotation) * localZ;
+            addChair([x, center[1], z], rotation + angle, 0.26, 0.25, 1);
+          }
+        } else if (seatCount > 0) {
+          const perSide = seatCount / 2;
+          for (const side of [-1, 1]) for (let index = 0; index < perSide; index += 1) {
+            const localX = (index - (perSide - 1) / 2) * width * 0.62;
+            const localZ = side * (depth / 2 + 0.16);
+            const x = center[0] + Math.cos(rotation) * localX + Math.sin(rotation) * localZ;
+            const z = center[2] - Math.sin(rotation) * localX + Math.cos(rotation) * localZ;
+            addChair([x, center[1], z], rotation, 0.25, 0.25, side);
+          }
+        }
+      } else if (/\b(chair|seat|stool)\b/.test(identity)) {
+        addChair(center, rotation);
+      }
+    }
+    return { tables, legs, seats, backs };
+  }, [items, viewport]);
+  useLayoutEffect(() => {
+    const object = new THREE.Object3D();
+    const apply = (mesh: THREE.InstancedMesh | null, instances: readonly FurnitureInstanceBox[]) => {
+      if (!mesh) return;
+      instances.forEach((instance, index) => {
+        object.position.set(...instance.position);
+        object.rotation.set(0, instance.rotation, 0);
+        object.scale.set(...instance.scale);
+        object.updateMatrix();
+        mesh.setMatrixAt(index, object.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    };
+    apply(tableRef.current, tables);
+    apply(legRef.current, legs);
+    apply(seatRef.current, seats);
+    apply(backRef.current, backs);
+  }, [backs, legs, seats, tables]);
+  useEffect(() => () => {
+    boxGeometry.dispose();
+    tableMaterial.dispose();
+    frameMaterial.dispose();
+    seatMaterial.dispose();
+  }, [boxGeometry, frameMaterial, seatMaterial, tableMaterial]);
+
+  return <group name="student-canteen-authored-furniture" frustumCulled>
+    {tables.length > 0 && <instancedMesh ref={tableRef} args={[boxGeometry, tableMaterial, tables.length]} castShadow receiveShadow />}
+    {legs.length > 0 && <instancedMesh ref={legRef} args={[boxGeometry, frameMaterial, legs.length]} castShadow />}
+    {seats.length > 0 && <instancedMesh ref={seatRef} args={[boxGeometry, seatMaterial, seats.length]} castShadow />}
+    {backs.length > 0 && <instancedMesh ref={backRef} args={[boxGeometry, seatMaterial, backs.length]} castShadow />}
+  </group>;
+}
+
 function Beam({ start, end, thickness, color, metalness = 0 }: { start: [number, number, number]; end: [number, number, number]; thickness: number; color: string; metalness?: number }) {
   const a = new THREE.Vector3(...start); const b = new THREE.Vector3(...end);
   const direction = b.clone().sub(a); const length = direction.length();
@@ -1117,6 +1224,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
   const selectionTweenRef = useRef<{ startPosition: THREE.Vector3; endPosition: THREE.Vector3; startTarget: THREE.Vector3; endTarget: THREE.Vector3; startedAt: number; duration: number } | null>(null);
   const selectionFocusLockRef = useRef(false);
   const lastRoomFocusKeyRef = useRef("");
+  const lastRouteInspectionFocusKeyRef = useRef("");
   const dampingBeforeRecenterRef = useRef<boolean | null>(null);
   const followCameraStateRef = useRef({ freeLook: Boolean(props.freeLook) });
   const { camera, invalidate, size } = useThree();
@@ -1470,6 +1578,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       lastRoomFocusKeyRef.current = "";
       return;
     }
+    if (props.routeInspectionFocusPoint && props.routeInspectionFocusKey) return;
     if (!props.focusRoomId || !selectionRoom) {
       if (!props.focusRoomId) {
         lastRoomFocusKeyRef.current = "";
@@ -1578,7 +1687,46 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       duration: 360,
     };
     invalidate();
-  }, [camera, cancelRecenterTween, floor.id, invalidate, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, selectionRoom, size.height, size.width, viewport]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, selectionRoom, size.height, size.width, viewport]);
+
+  useEffect(() => {
+    if (props.followMode && !props.freeLook) {
+      lastRouteInspectionFocusKeyRef.current = "";
+      return;
+    }
+    if (!props.routeInspectionFocusPoint || !props.routeInspectionFocusKey) {
+      lastRouteInspectionFocusKeyRef.current = "";
+      return;
+    }
+    const focusKey = `${floor.id}:${props.routeInspectionFocusKey}`;
+    if (lastRouteInspectionFocusKeyRef.current === focusKey || !controls.current) return;
+    lastRouteInspectionFocusKeyRef.current = focusKey;
+    const target = new THREE.Vector3(...pointToWorld(props.routeInspectionFocusPoint, viewport, FLOOR_SURFACE_Y + 0.18));
+    const currentTarget = controls.current.target as THREE.Vector3;
+    const currentOffset = camera.position.clone().sub(currentTarget);
+    const endPosition = target.clone().add(currentOffset);
+    cancelRecenterTween();
+    selectionFocusLockRef.current = false;
+    if (props.reducedMotion) {
+      currentTarget.copy(target);
+      camera.position.copy(endPosition);
+      camera.lookAt(target);
+      controls.current.update();
+      invalidate();
+      return;
+    }
+    dampingBeforeRecenterRef.current = Boolean(controls.current.enableDamping);
+    controls.current.enableDamping = false;
+    selectionTweenRef.current = {
+      startPosition: camera.position.clone(),
+      endPosition,
+      startTarget: currentTarget.clone(),
+      endTarget: target,
+      startedAt: performance.now(),
+      duration: 380,
+    };
+    invalidate();
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, viewport]);
 
   const baseRegions = regions.length ? regions : [{ x: 0, y: 0, width: floor.canvasW ?? 600, height: floor.canvasH ?? 450 }];
   const visibleRoute = route.length > 1;
@@ -1638,7 +1786,10 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {floor.ramps?.map((ramp) => <MemoRampModel key={`ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
       {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
       {floor.entranceSteps?.filter((step) => step.visible !== false).map((step) => <MemoStairModel key={`entrance-step-${step.id}`} stair={step} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} entranceModel />)}
-      {floor.furniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
+      {floor.furniture?.filter((item) => shouldRenderIndoorLandmarkFurniture(item)
+        && !(props.showDiningFurniture && shouldRenderStudentCanteenDiningFurniture(item)))
+        .map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
+      {props.showDiningFurniture && floor.furniture?.length ? <StudentCanteenDiningFurnitureLayer items={floor.furniture} viewport={viewport} /> : null}
       <EventAsset3DLayer furniture={props.eventFurniture} labels={props.eventLabels} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
       {props.eventMarker && <Html position={pointToWorld(props.eventMarker.point, viewport, 0.3)} center distanceFactor={9} zIndexRange={[90, 0]}>
         <div className="rounded-xl border border-orange-200 bg-white/95 px-2 py-1.5 text-[10px] font-extrabold text-orange-800 shadow-lg">◉ {props.eventMarker.label}</div>

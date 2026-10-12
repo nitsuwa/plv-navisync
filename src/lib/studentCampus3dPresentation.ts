@@ -291,6 +291,7 @@ function closestPathDirection(marker: CampusMarker, campus: ReadonlyOutdoorCampu
  * nearby approach exists. The campus content center is the final fallback.
  */
 export function campusGateFacingRotation(marker: CampusMarker, campus: ReadonlyOutdoorCampus): number {
+  const snapToQuarterTurn = (angle: number) => Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
   const authoredRotation = (marker as CampusMarker & { rotation?: number }).rotation;
 
   const buildingCenters = campus.buildings.map((building) => ({
@@ -310,10 +311,12 @@ export function campusGateFacingRotation(marker: CampusMarker, campus: ReadonlyO
     let dx = nearestPath.dx / pathLength;
     let dy = nearestPath.dy / pathLength;
     if (dx * inwardX + dy * inwardY < 0) { dx *= -1; dy *= -1; }
-    return Math.atan2(dx, dy);
+    // The Student 3D gate is a rigid, renderer-only landmark. Snap noisy path
+    // tangents to the nearest cardinal yaw so the physical leaves stay square.
+    return snapToQuarterTurn(Math.atan2(dx, dy));
   }
   if (typeof authoredRotation === "number" && Number.isFinite(authoredRotation)) {
-    return -(authoredRotation * Math.PI) / 180;
+    return snapToQuarterTurn(-(authoredRotation * Math.PI) / 180);
   }
-  return Math.atan2(inwardX / inwardLength, inwardY / inwardLength);
+  return snapToQuarterTurn(Math.atan2(inwardX / inwardLength, inwardY / inwardLength));
 }

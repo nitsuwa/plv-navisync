@@ -117,6 +117,32 @@ describe("published campus version refresh", () => {
     expect(result.current.activeCampus?.id).toBe(campus.id);
   });
 
+  it("does not drop a scheduled metadata poll when timer drift reaches the throttle boundary", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => usePublishedCampus());
+    await flushPromises();
+    expect(result.current.activeCampus?.id).toBe(campus.id);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(2);
+
+    // Simulate the browser timer firing a few hundred milliseconds before
+    // the global duplicate-request guard reaches its exact 60-second cutoff.
+    vi.setSystemTime(Date.now() - 500);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.listPublishedVersionStatus).toHaveBeenCalledTimes(3);
+    expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches exactly one new sanitized snapshot after the version id changes", async () => {
     const updatedCampus = { ...campus, name: "Updated Main Campus" } as Campus;
     mocks.listPublishedSnapshots.mockResolvedValueOnce([campus]).mockResolvedValueOnce([updatedCampus]);
