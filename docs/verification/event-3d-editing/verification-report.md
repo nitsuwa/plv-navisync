@@ -2,6 +2,8 @@
 
 Verified code revision: `ada8abdc50b874c1c0619baea2330d5b342afc9c`.
 
+Published release: `72a488fe652ffa7e8888b01dbd3e579358532deb`, confirmed on GitHub main on 2026-10-13. Local main was fast-forwarded and pushed normally. Subsequent handoff-status documentation does not change production code.
+
 ## Included Git history
 
 - `247d23b`: synchronized organizer/admin 3D previews and approved public event additions.

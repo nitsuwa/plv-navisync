@@ -66,9 +66,9 @@ Files: create `src/components/events/Event3DSceneLayout.tsx`, `Event3DEditorCont
 - [x] Run broad relevant tests, full suite, production build, diff checks and a baseline type diagnostic comparison. Document existing unrelated failures precisely.
 - [x] Dispatch independent code review per requesting-code-review; repair material findings and rerun affected checks.
 - [x] Write a combined manual test guide, noting the separately imported optional campus snapshot cache migration.
-- [ ] Stage/commit only the feature and related records, fetch origin again, integrate/reverify new changes if any, fast-forward local main, and push main normally.
-- [ ] Confirm origin/main matches the intended local commit and deliver the complete test instructions.
+- [x] Stage/commit only the feature and related records, fetch origin again, integrate/reverify new changes if any, fast-forward local main, and push main normally. Release `72a488f` confirmed on GitHub main.
+- [x] Confirm origin/main matches the intended local commit and deliver the complete test instructions in `docs/verification/event-3d-editing/README.md`.
 
 ## Next step
 
-Implementation, 40 focused tests, 13 real browser editing checks and 10 preview regression checks have passed. Complete broad verification and Git integration; the user will manually test the whole feature using the combined guide after delivery.
+Implementation and Git integration are complete. Final merged focused233 and browser13+10 checks pass; build passes. Broader test/type failures and worker limitations are documented. The user can now perform one complete manual test using the combined guide.
