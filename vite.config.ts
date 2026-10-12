@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -16,7 +16,46 @@ function figmaAssetResolver() {
   }
 }
 
-export default defineConfig({
+function isLocalUrl(value: string): boolean {
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`
+  try {
+    const hostname = new URL(candidate).hostname.toLowerCase()
+    return hostname === 'localhost'
+      || hostname.endsWith('.localhost')
+      || hostname === '127.0.0.1'
+      || hostname === '0.0.0.0'
+      || hostname === '[::1]'
+  } catch {
+    return false
+  }
+}
+
+function publicAppOrigin(mode: string): string {
+  const env = loadEnv(mode, '.', '')
+  const explicitUrl = env.VITE_PUBLIC_APP_URL?.trim()
+  const vercelEnvironment = env.VERCEL_ENV
+  const deploymentUrl = env.VERCEL_URL
+  const productionUrl = env.VERCEL_PROJECT_PRODUCTION_URL
+  const vercelUrl = vercelEnvironment === 'production'
+    ? productionUrl || deploymentUrl
+    : deploymentUrl || productionUrl
+  const isVercelBuild = Boolean(vercelEnvironment || deploymentUrl || productionUrl)
+  const explicitIsLocal = explicitUrl ? isLocalUrl(explicitUrl) : false
+  const candidate = explicitUrl && (!isVercelBuild || !explicitIsLocal) ? explicitUrl : vercelUrl
+
+  if (!candidate) return ''
+  const withProtocol = /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`
+  try {
+    return new URL(withProtocol).origin
+  } catch {
+    return ''
+  }
+}
+
+export default defineConfig(({ mode }) => ({
+  define: {
+    'import.meta.env.VITE_PUBLIC_APP_ORIGIN': JSON.stringify(publicAppOrigin(mode)),
+  },
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if
@@ -69,4 +108,4 @@ export default defineConfig({
     css: true,
     testTimeout: 10000,
   },
-})
+}))
