@@ -275,6 +275,18 @@ export function shouldRenderIndoorLandmarkFurniture(
   return area >= 9000 && /\b(table|desk|workbench|cabinet|shelf)\b/.test(identity);
 }
 
+/** Keep authored dining tables and seats visible in the Student 3D canteen.
+ * This is a presentation-only exception; navigation geometry never reads it. */
+export function shouldRenderStudentCanteenDiningFurniture(
+  item: Pick<FloorFurniture, "assetKey" | "type" | "name" | "category" | "visible">,
+): boolean {
+  if (item.visible === false) return false;
+  const identity = `${item.assetKey ?? ""} ${item.type ?? ""} ${item.name ?? ""} ${item.category ?? ""}`
+    .toLowerCase().replace(/[_-]+/g, " ");
+  if (/\b(table tennis|ping pong)\b/.test(identity)) return false;
+  return /\b(table|chair|seat|stool)\b/.test(identity);
+}
+
 /** Angles for evenly spaced seats around a table; kept pure for renderer tests. */
 export function radialFurnitureSeatAngles(count: number): number[] {
   const safeCount = Math.max(0, Math.floor(Number.isFinite(count) ? count : 0));

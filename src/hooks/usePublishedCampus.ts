@@ -8,6 +8,7 @@ import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformS
 const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
 const PUBLISHED_VERSION_POLL_INTERVAL_MS = 60_000;
+const VERSION_STATUS_POLL_DRIFT_TOLERANCE_MS = 1_000;
 const SHARED_VERSION_STATUS_FRESH_MS = 5_000;
 const MAX_REFRESH_BACKOFF_MS = 5 * 60_000;
 const REFRESH_RETRY_BASE_MS = 60_000;
@@ -148,7 +149,7 @@ function getSharedVersionStatus(force = false): Promise<PublishedVersionStatus[]
     return Promise.resolve(sharedVersionStatus);
   }
   if (!force && now < sharedVersionRetryAt) return Promise.resolve(null);
-  if (!force && now - sharedVersionStatusLastAttemptAt < PUBLISHED_VERSION_POLL_INTERVAL_MS) {
+  if (!force && now - sharedVersionStatusLastAttemptAt < PUBLISHED_VERSION_POLL_INTERVAL_MS - VERSION_STATUS_POLL_DRIFT_TOLERANCE_MS) {
     return Promise.resolve(sharedVersionStatus);
   }
   sharedVersionStatusLastAttemptAt = now;
@@ -317,7 +318,6 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           const cached = publishedSnapshotsByCampus.get(item.campus_id);
           return cached?.versionId !== item.latest_published_version_id;
         });
-
         if (needsSnapshot) {
           const snapshots = await loadSanitizedPublishedSnapshots();
           setCachedSnapshots(status, snapshots);
