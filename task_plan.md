@@ -8,9 +8,9 @@ Active task: implement all approved UX suggestions. User clarified that realisti
 - [x] Actual placement hit-target cursors, pointer/mode feedback and explicit repeat placement.
 - [x] Compact 3D tools and shared desktop inspector/mobile sheet.
 - [x] Save/retry/newer-edit and issue-focus feedback.
-- [ ] Focused/WebGL/build/type verification, read-only review and authorized main delivery.
+- [x] Focused/WebGL/build/type verification, read-only review and authorized main delivery.
 
-Implemented and browser-verified; final one-worker suite/build and authorized main delivery are in progress. Preserve existing layout coordinates and unrelated files. No live SQL or user event writes.
+Completed:feature418a1ad is on local/GitHub main.340 focused tests,11 browser checks and build PASS; baseline type diagnostics unchanged. Manual testing go signal ready. Preserve existing layout coordinates and unrelated files. No live SQL or user event writes.
 
 ## October 13 — Event editor usability and reported defects
 

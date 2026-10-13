@@ -45,5 +45,14 @@
     ]
   },
   "sqlRequired": false,
-  "physicalDeviceFollowUp": "Check real iOS/Android GPU and keyboard behavior with manual-test.md"
+  "physicalDeviceFollowUp": "Check real iOS/Android GPU and keyboard behavior with manual-test.md",
+  "delivery": {
+    "pullRequestCreated": false,
+    "featureCommit": "418a1ad2bfdf0503e8bcd86f2c918a49a926c2cb",
+    "integration": "fast-forward",
+    "conflicts": 0,
+    "backupBranch": "backup/pre-event-consistent-tools-20261013",
+    "githubMainFeaturePushed": true,
+    "forcePush": false
+  }
 }

@@ -35,4 +35,7 @@
 - [x] Run affected editor/sizing/native/coordinator/public/geometry tests and inspect actual WebGL desktop/mobile screenshots.
 - [x] Verify save/reopen, repeat/undo, fixed/custom/reset, cursor over real hit targets, touch/keyboard, group/lock and read-only fallback.
 - [x] Run build and comparable type diagnostic check; get independent read-only review per requesting-code-review and resolve material findings.
-- [ ] Update the manual guide/results, integrate fresh main and deliver under the existing authorized Git workflow. Give the user a testing go signal and state any remaining physical-device limits.
+- [x] Update the manual guide/results, integrate fresh main and deliver under the existing authorized Git workflow. Give the user a testing go signal and state any remaining physical-device limits.
+
+
+Delivery: feature418a1ad fast-forwarded from f3bc9a3 to local main and pushed to origin/main on October13.340 focused tests,11 actual browser checks and production build pass; type diagnostics match1047 baseline. No PR, force push, SQL or live event writes. Manual guide is ready.
