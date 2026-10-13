@@ -26,5 +26,13 @@
     "newDiagnostics": 0
   },
   "review": "Independent read-only review: no material defects",
-  "sqlRequired": false
+  "sqlRequired": false,
+  "delivery": {
+    "pullRequestCreated": false,
+    "forcePush": false,
+    "githubMainPushed": true,
+    "integration": "fast-forward",
+    "featureCommit": "47d4eb2",
+    "backup": "backup/pre-event-camera-retention-20261013"
+  }
 }
