@@ -50,4 +50,4 @@ Files: new Event3DAssetPicker.tsx, Event3DEditorControls.tsx, EventLayout3DPrevi
 - [x] Exercise actual WebGL placement, view switch, save/reopen, labels/history/locks, outside-canvas floor, indoor/outdoor, light/dark/mobile and fallback with isolated fixtures.
 - [x] Inspect screenshots, run production build and type diagnostic comparison if changed types warrant it.
 - [x] Request independent review per requesting-code-review, fix material issues and rerun affected checks.
-- [ ] Document results and remaining limits; integrate latest main safely and deliver tested changes within the existing authorization.
+- [x] Document results and remaining limits; integrate latest main safely and deliver tested changes within the existing authorization. Feature `6a19c10` pushed to GitHub main after a clean fast-forward; unrelated local files preserved.

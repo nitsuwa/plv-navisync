@@ -8,9 +8,9 @@ Current task: fix the reported 3D placement/persistence, 2D floor clipping, asse
 - [x] Reproduce and fix direct placement/persistence through the actual page coordinator, including unchanged grant refresh and immediate revocation.
 - [x] Restore full readonly floor rendering/framing without changing authored event coordinates; include exterior presentation bounds and owner metadata.
 - [x] Improve the asset catalog, controls, cursors, overlay containment and all 14 model proportions; adapt Booth Area preset spacing.
-- [ ] Verify relevant unit/browser checks, review, build and deliver within authorized Git workflow.
+- [x] Verify relevant unit/browser checks, review, build and deliver within authorized Git workflow. Feature `6a19c10` fast-forwarded and pushed to GitHub main; no conflicts, PR or force push. Backup and unrelated local files preserved.
 
-**Next step:** commit and integrate with latest main under the existing authorization. Final focused253/public64, browser10/gesture13 and build3644 modules pass; TypeScript1047/1047 unchanged; read-only independent review passes. Results/manual steps in `docs/verification/event-editor-usability/README.md`.
+**Next step:** user refreshes the app and performs the combined manual check in `docs/verification/event-editor-usability/README.md`. Implementation and main integration are complete. Final focused253/public64, browser10/gesture13 and build3644 modules pass; TypeScript1047/1047 unchanged; read-only independent review passes. No new SQL or live database/event/base-map mutation.
 
 ## October 12, 2026 — Direct event editing in 3D and main integration
 

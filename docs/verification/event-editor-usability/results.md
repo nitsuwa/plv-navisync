@@ -2,6 +2,8 @@
 
 Starting main/source: `72b4093`. Implementation branch: `codex/event-editor-usability-fixes`.
 
+Delivered feature: `6a19c10`, confirmed pushed to GitHub main. Fresh fetch found no intervening upstream changes. Local main was fast-forwarded without conflicts; its full tree matched the tested feature tree before push. A local backup branch `codex/backup-main-before-event-usability-6a19c10` retains the starting main commit. Unrelated handoff/continuity files were preserved. No PR or force push.
+
 - Focused editor/page/native-pointer/geometry/preset/readonly: **253 passed, 0 failed**, 14 files. [Results](focused-results.json).
 - Public-map event/publication/outdoor projection: **64 passed, 0 failed**, 3 files. [Results](public-map-results.json).
 - Actual published-map fixture/WebGL usability: **10 checks passed**, no page errors. Includes all 14 precise rendered mesh bounds, complete COED annex rooms, mouse/touch/keyboard placement, save/reopen, 2D/3D/location synchronization, mobile catalog focus, cursor and admin read-only behavior. [Results](evidence/browser-results.json).
