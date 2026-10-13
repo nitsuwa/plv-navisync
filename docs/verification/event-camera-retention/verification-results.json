@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "scope": "Camera/zoom only; no asset sizing or database changes",
+  "base": "b582372e98cae2fae6c32b009c0b753fd0fbefb3",
+  "tests": {
+    "failed": 0,
+    "passed": 83,
+    "workerCount": 1
+  },
+  "browser": {
+    "poseTolerance": 0.005,
+    "realNativeOrbitPan": true,
+    "checks": 6,
+    "liveDataWrites": false,
+    "pageErrors": 0,
+    "status": "PASS"
+  },
+  "build": {
+    "exitCode": 0,
+    "modules": 3647
+  },
+  "types": {
+    "current": 1047,
+    "baseline": 1047,
+    "singleThreaded": true,
+    "newDiagnostics": 0
+  },
+  "review": "Independent read-only review: no material defects",
+  "sqlRequired": false
+}

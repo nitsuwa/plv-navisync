@@ -9,7 +9,7 @@ import type { CampusDecorAsset, CampusPath, FloorFurniture, FloorLabel } from ".
 import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
 import type { Event3DEditing } from "../../lib/event3dEditing";
 import { EventPreviewCamera } from "../events/EventPreviewCamera";
-import { event3DOutdoorTargetBounds, type Event3DCameraRequest } from "../../lib/event3dLayout";
+import { event3DOutdoorTargetBounds, type Event3DCameraRequest, type Event3DCameraSession } from "../../lib/event3dLayout";
 import { DECOR_ASSET_MAP } from "../map-builder/constants";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
@@ -60,6 +60,7 @@ interface StudentCampus3DRendererProps {
   eventLabels?: readonly FloorLabel[];
   eventEditing?: Event3DEditing;
   previewCamera?: Event3DCameraRequest;
+  previewCameraSession?: Event3DCameraSession;
   selectedEventLocationId?: string | null;
   darkMode?: boolean;
   reducedMotion?: boolean;
@@ -2235,7 +2236,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
     {props.exploreTransitionCues?.map((transition) => <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
-    <EventPreviewCamera request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
+    <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
   {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />}
   </>;
 }

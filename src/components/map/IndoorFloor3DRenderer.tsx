@@ -18,7 +18,7 @@ import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } fr
 import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
 import type { Event3DEditing } from "../../lib/event3dEditing";
 import { EventPreviewCamera } from "../events/EventPreviewCamera";
-import type { Event3DCameraRequest } from "../../lib/event3dLayout";
+import type { Event3DCameraRequest, Event3DCameraSession } from "../../lib/event3dLayout";
 
 declare module "react" {
   namespace JSX {
@@ -55,6 +55,7 @@ interface IndoorFloor3DRendererProps {
   eventLabels?: readonly FloorLabel[];
   eventEditing?: Event3DEditing;
   previewCamera?: Event3DCameraRequest;
+  previewCameraSession?: Event3DCameraSession;
   eventMarker?: { point: Pt; label: string } | null;
   activeTransition?: { point: Pt; label: string; onActivate?: () => void } | null;
   exploreTransitionCues?: readonly { id: string; point: Pt; label: string; onActivate: () => void }[];
@@ -1839,7 +1840,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     </group>
     <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.2} maxPolarAngle={Math.PI / 3}
       enableRotate enablePan={!props.followMode || props.freeLook} enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
-    <EventPreviewCamera request={props.previewCamera} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
+    <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
   </>;
 }
 

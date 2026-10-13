@@ -4,6 +4,9 @@ import type { Student3dCameraTargetBounds } from "./student3dInput";
 
 export interface Event3DFrame { scale: number; originX: number; originY: number }
 export interface Event3DCameraRequest { nonce: number; kind: "fit" | "focus" | "zoom-in" | "zoom-out"; bounds: LayoutRect; maxHeight?: number }
+export interface Event3DCameraSnapshot { position: [number, number, number]; target: [number, number, number]; zoom: number; far: number; minDistance: number; maxDistance: number }
+/** Editor-lifetime view state; never part of the saved event or published map. */
+export interface Event3DCameraSession { current?: Event3DCameraSnapshot }
 export function eventAsset3DTransform(item: FloorFurniture, frame: Event3DFrame) {
   if (item.visible === false || ![item.x, item.y, item.width, item.height, item.rotation ?? 0, frame.scale, frame.originX, frame.originY].every(Number.isFinite)
     || item.width <= 0 || item.height <= 0 || frame.scale <= 0) return null;

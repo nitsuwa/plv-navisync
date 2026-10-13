@@ -85,7 +85,7 @@ import { EventSelectionOverlay } from "./EventSelectionOverlay";
 import { constrainEventAsset, eventAssetAllowsResize, eventAssetReferenceFactor, resetEventAssetSize, resizeEventAsset, type EventSizeContext } from "../../lib/eventAssetSizing";
 import { stableEventJson } from "../../lib/stableEventJson";
 import { EventSaveStatus } from "./EventSaveStatus";
-import { event3DLayoutBounds } from "../../lib/event3dLayout";
+import { event3DLayoutBounds, type Event3DCameraSession } from "../../lib/event3dLayout";
 import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
 import { eventPlacementGuides } from "../../lib/eventPlacementGuides";
@@ -663,7 +663,9 @@ export function EventFloorEditor({
   // ── Canvas dimensions ──────────────────────────────────────────────────
   const canvasW = floorPlan.canvasW || 800;
   const canvasH = floorPlan.canvasH || 600;
+  const cameraSessions = useRef<Record<string, Event3DCameraSession>>({});
   const viewportLocationKey = `${floorPlan.buildingId}:${floorPlan.id}:${canvasW}:${canvasH}`;
+  const cameraSession = cameraSessions.current[viewportLocationKey] ?? (cameraSessions.current[viewportLocationKey] = {});
   const eventContentBounds = useMemo(
     () => {
       const content = getFloorPlanContentBounds(floorPlan, eventFurniture, eventLabels);
@@ -2990,7 +2992,7 @@ export function EventFloorEditor({
 
       {/* Canvas */}
       {viewMode === "3d" && <div className="flex min-h-0 min-w-0 flex-1">
-        <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels}
+        <EventLayout3DPreview key={viewportLocationKey} cameraSession={cameraSession} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels}
           selectedIds={selectedIds} editing={threeEditing} editingBusy={threeBusy} focusRequest={threeFocusNonce} onReturnTo2D={() => setViewMode("2d")}
           placementLabel={threeTool === "place-label" ? "Label" : activeTemplate.name} placementValid={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)}
           editorTools={!readOnly && <Event3DEditorControls tool={threeTool}
