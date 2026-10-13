@@ -5,6 +5,14 @@ import type { FloorFurniture } from "../../components/map-builder/types";
 
 const chair: FloorFurniture = { id: "chair", type: "chair", name: "Chair", category: "event", x: 100, y: 200, width: 40, height: 20, rotation: 90, color: "#123456", layer: "events" };
 describe("event 3D layout", () => {
+  it.each([{ type: "chair", height: 0.85 }, { type: "table", height: 0.8 }, { type: "tent", height: 2.5 }, { type: "stage", height: 0.3 }])("keeps $type height realistic when its footprint is enlarged", ({ type, height }) => {
+    const frame = { scale: 0.025, originX: 0, originY: 0 };
+    const model = eventAsset3DTransform({ ...chair, type, width: 400, height: 300 }, frame)!;
+    expect(model.height).toBeCloseTo(height);
+    expect(model.width).toBe(10);
+    expect(model.depth).toBe(7.5);
+    expect(model.position).toEqual([7.5, 0.025, 8.75]);
+  });
   it("keeps the plotted center and rotation in indoor world coordinates", () => {
     const value = eventAsset3DTransform(chair, { scale: 0.025, originX: 400, originY: 300 });
     expect(value?.position).toEqual([-7, 0.025, -2.25]);
@@ -31,7 +39,7 @@ describe("event 3D layout", () => {
   it("returns no focus bounds for an empty layout", () => {
     expect(event3DLayoutBounds([], [])).toBeNull();
   });
-  it.each([{ type: "tent", width: 80, height: 80, wantHeight: 3.3 }, { type: "chair", width: 400, height: 400, wantHeight: 19.5 }])("keeps the complete $type model inside a focused camera view", ({ type, width, height, wantHeight }: { type: string; width: number; height: number; wantHeight: number }) => {
+  it.each([{ type: "tent", width: 80, height: 80, wantHeight: 2.5 }, { type: "chair", width: 400, height: 400, wantHeight: 0.85 }])("keeps the complete $type model inside a focused camera view", ({ type, width, height, wantHeight }: { type: string; width: number; height: number; wantHeight: number }) => {
     const item = { ...chair, type, width, height, rotation: 0 };
     const frame = { scale: 0.025, originX: 400, originY: 300 };
     const model = eventAsset3DTransform(item, frame)!;

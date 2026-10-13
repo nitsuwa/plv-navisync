@@ -1,5 +1,17 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 13 — Event editor usability and reported defects
+
+Current task: fix the reported 3D placement/persistence, 2D floor clipping, asset proportions and controls. Design/plan: `docs/superpowers/plans/2026-10-13-event-editor-usability.md`. Work in existing checkout on `codex/event-editor-usability-fixes`; preserve unrelated files. No live SQL or user-event mutation for verification.
+
+- [x] Inspect screenshots and current editor/page/map implementations; identify framing clamps and placement confirmation/ref boundaries.
+- [x] Reproduce and fix direct placement/persistence through the actual page coordinator, including unchanged grant refresh and immediate revocation.
+- [x] Restore full readonly floor rendering/framing without changing authored event coordinates; include exterior presentation bounds and owner metadata.
+- [x] Improve the asset catalog, controls, cursors, overlay containment and all 14 model proportions; adapt Booth Area preset spacing.
+- [ ] Verify relevant unit/browser checks, review, build and deliver within authorized Git workflow.
+
+**Next step:** commit and integrate with latest main under the existing authorization. Final focused253/public64, browser10/gesture13 and build3644 modules pass; TypeScript1047/1047 unchanged; read-only independent review passes. Results/manual steps in `docs/verification/event-editor-usability/README.md`.
+
 ## October 12, 2026 — Direct event editing in 3D and main integration
 
 Current authorized task: finish direct event editing in 3D, then commit/push/merge into GitHub main so the user can test the complete flow once. Work in the existing checkout; preserve unrelated local files. The approved scope is place, select, move, rotate and resize event additions in 3D using the same 2D data, history and persistence; admin/public views stay read-only.

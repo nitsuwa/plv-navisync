@@ -51,6 +51,15 @@ const overlayFurniture: FloorFurniture[] = [{
 }];
 
 describe("event viewport helpers", () => {
+  it("frames the complete readonly floor beyond the editable canvas", () => {
+    const extended: FloorPlan = { ...floorPlan,
+      rooms: [...floorPlan.rooms, { ...floorPlan.rooms[0], id: "annex", x: 1100, y: 70, w: 200, h: 300 }],
+      stairs: [{ id: "outside-stair", label: "Outside stair", x: -60, y: 700, width: 40, height: 60, rotation: 0, direction: "up" }],
+    };
+    expect(getFloorPlanContentBounds(extended, [], [])).toEqual({ x: -60, y: 70, width: 1360, height: 690 });
+    expect(extended.canvasW).toBe(1000);
+    expect(extended.rooms[1].x).toBe(1100);
+  });
   it("normalizes wheel input into predictable screen-space pan deltas", () => {
     expect(normalizeWheelDelta({ deltaX: 12, deltaY: 24, deltaMode: 0 })).toEqual({ x: -12, y: -24 });
     expect(normalizeWheelDelta({ deltaX: 0, deltaY: 3, deltaMode: 1 })).toEqual({ x: 0, y: -48 });

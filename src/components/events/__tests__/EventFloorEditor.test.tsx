@@ -1641,8 +1641,9 @@ describe("EventFloorEditor", () => {
       const canvas = screen.getByLabelText("Event layout canvas");
       expect(screen.getByTestId("event-zoom-level")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Toggle snapping" }));
-      const zoom = Number.parseInt(screen.getByTestId("event-zoom-level").textContent || "100", 10) / 100;
       const item = screen.getByTestId("event-furniture-chair-1");
+      // The displayed percentage is rounded; pointer conversion uses the exact transform.
+      const zoom = Number(item.parentElement!.style.transform.match(/scale\(([^)]+)\)/)![1]);
       const start = { clientX: 130, clientY: 80 };
       const initialLeft = Number.parseFloat(item.style.left);
       fireEvent.pointerDown(item, { pointerId: 29, pointerType: "mouse", button: 0, ...start });

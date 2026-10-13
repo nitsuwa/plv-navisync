@@ -32,6 +32,16 @@ function updateNumber(name: string, value: string) {
   fireEvent.focus(input); fireEvent.change(input, { target: { value } }); fireEvent.blur(input);
 }
 describe("direct 3D event editor integration", () => {
+  it("offers searchable illustrated assets with keyboard focus returning to the picker", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Add item in 3D" }));
+    const search = screen.getByRole("searchbox", { name: "Search event assets" });
+    fireEvent.change(search, { target: { value: "chair" } });
+    expect(screen.queryByRole("button", { name: "Choose Tent" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Chair" }));
+    expect(screen.queryByRole("dialog", { name: "Choose event asset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose 3D event asset" })).toHaveTextContent("Chair");
+  });
   it("saves completed 3D geometry through the real editor and reflects it in 2D", async () => {
     const save = setup();
     fireEvent.click(screen.getByRole("button", { name: "Select chair on 3D map" }));
@@ -55,13 +65,13 @@ describe("direct 3D event editor integration", () => {
   it("explicitly places the chosen event asset at the selected 3D map point", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "Add item in 3D" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "3D event asset" }), { target: { value: "tent" } });
+    fireEvent.click(screen.getByRole("button", { name: "Choose Tent" }));
     fireEvent.click(screen.getByRole("button", { name: "Pick 3D placement point" }));
     fireEvent.click(screen.getByRole("button", { name: "Place here in 3D" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     const items = screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]");
     expect(items).toHaveLength(2);
-    expect(items[1]).toHaveStyle({ left: "160px", top: "120px", width: "80px", height: "80px" });
+    expect(items[1]).toHaveStyle({ left: "140px", top: "100px", width: "120px", height: "120px" });
   });
   it("blocks saves and history while a gesture is pending and restores them on cancel", () => {
     setup();

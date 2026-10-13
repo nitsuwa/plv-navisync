@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require('playwright')); }
 catch { ({ chromium } = require(process.env.PLAYWRIGHT_MODULE || `${process.env.USERPROFILE}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright`)); }
-const out = 'docs/verification/event-3d-editing/evidence';
+const out = process.env.EVENT_3D_BROWSER_OUTPUT || 'docs/verification/event-3d-editing/evidence';
 fs.mkdirSync(out, { recursive: true });
 const report = { status: 'RUNNING', mode: 'real local WebGL renderers, isolated fixtures; no live database writes', checks: [], pageErrors: [], externalRequests: [] };
 const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -78,12 +78,10 @@ try {
   assert.notEqual(await number('X'), outdoorX);
   await button('Fit map in 3D').click(); await page.waitForTimeout(300);
   await button('Add item in 3D').click();
-  await page.getByRole('combobox', { name: '3D event asset' }).selectOption('tent');
+  await button('Choose Tent').click();
   const canvasBox = await page.getByRole('region', { name: 'Event 3D editor' }).locator('canvas').boundingBox();
   await page.mouse.click(canvasBox.x + canvasBox.width * 0.55, canvasBox.y + canvasBox.height * 0.6);
-  await button('Place here in 3D').waitFor({ state: 'visible' });
-  assert.equal(await button('Place here in 3D').isEnabled(), true);
-  await button('Place here in 3D').click();
+  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Event items in 3D preview"] li').length === 3);
   assert.equal(await page.getByRole('list', { name: 'Event items in 3D preview' }).getByRole('listitem').count(), 3);
   check('Outdoor authored coordinates support actual dragging and explicit asset placement');
   await page.getByRole('combobox', { name: 'Selected 3D item' }).selectOption('welcome');

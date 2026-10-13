@@ -1517,7 +1517,7 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
           <Html position={[0, 0.405, 0.061]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}><span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span></Html>
         </>}
       </group>
-      {canEnterFromCampus && !isActiveDoor && <Html position={[0, 0.43, 0.08]} center distanceFactor={12} zIndexRange={hasRoute ? [25, 0] : [55, 0]}>
+      {onEnterBuilding && canEnterFromCampus && !isActiveDoor && <Html position={[0, 0.43, 0.08]} center distanceFactor={12} zIndexRange={hasRoute ? [25, 0] : [55, 0]}>
         <div className="group/entrance relative">
           {hasRoute && !exploreTransitionsEnabled
             ? <span aria-label={`Entrance at ${buildingName}`} title={`Enter ${buildingName} building`} className="grid h-6 w-6 place-items-center rounded-full border border-white/70 bg-blue-800/45 text-white/85"><DoorOpen className="h-3 w-3" /></span>
@@ -2185,7 +2185,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     </group>)}
     <MemoOutdoorAssetLayer assets={campus.decorAssets} suhayHusaySelected={suhayHusaySelected} />
     {campus.buildings.map((building) => <MemoBuilding key={building.id} building={building} selected={props.selectedBuildingId === building.id} onSelectBuilding={selectBuilding} shouldSuppressClick={shouldSuppressClick} />)}
-    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={enterBuilding} shouldSuppressClick={shouldSuppressClick} />
+    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={props.onEnterBuilding ? enterBuilding : undefined} shouldSuppressClick={shouldSuppressClick} />
     {campus.markers.map((marker) => {
       const position = worldTuple(marker, STUDENT_CAMPUS_3D_GROUND_EPSILON);
       const selected = props.selectedPlaceId === marker.id;

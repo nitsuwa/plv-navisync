@@ -26,8 +26,38 @@ function Surface() {
   const { preview, start } = useEvent3DInteraction({ furniture: layout.furniture, labels: layout.labels, frame: { scale: 0.025, originX: 200, originY: 200 }, editing: { tool: "move", selectedIds: ["chair"], bounds: { width: 400, height: 400 }, grid: 0, onSelect: () => {}, onPlacementPoint: () => {}, onBusyChange: setBusy, onCommit: (_start, next) => setLayout(next) } });
   return <><button onPointerDown={event => start("chair", event)}>Event item</button><button disabled={busy}>Save layout</button><output aria-label="Displayed X">{(preview || layout).furniture[0].x}</output><output aria-label="Committed X">{layout.furniture[0].x}</output></>;
 }
+function PlacementSurface({ place, hover, cancel }: { place: (point: { x: number; y: number }) => void; hover: (point: { x: number; y: number }) => void; cancel: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const { start } = useEvent3DInteraction({ frame: { scale: 0.025, originX: 200, originY: 200 }, editing: {
+    tool: "place-item", selectedIds: [], bounds: { width: 400, height: 400 }, grid: 0,
+    onSelect: () => {}, onPlacementPoint: hover, onPlace: place, onCancelPlacement: cancel, onBusyChange: setBusy, onCommit: () => {},
+  } });
+  return <><button onPointerDown={event => start(null, event)}>Place on map</button><button disabled={busy}>Save layout</button></>;
+}
 const pointer = (pointerId: number, clientX: number, isPrimary = true) => ({ pointerId, clientX, clientY: 200, pointerType: "touch", isPrimary, button: 0, bubbles: true });
 describe("3D native pointer transaction lifecycle", () => {
+  it("previews mouse hover without placing and commits one native release exactly once", async () => {
+    const place = vi.fn(), hover = vi.fn();
+    render(<PlacementSurface place={place} hover={hover} cancel={vi.fn()} />);
+    fireEvent.pointerMove(canvas, { ...pointer(1, 200), pointerType: "mouse" });
+    await waitFor(() => expect(hover).toHaveBeenCalledOnce());
+    expect(hover.mock.calls[0][0].x).toBeCloseTo(200); expect(hover.mock.calls[0][0].y).toBeCloseTo(200);
+    expect(place).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Place on map" }), pointer(1, 200));
+    fireEvent.pointerUp(window, pointer(1, 200)); fireEvent.pointerUp(window, pointer(1, 200));
+    expect(place).toHaveBeenCalledTimes(1); expect(place.mock.calls[0][0].x).toBeCloseTo(200); expect(place.mock.calls[0][0].y).toBeCloseTo(200);
+    expect(screen.getByRole("button", { name: "Save layout" })).toBeEnabled();
+  });
+  it("cancels native placement on Escape or a second finger without committing", () => {
+    const place = vi.fn(), cancel = vi.fn();
+    render(<PlacementSurface place={place} hover={vi.fn()} cancel={cancel} />);
+    const map = screen.getByRole("button", { name: "Place on map" });
+    fireEvent.pointerDown(map, pointer(1, 200)); fireEvent.keyDown(window, { key: "Escape" }); fireEvent.pointerUp(window, pointer(1, 200));
+    expect(cancel).toHaveBeenCalledTimes(1); expect(place).not.toHaveBeenCalled();
+    fireEvent.pointerDown(map, pointer(2, 200)); fireEvent.pointerDown(map, pointer(3, 200, false));
+    fireEvent.pointerUp(window, pointer(3, 200, false)); fireEvent.pointerUp(window, pointer(2, 200));
+    expect(place).not.toHaveBeenCalled(); expect(screen.getByRole("button", { name: "Save layout" })).toBeEnabled();
+  });
   it("samples the final release before camera damping resumes", async () => {
     const camera = graphics.state.camera as THREE.Camera;
     (graphics.state.controls as { enabled: boolean; update: () => void }).update = () => { camera.position.x += 1; camera.updateMatrixWorld(); };

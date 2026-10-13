@@ -24,6 +24,9 @@ export interface Event3DEditing {
   placement?: Event3DLayout;
   onSelect: (id: string) => void;
   onPlacementPoint: (point: Event3DPoint) => void;
+  /** A click/tap commits one item; pointer hover only previews a location. */
+  onPlace?: (point: Event3DPoint) => void;
+  onCancelPlacement?: () => void;
   onCommit: (start: Event3DLayout, next: Event3DLayout) => void;
   onBusyChange: (busy: boolean) => void;
 }

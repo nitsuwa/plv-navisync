@@ -13,20 +13,20 @@ export interface EventFurnitureTemplate {
 }
 
 export const EVENT_FURNITURE_TEMPLATES: EventFurnitureTemplate[] = [
-  { type: "booth", name: "Booth", category: "event", width: 60, height: 40, color: "#f59e0b" },
+  { type: "booth", name: "Booth", category: "event", width: 80, height: 60, color: "#f59e0b" },
   { type: "chair", name: "Chair", category: "event", width: 16, height: 16, color: "#0ea5e9" },
   { type: "stage", name: "Stage", category: "event", width: 120, height: 80, color: "#8b5cf6" },
-  { type: "speaker", name: "Speaker", category: "event", width: 28, height: 42, color: "#334155" },
-  { type: "projector", name: "Projector", category: "event", width: 36, height: 24, color: "#64748b" },
-  { type: "monitor", name: "Monitor", category: "event", width: 42, height: 30, color: "#14b8a6" },
-  { type: "tent", name: "Tent", category: "event", width: 80, height: 80, color: "#10b981" },
+  { type: "speaker", name: "Speaker", category: "event", width: 16, height: 18, color: "#334155" },
+  { type: "projector", name: "Projector", category: "event", width: 14, height: 12, color: "#64748b" },
+  { type: "monitor", name: "Monitor", category: "event", width: 28, height: 12, color: "#14b8a6" },
+  { type: "tent", name: "Tent", category: "event", width: 120, height: 120, color: "#10b981" },
   { type: "table", name: "Table", category: "event", width: 50, height: 30, color: "#6366f1" },
   { type: "barrier", name: "Barrier", category: "event", width: 40, height: 10, color: "#ef4444" },
   { type: "signage", name: "Signage", category: "event", width: 30, height: 20, color: "#06b6d4" },
   { type: "registration-desk", name: "Registration Desk", category: "event", width: 70, height: 28, color: "#a16207" },
   { type: "podium", name: "Podium", category: "event", width: 24, height: 24, color: "#92400e" },
-  { type: "microphone", name: "Microphone", category: "event", width: 14, height: 28, color: "#475569" },
-  { type: "queue-post", name: "Queue Post", category: "event", width: 16, height: 16, color: "#be123c" },
+  { type: "microphone", name: "Microphone", category: "event", width: 14, height: 14, color: "#475569" },
+  { type: "queue-post", name: "Queue Post", category: "event", width: 12, height: 12, color: "#be123c" },
 ];
 
 export function getEventFurnitureTemplate(type: string): EventFurnitureTemplate {

@@ -57,7 +57,7 @@ const authState = vi.hoisted(() => ({
   profile: {id:'org-a'} as {id:string}|null,
   signOut: vi.fn(),
 }));
-const organizationAccess = vi.hoisted(() => ({ organizations: [{ organizationId: "org-a", organizationName: "Demo Org", grantId: "grant-a", academicYear: "2026–2027", expiresAt: "2027-06-30T15:59:59.000Z" }] }));
+const organizationAccess = vi.hoisted(() => ({ listeners: new Set<() => void>(), organizations: [{ organizationId: "org-a", organizationName: "Demo Org", grantId: "grant-a", academicYear: "2026–2027", expiresAt: "2027-06-30T15:59:59.000Z" }] }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => {
   useSyncExternalStore(listener=>{authState.listeners.add(listener);return()=>authState.listeners.delete(listener);},()=>`${authState.profile?.id}:${authState.loading}:${authState.isStudentOrg}`);
@@ -70,9 +70,13 @@ vi.mock("../../hooks/usePublishedCampus", () => ({ usePublishedCampus: () => {
   }, () => publishedCampusState.loading);
   return publishedCampusState;
 } }));
-vi.mock("../../hooks/useEventOrganizationAccess", () => ({ useEventOrganizationAccess: () => ({ organizations: organizationAccess.organizations, loading: false, error: null }) }));
+vi.mock("../../hooks/useEventOrganizationAccess", () => ({ useEventOrganizationAccess: () => {
+  const organizations = useSyncExternalStore(listener => { organizationAccess.listeners.add(listener); return () => organizationAccess.listeners.delete(listener); }, () => organizationAccess.organizations);
+  return { organizations, loading: false, error: null };
+} }));
 vi.mock("../../hooks/useToast", () => ({ useToast: () => fixture.toast }));
 vi.mock("../../services/eventOverlayService", () => ({ eventOverlayService: fixture.service }));
+vi.mock("../../components/events/EventLayout3DPreview", () => ({ EventLayout3DPreview: ({ editing, editorTools }: { editing?: { onPlace?: (point: { x: number; y: number }) => void }; editorTools?: React.ReactNode }) => <section aria-label="3D fixture">{editorTools}<button onClick={() => editing?.onPlace?.({ x: 200, y: 160 })}>Tap 3D map to place</button></section> }));
 vi.mock("../../lib/eventLocationData", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/eventLocationData")>();
   return { ...actual, resolveFloorPlanForEvent: fixture.floorResolver };
@@ -161,6 +165,7 @@ function startPendingChairMove() {
 }
 
 beforeEach(() => {
+  organizationAccess.organizations = [{ organizationId: "org-a", organizationName: "Demo Org", grantId: "grant-a", academicYear: "2026–2027", expiresAt: "2027-06-30T15:59:59.000Z" }];
   authState.profile={id:'org-a'};
   localStorage.clear();
   localStorage.setItem('navisync:event-editor-tour:v2:org-a','done');
@@ -180,6 +185,51 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it("retains the active location and unsaved 3D placements after an unchanged grant refresh", async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, organizationId: "org-a" });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    fireEvent.click(screen.getByRole("button", { name: /administration building/i }));
+    await screen.findByTestId("event-furniture-b-table");
+    fireEvent.click(screen.getByRole("button", { name: /^3D layout$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add item in 3D" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose Booth" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tap 3D map to place" }));
+    await act(async () => { organizationAccess.organizations = organizationAccess.organizations.map(entry => ({ ...entry })); organizationAccess.listeners.forEach(listener => listener()); });
+    fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
+    expect(screen.getByTestId("event-furniture-b-table")).toBeInTheDocument();
+    expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalled());
+    const saved = fixture.service.updateEventOverlayLayout.mock.calls.at(-1)![1];
+    expect(saved[0].eventFurniture).toEqual(overlay.locations![0].eventFurniture);
+    expect(saved[1].eventFurniture).toHaveLength(2);
+  });
+  it("clears private event editing immediately when the grant is revoked on refresh", async () => {
+    fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, organizationId: "org-a" });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });
+    renderPage(); await screen.findByTestId("event-furniture-a-chair");
+    act(() => { organizationAccess.organizations = []; organizationAccess.listeners.forEach(listener => listener()); });
+    expect(screen.queryByTestId("event-furniture-a-chair")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/assignment changed or expired/i);
+  });
+  it("keeps a directly placed 3D item in 2D and in the real page save payload", async () => {
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    fireEvent.click(screen.getByRole("button", { name: /^3D layout$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add item in 3D" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose Booth" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tap 3D map to place" }));
+    fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
+    expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(fixture.service.updateEventOverlayLayout).toHaveBeenCalled());
+    const saved = fixture.service.updateEventOverlayLayout.mock.calls.at(-1)![1];
+    expect(saved[0].eventFurniture).toHaveLength(2);
+    expect(saved[0].eventFurniture[1]).toMatchObject({ type: "booth", x: 160, y: 130, width: 80, height: 60 });
+    expect(saved[1].eventFurniture).toEqual(overlay.locations![1].eventFurniture);
+  });
   it('clears an already loaded private map when the actor changes on the same URL',async()=>{
     renderPage();
     await screen.findByTestId('event-furniture-a-chair');

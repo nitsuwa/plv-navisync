@@ -35,12 +35,15 @@ export const EVENT_LAYOUT_PRESETS: readonly EventLayoutPreset[] = [
     id: "booth-area",
     name: "Booth Area",
     description: "A booth with a table and two visitor chairs.",
-    create: ({ x, y }, nextId) => [
-      place("booth", x, y, nextId),
-      place("table", x + 5, y + 48, nextId),
-      place("chair", x - 32, y + 50, nextId),
-      place("chair", x + 56, y + 50, nextId),
-    ],
+    create: ({ x, y }, nextId) => {
+      const booth = getEventFurnitureTemplate("booth"), table = getEventFurnitureTemplate("table");
+      return [
+        place("booth", x, y, nextId),
+        place("table", x + (booth.width - table.width) / 2, y + booth.height + 8, nextId),
+        place("chair", x - 32, y + booth.height + 10, nextId),
+        place("chair", x + booth.width + 16, y + booth.height + 10, nextId),
+      ];
+    },
   },
   {
     id: "registration-area",

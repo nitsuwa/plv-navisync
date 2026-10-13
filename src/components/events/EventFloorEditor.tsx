@@ -56,7 +56,7 @@ import { clampViewportPan, getPanToKeepWorldPoint, getViewportFitZoom, getViewpo
 import { fitEventViewport, getContentPanBounds, getFloorPlanContentBounds, getSmoothZoomTarget, normalizeWheelDelta } from "../../lib/eventViewport";
 import { clearEventLayoutDraft, eventLayoutDraftStorageKey, readEventLayoutDraft, writeEventLayoutDraft } from "../../lib/eventDraftPersistence";
 import { ReadonlyOutdoorCampusScene } from "../map-builder/ReadonlyOutdoorVisuals";
-import { ReadonlyFloorPlanScene } from "../map-builder/ReadonlyFloorPlanVisuals";
+import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../map-builder/ReadonlyFloorPlanVisuals";
 import type { EventOverlayStatus } from "../../services/eventOverlayService";
 import { isCanvasTextEditingTarget, useSpacePan } from "../canvas/useSpacePan";
 import { EVENT_ASSET_DRAG_TYPE } from "../canvas/CanvasAssetPalette";
@@ -406,6 +406,7 @@ export function EventFloorEditor({
   const [threeBusy, setThreeBusy] = useState(false);
   const [threePoint, setThreePoint] = useState<{ x: number; y: number } | null>(null);
   const [threeError, setThreeError] = useState<string | null>(null);
+  const [threeNotice, setThreeNotice] = useState<string | null>(null);
   useEffect(() => { if (onFeedbackPoint) setViewMode("2d"); }, [onFeedbackPoint]);
   const [activeTool, setActiveTool] = useState<EventTool>("select");
   const tutorialPreviousToolRef = useRef<EventTool | null>(null);
@@ -644,8 +645,16 @@ export function EventFloorEditor({
   const canvasH = floorPlan.canvasH || 600;
   const viewportLocationKey = `${floorPlan.buildingId}:${floorPlan.id}:${canvasW}:${canvasH}`;
   const eventContentBounds = useMemo(
-    () => getFloorPlanContentBounds(floorPlan, eventFurniture, eventLabels),
-    [eventFurniture, eventLabels, floorPlan],
+    () => {
+      const content = getFloorPlanContentBounds(floorPlan, eventFurniture, eventLabels);
+      if (floorPlan.buildingId === "campus") return content;
+      const building = activeCampus?.buildings?.find(building => building.id === floorPlan.buildingId);
+      const presentation = readonlyFloorPlanViewport(floorPlan, building?.exteriorEmergencyStairs);
+      const x = Math.min(content.x, -presentation.offsetX), y = Math.min(content.y, -presentation.offsetY);
+      return { x, y, width: Math.max(content.x + content.width, presentation.width - presentation.offsetX) - x,
+        height: Math.max(content.y + content.height, presentation.height - presentation.offsetY) - y };
+    },
+    [eventFurniture, eventLabels, floorPlan, activeCampus],
   );
   const selectedFurnitureIds = useMemo(
     () => eventFurniture.filter((item) => selectedIds.includes(item.id)).map((item) => item.id),
@@ -787,11 +796,12 @@ export function EventFloorEditor({
   const viewportBackground = floorPlan.id === "campus" && activeCampus
     ? campusGroundAppearance(activeCampus).color
     : floorPlan.backgroundColor || "var(--map-floor-corridor, #f3f4f6)";
-  const baseMapScene = useMemo(() => (
-    floorPlan.id === "campus" && activeCampus
-      ? <ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(activeCampus)} showBuildings />
-      : <ReadonlyFloorPlanScene floor={floorPlan} />
-  ), [activeCampus, floorPlan]);
+  const baseMapScene = useMemo(() => {
+    if (floorPlan.id === "campus" && activeCampus) return <ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(activeCampus)} showBuildings />;
+    const building = activeCampus?.buildings?.find(building => building.id === floorPlan.buildingId);
+    return <ReadonlyFloorPlanScene floor={floorPlan} exteriorEmergencyStairs={building?.exteriorEmergencyStairs}
+      floorIndex={Math.max(0, building?.floors.findIndex(floor => floor.number === floorPlan.number) ?? 0)} floorCount={building?.floors.length || 1} />;
+  }, [activeCampus, floorPlan]);
 
   const getEventPanBounds = useCallback((zoomValue: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1010,7 +1020,7 @@ export function EventFloorEditor({
       name: getUniqueEventObjectName(candidate.name, usedNames),
     };
     const updated = [...eventFurniture, placed];
-    setEventFurniture(updated);
+    setFurniturePreview(updated);
     pushHistory(updated, eventLabels);
     setSelectedId(placed.id);
     setSelectedType("furniture");
@@ -1025,7 +1035,7 @@ export function EventFloorEditor({
       setSelectionArrangeOpen(false);
     }
     return true;
-  }, [eventFurniture, eventLabels, pushHistory, readOnly, repeatPlacement]);
+  }, [eventFurniture, eventLabels, pushHistory, readOnly, repeatPlacement, setFurniturePreview]);
 
   const placePreset = useCallback((
     preview: NonNullable<typeof presetPreview>,
@@ -1078,13 +1088,13 @@ export function EventFloorEditor({
         align: "left",
       };
       const updated = [...eventLabels, newLabel];
-      setEventLabels(updated);
+      setLabelsPreview(updated);
       pushHistory(eventFurniture, updated);
       setSelectedId(newLabel.id);
       setSelectedType("label");
       setSelectedIds([newLabel.id]);
     },
-    [eventFurniture, eventLabels, pushHistory, readOnly]
+    [eventFurniture, eventLabels, pushHistory, readOnly, setLabelsPreview]
   );
 
   // ── Delete selected ────────────────────────────────────────────────────
@@ -1749,11 +1759,25 @@ export function EventFloorEditor({
     } else if (threeTool === "place-label") placeLabel(Math.max(0, Math.min(canvasW, threePoint.x)), Math.max(0, Math.min(canvasH - 14, threePoint.y)));
     else return;
     setThreePoint(null); setThreeTool("move"); setThreeError(null);
-  }, [readOnly, threeBusy, threePoint, threeTool, threeCandidate, commitFurnitureCandidate, placeLabel, canvasW, canvasH]);
+    setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
+  }, [readOnly, threeBusy, threePoint, threeTool, threeCandidate, commitFurnitureCandidate, placeLabel, canvasW, canvasH, activeTemplate.name]);
+  const placeThreePoint = useCallback((point: { x: number; y: number }) => {
+    if (readOnly) return;
+    if (threeTool === "place-item") {
+      const candidate = buildEventAssetCandidate({ template: activeTemplate, point, existing: latestFurnitureRef.current, canvasWidth: canvasW, canvasHeight: canvasH, grid: floorPlan.gridSize || 20, zoom: 1, snapEnabled, blockedRegions: protectedRegions });
+      if (!commitFurnitureCandidate(candidate.item, candidate.assessment)) { setThreePoint(point); setThreeError(candidate.assessment.blockingReason); return; }
+    } else if (threeTool === "place-label") {
+      placeLabel(Math.max(0, Math.min(canvasW, point.x)), Math.max(0, Math.min(canvasH - 14, point.y)));
+    } else return;
+    setThreePoint(null); setThreeTool("move"); setThreeError(null);
+    setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
+  }, [readOnly, threeTool, activeTemplate, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions, commitFurnitureCandidate, placeLabel]);
   const threeEditing: Event3DEditing | undefined = readOnly ? undefined : {
     tool: threeTool, selectedIds, bounds: { width: canvasW, height: canvasH }, grid: snapEnabled ? floorPlan.gridSize || 20 : 0,
     placement: threeCandidate ? { furniture: [{ ...threeCandidate.item, color: threeCandidate.assessment.canPlace ? threeCandidate.item.color : "#ef4444" }], labels: [] } : threeTool === "place-label" && threePoint ? { furniture: [], labels: [{ id: "3d-label-preview", ...threePoint, text: "Event Label", fontSize: 14, color: "#1f2937", rotation: 0 }] } : undefined,
-    onSelect: selectThreeItem, onPlacementPoint: point => { setThreePoint(point); setThreeError(null); }, onCommit: commitThreeGeometry, onBusyChange: setThreeBusy,
+    onSelect: selectThreeItem, onPlacementPoint: point => { setThreePoint(point); setThreeError(null); }, onPlace: placeThreePoint,
+    onCancelPlacement: () => { setThreePoint(null); setThreeTool("move"); setThreeError(null); setThreeNotice("Placement cancelled."); },
+    onCommit: commitThreeGeometry, onBusyChange: setThreeBusy,
   };
 
   const renameEventObject = useCallback((id: string, kind: "furniture" | "labels", proposedName: string) => {
@@ -2896,7 +2920,7 @@ export function EventFloorEditor({
         </div>}
 
       {/* Canvas */}
-      {viewMode === "3d" && <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} editing={threeEditing} editingBusy={threeBusy} onReturnTo2D={() => setViewMode("2d")} editorTools={!readOnly && <Event3DEditorControls tool={threeTool} onToolChange={tool => { setThreeTool(tool); setThreePoint(null); setThreeError(null); }} template={activeTemplate.type} onTemplateChange={type => { setActiveTemplate(getEventFurnitureTemplate(type)); }} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onSelect={selectThreeItem} onFurnitureChange={updateThreeFurniture} onLabelChange={changes => updateSelectedLabel({ ...changes, ...(changes.x !== undefined ? { x: Math.max(0, Math.min(canvasW, changes.x)) } : {}), ...(changes.y !== undefined ? { y: Math.max(0, Math.min(canvasH - (selectedLabel?.fontSize || 14), changes.y)) } : {}) })} onToggleLock={selectedFurniture ? toggleSelectedLock : toggleSelectedLabelLock} onDuplicate={duplicateSelection} placementPoint={threePoint} canPlace={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)} onPlace={placeThreeItem} busy={threeBusy} snap={snapEnabled} onSnapChange={() => setSnapEnabled(value => !value)} error={threeError || threeCandidate?.assessment.blockingReason || null} />} />}
+      {viewMode === "3d" && <EventLayout3DPreview key={viewportLocationKey} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} editing={threeEditing} editingBusy={threeBusy} onReturnTo2D={() => setViewMode("2d")} editorTools={!readOnly && <Event3DEditorControls tool={threeTool} onToolChange={tool => { setThreeNotice(tool === "move" && (threeTool === "place-item" || threeTool === "place-label") ? "Placement cancelled." : null); setThreeTool(tool); setThreePoint(tool === "place-item" || tool === "place-label" ? { x: canvasW / 2, y: canvasH / 2 } : null); setThreeError(null); }} template={activeTemplate.type} onTemplateChange={type => { setActiveTemplate(getEventFurnitureTemplate(type)); }} furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onSelect={selectThreeItem} onFurnitureChange={updateThreeFurniture} onLabelChange={changes => updateSelectedLabel({ ...changes, ...(changes.x !== undefined ? { x: Math.max(0, Math.min(canvasW, changes.x)) } : {}), ...(changes.y !== undefined ? { y: Math.max(0, Math.min(canvasH - (selectedLabel?.fontSize || 14), changes.y)) } : {}) })} onToggleLock={selectedFurniture ? toggleSelectedLock : toggleSelectedLabelLock} onDuplicate={duplicateSelection} placementPoint={threePoint} canPlace={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)} onPlace={placeThreeItem} busy={threeBusy} snap={snapEnabled} onSnapChange={() => setSnapEnabled(value => !value)} error={threeError || threeCandidate?.assessment.blockingReason || null} notice={threeNotice} />} />}
       <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1" style={viewMode === "3d" ? { display: "none" } : undefined}>
       <div
         ref={canvasRef}
@@ -3449,7 +3473,7 @@ export function EventFloorEditor({
           }}
         >
           {/* Base Floor Plan (read-only rendering) */}
-          <svg width={canvasW} height={canvasH} className="absolute inset-0">
+          <svg width={canvasW} height={canvasH} className="absolute inset-0 overflow-visible" data-testid="event-base-map">
             {/* Background */}
             <rect
               width={canvasW}
@@ -3764,8 +3788,8 @@ export function EventFloorEditor({
 
         {/* Instructions overlay */}
         {eventFurniture.length === 0 && eventLabels.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center text-muted-foreground">
+          <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex justify-start">
+            <div className="max-w-sm rounded-xl border border-border bg-card/95 p-3 text-muted-foreground shadow-sm">
               <p className="text-sm font-bold mb-1">
                 {readOnly ? "No event additions yet" : "Click to place event items"}
               </p>

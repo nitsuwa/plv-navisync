@@ -165,3 +165,8 @@
     max-width: calc(100% - 1.5rem);
   }
 }
+/* Placement stays recognizable even when the base renderer changes its inline cursor. */
+[data-event-3d-tool="place-item"] canvas,
+[data-event-3d-tool="place-label"] canvas {
+  cursor: crosshair !important;
+}

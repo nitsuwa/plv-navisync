@@ -13,8 +13,10 @@ interface ActivePointer {
   wasEnabled: boolean;
   editing: Event3DEditing;
 }
+const EMPTY_FURNITURE: readonly FloorFurniture[] = [];
+const EMPTY_LABELS: readonly FloorLabel[] = [];
 
-export function useEvent3DInteraction({ furniture = [], labels = [], frame, editing }: { furniture?: readonly FloorFurniture[]; labels?: readonly FloorLabel[]; frame: Event3DFrame; editing?: Event3DEditing }) {
+export function useEvent3DInteraction({ furniture = EMPTY_FURNITURE, labels = EMPTY_LABELS, frame, editing }: { furniture?: readonly FloorFurniture[]; labels?: readonly FloorLabel[]; frame: Event3DFrame; editing?: Event3DEditing }) {
   const { camera, gl, controls, invalidate } = useThree();
   const [preview, setPreview] = useState<Event3DLayout | null>(null);
   const latest = useRef({ furniture, labels, frame, editing }); latest.current = { furniture, labels, frame, editing };
@@ -46,7 +48,7 @@ export function useEvent3DInteraction({ furniture = [], labels = [], frame, edit
     try { if (gl.domElement.hasPointerCapture(pointer.id)) gl.domElement.releasePointerCapture(pointer.id); } catch { /* capture may already be released */ }
     try {
       if (completed && pointer.gesture) pointer.editing.onCommit(pointer.gesture.start, completed);
-      else if (point && !pointer.gesture && distance <= 6) pointer.editing.onPlacementPoint(point);
+      else if (point && !pointer.gesture && distance <= 6) (pointer.editing.onPlace || pointer.editing.onPlacementPoint)(point);
     } finally { pointer.editing.onBusyChange(false); invalidate(); }
   }, [gl, invalidate, sample]);
   const start = useCallback((id: string | null, event: PointerEvent | ReactPointerEvent, override?: Event3DManipulation) => {
@@ -71,6 +73,12 @@ export function useEvent3DInteraction({ furniture = [], labels = [], frame, edit
     if (!latest.current.editing) return;
     const move = (event: PointerEvent) => {
       const pointer = active.current;
+      const edit = latest.current.editing;
+      if (!pointer && edit && (edit.tool === "place-item" || edit.tool === "place-label") && event.pointerType !== "touch" && !pressedPointers.current.size && event.target === gl.domElement) {
+        if (animation.current !== null) cancelAnimationFrame(animation.current);
+        animation.current = requestAnimationFrame(() => { animation.current = null; const point = sample(event.clientX, event.clientY); if (point) edit.onPlacementPoint(point); });
+        return;
+      }
       if (!pointer?.gesture || event.pointerId !== pointer.id) return;
       if (animation.current !== null) cancelAnimationFrame(animation.current);
       animation.current = requestAnimationFrame(() => {
@@ -93,7 +101,12 @@ export function useEvent3DInteraction({ furniture = [], labels = [], frame, edit
       pressedPointers.current.add(event.pointerId);
       if (pressedPointers.current.size > 1) { suppressMultiTouch.current = true; finish(true); }
     };
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && active.current) { event.preventDefault(); finish(true); } };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (active.current) { event.preventDefault(); finish(true); }
+      const edit = latest.current.editing;
+      if (edit?.tool === "place-item" || edit?.tool === "place-label") edit.onCancelPlacement?.();
+    };
     const hidden = () => { if (document.hidden) stop(); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", cancel); window.addEventListener("pointerdown", secondPointer, true);
     window.addEventListener("lostpointercapture", lostCapture, true); window.addEventListener("blur", stop); window.addEventListener("resize", stop); window.addEventListener("keydown", key); document.addEventListener("visibilitychange", hidden);
@@ -101,7 +114,7 @@ export function useEvent3DInteraction({ furniture = [], labels = [], frame, edit
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", cancel); window.removeEventListener("pointerdown", secondPointer, true);
       window.removeEventListener("lostpointercapture", lostCapture, true); window.removeEventListener("blur", stop); window.removeEventListener("resize", stop); window.removeEventListener("keydown", key); document.removeEventListener("visibilitychange", hidden); stop();
     };
-  }, [Boolean(editing), finish, invalidate, sample]);
+  }, [Boolean(editing), finish, gl, invalidate, sample]);
   useEffect(() => { if (active.current) finish(true); }, [furniture, labels, editing?.tool, finish]);
   return { preview, start };
 }

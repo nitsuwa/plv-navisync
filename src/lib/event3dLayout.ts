@@ -7,12 +7,14 @@ export interface Event3DCameraRequest { nonce: number; kind: "fit" | "focus" | "
 export function eventAsset3DTransform(item: FloorFurniture, frame: Event3DFrame) {
   if (item.visible === false || ![item.x, item.y, item.width, item.height, item.rotation ?? 0, frame.scale, frame.originX, frame.originY].every(Number.isFinite)
     || item.width <= 0 || item.height <= 0 || frame.scale <= 0) return null;
-  const width = item.width * frame.scale, depth = item.height * frame.scale, unit = Math.min(width, depth);
-  const ratios: Record<string, number> = { chair: 1.95, table: 1.17, "registration-desk": 1.17, stage: 0.16, tent: 1.65, booth: 1.65, signage: 2.1, podium: 1.52, microphone: 2.2, "queue-post": 2.15, speaker: 1.8, monitor: 1.5, projector: 0.4 };
+  const width = item.width * frame.scale, depth = item.height * frame.scale;
+  // Footprint resizing changes floor coverage, not the object's vertical
+  // height. These illustrative heights use the existing authored map units.
+  const heights: Record<string, number> = { chair: 34, table: 32, "registration-desk": 32, stage: 12, tent: 100, booth: 96, signage: 64, podium: 44, microphone: 64, "queue-post": 40, speaker: 52, monitor: 34, projector: 8, barrier: 36 };
   const kind = item.assetKey || item.type;
   return {
     position: [(item.x + item.width / 2 - frame.originX) * frame.scale, 0.025, (item.y + item.height / 2 - frame.originY) * frame.scale] as [number, number, number],
-    width, depth, height: kind === "barrier" ? width * 0.55 : unit * (ratios[kind] ?? 0.5),
+    width, depth, height: (heights[kind] ?? 24) * frame.scale,
     rotation: -(item.rotation ?? 0) * Math.PI / 180,
   };
 }

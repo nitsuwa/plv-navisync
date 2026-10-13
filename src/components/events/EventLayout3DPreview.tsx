@@ -5,6 +5,8 @@ import { projectReadonlyOutdoorCampus } from "../../lib/readonlyOutdoorCampus";
 import { eventAsset3DTransform, event3DLayoutBounds, type Event3DCameraRequest } from "../../lib/event3dLayout";
 import type { Campus, FloorFurniture, FloorLabel, FloorPlan } from "../map-builder/types";
 import type { Event3DEditing } from "../../lib/event3dEditing";
+import { readonlyFloorPlanViewport } from "../map-builder/ReadonlyFloorPlanVisuals";
+import { getFloorPlanContentBounds } from "../../lib/eventViewport";
 
 const Indoor3D = lazy(() => import("../map/IndoorFloor3DRenderer"));
 const Outdoor3D = lazy(() => import("../map/StudentCampus3DRenderer"));
@@ -50,8 +52,16 @@ export function EventLayout3DPreview({ floorPlan, campus, furniture, labels, sel
   }, []);
   const outdoor = floorPlan.buildingId === "campus";
   const projection = useMemo(() => campus ? projectReadonlyOutdoorCampus(campus) : null, [campus]);
-  const viewport = useMemo(() => ({ width: floorPlan.canvasW || 800, height: floorPlan.canvasH || 600, offsetX: 0, offsetY: 0 }), [floorPlan.canvasW, floorPlan.canvasH]);
-  const mapBounds = useMemo(() => ({ x: 0, y: 0, width: viewport.width, height: viewport.height }), [viewport]);
+  const viewport = useMemo(() => {
+    if (outdoor) return { width: floorPlan.canvasW || 800, height: floorPlan.canvasH || 600, offsetX: 0, offsetY: 0 };
+    const building = campus?.buildings?.find(building => building.id === floorPlan.buildingId);
+    const presentation = readonlyFloorPlanViewport(floorPlan, building?.exteriorEmergencyStairs);
+    const content = getFloorPlanContentBounds(floorPlan);
+    const x = Math.min(content.x, -presentation.offsetX), y = Math.min(content.y, -presentation.offsetY);
+    return { width: Math.max(content.x + content.width, presentation.width - presentation.offsetX) - x,
+      height: Math.max(content.y + content.height, presentation.height - presentation.offsetY) - y, offsetX: -x, offsetY: -y };
+  }, [floorPlan, campus, outdoor]);
+  const mapBounds = useMemo(() => ({ x: -viewport.offsetX, y: -viewport.offsetY, width: viewport.width, height: viewport.height }), [viewport]);
   const focusBounds = useMemo(() => event3DLayoutBounds(
     selectedIds.length ? furniture.filter(item => selectedIds.includes(item.id)) : furniture,
     selectedIds.length ? labels.filter(item => selectedIds.includes(item.id)) : labels,
@@ -68,7 +78,7 @@ export function EventLayout3DPreview({ floorPlan, campus, furniture, labels, sel
       </div>}
     </div>
     {!unavailable && editorTools}
-    <div className="relative min-h-40 flex-1">
+    <div data-event-3d-tool={editing?.tool || "view"} className="relative isolate min-h-40 flex-1 overflow-hidden">
       {unavailable ? <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center"><p className="text-sm font-semibold">3D preview is unavailable on this device.</p><p className="text-xs text-muted-foreground">Your layout is preserved. You can continue in 2D.</p><button type="button" onClick={onReturnTo2D} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Return to 2D</button></div>
         : <PreviewBoundary onError={fallback}><Suspense fallback={<div role="status" className="absolute inset-0 flex items-center justify-center gap-2 text-sm"><Loader2 className="h-5 w-5 animate-spin" />Loading 3D preview…</div>}>
           {outdoor && projection ? <Outdoor3D campus={projection} eventFurniture={furniture} eventLabels={labels} eventEditing={editing} previewCamera={camera} darkMode={theme === "dark"} reducedMotion={reducedMotion} onFallback={fallback} />

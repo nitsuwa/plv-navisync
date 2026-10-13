@@ -1,0 +1,8 @@
+{
+  "baselineCommit": "72b4093",
+  "baselineDiagnostics": 1047,
+  "currentDiagnostics": 1047,
+  "increasedFileCodeCounts": [],
+  "exactMessageAdditions": [],
+  "note": "Same installed dependencies with package symlink access. Baseline log from prior verified main source; docs-only delivery commit retained its source tree. Counts are not a clean typecheck."
+}
