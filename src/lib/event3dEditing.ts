@@ -1,7 +1,8 @@
 import type { FloorFurniture, FloorLabel } from "../components/map-builder/types";
 import { resolveLayoutMoveFromSnapshot, type LayoutItem } from "./eventLayoutGeometry";
-import { constrainFurnitureToFloor, resizeFurnitureWithinFloor } from "./floorGeometry";
+
 import { eventAsset3DTransform, type Event3DFrame } from "./event3dLayout";
+import { constrainEventAsset, eventAssetAllowsResize, resizeEventAsset } from "./eventAssetSizing";
 
 export interface Event3DLayout { furniture: FloorFurniture[]; labels: FloorLabel[] }
 export interface Event3DPoint { x: number; y: number }
@@ -15,12 +16,14 @@ export interface Event3DGesture {
   pointer: Event3DPoint;
   bounds: { width: number; height: number };
   grid: number;
+  preserveAspect?: boolean;
 }
 export interface Event3DEditing {
   tool: Event3DEditTool;
   selectedIds: readonly string[];
   bounds: { width: number; height: number };
   grid: number;
+  preserveAspect?: boolean;
   placement?: Event3DLayout;
   onSelect: (id: string) => void;
   onPlacementPoint: (point: Event3DPoint) => void;
@@ -42,14 +45,15 @@ export function event3DSelectionIds(layout: Event3DLayout, id: string): string[]
   return item || layout.labels.some(label => label.id === id) ? [id] : [];
 }
 
-export function beginEvent3DGesture(layout: Event3DLayout, id: string, tool: Event3DManipulation, point: Event3DPoint, bounds: { width: number; height: number }, grid = 0): Event3DGesture | null {
+export function beginEvent3DGesture(layout: Event3DLayout, id: string, tool: Event3DManipulation, point: Event3DPoint, bounds: { width: number; height: number }, grid = 0, preserveAspect = false): Event3DGesture | null {
   const item = layout.furniture.find(item => item.id === id), label = layout.labels.find(label => label.id === id);
   const ids = event3DSelectionIds(layout, id);
   if (!ids.length || ![point.x, point.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0) return null;
   if (item ? !eventAsset3DTransform(item, { scale: 1, originX: 0, originY: 0 }) : !label || label.visible === false) return null;
   if (layout.furniture.some(item => ids.includes(item.id) && item.locked) || label?.locked) return null;
   if (tool !== "move" && (!item || ids.length !== 1 || item.groupId)) return null;
-  return { start: { furniture: layout.furniture.map(item => ({ ...item })), labels: layout.labels.map(label => ({ ...label })) }, id, ids, tool, pointer: { ...point }, bounds: { ...bounds }, grid: Math.max(0, grid) };
+  if (tool === "resize" && !eventAssetAllowsResize(item!)) return null;
+  return { start: { furniture: layout.furniture.map(item => ({ ...item })), labels: layout.labels.map(label => ({ ...label })) }, id, ids, tool, pointer: { ...point }, bounds: { ...bounds }, grid: Math.max(0, grid), preserveAspect };
 }
 
 function moveBounds(item: FloorFurniture): LayoutItem {
@@ -78,10 +82,10 @@ export function previewEvent3DGesture(gesture: Event3DGesture, point: Event3DPoi
     if (Math.hypot(pointer.x - cx, pointer.y - cy) < 0.001 || Math.hypot(point.x - cx, point.y - cy) < 0.001) return start;
     const delta = (Math.atan2(point.y - cy, point.x - cx) - Math.atan2(pointer.y - cy, pointer.x - cx)) * 180 / Math.PI;
     const rotation = ((item!.rotation + delta) % 360 + 360) % 360;
-    next = constrainFurnitureToFloor({ ...item!, rotation: grid > 0 ? Math.round(rotation / 15) * 15 % 360 : rotation }, bounds.width, bounds.height);
+    next = constrainEventAsset({ ...item!, rotation: grid > 0 ? Math.round(rotation / 15) * 15 % 360 : rotation }, bounds.width, bounds.height);
   } else {
     const snap = (value: number) => grid > 0 ? Math.round(value / grid) * grid : value;
-    next = resizeFurnitureWithinFloor(item!, "se", snap(point.x - pointer.x), snap(point.y - pointer.y), bounds.width, bounds.height);
+    next = resizeEventAsset(item!, "se", snap(point.x - pointer.x), snap(point.y - pointer.y), bounds, gesture.preserveAspect);
   }
   return { furniture: start.furniture.map(item => item.id === id ? next : item), labels: start.labels };
 }

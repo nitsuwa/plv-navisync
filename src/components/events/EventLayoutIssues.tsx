@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, ChevronDown, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { LayoutWarning } from "../../lib/eventLayoutValidation";
@@ -27,6 +28,19 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false, co
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const [anchor, setAnchor] = useState({ left: 12, top: 80, width: 320, maxHeight: 256 });
+  useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(384, window.innerWidth - 24);
+      const top = Math.min(rect.bottom + 8, Math.max(12, window.innerHeight - 180));
+      setAnchor({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), top, width, maxHeight: Math.min(320, window.innerHeight - top - 12) });
+    };
+    update(); window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
+    return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+  }, [open]);
   const count = warnings.filter(warning => warning.severity !== "info").length;
   const orderedWarnings = [...warnings.filter(warning => warning.severity !== "info"), ...warnings.filter(warning => warning.severity === "info")];
 
@@ -89,19 +103,21 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false, co
         </button>
       </div>
 
-      {open && (
+      {open && createPortal(
         <div
           id={panelId}
           role="region"
           aria-label="Layout checks"
           data-event-layout-issues={panelId}
-          className="absolute left-3 right-3 top-[calc(100%+0.5rem)] max-h-64 overflow-y-auto rounded-2xl border border-border/80 bg-card p-3 shadow-2xl sm:left-auto sm:right-4 sm:w-[min(24rem,calc(100vw-2rem))]"
+          data-event-editor-chrome
+          style={anchor}
+          className="fixed z-[90] overflow-y-auto rounded-2xl border border-border/80 bg-card p-3 text-foreground shadow-2xl"
           onPointerDown={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-extrabold text-foreground">Layout checks</p>
-            <button type="button" aria-label="Close layout checks" onClick={() => { setOpen(false); buttonRef.current?.focus(); }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <button type="button" aria-label="Close layout checks" onClick={() => { setOpen(false); buttonRef.current?.focus(); }} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
@@ -128,7 +144,7 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false, co
                         setOpen(false);
                         buttonRef.current?.focus();
                       }}
-                      className="shrink-0 rounded-lg border border-border/70 px-2 py-1.5 text-[10px] font-extrabold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      className="min-h-11 shrink-0 rounded-lg border border-border/70 px-2 py-1.5 text-[10px] font-extrabold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       Show items
                     </button>
@@ -138,7 +154,7 @@ export function EventLayoutIssues({ warnings, onFocusItems, disabled = false, co
             </div>
           )}
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

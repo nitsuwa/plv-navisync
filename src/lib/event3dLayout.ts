@@ -14,7 +14,7 @@ export function eventAsset3DTransform(item: FloorFurniture, frame: Event3DFrame)
   const kind = item.assetKey || item.type;
   return {
     position: [(item.x + item.width / 2 - frame.originX) * frame.scale, 0.025, (item.y + item.height / 2 - frame.originY) * frame.scale] as [number, number, number],
-    width, depth, height: (heights[kind] ?? 24) * frame.scale,
+    width, depth, height: (heights[kind] ?? 24) * eventAssetReferenceFactor(item.assetVariant) * frame.scale,
     rotation: -(item.rotation ?? 0) * Math.PI / 180,
   };
 }
@@ -52,3 +52,4 @@ export function event3DCameraPose(bounds: LayoutRect, frame: Event3DFrame, aspec
 export function event3DOutdoorTargetBounds(base: Student3dCameraTargetBounds, width: number, height: number, scale: number, hasEventLayout: boolean, maxHeight = 0): Student3dCameraTargetBounds {
   return hasEventLayout ? { ...base, minX: Math.min(base.minX, 0), maxX: Math.max(base.maxX, width * scale), minZ: Math.min(base.minZ, 0), maxZ: Math.max(base.maxZ, height * scale), maxY: Math.max(base.maxY, maxHeight / 2 + 0.025) } : base;
 }
+import { eventAssetReferenceFactor } from "./eventAssetSizing";

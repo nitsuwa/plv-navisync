@@ -1,10 +1,12 @@
 import type { FloorFurniture } from "../map-builder/types";
 import { CanvasAssetVisual } from "../canvas/CanvasAssetVisual";
+import { eventReferenceSize, type EventSizeContext } from "../../lib/eventAssetSizing";
 
 export interface EventFurnitureTemplate {
   type: string;
   /** Stable visual identity; defaults to the legacy type for compatibility. */
   assetKey?: string;
+  assetVariant?: string;
   name: string;
   category: "event";
   width: number;
@@ -29,9 +31,9 @@ export const EVENT_FURNITURE_TEMPLATES: EventFurnitureTemplate[] = [
   { type: "queue-post", name: "Queue Post", category: "event", width: 12, height: 12, color: "#be123c" },
 ];
 
-export function getEventFurnitureTemplate(type: string): EventFurnitureTemplate {
-  return EVENT_FURNITURE_TEMPLATES.find((template) => template.type === type)
-    || EVENT_FURNITURE_TEMPLATES[0];
+export function getEventFurnitureTemplate(type: string, context?: EventSizeContext, preset = "standard"): EventFurnitureTemplate {
+  const base = EVENT_FURNITURE_TEMPLATES.find((template) => template.type === type) || EVENT_FURNITURE_TEMPLATES[0];
+  return context ? { ...base, ...eventReferenceSize(base, context, preset) } : base;
 }
 
 export function EventAssetVisual({ type, label, className = "" }: { type: string; label: string; className?: string }) {
@@ -51,6 +53,7 @@ export function eventFurnitureFromTemplate(template: EventFurnitureTemplate, x: 
     rotation: 0,
     color: template.color,
     assetKey: template.assetKey ?? template.type,
+    ...(template.assetVariant ? { assetVariant: template.assetVariant } : {}),
     layer: "events",
   };
 }

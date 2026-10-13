@@ -4,6 +4,7 @@ import type { Event3DEditing, Event3DManipulation } from "../../lib/event3dEditi
 import type { Event3DFrame } from "../../lib/event3dLayout";
 import { EventAsset3DLayer } from "./EventAsset3DLayer";
 import { useEvent3DInteraction } from "./useEvent3DInteraction";
+import { eventAssetAllowsResize } from "../../lib/eventAssetSizing";
 
 export function Event3DSceneLayout({ furniture = [], labels = [], frame, editing }: { furniture?: readonly FloorFurniture[]; labels?: readonly FloorLabel[]; frame: Event3DFrame; editing?: Event3DEditing }) {
   const { preview, start } = useEvent3DInteraction({ furniture, labels, frame, editing });
@@ -15,9 +16,9 @@ export function Event3DSceneLayout({ furniture = [], labels = [], frame, editing
     return [(cx + dx * Math.cos(angle) - dy * Math.sin(angle) - frame.originX) * frame.scale, 0.09, (cy + dx * Math.sin(angle) + dy * Math.cos(angle) - frame.originY) * frame.scale] as [number, number, number];
   };
   return <>
-    <EventAsset3DLayer furniture={shownFurniture} labels={shownLabels} frame={frame} selectedIds={editing?.selectedIds} onItemPointerDown={editing && editing.tool !== "pan" ? (id, event) => start(id, event) : undefined} />
+    <EventAsset3DLayer furniture={shownFurniture} labels={shownLabels} frame={frame} selectedIds={editing?.tool === "place-item" || editing?.tool === "place-label" ? [] : editing?.selectedIds} onItemPointerDown={editing && editing.tool !== "pan" ? (id, event) => start(id, event) : undefined} />
     {editing && <mesh position={[(editing.bounds.width / 2 - frame.originX) * frame.scale, 0.03, (editing.bounds.height / 2 - frame.originY) * frame.scale]} rotation={[-Math.PI / 2, 0, 0]} onPointerDown={event => { if (editing.tool === "place-item" || editing.tool === "place-label") { event.stopPropagation(); start(null, event.nativeEvent); } }}><planeGeometry args={[editing.bounds.width * frame.scale, editing.bounds.height * frame.scale]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh>}
     {editing?.placement && <group><EventAsset3DLayer furniture={editing.placement.furniture} labels={editing.placement.labels} frame={frame} preview /></group>}
-    {selected && !selected.locked && !selected.groupId && (editing?.tool === "rotate" || editing?.tool === "resize") && <Html position={handlePoint(selected, editing.tool)} center zIndexRange={[30, 0]}><button type="button" aria-label={`${editing.tool === "rotate" ? "Rotate" : "Resize"} ${selected.name} handle in 3D`} onPointerDown={event => start(selected.id, event, editing.tool as Event3DManipulation)} className="flex h-11 w-11 touch-none items-center justify-center rounded-full border-2 border-white bg-primary text-xl font-bold text-primary-foreground shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{editing.tool === "rotate" ? "↻" : "↘"}</button></Html>}
+    {selected && !selected.locked && !selected.groupId && (editing?.tool === "rotate" || editing?.tool === "resize" && eventAssetAllowsResize(selected)) && <Html position={handlePoint(selected, editing.tool)} center zIndexRange={[30, 0]}><button type="button" aria-label={`${editing.tool === "rotate" ? "Rotate" : "Resize"} ${selected.name} handle in 3D`} onPointerDown={event => start(selected.id, event, editing.tool as Event3DManipulation)} className="flex h-11 w-11 touch-none items-center justify-center rounded-full border-2 border-white bg-primary text-xl font-bold text-primary-foreground shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{editing.tool === "rotate" ? "↻" : "↘"}</button></Html>}
   </>;
 }

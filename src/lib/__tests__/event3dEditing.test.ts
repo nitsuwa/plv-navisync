@@ -44,7 +44,7 @@ describe("direct event 3D geometry", () => {
     expect(previewEvent3DGesture(gesture, { x: 110, y: 120 }).furniture[0].rotation).toBe(80);
   });
   it("resizes a rotated southeast handle with its opposite corner fixed", () => {
-    const start = { furniture: [{ ...chair, x: 100, y: 100, width: 40, height: 20, rotation: 90 }], labels: [] };
+    const start = { furniture: [{ ...chair, type: "table", x: 100, y: 100, width: 40, height: 20, rotation: 90 }], labels: [] };
     const gesture = beginEvent3DGesture(start, "a", "resize", { x: 110, y: 130 }, bounds)!;
     // Both rectangles retain the rotated northwest corner at (130, 90).
     expect(previewEvent3DGesture(gesture, { x: 100, y: 150 }).furniture[0]).toMatchObject({ x: 85, y: 105, width: 60, height: 30, rotation: 90 });

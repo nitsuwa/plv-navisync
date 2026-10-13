@@ -1,65 +1,51 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Move, RotateCw, Scaling, Hand, Plus, Type, Magnet, SlidersHorizontal } from "lucide-react";
 import type { FloorFurniture, FloorLabel } from "../map-builder/types";
 import type { Event3DEditTool, Event3DPoint } from "../../lib/event3dEditing";
+import { eventAssetAllowsResize } from "../../lib/eventAssetSizing";
 import { Event3DAssetPicker } from "./Event3DAssetPicker";
-import { getEventFurnitureTemplate } from "./eventAssets";
-import { Move, RotateCw, Scaling, Hand, Plus, Type, Magnet } from "lucide-react";
 
-const buttonClass = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-xs font-bold hover:bg-muted disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
-function GeometryField({ label, value, disabled, onCommit }: { label: string; value: number; disabled: boolean; onCommit: (value: number) => void }) {
-  const [text, setText] = useState(String(Math.round(value * 100) / 100)), [focused, setFocused] = useState(false);
-  const cancelEdit = useRef(false);
-  useEffect(() => { if (!focused) setText(String(Math.round(value * 100) / 100)); }, [value, focused]);
-  return <label className="flex min-w-0 flex-col gap-1 text-[11px] font-semibold text-muted-foreground">{label}
-    <input type="number" aria-label={`${label} in 3D`} value={text} disabled={disabled} onFocus={() => { cancelEdit.current = false; setFocused(true); }} onChange={event => setText(event.target.value)} onBlur={() => { setFocused(false); if (!cancelEdit.current && text.trim() && Number.isFinite(Number(text))) onCommit(Number(text)); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } else if (event.key === "Escape") { event.stopPropagation(); cancelEdit.current = true; setText(String(Math.round(value * 100) / 100)); event.currentTarget.blur(); } }} className="h-10 w-full min-w-0 rounded-lg border border-border bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40" />
-  </label>;
-}
-
-export function Event3DEditorControls({ tool, onToolChange, template, onTemplateChange, furniture, labels, selectedIds, onSelect, onFurnitureChange, onLabelChange, onToggleLock, onDuplicate, placementPoint, canPlace, onPlace, busy, snap, onSnapChange, error, notice }: {
+const buttonClass = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-border px-3 text-xs font-semibold hover:bg-muted disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+export function Event3DEditorControls({ tool, onToolChange, template, onTemplateChange, furniture, labels, selectedIds, onSelect, onOpenDetails, onToggleLock, onDuplicate, placementPoint, canPlace, onPlace, busy, snap, onSnapChange, error, notice, repeatPlacement, onRepeatChange, layoutChecks }: {
   tool: Event3DEditTool; onToolChange: (tool: Event3DEditTool) => void; template: string; onTemplateChange: (type: string) => void;
   furniture: readonly FloorFurniture[]; labels: readonly FloorLabel[]; selectedIds: readonly string[]; onSelect: (id: string) => void;
-  onFurnitureChange: (changes: Partial<FloorFurniture>) => void; onLabelChange: (changes: Partial<FloorLabel>) => void;
-  onToggleLock: () => void; onDuplicate: () => void; placementPoint: Event3DPoint | null; canPlace: boolean; onPlace: () => void;
-  busy: boolean; snap: boolean; onSnapChange: () => void; error: string | null;
-  notice?: string | null;
+  onOpenDetails: (trigger: HTMLElement) => void; onToggleLock: () => void; onDuplicate: () => void;
+  placementPoint: Event3DPoint | null; canPlace: boolean; onPlace: () => void; busy: boolean;
+  snap: boolean; onSnapChange: () => void; error: string | null; notice?: string | null;
+  repeatPlacement: boolean; onRepeatChange: () => void;
+  layoutChecks?: ReactNode;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const selected = selectedIds.length === 1 ? furniture.find(item => item.id === selectedIds[0]) : null;
   const label = selectedIds.length === 1 ? labels.find(item => item.id === selectedIds[0]) : null;
   const locked = Boolean(selected?.locked || label?.locked || furniture.some(item => selectedIds.includes(item.id) && item.locked));
-  const tools = [{ id: "move", text: "Move", label: "Move items in 3D" }, { id: "rotate", text: "Rotate", label: "Rotate items in 3D" }, { id: "resize", text: "Resize", label: "Resize items in 3D" }, { id: "pan", text: "Pan", label: "Pan map in 3D" }, { id: "place-item", text: "Add item", label: "Add item in 3D" }, { id: "place-label", text: "Add label", label: "Add label in 3D" }] as const;
-  return <div aria-label="3D editing controls" className="max-h-[40dvh] shrink-0 space-y-2 overflow-y-auto border-b border-border bg-card px-3 py-2">
-    <div role="group" aria-label="3D edit tools" className="flex flex-wrap gap-1.5">{tools.map(({ id, text, label }) => {
-      const Icon = { move: Move, rotate: RotateCw, resize: Scaling, pan: Hand, "place-item": Plus, "place-label": Type }[id];
-      return <button key={id} type="button" aria-label={label} aria-pressed={tool === id} disabled={busy || ((id === "rotate" || id === "resize") && (!selected || Boolean(selected.groupId) || locked))} onClick={() => { onToolChange(id); if (id === "place-item") setPickerOpen(true); }} className={`${buttonClass} ${tool === id ? "border-primary bg-primary/10 text-primary" : ""}`}><Icon className="h-3.5 w-3.5" aria-hidden="true" />{text}</button>;
-    })}<button type="button" aria-label="Snap in 3D" aria-pressed={snap} disabled={busy} onClick={onSnapChange} className={buttonClass}><Magnet className="h-3.5 w-3.5" aria-hidden="true" />{snap ? "Snap on" : "Snap off"}</button></div>
-    {(tool === "place-item" || tool === "place-label") ? <div className="flex flex-wrap items-center gap-2">
+  const placing = tool === "place-item" || tool === "place-label";
+  const tools = [{ id: "move", text: "Move", Icon: Move }, { id: "rotate", text: "Rotate", Icon: RotateCw }, { id: "resize", text: "Resize", Icon: Scaling }, { id: "pan", text: "Pan", Icon: Hand }, { id: "place-item", text: "Add item", Icon: Plus }, { id: "place-label", text: "Add label", Icon: Type }] as const;
+  const names = { move: "Move items in 3D", rotate: "Rotate items in 3D", resize: "Resize items in 3D", pan: "Pan map in 3D", "place-item": "Add item in 3D", "place-label": "Add label in 3D" };
+  return <div aria-label="3D editing controls" className="max-h-[32dvh] shrink-0 space-y-2 overflow-y-auto border-b border-border bg-card p-2 sm:px-3">
+    <div className="flex flex-wrap items-center gap-2">
+      <div role="group" aria-label="3D edit tools" className="flex w-full flex-nowrap gap-1 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0">
+        {tools.map(({ id, text, Icon }) => <button key={id} type="button" aria-label={names[id]} aria-pressed={tool === id}
+          disabled={busy || ((id === "rotate" || id === "resize") && (!selected || Boolean(selected.groupId) || locked || (id === "resize" && !eventAssetAllowsResize(selected))))}
+          onClick={() => { onToolChange(id); if (id === "place-item") setPickerOpen(true); }}
+          className={buttonClass + " shrink-0 whitespace-nowrap" + (tool === id ? " border-primary bg-primary/10 text-primary" : "")}><Icon className="h-4 w-4" aria-hidden="true" />{text}</button>)}
+        <button type="button" aria-label="Snap in 3D" aria-pressed={snap} disabled={busy} onClick={onSnapChange} className={buttonClass}><Magnet className="h-4 w-4" />Snap</button>
+      </div>
+      {!placing && <div className="flex min-w-0 flex-nowrap items-center gap-1.5 sm:flex-wrap">
+        <label className="flex min-w-0 items-center gap-2 text-xs font-semibold"><span className="sr-only">Item</span><select aria-label="Selected 3D item" value={selectedIds[0] || ""} disabled={busy} onChange={event => { onSelect(event.target.value); if (event.target.value) onOpenDetails(event.currentTarget); }} className="h-11 w-44 max-w-full rounded-xl border border-border bg-background px-2 text-xs"><option value="">Select an event item</option>{furniture.map(item => <option key={item.id} value={item.id}>{item.name + (item.visible === false ? " (hidden)" : "")}</option>)}{labels.map(label => <option key={label.id} value={label.id}>{label.text}</option>)}</select></label>
+        <button type="button" aria-label="Item details in 3D" disabled={busy || !(selected || label)} onClick={event => onOpenDetails(event.currentTarget)} className={buttonClass}><SlidersHorizontal className="h-4 w-4" />Details</button>
+        {selectedIds.length > 0 && <button type="button" aria-label="Duplicate items in 3D" disabled={busy || locked} onClick={onDuplicate} className={buttonClass.replace("inline-flex", "hidden sm:inline-flex")}>Duplicate</button>}
+        {selectedIds.length > 0 && <button type="button" aria-label={locked ? "Unlock item in 3D" : "Lock item in 3D"} disabled={busy || selectedIds.length > 1} onClick={onToggleLock} className={buttonClass.replace("inline-flex", "hidden sm:inline-flex")}>{locked ? "Unlock" : "Lock"}</button>}
+      </div>}
+      {layoutChecks && <div className="ml-auto">{layoutChecks}</div>}
+    </div>
+    {placing && <div className="flex flex-wrap items-center gap-2">
       {tool === "place-item" && <Event3DAssetPicker value={template} onChange={onTemplateChange} open={pickerOpen} onOpenChange={setPickerOpen} disabled={busy} />}
-      <button type="button" aria-label="Place here in 3D" disabled={!placementPoint || !canPlace || busy} onClick={onPlace} className={`${buttonClass} border-primary bg-primary text-primary-foreground hover:bg-primary/90`}>Place here</button>
-      <button type="button" aria-label="Cancel placement in 3D" onClick={() => onToolChange("move")} disabled={busy} className={buttonClass}>Cancel</button>
-      <p role="status" className="basis-full text-xs font-semibold text-primary">{tool === "place-item" ? getEventFurnitureTemplate(template).name : "Label"} ready · Click or tap the map to place once. The translucent item is a preview. Escape cancels.</p>
-    </div> : <div className="flex flex-wrap items-center gap-2">
-      <label className="flex w-full min-w-0 max-w-sm items-center gap-2 text-xs font-semibold">Item<select aria-label="Selected 3D item" value={selectedIds[0] || ""} disabled={busy} onChange={event => onSelect(event.target.value)} className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-2"><option value="">Choose an event item</option>{furniture.map(item => <option key={item.id} value={item.id}>{item.name}{item.visible === false ? " (hidden)" : ""}</option>)}{labels.map(label => <option key={label.id} value={label.id}>{label.text}</option>)}</select></label>
-      {(selected || label) && <button type="button" aria-label={locked ? "Unlock item in 3D" : "Lock item in 3D"} disabled={busy} onClick={onToggleLock} className={buttonClass}>{locked ? "Unlock" : "Lock"}</button>}
-      {selectedIds.length > 0 && <button type="button" aria-label="Duplicate items in 3D" disabled={busy || locked} onClick={onDuplicate} className={buttonClass}>Duplicate</button>}
-      {selectedIds.length > 1 && <p className="basis-full text-xs text-muted-foreground">{selectedIds.length} grouped items selected. Move them together; ungroup in 2D to rotate or resize individual items.</p>}
-      {selectedIds.length > 1 && locked && <p role="status" className="basis-full text-xs text-destructive">This group contains a locked item. Unlock its members in 2D before moving it.</p>}
+      <button type="button" aria-label="Place here in 3D" disabled={!placementPoint || !canPlace || busy} onClick={onPlace} className={buttonClass + " bg-primary text-primary-foreground hover:bg-primary/90"}>Place here</button>
+      <label className="flex min-h-11 items-center gap-2 text-xs font-semibold"><input type="checkbox" aria-label="Keep placing" checked={repeatPlacement} disabled={busy} onChange={onRepeatChange} />Keep placing</label>
+      <button type="button" aria-label="Cancel placement in 3D" disabled={busy} onClick={() => onToolChange("move")} className={buttonClass}>Cancel</button>
     </div>}
-    {selected && tool !== "place-item" && tool !== "place-label" && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-      <GeometryField label="X" value={selected.x} disabled={busy || locked} onCommit={x => onFurnitureChange({ x })} />
-      <GeometryField label="Y" value={selected.y} disabled={busy || locked} onCommit={y => onFurnitureChange({ y })} />
-      <GeometryField label="Rotation" value={selected.rotation} disabled={busy || locked || Boolean(selected.groupId)} onCommit={rotation => onFurnitureChange({ rotation: ((rotation % 360) + 360) % 360 })} />
-      <GeometryField label="Width" value={selected.width} disabled={busy || locked || Boolean(selected.groupId)} onCommit={width => onFurnitureChange({ width })} />
-      <GeometryField label="Depth" value={selected.height} disabled={busy || locked || Boolean(selected.groupId)} onCommit={height => onFurnitureChange({ height })} />
-    </div>}
-    {label && tool !== "place-item" && tool !== "place-label" && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-      <label className="col-span-3 flex flex-col gap-1 text-[11px] font-semibold text-muted-foreground sm:col-span-2">Label text<input aria-label="Label text in 3D" value={label.text} disabled={busy || locked} onChange={event => onLabelChange({ text: event.target.value })} className="h-10 min-w-0 rounded-lg border border-border bg-background px-2 text-sm text-foreground" /></label>
-      <GeometryField label="X" value={label.x} disabled={busy || locked} onCommit={x => onLabelChange({ x })} />
-      <GeometryField label="Y" value={label.y} disabled={busy || locked} onCommit={y => onLabelChange({ y })} />
-      <GeometryField label="Font size" value={label.fontSize} disabled={busy || locked} onCommit={fontSize => onLabelChange({ fontSize: Math.max(8, Math.min(96, fontSize)) })} />
-      <label className="flex flex-col gap-1 text-[11px] font-semibold text-muted-foreground">Label color<input type="color" aria-label="Label color in 3D" value={label.color || "#1f2937"} disabled={busy || locked} onChange={event => onLabelChange({ color: event.target.value })} className="h-10 w-full rounded-lg border border-border bg-background" /></label>
-    </div>}
-    {error && <p role="status" className="text-xs font-semibold text-destructive">{error}</p>}
-    {!error && notice && <p role="status" className="text-xs font-semibold text-primary">{notice}</p>}
+    {selectedIds.length > 1 && <p className="text-xs text-muted-foreground">Move the selected group together. Ungroup in 2D to edit individual sizes.</p>}
+    {error ? <p role="status" className="text-xs font-semibold text-destructive">{error}</p> : notice && <p role="status" className="text-xs font-semibold text-primary">{notice}</p>}
   </div>;
 }

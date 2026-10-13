@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useId } from "react";
 import { BringToFront, ChevronDown, Eye, EyeOff, Lock, RotateCw, SendToBack, Unlock, Ungroup, X } from "lucide-react";
 import type { FloorFurniture, FloorLabel } from "../map-builder/types";
+import { eventAssetAllowsResize, eventAssetSizePresets, eventReferenceSize, type EventSizeContext } from "../../lib/eventAssetSizing";
+import { getEventFurnitureTemplate } from "./eventAssets";
+import { EventGeometryField } from "./EventGeometryField";
 
 interface EventItemInspectorProps {
   isOpen: boolean;
@@ -18,9 +21,19 @@ interface EventItemInspectorProps {
   onUpdateLayer: (direction: "front" | "back") => void;
   onUngroup: () => void;
   showHeader?: boolean;
+  mode?: "2d" | "3d";
+  sizeContext?: EventSizeContext;
+  busy?: boolean;
+  preserveAspect?: boolean;
+  onAspectChange?: () => void;
+  onResetSize?: () => void;
+  onSizePreset?: (preset: string) => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
+  error?: string | null;
 }
-const actionButtonClass = "flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-xs font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
-const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50";
+const actionButtonClass = "flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-border/70 px-2 text-xs font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+const fieldClass = "h-11 w-full min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50";
 const labelSwatches = ["#1E3A8A", "#0F766E", "#7C3AED", "#B45309", "#BE123C", "#111827"];
 
 export function EventItemInspector({
@@ -39,14 +52,19 @@ export function EventItemInspector({
   onUpdateLayer,
   onUngroup,
   showHeader = true,
+  mode = "2d", sizeContext = "indoor", busy = false, preserveAspect = true, onAspectChange, onResetSize, onSizePreset, onDuplicate, onDelete, error,
 }: EventItemInspectorProps) {
+  const advancedId = useId();
+  const aria = (name: string) => mode === "3d" ? `${name} in 3D` : name;
+  const geometryLocked = busy || Boolean(furniture?.locked || furniture?.groupId || label?.locked);
   const hasSelection = isOpen && Boolean(furniture || label);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [labelColorDraft, setLabelColorDraft] = useState(label?.color || "#1f2937");
   useEffect(() => {
     setAdvancedOpen(false);
-    setLabelColorDraft(label?.color || "#1f2937");
-  }, [label?.id, label?.color, furniture?.id]);
+
+  }, [label?.id, furniture?.id]);
+  useEffect(() => setLabelColorDraft(label?.color || "#1f2937"), [label?.id, label?.color]);
 
   const updateLabelColorDraft = (value: string) => {
     setLabelColorDraft(value);
@@ -60,7 +78,7 @@ export function EventItemInspector({
           {hasSelection && <p className="mt-0.5 break-words text-sm font-extrabold">{furniture?.name ?? label?.text ?? "Untitled label"}</p>}
         </div>
         {hasSelection && (
-          <button type="button" aria-label="Close item details" title="Close item details" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <button type="button" aria-label="Close item details" title="Close item details" onClick={onClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <X aria-hidden="true" className="h-4 w-4" />
           </button>
         )}
@@ -73,40 +91,52 @@ export function EventItemInspector({
         </div>
       ) : furniture ? (
         <>
-          <p className="-mt-2 text-xs leading-5 text-muted-foreground">Fixed size: {furniture.width} × {furniture.height} map units. Move and rotate without resizing.</p>
+          <p className="-mt-2 text-xs leading-5 text-muted-foreground">{eventAssetAllowsResize(furniture) ? "Size" : "Reference size"}: {Number(furniture.width.toFixed(2))} × {Number(furniture.height.toFixed(2))} map units. Approximate proportions.</p>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-muted-foreground">Size preset
+            <select aria-label="Size preset" disabled={geometryLocked} value={eventAssetSizePresets(furniture.assetKey || furniture.type).find(preset => {
+              const size = eventReferenceSize(getEventFurnitureTemplate(furniture.assetKey || furniture.type), sizeContext, preset.id);
+              return Math.abs(size.width - furniture.width) < 0.01 && Math.abs(size.height - furniture.height) < 0.01;
+            })?.id || "custom"} onChange={event => onSizePreset?.(event.target.value)} className={fieldClass}>
+              <option value="custom" disabled>Current saved size</option>
+              {eventAssetSizePresets(furniture.assetKey || furniture.type).map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+            </select>
+          </label>
+          {eventAssetAllowsResize(furniture) ? <>
+            <div className="grid grid-cols-2 gap-2">
+              <EventGeometryField key={`${furniture.id}:w`} label="Width" ariaLabel={aria("Width")} value={furniture.width} disabled={geometryLocked} onCommit={width => onUpdateFurniture({ width })} />
+              <EventGeometryField key={`${furniture.id}:d`} label="Depth" ariaLabel={aria("Depth")} value={furniture.height} disabled={geometryLocked} onCommit={height => onUpdateFurniture({ height })} />
+            </div>
+            <label className="flex min-h-11 items-center gap-2 text-xs font-semibold"><input type="checkbox" aria-label="Lock proportions" checked={preserveAspect} disabled={geometryLocked} onChange={onAspectChange} />Lock proportions</label>
+          </> : <p className="text-xs text-muted-foreground">Choose a reference variant; move and rotate without stretching.</p>}
+          <button type="button" aria-label="Reset to standard size" disabled={geometryLocked} onClick={onResetSize} className={actionButtonClass}>Reset to standard size</button>
           <div className="grid grid-cols-2 gap-2">
-            <label className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">
-              Rotation
-              <input type="number" aria-label="Rotation" min={-360} value={Math.round(furniture.rotation || 0)} onChange={(event) => onUpdateFurniture({ rotation: ((Number(event.currentTarget.value) % 360) + 360) % 360 })} disabled={furniture.locked} title={furniture.locked ? "Unlock this item to edit its geometry" : undefined} className={fieldClass} />
-            </label>
-            <button type="button" aria-label={furniture.locked ? "Unlock selected item" : "Lock selected item"} onClick={onToggleFurnitureLock} className={`${actionButtonClass} self-end`}>
+            <EventGeometryField key={`${furniture.id}:rotation`} label="Rotation" ariaLabel={aria("Rotation")} value={furniture.rotation || 0} disabled={geometryLocked} onCommit={rotation => onUpdateFurniture({ rotation: ((rotation % 360) + 360) % 360 })} />
+            <button type="button" aria-label={furniture.locked ? "Unlock selected item" : "Lock selected item"} disabled={busy} onClick={onToggleFurnitureLock} className={`${actionButtonClass} self-end`}>
               {furniture.locked ? <Unlock aria-hidden="true" className="h-4 w-4" /> : <Lock aria-hidden="true" className="h-4 w-4" />}{furniture.locked ? "Unlock" : "Lock"}
             </button>
-            <button type="button" aria-label="Rotate selected item" onClick={onRotate} disabled={furniture.locked} className={`${actionButtonClass} col-span-2`}>
+            <button type="button" aria-label="Rotate selected item" onClick={onRotate} disabled={geometryLocked} className={`${actionButtonClass} col-span-2`}>
               <RotateCw aria-hidden="true" className="h-4 w-4" /> Rotate 15°
             </button>
           </div>
-          <button type="button" aria-expanded={advancedOpen} aria-controls="event-item-advanced" onClick={() => setAdvancedOpen((open) => !open)} className="flex min-h-10 items-center justify-between rounded-lg border border-border/70 px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <button type="button" aria-expanded={advancedOpen} aria-controls={advancedId} onClick={() => setAdvancedOpen((open) => !open)} className="flex min-h-11 items-center justify-between rounded-lg border border-border/70 px-3 text-xs font-bold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             Advanced <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
           </button>
-          {advancedOpen && <div id="event-item-advanced" className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3">
+          {advancedOpen && <div id={advancedId} className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3">
             <div className="grid grid-cols-2 gap-3">
               {([
                 ["X", furniture.x, (value: number) => onUpdateFurniture({ x: Math.max(0, Math.min(canvasWidth - furniture.width, value)) })],
                 ["Y", furniture.y, (value: number) => onUpdateFurniture({ y: Math.max(0, Math.min(canvasHeight - furniture.height, value)) })],
               ] as Array<[string, number, (value: number) => void]>).map(([field, value, update]) => (
-                <label key={field} className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">{field}
-                  <input type="number" aria-label={field} min={0} value={value} onChange={(event) => update(Number(event.currentTarget.value) || 0)} disabled={furniture.locked} title={furniture.locked ? "Unlock this item to edit its geometry" : undefined} className={fieldClass} />
-                </label>
+                <EventGeometryField key={`${furniture.id}:${field}`} label={field} ariaLabel={aria(field)} value={value} disabled={geometryLocked} onCommit={update} />
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" aria-label={furniture.visible === false ? "Show selected item" : "Hide selected item"} onClick={onToggleVisibility} className={actionButtonClass}>
+              <button type="button" aria-label={furniture.visible === false ? "Show selected item" : "Hide selected item"} disabled={busy} onClick={onToggleVisibility} className={actionButtonClass}>
                 {furniture.visible === false ? <Eye aria-hidden="true" className="h-4 w-4" /> : <EyeOff aria-hidden="true" className="h-4 w-4" />}{furniture.visible === false ? "Show" : "Hide"}
               </button>
-              <button type="button" aria-label="Bring selected item to front" onClick={() => onUpdateLayer("front")} className={actionButtonClass}><BringToFront aria-hidden="true" className="h-4 w-4" /> Front</button>
-              <button type="button" aria-label="Send selected item to back" onClick={() => onUpdateLayer("back")} className={actionButtonClass}><SendToBack aria-hidden="true" className="h-4 w-4" /> Back</button>
-              {furniture.groupId && <button type="button" aria-label="Ungroup selected item" onClick={onUngroup} className={actionButtonClass}><Ungroup aria-hidden="true" className="h-4 w-4" /> Ungroup</button>}
+              <button type="button" aria-label="Bring selected item to front" disabled={busy} onClick={() => onUpdateLayer("front")} className={actionButtonClass}><BringToFront aria-hidden="true" className="h-4 w-4" /> Front</button>
+              <button type="button" aria-label="Send selected item to back" disabled={busy} onClick={() => onUpdateLayer("back")} className={actionButtonClass}><SendToBack aria-hidden="true" className="h-4 w-4" /> Back</button>
+              {furniture.groupId && <button type="button" aria-label="Ungroup selected item" disabled={busy} onClick={onUngroup} className={actionButtonClass}><Ungroup aria-hidden="true" className="h-4 w-4" /> Ungroup</button>}
             </div>
           </div>}
         </>
@@ -114,33 +144,44 @@ export function EventItemInspector({
         <>
           <label className="flex flex-col gap-1.5 text-xs font-bold text-muted-foreground">
             Label text
-            <input aria-label="Label text" value={label.text} disabled={label.locked} onChange={(event) => onUpdateLabel({ text: event.currentTarget.value })} className={fieldClass} />
+            <input aria-label={aria("Label text")} value={label.text} disabled={label.locked || busy} onChange={(event) => onUpdateLabel({ text: event.currentTarget.value })} className={fieldClass} />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">
               Font size
-              <input aria-label="Font size" type="number" value={label.fontSize} disabled={label.locked} onChange={(event) => onUpdateLabel({ fontSize: Math.max(8, Math.min(96, Number(event.currentTarget.value) || 8)) })} className={fieldClass} />
+              <input aria-label={aria("Font size")} type="number" value={label.fontSize} disabled={label.locked || busy} onChange={(event) => onUpdateLabel({ fontSize: Math.max(8, Math.min(96, Number(event.currentTarget.value) || 8)) })} className={fieldClass} />
             </label>
             <label className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">
               Rotation
-              <input aria-label="Rotation" type="number" value={Math.round(label.rotation || 0)} disabled={label.locked} onChange={(event) => onUpdateLabel({ rotation: ((Number(event.currentTarget.value) % 360) + 360) % 360 })} className={fieldClass} />
+              <input aria-label={aria("Rotation")} type="number" value={Math.round(label.rotation || 0)} disabled={label.locked || busy} onChange={(event) => onUpdateLabel({ rotation: ((Number(event.currentTarget.value) % 360) + 360) % 360 })} className={fieldClass} />
             </label>
-            <button type="button" aria-label={label.locked ? "Unlock selected label" : "Lock selected label"} onClick={onToggleLabelLock} className={actionButtonClass}>
+            <button type="button" aria-label={label.locked ? "Unlock selected label" : "Lock selected label"} disabled={busy} onClick={onToggleLabelLock} className={actionButtonClass}>
               {label.locked ? <Unlock aria-hidden="true" className="h-4 w-4" /> : <Lock aria-hidden="true" className="h-4 w-4" />}{label.locked ? "Unlock" : "Lock"}
             </button>
           </div>
+          <button type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)} className={actionButtonClass}>Advanced</button>
+          {advancedOpen && <div className="grid grid-cols-2 gap-2">
+            <EventGeometryField key={`${label.id}:x`} label="X" ariaLabel={aria("X")} value={label.x} disabled={geometryLocked} onCommit={x => onUpdateLabel({ x: Math.max(0, Math.min(canvasWidth, x)) })} />
+            <EventGeometryField key={`${label.id}:y`} label="Y" ariaLabel={aria("Y")} value={label.y} disabled={geometryLocked} onCommit={y => onUpdateLabel({ y: Math.max(0, Math.min(canvasHeight - label.fontSize, y)) })} />
+          </div>}
           <fieldset className="space-y-2">
             <legend className="text-xs font-bold text-muted-foreground">Label color</legend>
+            <input type="color" aria-label={aria("Label color")} value={label.color || "#1f2937"} disabled={geometryLocked} onChange={event => onUpdateLabel({ color: event.target.value })} className="h-11 w-full rounded-xl border border-border bg-background" />
             <div className="flex flex-wrap gap-2">
-              {labelSwatches.map((color) => <button key={color} type="button" aria-label={`Set label color ${color}`} aria-pressed={(label.color || "#1f2937").toLowerCase() === color.toLowerCase()} disabled={label.locked} onClick={() => { setLabelColorDraft(color); onUpdateLabel({ color }); }} className="h-9 w-9 rounded-full border-2 border-border p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" title={color}><span aria-hidden="true" className="block h-full w-full rounded-full" style={{ backgroundColor: color }} /></button>)}
+              {labelSwatches.map((color) => <button key={color} type="button" aria-label={`Set label color ${color}`} aria-pressed={(label.color || "#1f2937").toLowerCase() === color.toLowerCase()} disabled={geometryLocked} onClick={() => { setLabelColorDraft(color); onUpdateLabel({ color }); }} className="h-11 w-11 rounded-full border-2 border-border p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" title={color}><span aria-hidden="true" className="block h-full w-full rounded-full" style={{ backgroundColor: color }} /></button>)}
             </div>
             <label className="flex min-w-0 flex-col gap-1.5 text-xs font-bold text-muted-foreground">Hex value
-              <input type="text" aria-label="Label color hex" value={labelColorDraft} aria-invalid={labelColorDraft.length > 0 && !/^#[\da-fA-F]{6}$/.test(labelColorDraft)} disabled={label.locked} onChange={(event) => updateLabelColorDraft(event.currentTarget.value)} className={fieldClass} />
+              <input type="text" aria-label="Label color hex" value={labelColorDraft} aria-invalid={labelColorDraft.length > 0 && !/^#[\da-fA-F]{6}$/.test(labelColorDraft)} disabled={geometryLocked} onChange={(event) => updateLabelColorDraft(event.currentTarget.value)} className={fieldClass} />
             </label>
             {labelColorDraft.length > 0 && !/^#[\da-fA-F]{6}$/.test(labelColorDraft) && <p role="status" className="text-[11px] text-destructive">Enter a six-digit color such as #1E3A8A.</p>}
           </fieldset>
         </>
       ) : null}
+      {error && <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">{error}</p>}
+      {hasSelection && (onDuplicate || onDelete) && <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+        <button type="button" aria-label="Duplicate selected item" onClick={onDuplicate} disabled={busy || geometryLocked} className={actionButtonClass}>Duplicate</button>
+        <button type="button" aria-label="Delete selected item" onClick={onDelete} disabled={busy || Boolean(furniture?.locked || label?.locked)} className={`${actionButtonClass} text-destructive`}>Delete</button>
+      </div>}
     </section>
   );
 }

@@ -86,13 +86,13 @@ export function EventPlacementDock({
         <button
           type="button"
           role="switch"
-          aria-label="Place multiple"
+          aria-label="Keep placing"
           aria-checked={repeatPlacement}
           disabled={disabled}
           onClick={() => onRepeatPlacementChange(!repeatPlacement)}
           className="flex min-h-11 shrink-0 items-center gap-3 rounded-xl border border-border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
         >
-          <span>Place multiple</span>
+          <span>Keep placing</span>
           <span aria-hidden="true" className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", repeatPlacement ? "bg-primary" : "bg-muted-foreground/40")}>
             <span className={cn("absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none", repeatPlacement ? "translate-x-4" : "translate-x-0")} />
           </span>

@@ -59,7 +59,7 @@ export function useEvent3DInteraction({ furniture = EMPTY_FURNITURE, labels = EM
     const placing = edit.tool === "place-item" || edit.tool === "place-label";
     if (!id && !placing) return;
     if (id && !placing) edit.onSelect(id);
-    const gesture = !placing && id ? beginEvent3DGesture({ furniture: [...state.furniture], labels: [...state.labels] }, id, override || edit.tool as Event3DManipulation, point, edit.bounds, edit.grid) : null;
+    const gesture = !placing && id ? beginEvent3DGesture({ furniture: [...state.furniture], labels: [...state.labels] }, id, override || edit.tool as Event3DManipulation, point, edit.bounds, edit.grid, edit.preserveAspect) : null;
     if (!placing && !gesture) return;
     event.preventDefault(); event.stopPropagation();
     const orbit = controls as unknown as ActivePointer["controls"];

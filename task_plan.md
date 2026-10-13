@@ -1,5 +1,17 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 13 — Approved consistent desktop/mobile editor tools
+
+Active task: implement all approved UX suggestions. User clarified that realistic relative sizing is sufficient; do not claim measured meters or require calibration input. Branch `codex/event-editor-consistent-tools`, base `f3bc9a3`. Plan: `docs/superpowers/plans/2026-10-13-event-editor-consistent-tools.md`.
+
+- [x] Reference sizing and shared 2D/3D policy, presets/reset/aspect lock and 2D resize.
+- [x] Actual placement hit-target cursors, pointer/mode feedback and explicit repeat placement.
+- [x] Compact 3D tools and shared desktop inspector/mobile sheet.
+- [x] Save/retry/newer-edit and issue-focus feedback.
+- [ ] Focused/WebGL/build/type verification, read-only review and authorized main delivery.
+
+Implemented and browser-verified; final one-worker suite/build and authorized main delivery are in progress. Preserve existing layout coordinates and unrelated files. No live SQL or user event writes.
+
 ## October 13 — Event editor usability and reported defects
 
 Current task: fix the reported 3D placement/persistence, 2D floor clipping, asset proportions and controls. Design/plan: `docs/superpowers/plans/2026-10-13-event-editor-usability.md`. Work in existing checkout on `codex/event-editor-usability-fixes`; preserve unrelated files. No live SQL or user-event mutation for verification.

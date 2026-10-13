@@ -43,9 +43,13 @@ describe("direct 3D event editor integration", () => {
     expect(screen.getByRole("button", { name: "Choose 3D event asset" })).toHaveTextContent("Chair");
   });
   it("saves completed 3D geometry through the real editor and reflects it in 2D", async () => {
-    const save = setup();
+    const save = setup({ ...overlay, eventFurniture: [{ ...overlay.eventFurniture![0], type: "table", name: "Table" }] });
     fireEvent.click(screen.getByRole("button", { name: "Select chair on 3D map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Item details in 3D" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lock proportions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     updateNumber("Rotation in 3D", "90"); updateNumber("Width in 3D", "32"); updateNumber("Depth in 3D", "24"); updateNumber("X in 3D", "120");
+    if (screen.queryByRole("dialog", { name: "Item details" })) fireEvent.click(screen.getByRole("button", { name: "Close item details" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     expect(screen.getByTestId("event-furniture-chair")).toHaveStyle({ left: "120px", width: "32px", transform: "rotate(90deg)" });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
@@ -59,6 +63,7 @@ describe("direct 3D event editor integration", () => {
     expect(screen.getByText("chair:24,24")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Redo$/ }));
     expect(screen.getByText("chair:80,90")).toBeInTheDocument();
+    if (screen.queryByRole("dialog", { name: "Item details" })) fireEvent.click(screen.getByRole("button", { name: "Close item details" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     expect(screen.getByTestId("event-furniture-chair")).toHaveStyle({ left: "80px", top: "90px" });
   });
@@ -68,6 +73,7 @@ describe("direct 3D event editor integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose Tent" }));
     fireEvent.click(screen.getByRole("button", { name: "Pick 3D placement point" }));
     fireEvent.click(screen.getByRole("button", { name: "Place here in 3D" }));
+    if (screen.queryByRole("dialog", { name: "Item details" })) fireEvent.click(screen.getByRole("button", { name: "Close item details" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     const items = screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]");
     expect(items).toHaveLength(2);
@@ -95,9 +101,11 @@ describe("direct 3D event editor integration", () => {
   });
   it("cancels a pending numeric edit with Escape", () => {
     setup(); fireEvent.click(screen.getByRole("button", { name: "Select chair on 3D map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Item details in 3D" }));
     const input = screen.getByRole("spinbutton", { name: "Rotation in 3D" });
     act(() => input.focus()); fireEvent.change(input, { target: { value: "90" } });
     fireEvent.keyDown(input, { key: "Escape" }); fireEvent.blur(input);
+    if (screen.queryByRole("dialog", { name: "Item details" })) fireEvent.click(screen.getByRole("button", { name: "Close item details" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     expect(screen.getByTestId("event-furniture-chair")).toHaveStyle({ transform: "rotate(0deg)" });
   });
@@ -107,6 +115,7 @@ describe("direct 3D event editor integration", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Label text in 3D" }), { target: { value: "Check-in area" } });
     updateNumber("Font size in 3D", "18");
     fireEvent.change(screen.getByLabelText("Label color in 3D"), { target: { value: "#00aa00" } });
+    if (screen.queryByRole("dialog", { name: "Item details" })) fireEvent.click(screen.getByRole("button", { name: "Close item details" }));
     fireEvent.click(screen.getByRole("button", { name: /^2D layout$/ }));
     expect(screen.getByTestId("event-label-label")).toHaveStyle({ fontSize: "18px", color: "#00aa00" });
     expect(screen.getByTestId("event-label-label")).toHaveTextContent("Check-in area");

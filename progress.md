@@ -1,5 +1,9 @@
 # Progress Log
 
+## October 13 — Approved consistent desktop/mobile tools
+
+Approved suggestions and sizing correction inspected. User chooses approximate relative sizing, superseding exact calibration. Created branch `codex/event-editor-consistent-tools` from `f3bc9a3`; unrelated handoff files preserved. Design/plan written. Beginning meaningful RED tests before implementation. Skills: brainstorming, writing-plans, TDD, frontend-design and file planning; database guide read when evaluating persisted metadata, but no SQL changes are needed after the user's clarification.
+
 ## October 9 — Organization Event Continuity
 
 Read both approved documents and execution/database/TDD instructions. No AGENTS.md was found in the repository or ancestor directories. Original untracked plan/spec preserved. User requested current-checkout implementation; initial managed worktree contained no production changes and was archived. Created local implementation branch. Baseline checks started before code changes.
@@ -384,3 +388,7 @@ Approved map-context/responsive changes and available audit1–3 implemented. Br
 - Final merged focused233/233, actual editing13/13 and preview10/10 checks pass. Build3,643modules/1m27s passes. Merge recorded as ada8abd. Full attempt reported3,582pass/526fail with2 worker memory crashes and incomplete-JSON warning; all new3D files/public-map cases pass. Four representative upstream suites reproduced the same10 non-3D failures. All63 failure records have unchanged upstream test source, but no claim that every failure was runtime-baselined. User's earlier authorization leaves unrelated MapBuilder cleanup separate.
 - Delivery complete: final fetch had no additional incoming commit; fast-forwarded local main and normally pushed release72a488fe652ffa7e8888b01dbd3e579358532deb. GitHub main's SHA matched local HEAD. No PR, force push, live SQL or unrelated file staging. Final handoff-status documentation follows the release without production changes.
 - Sandbox denied initial fetch/index access; elevated retries succeeded. New tests will begin with pure geometry RED.
+
+October 13 consistent tools: meaningful RED tests preceded implementation. Shared reference presets/reset/aspect controls, 2D resize, scoped placing cursor/badges/ghosts, repeat history, shared responsive inspector, save retry and issue framing implemented. Independent reviewer identified legacy constraint, popup clipping and stale failure state; fixes and regressions added. Actual WebGL browser 11 checks PASS at 360/390/768/1440 with touch/keyboard and no live writes. Final type comparison singleThreaded:1047 baseline and1047 current, no diagnostic delta. Concurrent native compiler/test rerun hit Windows memory limits; remaining tests run with maxWorkers=1.
+
+Final verification:340/340 tests across43 suites PASS with maxWorkers=1; browser11 checks PASS/no page errors; final build3647 modules PASS with existing chunk warning. Review boundary precision repro was added RED, corrected with exact/inward position clamping, and passes. Fresh origin/main still f3bc9a3; integration prepared without PR or force push.

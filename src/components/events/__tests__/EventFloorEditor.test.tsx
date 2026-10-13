@@ -747,12 +747,12 @@ describe("EventFloorEditor", () => {
     fireEvent.keyDown(window, { code: "Space", key: " " });
     expect(canvas).toHaveStyle({ cursor: "grab" });
     expect(pan).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("Pan · Space held");
+    expect(screen.getByTestId("event-pan-status")).toHaveTextContent("Pan · Space held");
 
     fireEvent.mouseDown(canvas, { button: 0, clientX: 100, clientY: 100 });
     fireEvent.mouseMove(canvas, { clientX: 120, clientY: 115 });
     expect(canvas).toHaveStyle({ cursor: "grabbing" });
-    expect(screen.getByRole("status")).toHaveTextContent("Panning");
+    expect(screen.getByTestId("event-pan-status")).toHaveTextContent("Panning");
 
     fireEvent.mouseUp(window);
     expect(canvas).toHaveStyle({ cursor: "grab" });
@@ -1210,6 +1210,7 @@ describe("EventFloorEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Furniture$/ }));
     const canvas = screen.getByLabelText("Event layout canvas");
     fireEvent.click(within(canvas).getByRole("button", { name: "Chair" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Keep placing" }));
     fireEvent.click(canvas, { clientX: 120, clientY: 100 });
 
     await waitFor(() => {
@@ -2259,7 +2260,7 @@ describe("EventFloorEditor", () => {
     fireEvent.click(within(inspector).getByRole("button", { name: "Advanced" }));
     expect(within(inspector).queryByRole("spinbutton", { name: "Width" })).not.toBeInTheDocument();
     const x = within(inspector).getByRole("spinbutton", { name: "X" });
-    fireEvent.change(x, { target: { value: "48" } });
+    fireEvent.focus(x); fireEvent.change(x, { target: { value: "48" } }); fireEvent.blur(x);
     expect(screen.getByTestId("event-furniture-chair-1").style.left).toBe("48px");
     expect(screen.getByTestId("event-furniture-chair-1").style.width).toBe("24px");
   });
@@ -2386,7 +2387,7 @@ describe("EventFloorEditor", () => {
     fireEvent.click(within(inspector).getByRole("button", { name: "Advanced" }));
     const x = within(inspector).getByRole("spinbutton", { name: "X" });
     expect(x).toBeDisabled();
-    fireEvent.change(x, { target: { value: "48" } });
+    fireEvent.focus(x); fireEvent.change(x, { target: { value: "48" } }); fireEvent.blur(x);
     expect(item.style.width).not.toBe("48px");
 
     fireEvent.mouseDown(item, { button: 0, clientX: 36, clientY: 36 });
@@ -2580,6 +2581,7 @@ describe("EventFloorEditor", () => {
     expect(within(canvas).getByTestId("event-asset-dock")).toBeInTheDocument();
 
     fireEvent.click(within(canvas).getByRole("button", { name: "Chair" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Keep placing" }));
     fireEvent.click(canvas, { clientX: 120, clientY: 100 });
     fireEvent.click(canvas, { clientX: 180, clientY: 120 });
 

@@ -1,5 +1,12 @@
 # Findings & Decisions
 
+## October 13 — Consistent editor tools
+
+- User approved all suggested UX changes, then explicitly replaced exact calibration with approximate proportions against existing buildings/doors. The floor scale feature exists but is hidden behind an admin feature flag; no calibration/schema work is needed for this request.
+- 2D explicitly reports fixed furniture while 3D permits arbitrary chair footprint resizing. A shared asset-specific policy must cover both UI and callbacks/gesture helpers.
+- Current crosshair CSS targets only canvas. Drei HTML and other actual hit targets can inherit a different cursor. Tests must inspect elementFromPoint across the real surface, not only canvas computed style.
+- Outdoor buildings are rendered at a compressed scale compared with indoor floors; new outdoor reference furniture must be smaller. Existing assetVariant survives private/public/reuse projections and can identify reference model height without new SQL or bulk-changing saved drafts.
+
 ## October 9 — Organization Event Continuity
 
 Current owner checks span frontend, SQL policies, triggers, feedback/revision RPCs, and notification receipts. Replacing only a UI creator filter would leave successors denied and original creators authorized. History/reuse and media references must move together with database authorization. PGlite runs real PostgreSQL SQL/RLS but does not establish separate-session concurrency guarantees; a separate PostgreSQL runtime is being investigated for race tests.
@@ -306,3 +313,5 @@ Resolved defects and evidence are in docs/verification/event-final-audit/README.
 - Outdoor WorldCamera reacts to canvas resizing and competed with EventPreviewCamera when selection controls expanded. Event previews must use one camera owner; public route navigation keeps its existing WorldCamera.
 - Native TypeScript comparison against f242aa0 has no increased file/code diagnostic counts. The repo still has substantial existing errors; the production Vite build succeeds independently.
 - Final comparison against latest75096c5 is1,047diagnostics on both sides, no increased file/code counts. Four representative non-3D test suites reproduce the same10 failures on upstream source. Whole-suite memory errors and existing broader failures prevent a clean full-suite claim; final233 focused and23 browser checks pass.
+
+October 13 implementation findings: shared geometry policy prevents chair/equipment stretching; approximate outdoor factor 0.4 uses persisted assetVariant and stable model height. Position-only constraints preserve tiny/oversized legacy footprints. Actual crosshair includes HTML surfaces and camera chrome stays interactive. Native browser testing exposed a floating action bar covering the 2D resize target; spacing now reserves the control area. Layout issue popup uses a viewport-anchored portal outside scrolling tools. Coordinator false can mean saved older revision with newer unsaved edits, so failure feedback is signature-aware. Default 3D camera fits map to retain building context; Focus is explicit.

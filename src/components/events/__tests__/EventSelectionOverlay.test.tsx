@@ -51,7 +51,7 @@ describe("EventSelectionOverlay", () => {
 
     const handle = screen.getByRole("button", { name: "Rotate Chair 1" });
     expect(handle).toHaveClass("h-11", "w-11", "pointer-events-auto", "cursor-grab");
-    expect(handle).toHaveStyle({ transform: "translateX(-50%) scale(2)" });
+    expect(handle).toHaveStyle({ transform: "scale(2) translateX(-50%)" });
     fireEvent.pointerDown(handle, { pointerId: 7, button: 0 });
     expect(onRotatePointerDown).toHaveBeenCalledWith(expect.objectContaining({ type: "pointerdown" }), chair);
 
@@ -65,7 +65,7 @@ describe("EventSelectionOverlay", () => {
         onRotatePointerDown={onRotatePointerDown}
       />,
     );
-    expect(screen.getByRole("button", { name: "Rotate Chair 1" })).toHaveStyle({ transform: "translateX(-50%) scale(0.5)" });
+    expect(screen.getByRole("button", { name: "Rotate Chair 1" })).toHaveStyle({ transform: "scale(0.5) translateX(-50%)" });
   });
 
   it.each([
