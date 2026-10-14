@@ -84,6 +84,7 @@ import { event3DSelectionIds, mergeEvent3DChanges, type Event3DEditing, type Eve
 import { EventSelectionOverlay } from "./EventSelectionOverlay";
 import { constrainEventAsset, eventAssetAllowsResize, eventAssetReferenceFactor, resetEventAssetSize, resizeEventAsset, type EventSizeContext } from "../../lib/eventAssetSizing";
 import { stableEventJson } from "../../lib/stableEventJson";
+import { eventSnapPoint, eventSnapRotation, eventSnapDelta } from "../../lib/eventSnap";
 import { EventSaveStatus } from "./EventSaveStatus";
 import { event3DLayoutBounds, type Event3DCameraSession } from "../../lib/event3dLayout";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -894,7 +895,7 @@ export function EventFloorEditor({
       existing: eventFurniture,
       canvasWidth: canvasW,
       canvasHeight: canvasH,
-      grid: floorPlan.gridSize || 0,
+      grid: floorPlan.gridSize || 20,
       zoom,
       snapEnabled,
       blockedRegions: protectedRegions,
@@ -1105,10 +1106,10 @@ export function EventFloorEditor({
   const placeLabel = useCallback(
     (x: number, y: number) => {
       if (readOnly) return;
+      const anchor = eventSnapPoint({ x, y }, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14);
       const newLabel: FloorLabel = {
         id: genId(),
-        x,
-        y,
+        ...anchor,
         text: "Event Label",
         fontSize: 14,
         color: "#1f2937",
@@ -1123,7 +1124,7 @@ export function EventFloorEditor({
       setSelectedIds([newLabel.id]);
       if (!repeatPlacement) setActiveTool("select");
     },
-    [eventFurniture, eventLabels, pushHistory, readOnly, setLabelsPreview, repeatPlacement]
+    [eventFurniture, eventLabels, pushHistory, readOnly, setLabelsPreview, repeatPlacement, canvasW, canvasH, floorPlan.gridSize, snapEnabled]
   );
 
   // ── Delete selected ────────────────────────────────────────────────────
@@ -1220,7 +1221,7 @@ export function EventFloorEditor({
           existing: eventFurniture,
           canvasWidth: canvasW,
           canvasHeight: canvasH,
-          grid: floorPlan.gridSize || 0,
+          grid: floorPlan.gridSize || 20,
           zoom,
           snapEnabled,
           blockedRegions: protectedRegions,
@@ -1275,7 +1276,7 @@ export function EventFloorEditor({
       existing: eventFurniture,
       canvasWidth: canvasW,
       canvasHeight: canvasH,
-      grid: floorPlan.gridSize || 0,
+      grid: floorPlan.gridSize || 20,
       zoom: safeZoom,
       snapEnabled,
       blockedRegions: protectedRegions,
@@ -1467,9 +1468,7 @@ export function EventFloorEditor({
         if (deltaDegrees < -180) deltaDegrees += 360;
         const rawRotation = rotateGesture.startRotation + deltaDegrees;
         const normalizedRotation = ((rawRotation % 360) + 360) % 360;
-        const nextRotation = e.shiftKey
-          ? Math.round(normalizedRotation / 15) * 15
-          : Math.round(normalizedRotation * 100) / 100;
+        const nextRotation = eventSnapRotation(normalizedRotation, snapEnabled || e.shiftKey);
         const nextFurniture = latestFurnitureRef.current.map((item) => item.id === rotateGesture.id
           ? { ...item, rotation: nextRotation % 360 }
           : item);
@@ -1487,8 +1486,8 @@ export function EventFloorEditor({
           ? resizeEventAsset(
             resizeGesture.origin,
             resizeGesture.handle,
-            mouseX - resizeGesture.startMouseX,
-            mouseY - resizeGesture.startMouseY,
+            eventSnapDelta(mouseX - resizeGesture.startMouseX, floorPlan.gridSize || 20, snapEnabled),
+            eventSnapDelta(mouseY - resizeGesture.startMouseY, floorPlan.gridSize || 20, snapEnabled),
             { width: canvasW, height: canvasH },
             preserveAspect || e.shiftKey,
           )
@@ -1527,11 +1526,10 @@ export function EventFloorEditor({
         selectedIds: gesture.ids,
         startPointer: gesture.startPointer,
         bounds: { width: canvasW, height: canvasH },
-        grid: floorPlan.gridSize || 0,
-        threshold: gesture.anchorType === "furniture"
-          ? 6 / Math.max(0.25, gesture.frame.zoom)
-          : 0,
-        snapToGrid: gesture.anchorType === "furniture" && snapEnabled,
+        grid: floorPlan.gridSize || 20,
+        threshold: 6 / Math.max(0.25, gesture.frame.zoom),
+        snapToGrid: snapEnabled,
+        snapGroupsToGrid: true,
         snapEnabled,
       }, { x: mouseX, y: mouseY });
       gestureMovedRef.current = true;
@@ -1797,7 +1795,7 @@ export function EventFloorEditor({
     if (readOnly || threeBusy || !threePoint) return;
     if (threeTool === "place-item" && threeCandidate) {
       if (!commitFurnitureCandidate(threeCandidate.item, threeCandidate.assessment)) return;
-    } else if (threeTool === "place-label") placeLabel(Math.max(0, Math.min(canvasW, threePoint.x)), Math.max(0, Math.min(canvasH - 14, threePoint.y)));
+    } else if (threeTool === "place-label") placeLabel(threePoint.x, threePoint.y);
     else return;
     if (!repeatPlacement) { setThreePoint(null); setThreeTool("move"); } setThreeError(null);
     setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
@@ -1808,7 +1806,7 @@ export function EventFloorEditor({
       const candidate = buildEventAssetCandidate({ template: activeTemplate, point, existing: latestFurnitureRef.current, canvasWidth: canvasW, canvasHeight: canvasH, grid: floorPlan.gridSize || 20, zoom: 1, snapEnabled, blockedRegions: protectedRegions });
       if (!commitFurnitureCandidate(candidate.item, candidate.assessment)) { setThreePoint(point); setThreeError(candidate.assessment.blockingReason); return; }
     } else if (threeTool === "place-label") {
-      placeLabel(Math.max(0, Math.min(canvasW, point.x)), Math.max(0, Math.min(canvasH - 14, point.y)));
+      placeLabel(point.x, point.y);
     } else return;
     if (!repeatPlacement) { setThreePoint(null); setThreeTool("move"); } setThreeError(null);
     setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
@@ -1816,7 +1814,7 @@ export function EventFloorEditor({
   const threeEditing: Event3DEditing | undefined = readOnly ? undefined : {
     tool: threeTool, selectedIds, bounds: { width: canvasW, height: canvasH }, grid: snapEnabled ? floorPlan.gridSize || 20 : 0,
     preserveAspect,
-    placement: threeCandidate ? { furniture: [{ ...threeCandidate.item, color: threeCandidate.assessment.canPlace ? threeCandidate.item.color : "#ef4444" }], labels: [] } : threeTool === "place-label" && threePoint ? { furniture: [], labels: [{ id: "3d-label-preview", ...threePoint, text: "Event Label", fontSize: 14, color: "#1f2937", rotation: 0 }] } : undefined,
+    placement: threeCandidate ? { furniture: [{ ...threeCandidate.item, color: threeCandidate.assessment.canPlace ? threeCandidate.item.color : "#ef4444" }], labels: [] } : threeTool === "place-label" && threePoint ? { furniture: [], labels: [{ id: "3d-label-preview", ...eventSnapPoint(threePoint, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14), text: "Event Label", fontSize: 14, color: "#1f2937", rotation: 0 }] } : undefined,
     onSelect: selectThreeItem, onPlacementPoint: point => { setThreePoint(point); setThreeError(null); }, onPlace: placeThreePoint,
     onCancelPlacement: () => { setThreePoint(null); setThreeTool("move"); setThreeError(null); setThreeNotice("Placement cancelled."); },
     onCommit: commitThreeGeometry, onBusyChange: setThreeBusy,
@@ -2831,7 +2829,7 @@ export function EventFloorEditor({
             </div>
           </div>
         </div>
-        {!readOnly && <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+        {!readOnly && <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
           {tutorialAccountId && viewMode === "2d" && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
           {/* Undo/Redo */}
           <button
@@ -2840,7 +2838,7 @@ export function EventFloorEditor({
             title="Undo"
             onClick={undo}
             disabled={historyIndex <= 0 || threeBusy}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Undo2 className="h-3.5 w-3.5" />
           </button>
@@ -2850,7 +2848,7 @@ export function EventFloorEditor({
             title="Redo"
             onClick={redo}
             disabled={historyIndex >= history.length - 1 || threeBusy}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Redo2 className="h-3.5 w-3.5" />
           </button>
@@ -2860,35 +2858,37 @@ export function EventFloorEditor({
             disabled={!selectedId || threeBusy}
             aria-label="Delete selected items"
             title="Delete selected items (Del)"
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
-          <EventSaveStatus status={saveFailure ? "Save failed — retry" : saveStatus || localSaveStatus} />
+          <div className="order-first flex w-full justify-end sm:order-none sm:w-auto"><EventSaveStatus status={saveFailure ? "Save failed — retry" : saveStatus || localSaveStatus} /></div>
           {saveFailure && <button type="button" aria-label="Retry save" disabled={busy} onClick={handleSave} className="min-h-11 rounded-xl border border-destructive/40 px-3 text-xs font-semibold text-destructive">Retry</button>}
           {/* Save */}
           <button
             data-event-tour="save"
+            aria-label="Save Draft"
             onClick={handleSave}
             disabled={busy}
-            className="flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-xl border border-border text-[11px] sm:text-xs font-bold text-foreground hover:bg-muted transition-all disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap h-11 px-2.5 sm:px-3 rounded-xl border border-border text-[11px] sm:text-xs font-bold text-foreground hover:bg-muted transition-all disabled:opacity-50"
           >
             {saving || isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            Save Draft
+            <span className="sm:hidden">Save</span><span className="hidden sm:inline">Save Draft</span>
           </button>
           {/* Submit */}
           <button
             data-event-tour="submit"
+            aria-label={overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}
             onClick={handleSubmit}
             disabled={busy}
-            className="flex items-center gap-1.5 h-8 px-3 sm:px-4 rounded-xl bg-primary text-primary-foreground text-[11px] sm:text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap h-11 px-3 sm:px-4 rounded-xl bg-primary text-primary-foreground text-[11px] sm:text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
           >
             {submittingLocal || isSubmitting ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
               <Send className="h-3 w-3" />
             )}
-            {overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}
+            <span className="sm:hidden">Review</span><span className="hidden sm:inline">{overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}</span>
           </button>
         </div>}
       </div>
@@ -3071,7 +3071,7 @@ export function EventFloorEditor({
               existing: eventFurniture,
               canvasWidth: canvasW,
               canvasHeight: canvasH,
-              grid: floorPlan.gridSize || 0,
+              grid: floorPlan.gridSize || 20,
               zoom,
               snapEnabled,
               blockedRegions: protectedRegions,
@@ -3080,7 +3080,7 @@ export function EventFloorEditor({
             setSnapGuides(candidate.guides);
             setPlacementError(candidate.assessment.blockingReason);
           } else if (activeTool === "text") {
-            setPlacementPoint({ x: Math.max(0, Math.min(canvasW, point.x)), y: Math.max(0, Math.min(canvasH - 14, point.y)) });
+            setPlacementPoint(eventSnapPoint(point, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14));
           }
         }}
         onPointerLeave={() => { setFeedbackCursorPoint(null); setPlacementCursor(null); }}
@@ -3493,7 +3493,7 @@ export function EventFloorEditor({
               )}
             >
               <Magnet className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="hidden sm:inline">Snap</span>
+              <span className="text-[11px]">Snap {snapEnabled ? "on" : "off"}</span>
             </button>
           )}
             <button

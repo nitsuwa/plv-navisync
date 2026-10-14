@@ -1,0 +1,61 @@
+{
+  "passedTests": 263,
+  "failedTests": 0,
+  "suites": [
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/__tests__/CampusMapPage.eventOverlayService.test.tsx",
+      "status": "passed",
+      "tests": 44
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/pages/__tests__/StudentEventEditPage.pendingDraft.test.tsx",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/event3dEditing.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/eventLayoutGeometry.test.ts",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/eventSnap.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/Event3DItemPicker.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/EventFloorEditor.3dEditing.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/EventFloorEditor.test.tsx",
+      "status": "passed",
+      "tests": 122
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/EventFloorEditor.tools.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/EventPreviewCamera.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "name": "C:/Users/Rj/Documents/GitHub/plv-navisync/src/components/events/__tests__/useEvent3DInteraction.test.tsx",
+      "status": "passed",
+      "tests": 7
+    }
+  ]
+}

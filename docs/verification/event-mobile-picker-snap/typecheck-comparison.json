@@ -1,0 +1,7 @@
+{
+  "baselineDiagnostics": 1047,
+  "addedDiagnosticIdentities": 0,
+  "baselineCommit": "f8fdef3",
+  "comparison": "Diagnostic path/line/code identities compared; existing TypeScript baseline remains unresolved.",
+  "currentDiagnostics": 1047
+}

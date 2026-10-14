@@ -111,7 +111,9 @@ describe("direct 3D event editor integration", () => {
   });
   it("edits label text, size and color in 3D and preserves them on save", async () => {
     const save = setup({ ...overlay, eventLabels: [{ id: "label", text: "Welcome", x: 40, y: 80, fontSize: 14, color: "#111111", rotation: 0 }] });
-    fireEvent.change(screen.getByRole("combobox", { name: "Selected 3D item" }), { target: { value: "label" } });
+    fireEvent.click(screen.getByRole("button", { name: "Selected 3D item" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Welcome" }));
+    fireEvent.click(screen.getByRole("button", { name: "Item details in 3D" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Label text in 3D" }), { target: { value: "Check-in area" } });
     updateNumber("Font size in 3D", "18");
     fireEvent.change(screen.getByLabelText("Label color in 3D"), { target: { value: "#00aa00" } });

@@ -70,7 +70,7 @@ export function previewEvent3DGesture(gesture: Event3DGesture, point: Event3DPoi
   if (tool === "move") {
     const anchor = item || { ...label!, width: 0, height: label!.fontSize || 14 };
     const movingItems = item ? start.furniture.filter(item => ids.includes(item.id)).map(moveBounds) : [anchor];
-    const result = resolveLayoutMoveFromSnapshot({ anchor, movingItems, furnitureItems: start.furniture, selectedIds: ids, startPointer: pointer, bounds, grid, threshold: 6, snapEnabled: grid > 0, snapToGrid: grid > 0 }, point);
+    const result = resolveLayoutMoveFromSnapshot({ anchor, movingItems, furnitureItems: start.furniture, selectedIds: ids, startPointer: pointer, bounds, grid, threshold: 6, snapEnabled: grid > 0, snapToGrid: grid > 0, snapGroupsToGrid: true }, point);
     return {
       furniture: start.furniture.map(item => ids.includes(item.id) ? { ...item, x: item.x + result.delta.x, y: item.y + result.delta.y } : item),
       labels: start.labels.map(label => ids.includes(label.id) ? { ...label, x: label.x + result.delta.x, y: label.y + result.delta.y } : label),

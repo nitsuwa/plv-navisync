@@ -6,6 +6,10 @@ import { EventFloorEditor } from "../EventFloorEditor";
 vi.mock("../EventLayout3DPreview", () => ({ EventLayout3DPreview: ({ editing, editorTools }: { editing?: Event3DEditing; editorTools?: React.ReactNode }) => <section>{editorTools}
   <button onClick={() => editing?.onSelect("chair")}>Select chair in scene</button><button onClick={() => editing?.onSelect("table")}>Select table in scene</button>
   <button onClick={() => editing?.onPlace?.({ x: 180, y: 140 })}>Place in scene</button>
+  <button onClick={() => editing?.onPlace?.({ x: 137, y: 153 })}>Place at uneven point</button>
+  <button onClick={() => editing?.onPlacementPoint({ x: 497, y: 419 })}>Preview boundary point</button>
+  <button onClick={() => editing?.onPlace?.({ x: 497, y: 419 })}>Place boundary point</button>
+  <output aria-label="3D label preview position">{JSON.stringify(editing?.placement?.labels[0])}</output>
   <button onClick={() => { editing?.onPlace?.({ x: 180, y: 140 }); editing?.onPlace?.({ x: 220, y: 140 }); }}>Place twice rapidly</button>
 </section> }));
 const floor: FloorPlan = { id:"floor", buildingId:"hall", number:1, label:"Hall", canvasW:500,canvasH:420,gridSize:20,rooms:[],walls:[],doors:[],windows:[],furniture:[],stairs:[],ramps:[],elevators:[],labels:[],paths:[] };
@@ -16,6 +20,18 @@ const overlay: CampusEventOverlay = { id:"tools-test", title:"Fair",description:
 beforeEach(()=>localStorage.clear());
 function setup(map=floor, save=vi.fn().mockResolvedValue(true)) { render(<EventFloorEditor floorPlan={map} overlay={overlay} onSave={save} onSubmit={vi.fn()} onBack={vi.fn()}/>);fireEvent.click(screen.getByRole("button",{name:"3D layout"}));return save; }
 describe("consistent organizer tools",()=>{
+  it("commits the exact label boundary preview from both 3D placement paths",async()=>{
+    const save=setup();fireEvent.click(screen.getByRole("button",{name:"Add label in 3D"}));fireEvent.click(screen.getByText("Preview boundary point"));
+    expect(screen.getByLabelText("3D label preview position")).toHaveTextContent('"y":406');fireEvent.click(screen.getByRole("button",{name:"Place here in 3D"}));
+    fireEvent.click(screen.getByRole("button",{name:"Add label in 3D"}));fireEvent.click(screen.getByText("Place boundary point"));fireEvent.click(screen.getByRole("button",{name:"Save Draft"}));await waitFor(()=>expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1].map((label:{y:number})=>label.y)).toEqual([406,406]);
+  });
+  it("snaps new 3D label anchors when enabled and preserves free anchors when disabled",async()=>{
+    const save=setup();fireEvent.click(screen.getByRole("button",{name:"Add label in 3D"}));fireEvent.click(screen.getByText("Place at uneven point"));
+    fireEvent.click(screen.getByRole("button",{name:"Snap in 3D"}));fireEvent.click(screen.getByRole("button",{name:"Add label in 3D"}));fireEvent.click(screen.getByText("Place at uneven point"));
+    fireEvent.click(screen.getByRole("button",{name:"Save Draft"}));await waitFor(()=>expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1][0]).toMatchObject({x:140,y:160});expect(save.mock.calls[0][1][1]).toMatchObject({x:137,y:153});
+  });
   it("disables chair stretching in 3D",()=>{setup();fireEvent.click(screen.getByText("Select chair in scene"));expect(screen.getByRole("button",{name:"Resize items in 3D"})).toBeDisabled();});
   it("uses the smaller outdoor reference for newly placed chairs",()=>{setup({...floor,id:"campus",buildingId:"campus"});fireEvent.click(screen.getByRole("button",{name:"Add item in 3D"}));fireEvent.click(screen.getByRole("button",{name:"Choose Chair"}));fireEvent.click(screen.getByText("Place in scene"));fireEvent.click(screen.getByRole("button",{name:"2D layout"}));const items=screen.getByLabelText("Event layout canvas").querySelectorAll<HTMLElement>("[data-event-item]");expect(items).toHaveLength(3);expect(items[2]).toHaveStyle({width:"6.4px",height:"6.4px"});expect(screen.getByTestId("event-furniture-chair")).toHaveStyle({width:"32px"});});
   it("keeps every rapid repeated placement and one undo entry per item",()=>{setup();fireEvent.click(screen.getByRole("button",{name:"Add item in 3D"}));fireEvent.click(screen.getByRole("button",{name:"Choose Chair"}));fireEvent.click(screen.getByRole("checkbox",{name:"Keep placing"}));fireEvent.click(screen.getByText("Place twice rapidly"));fireEvent.click(screen.getByRole("button",{name:"2D layout"}));expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(4);fireEvent.click(screen.getByRole("button",{name:"Undo"}));expect(screen.getByLabelText("Event layout canvas").querySelectorAll("[data-event-item]")).toHaveLength(3);});

@@ -96,6 +96,8 @@ export interface LayoutMoveSnapshot {
   snapToGrid?: boolean;
   /** Disable both grid and sibling attraction while preserving free movement. */
   snapEnabled?: boolean;
+  /** Event editor opt-in: translate a group by a grid-snapped anchor. */
+  snapGroupsToGrid?: boolean;
 }
 
 export interface LayoutMoveResult {
@@ -235,7 +237,9 @@ export function resolveLayoutMoveFromSnapshot(
       threshold: snapshot.threshold,
       snapToGrid: snapshot.snapToGrid,
     })
-    : { x: requestedX, y: requestedY, guides: [] };
+    : snapshot.snapEnabled !== false && snapshot.snapGroupsToGrid && (snapshot.grid || 0) > 0
+      ? { x: snapValue(requestedX, snapshot.grid!), y: snapValue(requestedY, snapshot.grid!), guides: [] }
+      : { x: requestedX, y: requestedY, guides: [] };
 
   const movingItems = snapshot.movingItems;
   if (movingItems.length === 0) {

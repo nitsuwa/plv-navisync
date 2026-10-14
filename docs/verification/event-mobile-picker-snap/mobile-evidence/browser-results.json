@@ -1,0 +1,33 @@
+{
+  "status": "PASS",
+  "checks": [
+    "440px: searchable 12-item dialog is viewport-contained; selection closes it, returns focus and explicit Details opens the mobile sheet",
+    "Picker empty search and Escape restore keyboard focus",
+    "Actual 3D label placement: Snap off retains free coordinates; on aligns anchors to grid and preserves them in 2D/save",
+    "360/390/440/1440: all tools and Snap are visible with 44px targets, no page overflow and useful canvas height"
+  ],
+  "pageErrors": [],
+  "liveDataWrites": false,
+  "labels": {
+    "free": {
+      "id": "70a42a87-1982-4188-85ef-1aaebf95076f",
+      "x": 648.1825133264808,
+      "y": 448.21779779111296,
+      "text": "Event Label",
+      "fontSize": 14,
+      "color": "#1f2937",
+      "rotation": 0,
+      "align": "left"
+    },
+    "snapped": {
+      "id": "2001d742-4946-4b9b-85d1-7965a8835467",
+      "x": 640,
+      "y": 440,
+      "text": "Event Label",
+      "fontSize": 14,
+      "color": "#1f2937",
+      "rotation": 0,
+      "align": "left"
+    }
+  }
+}
