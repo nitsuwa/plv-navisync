@@ -1,0 +1,194 @@
+{
+  "checks": [
+    {
+      "name": "2D/3D snap/camera/mock save/read-only dark (1440, 900)",
+      "result": "PASS",
+      "screenshots": [
+        "editor-2d-dark-1440.png",
+        "editor-camera-before-dark-1440.png",
+        "editor-camera-after-dark-1440.png",
+        "editor-3d-dark-1440.png"
+      ],
+      "camera": {
+        "before": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "after": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "canvasBytesIdentical": false
+      },
+      "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged."
+    },
+    {
+      "name": "2D/3D snap/camera/mock save/read-only light (1440, 900)",
+      "result": "PASS",
+      "screenshots": [
+        "editor-2d-light-1440.png",
+        "editor-camera-before-light-1440.png",
+        "editor-camera-after-light-1440.png",
+        "editor-3d-light-1440.png"
+      ],
+      "camera": {
+        "before": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "after": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "canvasBytesIdentical": false
+      },
+      "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged."
+    },
+    {
+      "name": "2D/3D snap/camera/mock save/read-only dark (390, 844)",
+      "result": "PASS",
+      "screenshots": [
+        "editor-2d-dark-390.png",
+        "editor-camera-before-dark-390.png",
+        "editor-camera-after-dark-390.png",
+        "editor-3d-dark-390.png"
+      ],
+      "camera": {
+        "before": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "after": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "canvasBytesIdentical": false
+      },
+      "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged."
+    },
+    {
+      "name": "2D/3D snap/camera/mock save/read-only light (390, 844)",
+      "result": "PASS",
+      "screenshots": [
+        "editor-2d-light-390.png",
+        "editor-camera-before-light-390.png",
+        "editor-camera-after-light-390.png",
+        "editor-3d-light-390.png"
+      ],
+      "camera": {
+        "before": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "after": {
+          "position": [
+            17.76609474085425,
+            27.24083077509466,
+            19.679366482177016
+          ],
+          "target": [
+            0,
+            1.275,
+            0
+          ],
+          "zoom": 1,
+          "far": 185.54891237364433,
+          "minDistance": 0.8,
+          "maxDistance": 69.58084214011663
+        },
+        "canvasBytesIdentical": false
+      },
+      "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged."
+    }
+  ],
+  "pageErrors": [],
+  "unexpectedRequests": [],
+  "liveEventMutations": 0,
+  "liveRequestsForwarded": 0,
+  "graphics": "Chromium SwiftShader software WebGL; physical GPUs not certified",
+  "verificationServerStopped": true
+}

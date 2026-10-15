@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,27 @@ describe("ReuseOrganizationEventDialog", () => {
     expect(screen.getByText("Past Fair · 2024–2025")).toBeInTheDocument();
     expect(screen.getByText("IT Organization · 2026–2027")).toBeInTheDocument();
     expect(screen.getByText(/new draft.*fresh admin approval/i)).toBeInTheDocument();
+    expect(screen.getByText(/original layout remains intact/i)).toBeInTheDocument();
+  });
+
+  it("blocks duplicate submissions and dismissal while a reuse request is pending", async () => {
+    let resolveReuse!: (value: never) => void;
+    vi.mocked(eventOverlayService.reuseOrganizationEvent).mockImplementationOnce(() => new Promise((resolve) => { resolveReuse = resolve as typeof resolveReuse; }));
+    const onClose = vi.fn();
+    render(<MemoryRouter><ReuseOrganizationEventDialog source={source} organization={organization} onClose={onClose} onCreated={vi.fn()} /></MemoryRouter>);
+    const dialog = screen.getByRole("dialog", { name: "Reuse event layout" });
+    const form = screen.getByRole("button", { name: "Create new draft" }).closest("form")!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(eventOverlayService.reuseOrganizationEvent).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Creating draft…" })).toBeDisabled();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.pointerDown(document.body, { button: 0, pointerType: "mouse" });
+    expect(screen.getByRole("dialog", { name: "Reuse event layout" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => { resolveReuse({ id: "draft-pending" } as never); });
   });
 
   it("keeps the request retryable and navigates only after server confirmation", async () => {

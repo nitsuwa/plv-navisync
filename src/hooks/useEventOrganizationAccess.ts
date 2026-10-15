@@ -17,6 +17,7 @@ export function useEventOrganizationAccess(actorId: string | undefined, enabled:
   const [state, setState] = useState<AccessState>(() => initialState(actorId));
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null);
   const requestId = useRef(0);
+  const lastActivationRefreshAt = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!actorId || !enabled) {
@@ -53,17 +54,25 @@ export function useEventOrganizationAccess(actorId: string | undefined, enabled:
   useEffect(() => {
     if (!actorId || !enabled) return;
     const revalidate = () => {
-      if (document.visibilityState !== "hidden") void refresh();
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    };
+    const revalidateOnActivation = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (lastActivationRefreshAt.current !== null && now - lastActivationRefreshAt.current < 250) return;
+      lastActivationRefreshAt.current = now;
+      void refresh();
     };
     const timer = window.setInterval(revalidate, 30_000);
-    window.addEventListener("focus", revalidate);
+    window.addEventListener("focus", revalidateOnActivation);
     window.addEventListener("online", revalidate);
-    document.addEventListener("visibilitychange", revalidate);
+    document.addEventListener("visibilitychange", revalidateOnActivation);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", revalidate);
+      window.removeEventListener("focus", revalidateOnActivation);
       window.removeEventListener("online", revalidate);
-      document.removeEventListener("visibilitychange", revalidate);
+      document.removeEventListener("visibilitychange", revalidateOnActivation);
     };
   }, [actorId, enabled, refresh]);
 

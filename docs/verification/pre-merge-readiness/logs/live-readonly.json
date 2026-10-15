@@ -1,0 +1,83 @@
+{
+  "at": "2026-10-15T06:00:09.608Z",
+  "scope": "Configured demo account sign-in and allowlisted read-only organization/history RPCs; isolated session sign-out. No event/data mutations.",
+  "eventMutations": 0,
+  "credentialsOrTokensWritten": false,
+  "checks": [
+    {
+      "role": "representative",
+      "name": "authentication",
+      "result": "PASS",
+      "status": 200
+    },
+    {
+      "role": "representative",
+      "name": "authorized-organizations",
+      "result": "PASS",
+      "status": 200,
+      "assignmentCount": 1
+    },
+    {
+      "role": "representative",
+      "name": "current-work",
+      "result": "PASS",
+      "status": 200,
+      "count": 5,
+      "total": 5
+    },
+    {
+      "role": "representative",
+      "name": "event-history",
+      "result": "PASS",
+      "status": 200,
+      "count": 5,
+      "total": 5
+    },
+    {
+      "role": "representative",
+      "name": "history-year-filter",
+      "result": "PASS",
+      "status": 200,
+      "count": 5,
+      "total": 5
+    },
+    {
+      "role": "representative",
+      "name": "history-empty-search",
+      "result": "PASS",
+      "status": 200,
+      "count": 0,
+      "total": 0
+    },
+    {
+      "role": "representative",
+      "name": "isolated-session-cleanup",
+      "result": "PASS",
+      "status": 204
+    },
+    {
+      "role": "ordinary-student",
+      "name": "authentication",
+      "result": "PASS",
+      "status": 200
+    },
+    {
+      "role": "ordinary-student",
+      "name": "authorized-organizations",
+      "result": "PASS",
+      "status": 200,
+      "assignmentCount": 0
+    },
+    {
+      "role": "ordinary-student",
+      "name": "no-representative-assignment",
+      "result": "PASS"
+    },
+    {
+      "role": "ordinary-student",
+      "name": "isolated-session-cleanup",
+      "result": "PASS",
+      "status": 204
+    }
+  ]
+}

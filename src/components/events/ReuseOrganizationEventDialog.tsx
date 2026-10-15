@@ -23,12 +23,14 @@ export function ReuseOrganizationEventDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef<string | null>(null);
+  const submissionInFlight = useRef(false);
   const returnFocus = useRef<HTMLElement | null>(typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const reducedMotion = useReducedMotion();
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setBusy(true);
     setError("");
     requestId.current ??= crypto.randomUUID();
@@ -39,6 +41,7 @@ export function ReuseOrganizationEventDialog({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The new draft could not be confirmed. Retry safely.");
     } finally {
+      submissionInFlight.current = false;
       setBusy(false);
     }
   };
@@ -55,7 +58,7 @@ export function ReuseOrganizationEventDialog({
         <motion.div initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.18 }} className="flex min-h-0 flex-col">
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
             <div><Dialog.Title className="text-base font-extrabold">Reuse event layout</Dialog.Title><Dialog.Description className="mt-1 text-sm text-muted-foreground">Start a new organization draft from a past layout.</Dialog.Description></div>
-            <button type="button" aria-label="Close" disabled={busy} onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><X aria-hidden="true" className="h-4 w-4" /></button>
+            <button type="button" aria-label="Close" disabled={busy} onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><X aria-hidden="true" className="h-4 w-4" /></button>
           </div>
           <form onSubmit={submit} className="flex min-h-0 flex-col">
             <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
@@ -80,7 +83,7 @@ export function ReuseOrganizationEventDialog({
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Schedule, approval, feedback, and revision history will not carry over.</p>
                 {source.posterUrl && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">The poster remains a public link. Replace it in the new draft if it is outdated; referenced posters are protected from deletion.</p>}
               </div>
-              <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">This creates a new draft that needs fresh admin approval before students can see it. Check every placement against the current map; required layout issues will be shown before submission.</p>
+              <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">The original layout remains intact. This creates a new draft that needs fresh admin approval before students can see it. Check every placement against the current map; required layout issues will be shown before submission.</p>
               {error && <p role="alert" className="flex items-start gap-2 text-sm text-destructive"><AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></p>}
             </div>
             <div className="flex flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end sm:px-6">

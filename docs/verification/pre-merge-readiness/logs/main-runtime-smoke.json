@@ -1,0 +1,16 @@
+{
+  "url": "http://localhost:5173/admin",
+  "browserAuthenticationAttempted": false,
+  "externalRequestsForwarded": 0,
+  "userOwnedServerStopped": false,
+  "auditStartedServerOnPreviouslyFreePort": true,
+  "loginVisible": true,
+  "emailVisible": true,
+  "passwordVisible": true,
+  "demoAutofillAvailable": true,
+  "supabaseClientConfigured": true,
+  "servedTabsPresent": true,
+  "originalCheckoutPathPresent": true,
+  "servedMatchesCurrentSource": true,
+  "runtimeErrors": []
+}

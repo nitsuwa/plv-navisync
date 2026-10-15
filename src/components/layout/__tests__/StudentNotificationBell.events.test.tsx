@@ -16,13 +16,14 @@ vi.mock("../../../services/eventOverlayService", () => ({
   eventOverlayService: { listPublishedEventPreviews: mocks.listPublishedEventPreviews },
 }));
 vi.mock("../../../services/reportService", () => ({
+  normalizeReportStatus: (status: string) => status,
   reportService: { getStudentReports: mocks.getStudentReports },
 }));
 vi.mock("../../../services/studentPreferencesService", () => ({
   loadStudentPreferences: mocks.loadStudentPreferences,
 }));
 
-import { StudentNotificationBell } from "../StudentNotificationBell";
+import { StudentNotificationBell, StudentNotificationsSection } from "../StudentNotificationBell";
 
 describe("student event notifications", () => {
   beforeEach(() => {
@@ -116,5 +117,65 @@ describe("student event notifications", () => {
     fireEvent.click(screen.getByRole("button", { name: /notifications/i }));
     expect(await screen.findByRole("link", { name: /IT Organization event handover/i })).toHaveAttribute("href", "/student/events?organizationId=org-it&handover=grant-pending");
     expect(screen.getByText(/2 pending submissions/i)).toBeInTheDocument();
+  });
+
+  it("uses theme-based contrast cues and a themed status filter in the notification section", async () => {
+    render(
+      <MemoryRouter>
+        <StudentNotificationsSection
+          ownerId="student-section"
+          isStudentOrg={false}
+          eventUpdates={[]}
+          unreadEventIds={new Set()}
+          markEventRead={vi.fn()}
+          refreshEventUpdates={vi.fn().mockResolvedValue(undefined)}
+          campusId="campus-a"
+          reportsSnapshot={[{
+            id: "report-resolved",
+            campusId: "campus-a",
+            reporterId: "student-section",
+            category: "maintenance",
+            priority: "low",
+            title: "Walkway light",
+            description: "The light has been repaired.",
+            status: "resolved",
+            updates: [{ text: "Status changed to resolved", date: "2026-10-12T00:00:00.000Z" }],
+            createdAt: "2026-10-01T00:00:00.000Z",
+            updatedAt: "2026-10-12T00:00:00.000Z",
+          }]}
+          reportsSnapshotLoading={false}
+          reportsSnapshotError={false}
+          onRetryReports={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const notice = await screen.findByRole("link", { name: /Upcoming Campus Event/i });
+    expect(notice.querySelector("[data-notification-icon]")).toHaveClass("text-foreground");
+    expect(notice.querySelector("[data-notification-icon]")).not.toHaveClass("text-accent-foreground");
+    expect(notice).toHaveClass("bg-primary/[0.02]");
+    expect(notice).toHaveClass("dark:border-blue-300/55");
+    expect(notice.querySelector(".uppercase")).toHaveClass("dark:text-blue-300");
+    expect(screen.getByLabelText("Report status: Resolved")).toHaveClass("dark:text-emerald-300");
+    expect(screen.getAllByText("Unread notification")).toHaveLength(3);
+    expect(screen.getAllByText("Unread notification")[0]).toHaveClass("sr-only");
+    expect(notice.querySelector("time")).toHaveAttribute("datetime", "2026-10-08T06:00:00.000Z");
+    expect(notice.querySelector("time")).toHaveTextContent(/\S/);
+    expect(screen.getByRole("button", { name: /Mark all read/ })).toHaveClass("dark:text-blue-300");
+    expect(screen.getByRole("link", { name: /Ongoing Campus Event/i }).querySelector(".uppercase")).toHaveClass("text-emerald-800", "dark:text-emerald-300");
+
+    const statusFilter = screen.getByRole("combobox", { name: "Report status" });
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+    try {
+      fireEvent.click(statusFilter);
+      expect(await screen.findByRole("listbox")).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "All notifications" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("option", { name: "Pending" }));
+      expect(await screen.findByText("No pending reports")).toBeInTheDocument();
+      expect(statusFilter).toHaveTextContent("Pending");
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: originalScrollIntoView });
+    }
   });
 });

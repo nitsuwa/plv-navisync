@@ -17,6 +17,7 @@ export function PublicLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { isStudent, loading: authLoading } = useStudentAuth();
+  const isStudentEventsDashboard = pathname === "/student/events";
   const isEventEditor = /^\/student\/events\/[^/]+\/edit\/?$/.test(pathname);
 
   useEffect(() => {
@@ -82,7 +83,7 @@ export function PublicLayout() {
       <NavigationProgress />
       <ScrollToTop />
       {/* Navbar hidden on mobile map for immersive experience */}
-      {!isEventEditor && <div className={cn("sticky top-0 z-40", isMapPage && "hidden md:block")}>
+      {!isEventEditor && <div data-public-navbar className={cn("sticky top-0 z-40", isMapPage && "hidden md:block")}>
         <Navbar />
       </div>}
       {/* Emergency banner hidden on map view */}
@@ -92,7 +93,7 @@ export function PublicLayout() {
         id="main-content"
         className={cn(
           "relative z-[1] w-full max-w-full",
-          isMapPage || isEventEditor ? "min-h-0 overflow-hidden flex-1" : "overflow-x-hidden",
+          isMapPage || isEventEditor ? "min-h-0 overflow-hidden flex-1" : isStudentEventsDashboard ? "overflow-x-clip" : "overflow-x-hidden",
           !isMapPage && !isEventEditor && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
         )}
       >

@@ -1,55 +1,89 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Clock3, LoaderCircle, RefreshCw, Search } from "lucide-react";
-import { Link, useNavigate } from "react-router";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type ComponentPropsWithoutRef } from "react";
+import { CalendarDays, LoaderCircle, RefreshCw, Search, X } from "lucide-react";
+import { useNavigate } from "react-router";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 import { eventOverlayService } from "../../services/eventOverlayService";
 import type { EventOrganizationContext } from "../../types/eventOrganization";
 import type { CampusEventOverlay } from "../map-builder/types";
 import { ReuseOrganizationEventDialog } from "./ReuseOrganizationEventDialog";
+import { OrganizationHistoryCard } from "./OrganizationHistoryCard";
 
 const PAGE_SIZE = 20;
+const ALL_YEARS = "__all_academic_years__";
 
-function dateText(value?: string) {
-  if (!value || !Number.isFinite(Date.parse(value))) return "Not scheduled";
-  return new Date(value).toLocaleString("en-US", {
-    timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short", hour12: true,
-  }) + " PHT";
-}
-
-function createdDate(value?: string) {
-  if (!value || !Number.isFinite(Date.parse(value))) return "Creation date unavailable";
-  return new Date(value).toLocaleDateString("en-US", { timeZone: "Asia/Manila", dateStyle: "medium" });
-}
-
-const statusLabel: Record<string, string> = {
-  draft: "Draft", pending: "Pending review", approved: "Approved", disapproved: "Needs revision",
-};
+// The shared Radix wrappers forward these DOM props at runtime; their installed declarations omit them.
+const HistorySelectTrigger = SelectTrigger as unknown as ComponentType<ComponentPropsWithoutRef<"button"> & { size?: "sm" | "default" | "lg" }>;
+const HistorySelectContent = SelectContent as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { position?: "item-aligned" | "popper"; sideOffset?: number }>;
+const HistorySelectItem = SelectItem as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { value: string; disabled?: boolean; textValue?: string }>;
 
 interface OrganizationEventHistoryProps {
   organization: EventOrganizationContext;
+  onUnfilteredTotalChange?: (total: number | null) => void;
 }
 
-export function OrganizationEventHistory({ organization }: OrganizationEventHistoryProps) {
+interface ResultState {
+  scope: string;
+  events: CampusEventOverlay[];
+  total: number;
+}
+
+interface RequestState {
+  scope: string;
+  loading: boolean;
+  error: string | null;
+}
+
+interface MoreRequestState {
+  scope: string;
+  loading: boolean;
+  error: string | null;
+}
+
+export function OrganizationEventHistory({ organization, onUnfilteredTotalChange }: OrganizationEventHistoryProps) {
   const navigate = useNavigate();
-  const [events, setEvents] = useState<CampusEventOverlay[]>([]);
-  const [total, setTotal] = useState(0);
-  const [yearFilter, setYearFilter] = useState("");
+  const searchId = useId();
+  const yearLabelId = useId();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [yearFilter, setYearFilter] = useState("");
+  const [availableYears, setAvailableYears] = useState<string[]>([]);
   const [reuseTarget, setReuseTarget] = useState<CampusEventOverlay | null>(null);
+  const loadingMoreRef = useRef(false);
   const requestId = useRef(0);
+  const scope = JSON.stringify([organization.organizationId, organization.grantId, yearFilter, search]);
+  const [results, setResults] = useState<ResultState>(() => ({ scope, events: [], total: 0 }));
+  const [initialRequest, setInitialRequest] = useState<RequestState>(() => ({ scope, loading: true, error: null }));
+  const [moreRequest, setMoreRequest] = useState<MoreRequestState>(() => ({ scope, loading: false, error: null }));
+  const events = results.scope === scope ? results.events : [];
+  const total = results.scope === scope ? results.total : 0;
+  const loading = initialRequest.scope !== scope || initialRequest.loading;
+  const error = initialRequest.scope === scope ? initialRequest.error : null;
+  const loadingMore = moreRequest.scope === scope && moreRequest.loading;
+  const moreError = moreRequest.scope === scope ? moreRequest.error : null;
+  const hasFilters = Boolean(searchInput.trim() || search || yearFilter);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 200);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
+  const rememberYears = useCallback((page: CampusEventOverlay[]) => {
+    setAvailableYears((previous) => {
+      const next = new Set(previous);
+      for (const item of page) {
+        const value = item.academicYear?.trim();
+        if (value) next.add(value);
+      }
+      return [...next].sort((a, b) => b.localeCompare(a));
+    });
+  }, []);
+
   const load = useCallback(async () => {
     const request = ++requestId.current;
-    setLoading(true);
-    setError(null);
+    loadingMoreRef.current = false;
+    setResults({ scope, events: [], total: 0 });
+    setInitialRequest({ scope, loading: true, error: null });
+    setMoreRequest({ scope, loading: false, error: null });
     try {
       const result = await eventOverlayService.listOrganizationEvents(organization.organizationId, {
         academicYear: yearFilter || undefined,
@@ -59,83 +93,122 @@ export function OrganizationEventHistory({ organization }: OrganizationEventHist
         includeArchived: true,
       });
       if (request !== requestId.current) return;
-      setEvents(result.events);
-      setTotal(result.total);
+      setResults({ scope, events: result.events, total: result.total });
+      if (!search && !yearFilter) {
+        rememberYears(result.events);
+        onUnfilteredTotalChange?.(result.total);
+      }
+      setInitialRequest({ scope, loading: false, error: null });
     } catch (cause) {
       if (request !== requestId.current) return;
-      setError(cause instanceof Error ? cause.message : "Event history could not be loaded. Reconnect and retry.");
-    } finally {
-      if (request === requestId.current) setLoading(false);
+      setInitialRequest({ scope, loading: false, error: cause instanceof Error ? cause.message : "Event history could not be loaded. Reconnect and retry." });
     }
-  }, [organization.organizationId, yearFilter, search]);
+  }, [organization.organizationId, onUnfilteredTotalChange, rememberYears, scope, search, yearFilter]);
 
   useEffect(() => {
-    setEvents([]);
-    setTotal(0);
     void load();
-    return () => { ++requestId.current; };
+    return () => {
+      ++requestId.current;
+      loadingMoreRef.current = false;
+    };
   }, [load]);
 
-  const loadMore = async () => {
-    if (loadingMore || loading || events.length >= total) return;
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || loading || loadingMore || events.length >= total) return;
+    loadingMoreRef.current = true;
     const request = requestId.current;
-    setLoadingMore(true);
-    setError(null);
+    const offset = events.length;
+    setMoreRequest({ scope, loading: true, error: null });
     try {
       const result = await eventOverlayService.listOrganizationEvents(organization.organizationId, {
         academicYear: yearFilter || undefined,
         search,
         limit: PAGE_SIZE,
-        offset: events.length,
+        offset,
         includeArchived: true,
       });
       if (request !== requestId.current) return;
-      setEvents((previous) => [...previous, ...result.events.filter((item) => !previous.some((existing) => existing.id === item.id))]);
-      setTotal(result.total);
+      setResults((previous) => {
+        if (previous.scope !== scope) return previous;
+        const seen = new Set(previous.events.map((item) => item.id));
+        return {
+          scope,
+          events: [...previous.events, ...result.events.filter((item) => !seen.has(item.id))],
+          total: result.total,
+        };
+      });
+      if (!search && !yearFilter) {
+        rememberYears(result.events);
+        onUnfilteredTotalChange?.(result.total);
+      }
+      setMoreRequest({ scope, loading: false, error: null });
     } catch (cause) {
-      if (request === requestId.current) setError(cause instanceof Error ? cause.message : "More event history could not be loaded. Retry.");
+      if (request === requestId.current) setMoreRequest({ scope, loading: false, error: cause instanceof Error ? cause.message : "More event history could not be loaded. Retry." });
     } finally {
-      if (request === requestId.current) setLoadingMore(false);
+      if (request === requestId.current) loadingMoreRef.current = false;
     }
+  }, [events.length, loading, loadingMore, onUnfilteredTotalChange, organization.organizationId, rememberYears, scope, search, total, yearFilter]);
+
+  const years = useMemo(() => {
+    const choices = new Set(availableYears);
+    for (const item of events) {
+      const value = item.academicYear?.trim();
+      if (value) choices.add(value);
+    }
+    return [...choices].sort((a, b) => b.localeCompare(a));
+  }, [availableYears, events]);
+
+  const byId = useMemo(() => new Map(events.map((item) => [item.id, item])), [events]);
+  const clearFilters = () => {
+    setSearchInput("");
+    setSearch("");
+    setYearFilter("");
   };
 
-  const years = useMemo(() => [...new Set(events.map((event) => event.academicYear?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) => b.localeCompare(a)), [events]);
-
-  return <section aria-labelledby="organization-event-history-title" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div><h2 id="organization-event-history-title" className="font-extrabold text-foreground">Event history</h2><p className="mt-1 text-sm text-muted-foreground">Past layouts stay with {organization.organizationName}; new representatives can inspect their year, status, creator, and dates.</p></div>
-      <span className="self-start rounded-full bg-muted px-3 py-1 text-xs font-bold text-muted-foreground">{total} record{total === 1 ? "" : "s"}</span>
+  return <section aria-labelledby="organization-event-history-title" className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+    <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="min-w-0"><h2 id="organization-event-history-title" className="text-lg font-extrabold text-foreground sm:text-xl">Event history</h2><p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">All organization records, including current work and archived layouts.</p><p className="mt-1 break-words text-xs text-muted-foreground">{organization.organizationName}</p></div>
+      {!loading && !error && <span aria-live="polite" className="shrink-0 whitespace-nowrap rounded-full bg-muted px-3 py-1.5 text-xs font-bold tabular-nums text-muted-foreground">{total} record{total === 1 ? "" : "s"}</span>}
     </div>
 
-    <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,14rem)]">
-      <label className="relative block"><span className="sr-only">Search event history</span><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input type="search" role="searchbox" aria-label="Search event history" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search event title" className="h-11 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" /></label>
-      <label className="block"><span className="sr-only">Academic year</span><select aria-label="Academic year" value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><option value="">All academic years</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+    <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,15rem)] sm:items-end">
+      <div className="min-w-0">
+        <label htmlFor={searchId} className="mb-1.5 block text-sm font-semibold text-foreground">Search event title</label>
+        <div className="relative">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input id={searchId} type="text" role="searchbox" aria-label="Search event history" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search event title" className="h-11 w-full rounded-xl border border-border bg-background pl-9 pr-11 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+          {searchInput && <button type="button" aria-label="Clear event search" onClick={() => { setSearchInput(""); setSearch(""); }} className="absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X aria-hidden="true" className="h-4 w-4" /></button>}
+        </div>
+      </div>
+      <div className="min-w-0">
+        <span id={yearLabelId} className="mb-1.5 block text-sm font-semibold text-foreground">Academic year</span>
+        <Select value={yearFilter || ALL_YEARS} onValueChange={(value) => setYearFilter(value === ALL_YEARS ? "" : value)}>
+        <HistorySelectTrigger size="default" aria-label="Academic year" aria-labelledby={yearLabelId} className="!h-11 w-full rounded-xl border-border bg-background px-3 text-sm text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15">
+            <SelectValue placeholder="All academic years" />
+          </HistorySelectTrigger>
+          <HistorySelectContent position="popper" sideOffset={6} className="z-[60] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-reduce:animate-none">
+            <HistorySelectItem value={ALL_YEARS} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary">All academic years</HistorySelectItem>
+            {years.map((year) => <HistorySelectItem key={year} value={year} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary">{year}</HistorySelectItem>)}
+          </HistorySelectContent>
+        </Select>
+      </div>
     </div>
 
-    {loading && <div role="status" aria-live="polite" className="mt-4 flex items-center gap-2 rounded-xl bg-muted/40 px-4 py-5 text-sm text-muted-foreground"><LoaderCircle className="h-4 w-4 animate-spin" />Loading organization history…</div>}
-    {!loading && error && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between"><p role="alert" className="text-sm text-destructive">{error}</p><button type="button" onClick={() => void load()} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-bold text-primary"><RefreshCw className="h-4 w-4" />Retry history</button></div>}
-    {!loading && !error && events.length === 0 && <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-7 text-center"><CalendarDays className="mx-auto h-6 w-6 text-muted-foreground" /><p className="mt-2 text-sm font-semibold text-foreground">{search || yearFilter ? "No layouts match these filters" : "No past event layouts yet"}</p><p className="mt-1 text-xs text-muted-foreground">{search || yearFilter ? "Clear the search or choose another academic year." : "Approved and archived organization layouts will appear here."}</p>{(search || yearFilter) && <button type="button" onClick={() => { setSearchInput(""); setSearch(""); setYearFilter(""); }} className="mt-3 min-h-10 rounded-lg px-3 text-sm font-bold text-primary hover:bg-muted">Clear filters</button>}</div>}
+    {hasFilters && <div className="mt-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Filters apply to all organization history records.</p><button type="button" onClick={clearFilters} className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Clear filters</button></div>}
+
+    {loading && <div role="status" aria-live="polite" className="mt-4 flex min-h-16 items-center gap-2 rounded-xl bg-muted/40 px-4 py-5 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />Loading organization history…</div>}
+    {!loading && error && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between"><p role="alert" className="text-sm text-destructive">{error}</p><button type="button" onClick={() => void load()} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><RefreshCw aria-hidden="true" className="h-4 w-4" />Retry history</button></div>}
+    {!loading && !error && events.length === 0 && <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-7 text-center"><CalendarDays aria-hidden="true" className="mx-auto h-6 w-6 text-muted-foreground" /><p className="mt-2 text-sm font-semibold text-foreground">{hasFilters ? "No layouts match these filters" : "No organization event records yet"}</p><p className="mt-1 text-sm text-muted-foreground">{hasFilters ? "Clear the search or choose another academic year." : "Drafts, submissions, approvals, and archived layouts will appear here."}</p>{hasFilters && <button type="button" onClick={clearFilters} className="mt-2 inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-sm font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Clear filters</button>}</div>}
 
     {!loading && !error && events.length > 0 && <div className="mt-4 space-y-3">
-      {events.map((event) => {
-        const locations = event.locations?.map((location) => location.locationRef.label).filter(Boolean) ?? [];
-        const academicYear = event.academicYear?.trim() || "Unknown academic year";
-        const archived = Boolean(event.archivedAt);
-        const reusedSource = event.reusedFromEventId ? events.find(item => item.id === event.reusedFromEventId) : undefined;
-        return <article key={event.id} className="min-w-0 rounded-xl border border-border bg-background p-4">
-          <div className="flex flex-wrap items-start justify-between gap-2"><h3 className="min-w-0 flex-1 break-words text-sm font-extrabold text-foreground">{event.title}</h3><span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] font-bold text-muted-foreground">{archived ? "Archived" : statusLabel[event.status ?? "draft"] ?? "Unknown status"}</span></div>
-          <div className="mt-3 grid gap-x-4 gap-y-2 text-xs text-muted-foreground sm:grid-cols-2">
-            <p><span className="font-semibold text-foreground">Academic year:</span> {academicYear}</p>
-            <p><span className="font-semibold text-foreground">Original creator:</span> {event.creatorName?.trim() || event.createdByUserId || "Unknown"}</p>
-            <p><span className="font-semibold text-foreground">Created:</span> {createdDate(event.createdAt)}</p>
-            <p className="flex min-w-0 items-start gap-1"><Clock3 aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span><span className="font-semibold text-foreground">Event dates:</span> {dateText(event.dateStart)}{event.dateEnd ? ` – ${dateText(event.dateEnd)}` : ""}</span></p>
-            <p className="sm:col-span-2"><span className="font-semibold text-foreground">Locations:</span> {locations.length ? locations.join(" · ") : "No location recorded"}</p>
-            {event.reusedFromEventId && <p className="min-w-0 break-words sm:col-span-2"><span className="font-semibold text-foreground">Reuse history:</span> Based on {reusedSource?.title || "an earlier organization layout"}{reusedSource?.academicYear ? ` · ${reusedSource.academicYear}` : ""}. The original layout is kept.</p>}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3"><Link to={`/student/events/${event.id}/edit${archived ? "?history=1" : ""}`} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-border px-3 text-xs font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{archived ? "Inspect archived layout" : "View event maps"}</Link>{event.campusId && event.updatedAt && (archived || event.status === "approved") && <button type="button" onClick={() => setReuseTarget(event)} className="inline-flex min-h-10 items-center justify-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Reuse as new draft</button>}</div>
-        </article>;
+      <p aria-live="polite" className="text-xs font-medium text-muted-foreground">Showing {events.length} of {total} events</p>
+      {events.map((item) => {
+        const reuseSource = item.reusedFromEventId ? byId.get(item.reusedFromEventId) : undefined;
+        const canReuse = Boolean(item.campusId && item.updatedAt && (item.archivedAt || item.status === "approved"));
+        return <OrganizationHistoryCard key={item.id} event={item} reuseSource={reuseSource} canReuse={canReuse} onReuse={setReuseTarget} />;
       })}
-      {events.length < total && <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-bold text-primary disabled:opacity-60">{loadingMore && <LoaderCircle className="h-4 w-4 animate-spin" />}{loadingMore ? "Loading more…" : "Load more history"}</button>}
+      {moreError && <div className="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between"><p role="alert" className="text-sm text-destructive">{moreError}</p><button type="button" onClick={() => void loadMore()} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><RefreshCw aria-hidden="true" className="h-4 w-4" />Retry more history</button></div>}
+      {!moreError && events.length < total && <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background text-sm font-bold text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none disabled:opacity-60">{loadingMore && <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />}{loadingMore ? "Loading more history…" : "Load more history"}</button>}
     </div>}
     {reuseTarget && <ReuseOrganizationEventDialog source={reuseTarget} organization={organization} onClose={() => setReuseTarget(null)} onCreated={(created) => navigate(`/student/events/${created.id}/edit`)} />}
   </section>;
