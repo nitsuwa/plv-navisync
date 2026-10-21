@@ -53,6 +53,8 @@ function publicAppOrigin(mode: string): string {
 }
 
 export default defineConfig(({ mode }) => ({
+  // Worktrees may share node_modules; keep optimizer output local to each checkout.
+  cacheDir: path.resolve(__dirname, '.tmp/vite-cache'),
   define: {
     'import.meta.env.VITE_PUBLIC_APP_ORIGIN': JSON.stringify(publicAppOrigin(mode)),
   },

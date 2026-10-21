@@ -1,0 +1,16 @@
+{
+  "mode": "types-current",
+  "command": [
+    "node",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "--singleThreaded",
+    "--project",
+    "tsconfig.json"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "startedAt": "2026-10-15T06:56:39.677Z",
+  "finishedAt": "2026-10-15T06:57:35.644Z",
+  "logFile": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\docs\\verification\\pre-merge-readiness\\logs\\types-current.log"
+}

@@ -81,7 +81,10 @@ describe('shared admin pending submissions', () => {
     await act(async () => {});
     expect(view.result.current.pendingCount).toBe(1);
     backend.list.mockResolvedValue([one, two]);
-    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(59999); });
+    expect(view.result.current.pendingCount).toBe(1);
+    expect(backend.list).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(view.result.current.pendingCount).toBe(2);
     backend.list.mockRejectedValue(new Error('Queue unavailable'));
     await act(async () => { await view.result.current.refresh(); });

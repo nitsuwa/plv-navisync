@@ -1,0 +1,327 @@
+{
+  "baselineCommit": "75096c56c668a756724a8c4dc00bde0575661659",
+  "fullRun": {
+    "reportedPassed": 3582,
+    "reportedFailed": 526,
+    "pending": 1,
+    "limitation": "Two workers crashed with fatal process out-of-memory Zone errors. Vitest warned that some tests were still running when generating JSON; totals are diagnostic, not complete acceptance."
+  },
+  "failedFiles": [
+    {
+      "file": "src/hooks/__tests__/useAdminEventSubmissions.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/pages/__tests__/AdminMapBuilderPage.floorDirty.test.tsx",
+      "failed": 12,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/pages/__tests__/AdminOperationsPages.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/pages/__tests__/StudentMyEventsAccess.test.tsx",
+      "failed": 4,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/services/__tests__/dashboardService.test.ts",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/lib/__tests__/decorVisual.test.ts",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/lib/__tests__/exteriorApproachNavigation.test.ts",
+      "failed": 3,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map/__tests__/CampusPlaceDetails.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/b7FinalCorrection.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/b7MarkerLayerVisibility.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.b7Corrections.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.b7Markers.test.tsx",
+      "failed": 3,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.copyPaste.test.tsx",
+      "failed": 5,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.decorProps.test.tsx",
+      "failed": 4,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.directionArrows.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.entrances.test.tsx",
+      "failed": 3,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.floorHierarchy.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.issueLocate.test.tsx",
+      "failed": 9,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.navGraph.test.tsx",
+      "failed": 92,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.navGroupMove.test.tsx",
+      "failed": 9,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.navPhase612.test.tsx",
+      "failed": 12,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.navPhase68.test.tsx",
+      "failed": 9,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.navPhase69.test.tsx",
+      "failed": 7,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.objectIssues.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.phase5_12.test.tsx",
+      "failed": 18,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.phase5_8.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.publishGate.test.tsx",
+      "failed": 4,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.saveDraft.test.tsx",
+      "failed": 6,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/CampusEditor.scopeIsolation.test.tsx",
+      "failed": 3,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.b7Issues.test.tsx",
+      "failed": 6,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.floorSwitching.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.floorViewCleanup.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.hybridFloorNavigator.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.indoorNav.test.tsx",
+      "failed": 22,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.issueLocate.test.tsx",
+      "failed": 3,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navGroupMove.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase21.test.tsx",
+      "failed": 16,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase22.test.tsx",
+      "failed": 22,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase23.test.tsx",
+      "failed": 7,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase24.test.tsx",
+      "failed": 7,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase25.test.tsx",
+      "failed": 10,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase26.test.tsx",
+      "failed": 8,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase27.test.tsx",
+      "failed": 8,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase28.test.tsx",
+      "failed": 15,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase29.test.tsx",
+      "failed": 12,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase29A.test.tsx",
+      "failed": 5,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase30.test.tsx",
+      "failed": 4,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase31.test.tsx",
+      "failed": 11,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase32.test.tsx",
+      "failed": 7,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase33.test.tsx",
+      "failed": 4,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase34.test.tsx",
+      "failed": 5,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase35.test.tsx",
+      "failed": 6,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase36.test.tsx",
+      "failed": 17,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.navPhase68Card.test.tsx",
+      "failed": 11,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.phase1_7.test.tsx",
+      "failed": 13,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.phase1_8.test.tsx",
+      "failed": 68,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.roomWalkingNetwork.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.selection.test.tsx",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/FloorEditor.uxParity.test.tsx",
+      "failed": 6,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/ReadonlyOutdoorVisuals.test.tsx",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/roomAuthoringHelpers.test.ts",
+      "failed": 1,
+      "testSourceMatchesUpstream": true
+    },
+    {
+      "file": "src/components/map-builder/__tests__/TestNavigationPanel.roomRouting.test.ts",
+      "failed": 2,
+      "testSourceMatchesUpstream": true
+    }
+  ],
+  "interpretation": "Matching test source is an integration check, not a proof that every failure is pre-existing. Representative runtime comparisons are reported separately."
+}

@@ -63,14 +63,19 @@ describe("useEventOrganizationAccess", () => {
     expect(result.current.organizations.map((entry) => entry.organizationId)).toEqual(["b"]);
   });
 
-  it("revalidates on focus and reconnect", async () => {
+  it("coalesces focus and visibility revalidation into one access check", async () => {
     vi.mocked(eventOrganizationService.listMyEventOrganizations).mockResolvedValue([org("a")]);
     renderHook(() => useEventOrganizationAccess("rep-a", true));
     await waitFor(() => expect(eventOrganizationService.listMyEventOrganizations).toHaveBeenCalledTimes(1));
 
-    act(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(eventOrganizationService.listMyEventOrganizations).toHaveBeenCalledTimes(2));
-    act(() => window.dispatchEvent(new Event("online")));
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(eventOrganizationService.listMyEventOrganizations).toHaveBeenCalledTimes(2);
+
+    await act(async () => { window.dispatchEvent(new Event("online")); await Promise.resolve(); });
     await waitFor(() => expect(eventOrganizationService.listMyEventOrganizations).toHaveBeenCalledTimes(3));
   });
 });

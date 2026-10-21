@@ -100,7 +100,7 @@ describe("shared Student Org review updates", () => {
       expect(view.result.current.events).toHaveLength(1);
       await act(async () => { await view.result.current.markRead(view.result.current.events[0]); });
       const before = vi.mocked(eventOverlayService.listEventOverlays).mock.calls.length;
-      await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
       expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(before + 1);
       expect(view.result.current.unreadCount).toBe(0); view.unmount();
     } finally { vi.useRealTimers(); }
@@ -119,7 +119,12 @@ describe("shared Student Org review updates", () => {
     await waitFor(() => expect(view.result.current.unreadCount).toBe(1));
     await act(async () => { await view.result.current.markRead(event); });
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...event, adminComment: "New feedback" }]);
+    // Focus refresh is throttled for five seconds after the last automatic check.
+    // Advance only the clock so this test remains deterministic and does not sleep.
+    const currentTime = Date.now();
+    const advancedClock = vi.spyOn(Date, "now").mockReturnValue(currentTime + 6000);
     act(() => window.dispatchEvent(new Event("focus")));
+    advancedClock.mockRestore();
     await waitFor(() => expect(view.result.current.unreadCount).toBe(1));
     await act(async () => { expect(await view.result.current.markRead(event)).toBe("changed"); });
     expect(view.result.current.unreadCount).toBe(1); view.unmount();

@@ -1,0 +1,65 @@
+{
+  "complete": true,
+  "parts": [
+    {
+      "part": 0,
+      "exitCode": 0,
+      "files": 15,
+      "passed": 192,
+      "failed": 0,
+      "total": 192,
+      "skipped": 0,
+      "failures": []
+    },
+    {
+      "part": 1,
+      "exitCode": 0,
+      "files": 15,
+      "passed": 80,
+      "failed": 0,
+      "total": 80,
+      "skipped": 0,
+      "failures": []
+    },
+    {
+      "part": 2,
+      "exitCode": 0,
+      "files": 15,
+      "passed": 71,
+      "failed": 0,
+      "total": 71,
+      "skipped": 0,
+      "failures": []
+    },
+    {
+      "part": 3,
+      "exitCode": 0,
+      "files": 15,
+      "passed": 127,
+      "failed": 0,
+      "total": 127,
+      "skipped": 0,
+      "failures": []
+    },
+    {
+      "part": 4,
+      "exitCode": 0,
+      "files": 15,
+      "passed": 88,
+      "failed": 0,
+      "total": 88,
+      "skipped": 0,
+      "failures": []
+    },
+    {
+      "part": 5,
+      "exitCode": 0,
+      "files": 14,
+      "passed": 215,
+      "failed": 0,
+      "total": 215,
+      "skipped": 0,
+      "failures": []
+    }
+  ]
+}

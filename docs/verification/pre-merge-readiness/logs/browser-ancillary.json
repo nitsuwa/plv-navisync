@@ -1,0 +1,178 @@
+{
+  "checks": [
+    {
+      "name": "Notification theme/filter/contrast dark (360, 800)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-360x800.png",
+        "iconContrast": 12.11,
+        "dateContrast": 8.88,
+        "messageContrast": 8.88
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast light (360, 800)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-360x800.png",
+        "iconContrast": 13.52,
+        "dateContrast": 7.14,
+        "messageContrast": 7.14
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast dark (390, 844)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-390x844.png",
+        "iconContrast": 12.11,
+        "dateContrast": 8.88,
+        "messageContrast": 8.88
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast light (390, 844)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-390x844.png",
+        "iconContrast": 13.52,
+        "dateContrast": 7.14,
+        "messageContrast": 7.14
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast dark (440, 956)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-440x956.png",
+        "iconContrast": 12.11,
+        "dateContrast": 8.88,
+        "messageContrast": 8.88
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast light (440, 956)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-440x956.png",
+        "iconContrast": 13.52,
+        "dateContrast": 7.14,
+        "messageContrast": 7.14
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast dark (768, 1024)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-768x1024.png",
+        "iconContrast": 12.11,
+        "dateContrast": 8.88,
+        "messageContrast": 8.88
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast light (768, 1024)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-768x1024.png",
+        "iconContrast": 13.52,
+        "dateContrast": 7.14,
+        "messageContrast": 7.14
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast dark (1440, 900)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-1440x900.png",
+        "iconContrast": 12.11,
+        "dateContrast": 8.88,
+        "messageContrast": 8.88
+      }
+    },
+    {
+      "name": "Notification theme/filter/contrast light (1440, 900)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-1440x900.png",
+        "iconContrast": 13.52,
+        "dateContrast": 7.14,
+        "messageContrast": 7.14
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer dark (390, 420)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-390x420.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": true
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer light (390, 420)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-390x420.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": true
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer dark (390, 844)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-390x844.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": false
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer light (390, 844)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-390x844.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": false
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer dark (1440, 900)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-1440x900.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": false
+      }
+    },
+    {
+      "name": "Proposal loading/duplicate guard/footer light (1440, 900)",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-1440x900.png",
+        "mutations": "one mocked create; no live calls",
+        "reducedMotion": false
+      }
+    },
+    {
+      "name": "Text-only GSO location feedback dark",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\location-feedback-dark-390x844.png"
+      }
+    },
+    {
+      "name": "Text-only GSO location feedback light",
+      "result": "PASS",
+      "notes": {
+        "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\location-feedback-light-390x844.png"
+      }
+    }
+  ],
+  "consoleErrors": [],
+  "unexpectedRequests": [],
+  "liveRequestsForwarded": 0,
+  "liveEventMutations": 0,
+  "fixtureUrl": "http://127.0.0.1:5181",
+  "verificationServerStopped": true
+}

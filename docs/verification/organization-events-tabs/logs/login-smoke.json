@@ -1,0 +1,12 @@
+{
+  "url": "http://localhost:5173/admin",
+  "authenticationAttempted": false,
+  "externalRequestsForwarded": 0,
+  "loginVisible": true,
+  "emailFieldVisible": true,
+  "passwordFieldVisible": true,
+  "signInVisible": true,
+  "supabaseClientInitialized": true,
+  "demoAutofillAvailable": true,
+  "runtimeErrors": []
+}

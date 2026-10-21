@@ -1,9 +1,7 @@
 /** Student Org event proposals and map submission dashboard. */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Edit2, Loader2, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Save, Trash2, X, XCircle } from "lucide-react";
-import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
-import { motion, useReducedMotion } from "motion/react";
-import { cn } from "../lib/utils";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ComponentPropsWithoutRef } from "react";
+import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, Clock, Copy, Edit2, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, XCircle } from "lucide-react";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { useToast } from "../hooks/useToast";
@@ -14,15 +12,22 @@ import { eventOverlayService, type EventOverlayStatus } from "../services/eventO
 import { EventDetailsModal, EventProposalModal } from "../components/events/EventProposalModal";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { EventRevisionHistory } from "../components/events/EventRevisionHistory";
-import { eventFeedbackText } from "../lib/eventFeedbackPins";
 import type { CampusEventOverlay, EventLocationRef } from "../components/map-builder/types";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
 import { useEventOrganizationAccess } from "../hooks/useEventOrganizationAccess";
 import { useOrganizationEventWorkspace } from "../hooks/useOrganizationEventWorkspace";
 import { OrganizationEventHistory } from "../components/events/OrganizationEventHistory";
-import { getStudentEventPhase } from "../lib/eventPublication";
 import { countOpenFeedbackPins } from "../lib/eventFeedbackPins";
+import { OrganizationEventsWorkspaceTabs } from "../components/events/OrganizationEventsWorkspaceTabs";
+import { OrganizationCurrentWorkCard, type CurrentWorkMenuAction } from "../components/events/OrganizationCurrentWorkCard";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
+import { isCurrentOrganizationWork, parseOrganizationEventsView, type OrganizationEventsView } from "../lib/organizationEventPresentation";
+
+const OrganizationSelectTrigger = SelectTrigger as unknown as ComponentType<ComponentPropsWithoutRef<"button"> & { size?: "sm" | "default" | "lg" }>;
+const OrganizationSelectContent = SelectContent as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { position?: "item-aligned" | "popper"; sideOffset?: number }>;
+const OrganizationSelectItem = SelectItem as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { value: string; disabled?: boolean; textValue?: string }>;
+const NO_ORGANIZATION = "__choose_organization__";
 
 const STATUS_CONFIG: Record<EventOverlayStatus, { label: string; color: string; bg: string; icon: React.ElementType }> = {
   draft: { label: "Draft", color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800/30", icon: Save },
@@ -40,7 +45,15 @@ const NEXT_STEP: Record<EventOverlayStatus, string> = {
 
 export function StudentMyEventsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeView = parseOrganizationEventsView(searchParams.get("view"));
+  const changeView = useCallback((view: OrganizationEventsView) => {
+    const next = new URLSearchParams(searchParams);
+    if (view === "current") next.delete("view");
+    else next.set("view", "history");
+    setSearchParams(next, { preventScrollReset: true });
+  }, [searchParams, setSearchParams]);
   const { isStudentOrg, profile, username, loading: authLoading } = useStudentAuth();
   const {
     campuses,
@@ -59,16 +72,24 @@ export function StudentMyEventsPage() {
       access.selectOrganization(requestedOrganizationId);
     }
   }, [access.organizations, access.selectOrganization, requestedOrganizationId]);
-  const organization = access.organization;
+  const organization = requestedOrganizationId
+    ? access.organizations.find((item) => item.organizationId === requestedOrganizationId) ?? access.organization
+    : access.organization;
+  const historyScope = `${profile?.id ?? ""}:${organization?.organizationId ?? ""}:${organization?.grantId ?? ""}`;
+  const [historyCountState, setHistoryCountState] = useState<{ scope: string; total: number | null }>({ scope: "", total: null });
+  const historyCount = historyCountState.scope === historyScope ? historyCountState.total ?? undefined : undefined;
+  const handleHistoryTotal = useCallback((total: number | null) => setHistoryCountState({ scope: historyScope, total }), [historyScope]);
   const workspace = useOrganizationEventWorkspace(profile?.id, organization, isStudentOrg && !authLoading);
   const overlays = workspace.events;
   const loadError = access.error ?? workspace.error;
   const loading = access.loading || (Boolean(organization) && workspace.loading);
-  const actionsDisabled = Boolean(access.error || access.refreshing || workspace.error);
+  // A previously verified grant remains usable during background revalidation;
+  // protected mutations are still checked by the server and real access errors block actions.
+  const actionsDisabled = Boolean(access.error || workspace.error);
   const loadOverlays = async () => { await Promise.all([access.refresh(), workspace.refresh()]); };
-  const reducedMotion = useReducedMotion();
   const [readingIds,setReadingIds] = useState<ReadonlySet<string>>(new Set());
   const navigationRequest = useRef(0);
+  useLayoutEffect(() => { ++navigationRequest.current; }, [location.key, historyScope]);
   const mounted = useRef(true);
   const currentActor = useRef(profile?.id);
   currentActor.current = profile?.id;
@@ -79,9 +100,24 @@ export function StudentMyEventsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<CampusEventOverlay | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampusEventOverlay | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const deleteReturnFocus = useRef<HTMLButtonElement | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<CampusEventOverlay | null>(null);
   const [withdrawError, setWithdrawError] = useState("");
   const [busy, setBusy] = useState(false);
+  const hasOpenActionDialog = Boolean(deleteTarget || withdrawTarget);
+  const actionDialogWasOpen = useRef(false);
+  useEffect(() => {
+    let frame = 0;
+    if (actionDialogWasOpen.current && !hasOpenActionDialog) {
+      frame = window.requestAnimationFrame(() => {
+        if (deleteReturnFocus.current?.isConnected) deleteReturnFocus.current.focus();
+        else document.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Current work"]')?.focus();
+      });
+    }
+    actionDialogWasOpen.current = hasOpenActionDialog;
+    return () => { if (frame) window.cancelAnimationFrame(frame); };
+  }, [hasOpenActionDialog]);
   const acknowledge = async (event: CampusEventOverlay) => {
     const actor=currentActor.current;
     setReadingIds(current=>new Set(current).add(event.id));
@@ -133,6 +169,7 @@ export function StudentMyEventsPage() {
       setDeleteTarget(null);
       await loadOverlays();
     } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Something went wrong.");
       toast.error("Delete failed", err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setBusy(false);
@@ -164,165 +201,167 @@ export function StudentMyEventsPage() {
           ? "This published campus has no visible buildings with usable floor maps yet. Contact an administrator."
           : null;
 
+  const nowMs = Date.now();
+  const currentItems = overlays.filter((overlay) => isCurrentOrganizationWork(overlay, nowMs));
+  const exactCurrentCount = !loading && !loadError && overlays.length >= workspace.total ? currentItems.length : undefined;
+  const currentPanel = organization ? (
+    <div className="min-w-0 space-y-4">
+      {campusNotice && <div role={campusLoading ? "status" : campusError || !activeCampus ? "alert" : "status"} className="flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+        {campusLoading ? <Loader2 aria-hidden="true" className="mt-0.5 h-4 w-4 animate-spin text-primary" /> : <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 text-amber-600" />}
+        <div className="min-w-0 flex-1"><p>{campusNotice}</p>{!campusLoading && <button type="button" onClick={() => void refetchCampus()} className="mt-1 inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><RefreshCw aria-hidden="true" className="h-4 w-4" />Retry campus map</button>}</div>
+      </div>}
+
+      {receiptError && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground"><p className="min-w-0 flex-1">{receiptError}</p><button type="button" onClick={() => void loadOverlays()} className="min-h-11 rounded-lg px-3 font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Retry sync</button></div>}
+      {loadError && overlays.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm"><p>Showing the last loaded events. {loadError}</p><button type="button" onClick={() => void loadOverlays()} className="mt-1 inline-flex min-h-11 items-center rounded-lg px-2 font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Retry events</button></div>}
+
+      <section aria-labelledby="organization-current-work-title" className="min-w-0 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><h2 id="organization-current-work-title" className="text-lg font-extrabold text-foreground">Current work</h2><p className="text-sm text-muted-foreground">Drafts, submissions, and events needing attention.</p></div><span className="text-xs font-medium text-muted-foreground">{exactCurrentCount !== undefined ? `${exactCurrentCount} current item${exactCurrentCount === 1 ? "" : "s"}` : `${currentItems.length} current items in ${overlays.length} loaded organization records`}</span></div>
+
+        {loading ? <div role="status" aria-label="Loading event proposals" className="space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-40 animate-pulse rounded-2xl bg-muted/30" />)}</div>
+          : loadError && overlays.length === 0 ? <div role="alert" className="rounded-2xl border border-border bg-card p-5"><h3 className="font-bold text-foreground">Could not load your events</h3><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><button type="button" onClick={() => void loadOverlays()} className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Retry events</button></div>
+            : currentItems.length === 0 && overlays.length < workspace.total ? <div role="status" className="rounded-2xl border border-dashed border-border bg-card px-4 py-5"><p className="font-semibold text-foreground">No current work in the loaded records.</p><p className="mt-1 text-sm text-muted-foreground">Load the remaining organization events before treating this as the complete current-work list.</p></div>
+              : currentItems.length === 0 ? <EmptyState icon={CalendarDays} title="No current event work" description="There are no current drafts, submissions, or approved events needing attention. Review Event history for earlier layouts." />
+                : currentItems.map((overlay) => {
+                  const status = typeof overlay.status === "string" && Object.prototype.hasOwnProperty.call(STATUS_CONFIG, overlay.status) ? overlay.status as EventOverlayStatus : null;
+                  const config = status ? STATUS_CONFIG[status] : { label: "Status unavailable", color: "text-muted-foreground", bg: "bg-muted border-border", icon: AlertCircle };
+                  const StatusIcon = config.icon;
+                  const locations = normalizeEventOverlayLocations(overlay);
+                  const counts = countEventOverlayItems(locations);
+                  const unread = unreadIds.has(overlay.id);
+                  const menuReason = actionsDisabled ? "Unavailable while organization access or event data is refreshing." : busy ? "Another event action is in progress." : "";
+                  const menuActions: CurrentWorkMenuAction[] = [{
+                    id: "duplicate",
+                    label: "Duplicate layout",
+                    disabled: busy || actionsDisabled || isCached || Boolean(campusError) || !overlay.campusId,
+                    disabledReason: !overlay.campusId ? "This event has no campus map to copy." : isCached || campusError ? "A fresh published campus map is required." : menuReason,
+                    icon: <Copy aria-hidden="true" className="h-4 w-4" />,
+                    onSelect: () => void handleDuplicate(overlay),
+                  }];
+                  if (status && status !== "pending" && status !== "approved") menuActions.push({
+                    id: "edit-details",
+                    label: "Edit details",
+                    disabled: actionsDisabled,
+                    disabledReason: actionsDisabled ? menuReason : undefined,
+                    icon: <Pencil aria-hidden="true" className="h-4 w-4" />,
+                    onSelect: () => setEditTarget(overlay),
+                  });
+                  if (status === "pending") menuActions.push({
+                    id: "withdraw",
+                    label: "Withdraw submission",
+                    disabled: busy || actionsDisabled || !overlay.updatedAt,
+                    disabledReason: !overlay.updatedAt ? "This submission has no current version to withdraw." : menuReason,
+                    icon: <ArrowLeft aria-hidden="true" className="h-4 w-4" />,
+                    onSelect: (trigger) => { deleteReturnFocus.current = trigger; setWithdrawError(""); setWithdrawTarget(overlay); },
+                  });
+                  if (status && status !== "pending" && status !== "approved") menuActions.push({
+                    id: "delete",
+                    label: "Delete",
+                    disabled: actionsDisabled,
+                    disabledReason: actionsDisabled ? menuReason : undefined,
+                    destructive: true,
+                    icon: <Trash2 aria-hidden="true" className="h-4 w-4" />,
+                    onSelect: (trigger) => { deleteReturnFocus.current = trigger; setDeleteError(""); setDeleteTarget(overlay); },
+                  });
+                  return <OrganizationCurrentWorkCard
+                    key={overlay.id}
+                    overlay={overlay}
+                    campusName={campuses?.find((campus) => campus.id === overlay.campusId)?.name ?? "Campus"}
+                    statusPresentation={{ label: config.label, color: config.color, bg: config.bg, icon: <StatusIcon aria-hidden="true" className="h-3.5 w-3.5" /> }}
+                    nextStep={status ? NEXT_STEP[status] : "This event has an unrecognized status. Check the event details or contact an administrator."}
+                    unread={unread}
+                    markingRead={readingIds.has(overlay.id)}
+                    onMarkRead={() => void acknowledge(overlay)}
+                    furnitureCount={counts.furniture}
+                    labelsCount={counts.labels}
+                    openFeedbackCount={countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions)}
+                    visibilityContent={<EventStudentVisibility overlay={overlay} />}
+                    primaryAction={<Link to={`/student/events/${overlay.id}/edit`} aria-busy={readingIds.has(overlay.id)} onClick={(event) => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                      if (readingIds.has(overlay.id)) { event.preventDefault(); return; }
+                      if (unread) {
+                        event.preventDefault(); const request = ++navigationRequest.current; const actor = currentActor.current;
+                        void acknowledge(overlay).then(() => { if (mounted.current && currentActor.current === actor && request === navigationRequest.current) navigate(`/student/events/${overlay.id}/edit`); });
+                      }
+                    }} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none sm:w-auto">{readingIds.has(overlay.id) ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Edit2 aria-hidden="true" className="h-4 w-4" />}{status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : status === "approved" ? "View maps" : status === "pending" ? "Edit maps" : "Review event"}</Link>}
+                    menuActions={menuActions}
+                    detailsContent={<EventRevisionHistory overlay={overlay} />}
+                  />;
+                })}
+
+        {overlays.length < workspace.total && <button type="button" disabled={workspace.loadingMore || actionsDisabled} onClick={() => void workspace.loadMore()} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-bold text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">{workspace.loadingMore && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}{workspace.loadingMore ? "Loading more current work…" : `Load more organization events (${overlays.length} of ${workspace.total})`}</button>}
+      </section>
+    </div>
+  ) : null;
+  const historyPanel = organization && !access.error ? <OrganizationEventHistory organization={organization} onUnfilteredTotalChange={handleHistoryTotal} /> : null;
+
   return (
     <div className="min-h-screen bg-background">
-        <div className="max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Link to="/home" className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground mb-2">
-              <ArrowLeft className="h-3 w-3" /> Back to Home
-            </Link>
-            <h1 className="text-2xl font-extrabold text-foreground">Organization Events</h1>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-              Manage your organization’s current event work and inspect layouts created by past representatives.
+      <div className="mx-auto max-w-4xl space-y-3 px-4 pb-28 pt-4 sm:px-5 md:pb-8">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2"><Link to="/home" aria-label="Back to Home" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowLeft aria-hidden="true" className="h-5 w-5" /></Link><h1 className="text-2xl font-extrabold text-foreground sm:text-3xl">Organization Events</h1></div>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Manage your organization’s current event work and inspect layouts created by past representatives.</p>
+          </div>
+          {organization && <div className="flex w-full shrink-0 flex-col sm:w-56 sm:items-end">
+            <button type="button" disabled={!canCreateProposal} title={!canCreateProposal ? "A fresh published campus map and verified organization access are required." : undefined} onClick={() => setShowCreate(true)} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"><Plus aria-hidden="true" className="h-4 w-4" />Create event</button>
+            <p aria-live="polite" aria-hidden={canCreateProposal || undefined} className={`mt-1 min-h-8 text-xs text-muted-foreground sm:max-w-56 sm:text-right ${canCreateProposal ? "invisible" : ""}`}>
+              {access.error ? "Organization access needs to be verified before creating an event."
+                : workspace.error ? "Refresh event data before creating an event."
+                  : campusLoading ? "Checking for a current published campus map…"
+                    : campusError || isCached ? "Refresh the campus map before creating an event."
+                      : publishedCampuses.length === 0 ? "A current published campus map is required."
+                        : "Event creation is temporarily unavailable."}
             </p>
-          </div>
-          {organization && overlays.length > 0 && <button type="button" disabled={!canCreateProposal} onClick={() => setShowCreate(true)} className="shrink-0 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground disabled:opacity-50">Create event</button>}
-        </div>
+          </div>}
+        </header>
 
-        {access.organizations.length > 1 && <label className="block max-w-xl space-y-1.5 text-sm font-semibold" htmlFor="event-organization-context"><span>Organization workspace</span><select id="event-organization-context" aria-label="Organization workspace" value={organization?.organizationId ?? ""} onChange={(event) => access.selectOrganization(event.target.value)} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><option value="">Choose an organization</option>{access.organizations.map((item) => <option key={item.organizationId} value={item.organizationId}>{item.organizationName} · {item.academicYear}</option>)}</select></label>}
+        {access.organizations.length > 1 && <div className="max-w-xl">
+          <span id="event-organization-context-label" className="mb-1.5 block text-sm font-semibold text-foreground">Organization workspace</span>
+          <Select value={organization?.organizationId ?? NO_ORGANIZATION} onValueChange={(value) => {
+            if (value === NO_ORGANIZATION || !access.organizations.some((item) => item.organizationId === value)) return;
+            access.selectOrganization(value);
+            const next = new URLSearchParams(searchParams);
+            next.set("organizationId", value);
+            setSearchParams(next, { preventScrollReset: true });
+          }}>
+            <OrganizationSelectTrigger size="default" aria-label="Organization workspace" aria-labelledby="event-organization-context-label" className="!h-11 w-full rounded-xl border-border bg-card px-3 text-sm text-foreground shadow-sm focus-visible:ring-2 focus-visible:ring-primary/30"><SelectValue placeholder="Choose an organization" /></OrganizationSelectTrigger>
+            <OrganizationSelectContent position="popper" sideOffset={6} className="max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-reduce:animate-none">
+              <OrganizationSelectItem value={NO_ORGANIZATION} disabled className="min-h-11 rounded-lg px-3 py-2 text-sm">Choose an organization</OrganizationSelectItem>
+              {access.organizations.map((item) => <OrganizationSelectItem key={item.organizationId} value={item.organizationId} textValue={`${item.organizationName} ${item.academicYear}`} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary">{item.organizationName} · {item.academicYear}</OrganizationSelectItem>)}
+            </OrganizationSelectContent>
+          </Select>
+        </div>}
 
-        {organization && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3"><div className="min-w-0 flex-1 break-words"><p className="text-sm font-bold text-foreground">{organization.organizationName}</p><p className="mt-0.5 text-xs text-muted-foreground">Current representative: {username || "You"} · Academic year {organization.academicYear}</p></div><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">Active assignment</span></div>}
-
-        {access.error && <div role="alert" className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-50/70 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>Could not verify current organization access. {access.error}</span><button type="button" onClick={() => void access.refresh()} className="min-h-10 shrink-0 rounded-lg px-3 font-bold text-primary hover:bg-card">Retry access check</button></div>}
-
+        {organization && !access.error && <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-card px-4 py-2 shadow-sm"><div className="min-w-0"><p className="break-words text-sm font-bold text-foreground">{organization.organizationName}</p><p className="mt-0.5 break-words text-xs text-muted-foreground">Representative: {username || "You"} · Academic year {organization.academicYear}</p></div><span className="inline-flex min-h-8 shrink-0 items-center rounded-full bg-emerald-50 px-3 text-xs font-bold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">Active assignment</span></div>}
+        {access.error && <div role="alert" className="flex flex-col gap-2 rounded-2xl border border-amber-500/30 bg-amber-50/70 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>Could not verify current organization access. {access.error}</span><button type="button" onClick={() => void access.refresh()} className="inline-flex min-h-11 shrink-0 items-center rounded-lg px-3 font-bold text-primary hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Retry access check</button></div>}
+        {access.loading && <div role="status" className="flex min-h-16 items-center gap-3 rounded-2xl border border-border bg-card px-4 text-sm text-muted-foreground"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin text-primary" />Checking organization assignment…</div>}
         {!access.loading && !access.error && access.organizations.length === 0 && <div role="status" className="rounded-2xl border border-amber-500/20 bg-amber-50/60 p-5 dark:bg-amber-950/15"><h2 className="font-bold text-foreground">No active organization assignment</h2><p className="mt-1 text-sm leading-relaxed text-muted-foreground">An administrator must appoint you as the organization’s representative before you can manage event work. Ask your admin to check the Student Organizations section in Users.</p></div>}
-
-        {!access.loading && !access.error && access.organizations.length > 1 && !organization && <div role="status" className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">Choose an organization to see its drafts, submissions, feedback, and event history.</div>}
-
-        {campusNotice && (
-          <div
-            role={campusLoading ? "status" : campusError || !activeCampus ? "alert" : "status"}
-            className="flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
-          >
-            {campusLoading ? <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-primary" /> : <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />}
-            <div className="min-w-0 flex-1">
-              <p>{campusNotice}</p>
-              {!campusLoading && (
-                <button
-                  type="button"
-                  onClick={() => void refetchCampus()}
-                  className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" /> Retry campus map
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {receiptError && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground"><p className="min-w-0 flex-1">{receiptError}</p><button type="button" onClick={()=>void loadOverlays()} className="min-h-11 rounded-lg px-2 font-bold text-primary hover:bg-muted">Retry sync</button></div>}
-        {loadError && overlays.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs"><p>Showing the last loaded events. {loadError}</p><button type="button" onClick={()=>void loadOverlays()} className="mt-1 min-h-11 font-bold text-primary">Retry events</button></div>}
-        {loading ? (
-          <div className="space-y-3" aria-label="Loading event proposals">
-            {[1, 2, 3].map((item) => <div key={item} className="h-36 rounded-2xl bg-muted/30 animate-pulse" />)}
-          </div>
-        ) : loadError && overlays.length === 0 ? (
-          <div role="alert" className="rounded-2xl border border-border bg-card p-5"><h2 className="font-bold">Could not load your events</h2><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><button type="button" onClick={() => void loadOverlays()} className="mt-4 min-h-11 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Retry events</button></div>
-        ) : !organization ? null : overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).length === 0 ? (
-          <EmptyState
-            icon={CalendarDays}
-            title="No current event work"
-            description="Create a draft or review organization history to inspect earlier layouts."
-            action={canCreateProposal ? (
-              <button
-                type="button"
-                onClick={() => setShowCreate(true)}
-                className="inline-flex w-full max-w-[220px] items-center justify-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold"
-              >
-                <Plus className="h-3.5 w-3.5" /> Create event
-              </button>
-            ) : undefined}
-          />
-        ) : (
-          <section aria-labelledby="organization-current-work-title" className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="organization-current-work-title" className="text-lg font-extrabold text-foreground">Current work</h2><span className="text-xs text-muted-foreground">{overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).length} active item(s)</span></div>
-            {overlays.filter((overlay) => overlay.status !== "approved" || countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions) > 0 || ["upcoming", "ongoing"].includes(getStudentEventPhase(overlay, Date.now()))).map((overlay) => {
-              const status = overlay.status || "draft";
-              const config = STATUS_CONFIG[status];
-              const StatusIcon = config.icon;
-              const locations = normalizeEventOverlayLocations(overlay);
-              const counts = countEventOverlayItems(locations);
-              const unread = unreadIds.has(overlay.id);
-              return (
-                <motion.article key={overlay.id} data-testid={`org-event-card-${overlay.id}`} data-unread={unread ? "true" : "false"} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{duration:reducedMotion ? 0 : 0.16}} className={cn("bg-card rounded-2xl border shadow-sm overflow-hidden", unread ? "border-red-300 dark:border-red-800" : "border-border")}>
-                  <div className="p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className="min-w-0 flex-1 break-words font-extrabold text-foreground text-sm">{overlay.title}</h2>
-                      <span className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0", config.bg, config.color)}>
-                        <StatusIcon className="h-3 w-3" /> {config.label}
-                      </span>
-                    </div>
-                    {overlay.description && <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{overlay.description}</p>}
-                    {unread && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2 dark:bg-red-950/30"><span className="inline-flex items-center gap-2 text-xs font-bold text-red-700 dark:text-red-300"><span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-red-600" />New GSO update</span><button type="button" disabled={readingIds.has(overlay.id)} aria-label={`Mark GSO update for ${overlay.title} as read`} onClick={() => void acknowledge(overlay)} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 dark:text-red-300 dark:hover:bg-red-950/50">{readingIds.has(overlay.id) && <Loader2 aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin"/>}{readingIds.has(overlay.id) ? 'Saving read status…' : 'Mark as read'}</button></div>}
-                    <div className="mt-3 border-l-2 border-primary/30 pl-3 py-1">
-                      <p className="text-xs font-bold text-foreground">Next step</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{NEXT_STEP[status]}</p>
-                    </div>
-                    <dl className="mt-3 grid gap-x-4 gap-y-1.5 border-t border-border/60 pt-3 text-[11px] text-muted-foreground sm:grid-cols-2">
-                      <div className="min-w-0 break-words"><dt className="inline font-semibold text-foreground">Event academic year: </dt><dd className="inline">{overlay.academicYear || "Unknown academic year"}</dd></div>
-                      <div className="min-w-0 break-words"><dt className="inline font-semibold text-foreground">Original creator: </dt><dd className="inline">{overlay.creatorName || "Name unavailable"}</dd></div>
-                      <div className="min-w-0 break-words sm:col-span-2"><dt className="inline font-semibold text-foreground">Created: </dt><dd className="inline">{overlay.createdAt && Number.isFinite(Date.parse(overlay.createdAt)) ? `${new Date(overlay.createdAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" })} PHT` : "Creation date unavailable"}</dd></div>
-                    </dl>
-                    <p className="mt-2 text-xs font-semibold text-muted-foreground">{campuses?.find((campus) => campus.id === overlay.campusId)?.name ?? "Campus"}{status === "approved" && overlay.dateStart && ` · ${new Date(overlay.dateStart).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short", hour12: true })}`}</p>
-                    {status === 'approved' && <EventStudentVisibility overlay={overlay} />}
-                    <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
-                      <MapPin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />
-                      <span><strong className="text-foreground">{locations.length} location{locations.length === 1 ? "" : "s"}</strong> · {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-3">
-                      <span className="text-[10px] font-bold text-muted-foreground px-2 py-1 rounded-full bg-muted">{counts.furniture} furniture</span>
-                      <span className="text-[10px] font-bold text-muted-foreground px-2 py-1 rounded-full bg-muted">{counts.labels} labels</span>
-                    </div>
-                  </div>
-                  {overlay.adminComment && (
-                    <div className="px-5 py-3 border-t border-border bg-red-50/50 dark:bg-red-900/10 flex items-start gap-2">
-                      <MessageSquare className="h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0" />
-                      <div><p className="text-[10px] font-bold text-red-600 uppercase">GSO feedback</p><p className="text-xs text-red-700 dark:text-red-300 mt-0.5">{overlay.adminComment}</p></div>
-                    </div>
-                  )}
-                  {Object.entries(overlay.locationFeedback ?? {}).map(([locationId, feedback]) => <div key={locationId} className="border-t border-border bg-amber-50/50 px-5 py-3 text-xs dark:bg-amber-900/10"><p className="font-bold">GSO feedback · {locations.find((location) => location.id === locationId)?.locationRef.label ?? "Location"}</p><p className="mt-1 text-muted-foreground">{eventFeedbackText(feedback)}</p></div>)}
-                  <div className="px-5 py-3"><EventRevisionHistory overlay={overlay} /></div>
-                  <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
-                    {status === "pending" && <button type="button" disabled={busy || actionsDisabled || !overlay.updatedAt} onClick={() => { setWithdrawError(""); setWithdrawTarget(overlay); }} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><ArrowLeft aria-hidden className="h-3.5 w-3.5" />Withdraw submission</button>}
-                    <button type="button" disabled={busy || actionsDisabled || isCached || Boolean(campusError)} onClick={() => void handleDuplicate(overlay)} className="min-h-10 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">Duplicate layout</button>
-                    {status !== "pending" && status !== "approved" && <button type="button" disabled={actionsDisabled} onClick={() => setEditTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted disabled:opacity-40"><Pencil className="h-3.5 w-3.5" /> Edit details</button>}
-                    <Link to={`/student/events/${overlay.id}/edit`} aria-busy={readingIds.has(overlay.id)} onClick={event => {
-                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                      if (readingIds.has(overlay.id)) {event.preventDefault();return;}
-                      if (unread) {
-                        event.preventDefault(); const request=++navigationRequest.current; const actor=currentActor.current;
-                        void acknowledge(overlay).then(()=>{if(mounted.current && currentActor.current===actor && request===navigationRequest.current) navigate(`/student/events/${overlay.id}/edit`);});
-                      }
-                    }} className="order-first flex min-h-11 items-center gap-2 px-4 rounded-xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary">{readingIds.has(overlay.id) ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin"/> : <Edit2 className="h-3.5 w-3.5"/>} {status === "draft" ? "Continue draft" : status === "disapproved" ? "Revise maps" : status === "approved" ? "View maps" : "Edit maps"}</Link>
-                    {status !== "pending" && status !== "approved" && <button type="button" disabled={actionsDisabled} onClick={() => setDeleteTarget(overlay)} className="flex min-h-10 items-center gap-1.5 px-3 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
-                  </div>
-                </motion.article>
-              );
-            })}
-          </section>
-        )}
-        {organization && !access.error && <OrganizationEventHistory key={`${organization.organizationId}:${organization.grantId}`} organization={organization} />}
-        {workspace.events.length < workspace.total && organization && <button type="button" disabled={workspace.loadingMore || actionsDisabled} onClick={() => void workspace.loadMore()} className="min-h-11 w-full rounded-xl border border-border bg-card text-sm font-bold text-primary disabled:opacity-50">{workspace.loadingMore ? "Loading more current work…" : `Load more organization events (${workspace.events.length} of ${workspace.total})`}</button>}
+        {!access.loading && !access.error && access.organizations.length > 1 && !organization && <div role="status" className="rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">Choose an organization to see its drafts, submissions, feedback, and event history.</div>}
+        {organization && !access.error && !access.loading && <OrganizationEventsWorkspaceTabs key={historyScope} value={activeView} onValueChange={changeView} currentCount={exactCurrentCount} historyCount={historyCount} currentPanel={currentPanel} historyPanel={historyPanel} />}
       </div>
 
       {showCreate && organization && <EventProposalModal organization={organization} buildings={buildings} campuses={publishedCampuses.map((campus) => ({ id: campus.id, name: campus.name, buildings: publishedEventBuildingOptions(campus) }))} initialCampusId={activeCampus?.id} onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
       {editTarget && <EventDetailsModal overlay={editTarget} buildings={(() => { const campus = campuses?.find((item) => item.id === editTarget.campusId) ?? (activeCampus?.id === editTarget.campusId ? activeCampus : null); return campus ? publishedEventBuildingOptions(campus) : []; })()} onClose={() => setEditTarget(null)} onSave={handleEdit} />}
-      <AlertDialog.Root open={Boolean(withdrawTarget)} onOpenChange={(open) => { if (!open && !busy) setWithdrawTarget(null); }}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-2xl"><AlertDialog.Title className="font-extrabold">Withdraw submission?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm text-muted-foreground">This returns the event to Draft and removes it from the review queue. All saved locations, furniture, and labels stay. You can submit it again later.</AlertDialog.Description>{withdrawError && <p role="alert" className="mt-3 text-sm text-destructive">{withdrawError}</p>}<div className="mt-5 flex gap-2"><AlertDialog.Cancel asChild><button disabled={busy} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold">Keep submitted</button></AlertDialog.Cancel><button type="button" disabled={busy || actionsDisabled} className="min-h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-sm font-bold disabled:opacity-40" onClick={async () => { if (!withdrawTarget?.updatedAt) return; setBusy(true); setWithdrawError(""); try { const grantId = organization && withdrawTarget.organizationId === organization.organizationId ? organization.grantId : undefined; await eventOverlayService.withdrawEventSubmission(withdrawTarget.id, withdrawTarget.updatedAt, grantId); setWithdrawTarget(null); toast.success("Submission withdrawn", "Your saved maps are now a draft."); await loadOverlays(); } catch (error) { setWithdrawError(error instanceof Error ? error.message : "Could not withdraw submission."); } finally { setBusy(false); } }}>{busy ? "Withdrawing…" : "Withdraw to draft"}</button></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div><h2 className="font-extrabold text-foreground">Delete event proposal?</h2><p className="text-sm text-muted-foreground mt-2">This removes the event and all maps you added for it. It does not change the administrator-published map.</p></div>
-              <button type="button" aria-label="Close" onClick={() => setDeleteTarget(null)} className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button type="button" onClick={() => setDeleteTarget(null)} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground">Cancel</button>
-              <button type="button" onClick={() => void handleDelete()} disabled={busy} className="flex-1 h-10 rounded-xl bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-40">{busy && <Loader2 className="h-4 w-4 animate-spin" />} Delete event</button>
-            </div>
-          </div>
-        </div>
-      )}
+
+      <AlertDialog.Root open={Boolean(withdrawTarget)} onOpenChange={(open) => { if (!open && !busy) { setWithdrawTarget(null); setWithdrawError(""); } }}>
+        <AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" />
+          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl outline-none">
+            <AlertDialog.Title className="font-extrabold">Withdraw submission?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm leading-relaxed text-muted-foreground">This returns the event to Draft and removes it from the review queue. All saved locations, furniture, and labels stay. You can submit it again later.</AlertDialog.Description>
+            {withdrawError && <p role="alert" className="mt-3 text-sm text-destructive">{withdrawError}</p>}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><AlertDialog.Cancel asChild><button type="button" disabled={busy} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">Keep submitted</button></AlertDialog.Cancel><button type="button" disabled={busy || actionsDisabled} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40" onClick={async () => { if (!withdrawTarget?.updatedAt) return; setBusy(true); setWithdrawError(""); try { const grantId = organization && withdrawTarget.organizationId === organization.organizationId ? organization.grantId : undefined; await eventOverlayService.withdrawEventSubmission(withdrawTarget.id, withdrawTarget.updatedAt, grantId); setWithdrawTarget(null); toast.success("Submission withdrawn", "Your saved maps are now a draft."); await loadOverlays(); } catch (error) { setWithdrawError(error instanceof Error ? error.message : "Could not withdraw submission."); } finally { setBusy(false); } }}>{busy && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}{busy ? "Withdrawing…" : "Withdraw to draft"}</button></div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+
+      <AlertDialog.Root open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && !busy) { setDeleteTarget(null); setDeleteError(""); } }}>
+        <AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-background/70 backdrop-blur-sm" />
+          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-[81] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl outline-none">
+            <AlertDialog.Title className="font-extrabold">Delete event proposal?</AlertDialog.Title><AlertDialog.Description className="mt-2 text-sm leading-relaxed text-muted-foreground">This removes the event and all maps you added for it. It does not change the administrator-published map.</AlertDialog.Description>
+            {deleteError && <p role="alert" className="mt-3 break-words text-sm text-destructive">{deleteError}</p>}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><AlertDialog.Cancel asChild><button type="button" disabled={busy} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">Cancel</button></AlertDialog.Cancel><button type="button" onClick={() => void handleDelete()} disabled={busy || actionsDisabled} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-destructive px-4 text-sm font-bold text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:opacity-40">{busy && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}{busy ? "Deleting…" : "Delete event"}</button></div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
     </div>
   );
 }

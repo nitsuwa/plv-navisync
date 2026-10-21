@@ -21,6 +21,10 @@ import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPaus
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dIndoorArrivalCameraDirection, student3dIndoorFollowCameraOffset, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
 import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
+import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
+import type { Event3DEditing } from "../../lib/event3dEditing";
+import { EventPreviewCamera } from "../events/EventPreviewCamera";
+import type { Event3DCameraRequest, Event3DCameraSession } from "../../lib/event3dLayout";
 
 declare module "react" {
   namespace JSX {
@@ -66,6 +70,9 @@ interface IndoorFloor3DRendererProps {
   eventFurniture?: readonly FloorFurniture[];
   showDiningFurniture?: boolean;
   eventLabels?: readonly FloorLabel[];
+  eventEditing?: Event3DEditing;
+  previewCamera?: Event3DCameraRequest;
+  previewCameraSession?: Event3DCameraSession;
   eventMarker?: { point: Pt; label: string } | null;
   activeTransition?: { point: Pt; label: string; displayLabel?: string; onActivate?: () => void } | null;
   exploreTransitionCues?: readonly StudentRouteExploreTransitionMarker[];
@@ -1704,7 +1711,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       minX: Math.min(first[0], second[0]) - padding,
       maxX: Math.max(first[0], second[0]) + padding,
       minY: FLOOR_SURFACE_Y + 0.04,
-      maxY: FLOOR_SURFACE_Y + 2.2,
+      maxY: Math.max(FLOOR_SURFACE_Y + 2.2, (props.previewCamera?.maxHeight ?? 0) / 2 + 0.025),
       minZ: Math.min(first[2], second[2]) - padding,
       maxZ: Math.max(first[2], second[2]) + padding,
     };
@@ -2331,10 +2338,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
         .map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
       {props.auditoriumChairLayouts.length ? <StudentAuditoriumChairLayer chairs={props.auditoriumChairLayouts} viewport={viewport} /> : null}
       {props.showDiningFurniture && floor.furniture?.length ? <StudentCanteenDiningFurnitureLayer items={floor.furniture} viewport={viewport} /> : null}
-      {props.eventFurniture?.filter(shouldRenderIndoorLandmarkFurniture).map((item) => <MemoFurniture key={`event-furniture-${item.id}`} item={item} viewport={viewport} />)}
-      {props.eventLabels?.map((label) => <Html key={`event-label-${label.id}`} position={pointToWorld({ x: label.x, y: label.y }, viewport, 0.06)} center distanceFactor={10} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
-        <span className="rounded bg-orange-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">{label.text}</span>
-      </Html>)}
+      <Event3DSceneLayout furniture={props.eventFurniture} labels={props.eventLabels} editing={props.eventEditing} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
       {props.eventMarker && <Html position={pointToWorld(props.eventMarker.point, viewport, 0.3)} center distanceFactor={9} zIndexRange={[90, 0]}>
         <div className="rounded-xl border border-orange-200 bg-white/95 px-2 py-1.5 text-[10px] font-extrabold text-orange-800 shadow-lg">◉ {props.eventMarker.label}</div>
       </Html>}

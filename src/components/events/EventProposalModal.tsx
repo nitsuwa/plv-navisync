@@ -226,7 +226,9 @@ export function EventProposalModal({
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingStage, setSavingStage] = useState<"uploading-poster" | "creating">("creating");
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
+  const prefersReducedMotion = useReducedMotion() ?? false;
   const submissionInFlightRef = useRef(false);
   const requestIdRef = useRef(crypto.randomUUID());
   const uploadedPosterRef = useRef<{file:File;url:string;path:string} | null>(null);
@@ -273,11 +275,14 @@ export function EventProposalModal({
       return;
     }
     submissionInFlightRef.current = true;
+    const needsPosterUpload = Boolean(posterFile && uploadedPosterRef.current?.file !== posterFile);
+    setSavingStage(needsPosterUpload ? "uploading-poster" : "creating");
     setSaving(true);
     setError("");
     try {
-      if (posterFile && uploadedPosterRef.current?.file !== posterFile) {
+      if (needsPosterUpload && posterFile) {
         uploadedPosterRef.current = { file: posterFile, ...await uploadEventPoster(posterFile) };
+        setSavingStage("creating");
       }
       const posterUrl = uploadedPosterRef.current?.url;
       await onCreate({
@@ -331,8 +336,8 @@ export function EventProposalModal({
                 Continue <ArrowRight className="inline h-4 w-4 ml-1" />
               </button>
             ) : (
-              <button type="button" onClick={() => setReviewOpen(true)} disabled={saving || locations.length === 0} aria-describedby="event-create-help" className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create & design maps
+              <button type="button" onClick={() => setReviewOpen(true)} disabled={saving || locations.length === 0} aria-describedby="event-create-help" aria-busy={saving} className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                {saving ? <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin motion-reduce:animate-none" /> : <Plus className="h-4 w-4" />}{saving ? "Creating draft…" : "Create & design maps"}
               </button>
             )}
           </div>
@@ -363,7 +368,7 @@ export function EventProposalModal({
       <AlertDialog.Root open={reviewOpen} onOpenChange={(open) => { if (!saving) setReviewOpen(open); }}>
         <AlertDialog.Portal>
           <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-background/70 backdrop-blur-sm" />
-          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-[61] flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl [@media(max-height:500px)]:max-h-[calc(100dvh-0.5rem)]">
+          <AlertDialog.Content aria-busy={saving} className="fixed left-1/2 top-1/2 z-[61] flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl [@media(max-height:500px)]:max-h-[calc(100dvh-0.5rem)]">
             <div className="shrink-0 px-5 pt-5 sm:px-6 [@media(max-height:500px)]:pt-3">
               <AlertDialog.Title className="text-lg font-bold">Review event proposal</AlertDialog.Title>
               <AlertDialog.Description className="mt-2 text-sm text-muted-foreground [@media(max-height:500px)]:mt-1 [@media(max-height:500px)]:text-xs [@media(max-height:500px)]:leading-4">Confirm the areas where you will design and plot event assets. This creates a draft for review later.</AlertDialog.Description>
@@ -375,10 +380,26 @@ export function EventProposalModal({
               <ul className="mt-1.5 space-y-1.5 text-sm">{locations.map((location, index) => <li key={index} className="rounded-lg bg-muted p-2 [@media(max-height:500px)]:py-1">{location.label}</li>)}</ul>
             </div>
             <div data-testid="proposal-confirmation-actions" className="shrink-0 space-y-3 border-t border-border bg-card p-4 [@media(max-height:500px)]:p-3">
-              {saving && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} role="status" aria-live="polite" className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3"><Loader2 className="h-6 w-6 shrink-0 text-primary motion-safe:animate-spin" aria-hidden="true" /><div><p className="text-sm font-bold text-foreground">Preparing your event workspace</p><p className="mt-1 text-xs text-muted-foreground">Creating your draft and connecting the selected maps…</p></div></motion.div>}
+              {saving && <motion.div initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.18 }} role="status" aria-live="polite" aria-atomic="true" className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 shrink-0 text-primary motion-safe:animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{savingStage === "uploading-poster" ? "Uploading event poster" : "Preparing your event workspace"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{savingStage === "uploading-poster" ? "Your poster is being saved before the draft is created…" : "Saving your draft and opening the map editor…"}</p>
+                  </div>
+                </div>
+                <div data-testid="proposal-loading-track" aria-hidden="true" className="mt-3 h-1 overflow-hidden rounded-full bg-primary/10">
+                  <motion.div
+                    initial={false}
+                    animate={prefersReducedMotion ? { x: "0%" } : { x: ["-100%", "300%"] }}
+                    transition={prefersReducedMotion ? { duration: 0 } : { duration: 1.25, ease: "easeInOut", repeat: Infinity }}
+                    className="h-full w-1/3 rounded-full bg-primary"
+                  />
+                </div>
+              </motion.div>}
               <div className="flex gap-2">
                 <AlertDialog.Cancel asChild><button disabled={saving} className="min-h-11 flex-1 rounded-xl border border-border px-3 py-2 text-sm font-bold">Back to locations</button></AlertDialog.Cancel>
-                <button type="button" onClick={() => void submit()} disabled={saving} className="min-h-11 flex-1 rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground">{saving ? "Creating…" : "Confirm & design"}</button>
+                <button type="button" onClick={() => void submit()} disabled={saving} aria-busy={saving} className="min-h-11 flex-1 rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground disabled:cursor-wait">{saving && <Loader2 aria-hidden="true" className="mr-2 inline h-4 w-4 motion-safe:animate-spin motion-reduce:animate-none" />}{saving ? "Creating draft…" : "Confirm & design"}</button>
               </div>
             </div>
           </AlertDialog.Content>

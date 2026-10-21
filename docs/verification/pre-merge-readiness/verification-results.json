@@ -1,0 +1,1649 @@
+{
+  "at": "2026-10-15T07:02:02.782Z",
+  "status": "READY_WITH_EXISTING_TYPECHECK_LIMITATION",
+  "authorization": {
+    "auditAndLocalFixes": true,
+    "commit": false,
+    "merge": false,
+    "push": false,
+    "pr": false,
+    "awaitingUserGoSignal": true
+  },
+  "identity": {
+    "workspace": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync",
+    "branch": "main",
+    "head": "95b546122ba66fe52343bcf9111495844fcf320d",
+    "originMain": "95b546122ba66fe52343bcf9111495844fcf320d",
+    "divergence": "0\t0",
+    "changesUncommitted": true
+  },
+  "fixes": [
+    "Retain text-only GSO location feedback and comments after pins are addressed.",
+    "Improve notification secondary text contrast in both themes.",
+    "Update integration fixture for approved checkbox floor selection.",
+    "Correct pre-existing Admin60s polling test, retaining production timing."
+  ],
+  "tests": {
+    "focused": {
+      "files": 15,
+      "passed": 120,
+      "failed": 0,
+      "at": "Before final contrast-only edit; final event sequence rechecks affected notification tests."
+    },
+    "eventFlow": {
+      "files": 89,
+      "passed": 773,
+      "failed": 0,
+      "total": 773,
+      "skipped": 0,
+      "parts": [
+        {
+          "part": 0,
+          "exitCode": 0,
+          "files": 15,
+          "passed": 192,
+          "failed": 0,
+          "total": 192,
+          "skipped": 0,
+          "failures": []
+        },
+        {
+          "part": 1,
+          "exitCode": 0,
+          "files": 15,
+          "passed": 80,
+          "failed": 0,
+          "total": 80,
+          "skipped": 0,
+          "failures": []
+        },
+        {
+          "part": 2,
+          "exitCode": 0,
+          "files": 15,
+          "passed": 71,
+          "failed": 0,
+          "total": 71,
+          "skipped": 0,
+          "failures": []
+        },
+        {
+          "part": 3,
+          "exitCode": 0,
+          "files": 15,
+          "passed": 127,
+          "failed": 0,
+          "total": 127,
+          "skipped": 0,
+          "failures": []
+        },
+        {
+          "part": 4,
+          "exitCode": 0,
+          "files": 15,
+          "passed": 88,
+          "failed": 0,
+          "total": 88,
+          "skipped": 0,
+          "failures": []
+        },
+        {
+          "part": 5,
+          "exitCode": 0,
+          "files": 14,
+          "passed": 215,
+          "failed": 0,
+          "total": 215,
+          "skipped": 0,
+          "failures": []
+        }
+      ]
+    },
+    "wholeRepositorySuiteRun": false
+  },
+  "types": {
+    "baseline": {
+      "raw": 1047,
+      "unique": 528
+    },
+    "current": {
+      "raw": 1047,
+      "unique": 528
+    },
+    "introduced": [],
+    "resolved": [],
+    "increased": []
+  },
+  "build": {
+    "mode": "build",
+    "command": [
+      "node",
+      "node_modules/vite/bin/vite.js",
+      "build"
+    ],
+    "exitCode": 0,
+    "signal": null,
+    "startedAt": "2026-10-15T06:55:05.401Z",
+    "finishedAt": "2026-10-15T06:56:20.651Z",
+    "logFile": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\docs\\verification\\pre-merge-readiness\\logs\\build.log"
+  },
+  "browser": {
+    "checks": [
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 360x800",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-360x800.png",
+        "viewport": "360x800",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 360x800",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "360x800",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 360x800",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-360x800.png",
+        "viewport": "360x800",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 360x800",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "360x800",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 360x800",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-360x800.png",
+        "viewport": "360x800",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 360x800",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "360x800",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 360x800",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-360x800.png",
+        "viewport": "360x800",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 360x800",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "360x800",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 390x844",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-390x844.png",
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 390x844",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 390x844",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-390x844.png",
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 390x844",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "Sticky tabs beneath real navbar",
+        "result": "PASS",
+        "notes": "Measured navbar and sticky bar: {'x': 0, 'y': 0, 'width': 390, 'height': 57}, {'x': 8, 'y': 57, 'width': 374, 'height': 70}",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/dashboard-dark-390x844-sticky-tabs.png",
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 390x844",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-390x844.png",
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 390x844",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 390x844",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-390x844.png",
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 390x844",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 440x956",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-440x956.png",
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 440x956",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 440x956",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-440x956.png",
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 440x956",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U8,U14",
+        "name": "Themed year select placement",
+        "result": "PASS",
+        "notes": "Menu fully inside viewport: {'x': 33, 'y': 431, 'width': 388, 'height': 154}",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-440x956-year-menu.png",
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U8,U9,U14",
+        "name": "Themed current action menu placement",
+        "result": "PASS",
+        "notes": "Menu fully inside viewport: {'x': 183, 'y': 708, 'width': 224, 'height': 146}",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-440x956-actions-menu.png",
+        "viewport": "440x956",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 440x956",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-440x956.png",
+        "viewport": "440x956",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 440x956",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "440x956",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 440x956",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-440x956.png",
+        "viewport": "440x956",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 440x956",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "440x956",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 768x1024",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-768x1024.png",
+        "viewport": "768x1024",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 768x1024",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "768x1024",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 768x1024",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-768x1024.png",
+        "viewport": "768x1024",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 768x1024",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "768x1024",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 768x1024",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-768x1024.png",
+        "viewport": "768x1024",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 768x1024",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "768x1024",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 768x1024",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-768x1024.png",
+        "viewport": "768x1024",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 768x1024",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "768x1024",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 1440x900",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-1440x900.png",
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 1440x900",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 1440x900",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-1440x900.png",
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 1440x900",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 1440x900",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-1440x900.png",
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 1440x900",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 1440x900",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-1440x900.png",
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 1440x900",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 390x420",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-390x420.png",
+        "viewport": "390x420",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 390x420",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x420",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 390x420",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-390x420.png",
+        "viewport": "390x420",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 390x420",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x420",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 390x420",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-390x420.png",
+        "viewport": "390x420",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 390x420",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x420",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 390x420",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-390x420.png",
+        "viewport": "390x420",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 390x420",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "390x420",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "dark current 740x390",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-dark-740x390.png",
+        "viewport": "740x390",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark current touch targets 740x390",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "740x390",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "dark history 740x390",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-740x390.png",
+        "viewport": "740x390",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "dark history touch targets 740x390",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "740x390",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U14",
+        "name": "light current 740x390",
+        "result": "PASS",
+        "notes": "Two tabs, one active panel, no horizontal overflow.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/current-light-740x390.png",
+        "viewport": "740x390",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light current touch targets 740x390",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "740x390",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U1,U2,U6,U7,U10,U14",
+        "name": "light history 740x390",
+        "result": "PASS",
+        "notes": "One-action history access, four records, accurate Approved state.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-light-740x390.png",
+        "viewport": "740x390",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U2,U14",
+        "name": "light history touch targets 740x390",
+        "result": "PASS",
+        "notes": "Visible dashboard controls are at least 44px high and wide where interactive.",
+        "screenshot": null,
+        "viewport": "740x390",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U8,U14",
+        "name": "Search clear touch target",
+        "result": "PASS",
+        "notes": "Search clear button is at least 44px square.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U3,U4,U11",
+        "name": "URL/filter persistence and Back/Forward",
+        "result": "PASS",
+        "notes": "Query preserved; filter/search survived tab changes; browser history restored tabs. http://127.0.0.1:5181/student/events?scenario=normal&theme=dark&keep=yes&view=history",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U3,U4,U14",
+        "name": "Keyboard tabs and hidden-panel focus isolation",
+        "result": "PASS",
+        "notes": "Arrow moves focus without activation; Space and Enter activate; hidden panel controls cannot receive focus.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U3,U4",
+        "name": "Retained disclosure and independent tab scroll",
+        "result": "PASS",
+        "notes": "Disclosure retained and current scroll 420px restored after the History visit.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U10,U16",
+        "name": "History View event maps route",
+        "result": "PASS",
+        "notes": "Primary history action reaches the safe fixture editor route; no live editor or API mutation.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U7,U14",
+        "name": "Long content at 360x800",
+        "result": "PASS",
+        "notes": "Long title/creator/locations wrap; creator and missing-source reuse history remain expandable.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-360x800-long-content.png",
+        "viewport": "360x800",
+        "theme": "dark",
+        "scenario": "long",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U8,U13,U14",
+        "name": "Short-phone reuse dialog and focus return",
+        "result": "PASS",
+        "notes": "Themed dialog fits with visible footer; Escape returns focus; no mutation submitted.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/reuse-dark-390x420.png",
+        "viewport": "390x420",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U12,U13",
+        "name": "History next-page error/retry",
+        "result": "PASS",
+        "notes": "20 records retained; retry completed with exact offset-20 call count 2.",
+        "screenshot": "docs/verification/pre-merge-readiness/evidence/history-dark-next-page-error.png",
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "next-page-error",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U12",
+        "name": "History initial error and retry",
+        "result": "PASS",
+        "notes": "Retry restores isolated fixture records without a false success message.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "initial-error",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U11,U12",
+        "name": "Zero results and clear filters",
+        "result": "PASS",
+        "notes": "Empty state offers filter recovery; records return after Clear filters.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U6,U11",
+        "name": "Large Current work partial count",
+        "result": "PASS",
+        "notes": "100 loaded of 101 is labeled partial; later draft appears after loading remaining record.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "large",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U10",
+        "name": "Status matrix",
+        "result": "PASS",
+        "notes": "Draft, pending, revision, approved unpublished/published, archived and unknown labels checked.",
+        "screenshot": null,
+        "viewport": "768x1024",
+        "theme": "light",
+        "scenario": "status-matrix",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U5,U9,U16",
+        "name": "Access state access-loading",
+        "result": "PASS",
+        "notes": "Access gate renders Checking organization assignment.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "access-loading",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U5,U9,U16",
+        "name": "Access state no-assignment",
+        "result": "PASS",
+        "notes": "Access gate renders No active organization assignment.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "no-assignment",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U5,U9,U16",
+        "name": "Access state revoked",
+        "result": "PASS",
+        "notes": "Access gate renders Could not verify current organization access.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "revoked",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U5,U9",
+        "name": "Standard student role isolation",
+        "result": "PASS",
+        "notes": "A non-representative role is routed away from organization event management.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "standard-student",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13,U16",
+        "name": "Create gate disabled-cached",
+        "result": "PASS",
+        "notes": "CTA remains clear but disabled while existing map/access precondition is unmet.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "disabled-cached",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13,U16",
+        "name": "Create gate disabled-missing",
+        "result": "PASS",
+        "notes": "CTA remains clear but disabled while existing map/access precondition is unmet.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "disabled-missing",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13,U16",
+        "name": "Create gate disabled-unpublished",
+        "result": "PASS",
+        "notes": "CTA remains clear but disabled while existing map/access precondition is unmet.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "disabled-unpublished",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13,U16",
+        "name": "Create gate disabled-error",
+        "result": "PASS",
+        "notes": "CTA remains clear but disabled while existing map/access precondition is unmet.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "disabled-error",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U14",
+        "name": "Verified access remains stable during background refresh",
+        "result": "PASS",
+        "notes": "Later user-approved no-flicker behavior retains confirmed same-context access.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U3,U5",
+        "name": "Organization switch during delayed history query",
+        "result": "PASS",
+        "notes": "Old organization response did not replace the authorized Org 2 records.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "multiple",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13",
+        "name": "Unread and unresolved feedback",
+        "result": "PASS",
+        "notes": "GSO notice, general comment and unresolved map feedback remain visible.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "attention",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9,U13",
+        "name": "Mock withdrawal failure",
+        "result": "PASS",
+        "notes": "Error stays in alert dialog; one isolated fixture mutation; no live write.",
+        "screenshot": null,
+        "viewport": "740x390",
+        "theme": "dark",
+        "scenario": "mutation-error",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U12,U13",
+        "name": "Mock reuse failure and retryable dialog",
+        "result": "PASS",
+        "notes": "Failure remains visible in the open themed dialog and enables its retry action.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "mutation-error",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U4",
+        "name": "First History alignment dark 390",
+        "result": "PASS",
+        "notes": "History aligns at 338px beneath the navbar.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U4",
+        "name": "First History alignment dark 1440",
+        "result": "PASS",
+        "notes": "History aligns at 176px beneath the navbar.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U7",
+        "name": "Compact desktop cards dark",
+        "result": "PASS",
+        "notes": "Ordinary card 225.75px; both first primary actions are visible.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U4",
+        "name": "First History alignment light 390",
+        "result": "PASS",
+        "notes": "History aligns at 338px beneath the navbar.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U4",
+        "name": "First History alignment light 1440",
+        "result": "PASS",
+        "notes": "History aligns at 176px beneath the navbar.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U7",
+        "name": "Compact desktop cards light",
+        "result": "PASS",
+        "notes": "Ordinary card 225.75px; both first primary actions are visible.",
+        "screenshot": null,
+        "viewport": "1440x900",
+        "theme": "light",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U9",
+        "name": "Tab change cancels delayed editor navigation",
+        "result": "PASS",
+        "notes": "Delayed mock acknowledgement leaves the user in History.",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "requirement": "U14",
+        "name": "Reduced-motion preference",
+        "result": "PASS",
+        "notes": "prefers-reduced-motion=True",
+        "screenshot": null,
+        "viewport": "390x844",
+        "theme": "dark",
+        "scenario": "normal",
+        "group": "tabs"
+      },
+      {
+        "name": "Notification theme/filter/contrast dark (360, 800)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-360x800.png",
+          "iconContrast": 12.11,
+          "dateContrast": 8.88,
+          "messageContrast": 8.88
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast light (360, 800)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-360x800.png",
+          "iconContrast": 13.52,
+          "dateContrast": 7.14,
+          "messageContrast": 7.14
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast dark (390, 844)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-390x844.png",
+          "iconContrast": 12.11,
+          "dateContrast": 8.88,
+          "messageContrast": 8.88
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast light (390, 844)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-390x844.png",
+          "iconContrast": 13.52,
+          "dateContrast": 7.14,
+          "messageContrast": 7.14
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast dark (440, 956)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-440x956.png",
+          "iconContrast": 12.11,
+          "dateContrast": 8.88,
+          "messageContrast": 8.88
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast light (440, 956)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-440x956.png",
+          "iconContrast": 13.52,
+          "dateContrast": 7.14,
+          "messageContrast": 7.14
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast dark (768, 1024)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-768x1024.png",
+          "iconContrast": 12.11,
+          "dateContrast": 8.88,
+          "messageContrast": 8.88
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast light (768, 1024)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-768x1024.png",
+          "iconContrast": 13.52,
+          "dateContrast": 7.14,
+          "messageContrast": 7.14
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast dark (1440, 900)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-dark-1440x900.png",
+          "iconContrast": 12.11,
+          "dateContrast": 8.88,
+          "messageContrast": 8.88
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Notification theme/filter/contrast light (1440, 900)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\notifications-light-1440x900.png",
+          "iconContrast": 13.52,
+          "dateContrast": 7.14,
+          "messageContrast": 7.14
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer dark (390, 420)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-390x420.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": true
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer light (390, 420)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-390x420.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": true
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer dark (390, 844)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-390x844.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": false
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer light (390, 844)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-390x844.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": false
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer dark (1440, 900)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-dark-1440x900.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": false
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Proposal loading/duplicate guard/footer light (1440, 900)",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\proposal-loading-light-1440x900.png",
+          "mutations": "one mocked create; no live calls",
+          "reducedMotion": false
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Text-only GSO location feedback dark",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\location-feedback-dark-390x844.png"
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "Text-only GSO location feedback light",
+        "result": "PASS",
+        "notes": {
+          "screenshot": "docs\\verification\\pre-merge-readiness\\evidence\\location-feedback-light-390x844.png"
+        },
+        "group": "notifications/proposal/feedback"
+      },
+      {
+        "name": "2D/3D snap/camera/mock save/read-only dark (1440, 900)",
+        "result": "PASS",
+        "screenshots": [
+          "editor-2d-dark-1440.png",
+          "editor-camera-before-dark-1440.png",
+          "editor-camera-after-dark-1440.png",
+          "editor-3d-dark-1440.png"
+        ],
+        "camera": {
+          "before": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "after": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "canvasBytesIdentical": false
+        },
+        "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged.",
+        "group": "editor"
+      },
+      {
+        "name": "2D/3D snap/camera/mock save/read-only light (1440, 900)",
+        "result": "PASS",
+        "screenshots": [
+          "editor-2d-light-1440.png",
+          "editor-camera-before-light-1440.png",
+          "editor-camera-after-light-1440.png",
+          "editor-3d-light-1440.png"
+        ],
+        "camera": {
+          "before": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "after": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "canvasBytesIdentical": false
+        },
+        "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged.",
+        "group": "editor"
+      },
+      {
+        "name": "2D/3D snap/camera/mock save/read-only dark (390, 844)",
+        "result": "PASS",
+        "screenshots": [
+          "editor-2d-dark-390.png",
+          "editor-camera-before-dark-390.png",
+          "editor-camera-after-dark-390.png",
+          "editor-3d-dark-390.png"
+        ],
+        "camera": {
+          "before": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "after": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "canvasBytesIdentical": false
+        },
+        "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged.",
+        "group": "editor"
+      },
+      {
+        "name": "2D/3D snap/camera/mock save/read-only light (390, 844)",
+        "result": "PASS",
+        "screenshots": [
+          "editor-2d-light-390.png",
+          "editor-camera-before-light-390.png",
+          "editor-camera-after-light-390.png",
+          "editor-3d-light-390.png"
+        ],
+        "camera": {
+          "before": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "after": {
+            "position": [
+              17.76609474085425,
+              27.24083077509466,
+              19.679366482177016
+            ],
+            "target": [
+              0,
+              1.275,
+              0
+            ],
+            "zoom": 1,
+            "far": 185.54891237364433,
+            "minDistance": 0.8,
+            "maxDistance": 69.58084214011663
+          },
+          "canvasBytesIdentical": false
+        },
+        "notes": "14 assets plus 1 label; shared snap toggle; zoom reduces actual camera distance; position/target/zoom retained within 1e-6 after 2D/3D roundtrip and canvas dimensions unchanged; callback-only save; read-only admin preview. Camera session observed read-only via fixture Vite transform; production source unchanged.",
+        "group": "editor"
+      }
+    ],
+    "passed": 114,
+    "failed": 0,
+    "errors": [],
+    "unexpectedRequests": [],
+    "liveRequestsForwarded": 0,
+    "liveEventMutations": 0
+  },
+  "liveReadOnly": {
+    "at": "2026-10-15T06:00:09.608Z",
+    "scope": "Configured demo account sign-in and allowlisted read-only organization/history RPCs; isolated session sign-out. No event/data mutations.",
+    "eventMutations": 0,
+    "credentialsOrTokensWritten": false,
+    "checks": [
+      {
+        "role": "representative",
+        "name": "authentication",
+        "result": "PASS",
+        "status": 200
+      },
+      {
+        "role": "representative",
+        "name": "authorized-organizations",
+        "result": "PASS",
+        "status": 200,
+        "assignmentCount": 1
+      },
+      {
+        "role": "representative",
+        "name": "current-work",
+        "result": "PASS",
+        "status": 200,
+        "count": 5,
+        "total": 5
+      },
+      {
+        "role": "representative",
+        "name": "event-history",
+        "result": "PASS",
+        "status": 200,
+        "count": 5,
+        "total": 5
+      },
+      {
+        "role": "representative",
+        "name": "history-year-filter",
+        "result": "PASS",
+        "status": 200,
+        "count": 5,
+        "total": 5
+      },
+      {
+        "role": "representative",
+        "name": "history-empty-search",
+        "result": "PASS",
+        "status": 200,
+        "count": 0,
+        "total": 0
+      },
+      {
+        "role": "representative",
+        "name": "isolated-session-cleanup",
+        "result": "PASS",
+        "status": 204
+      },
+      {
+        "role": "ordinary-student",
+        "name": "authentication",
+        "result": "PASS",
+        "status": 200
+      },
+      {
+        "role": "ordinary-student",
+        "name": "authorized-organizations",
+        "result": "PASS",
+        "status": 200,
+        "assignmentCount": 0
+      },
+      {
+        "role": "ordinary-student",
+        "name": "no-representative-assignment",
+        "result": "PASS"
+      },
+      {
+        "role": "ordinary-student",
+        "name": "isolated-session-cleanup",
+        "result": "PASS",
+        "status": 204
+      }
+    ]
+  },
+  "mainRuntime": {
+    "url": "http://localhost:5173/admin",
+    "browserAuthenticationAttempted": false,
+    "externalRequestsForwarded": 0,
+    "userOwnedServerStopped": false,
+    "auditStartedServerOnPreviouslyFreePort": true,
+    "loginVisible": true,
+    "emailVisible": true,
+    "passwordVisible": true,
+    "demoAutofillAvailable": true,
+    "supabaseClientConfigured": true,
+    "servedTabsPresent": true,
+    "originalCheckoutPathPresent": true,
+    "servedMatchesCurrentSource": true,
+    "runtimeErrors": []
+  },
+  "review": "review.md",
+  "limitations": [
+    {
+      "name": "Repository-wide TypeScript",
+      "status": "EXISTING",
+      "detail": "Both cleanHEAD/current1047diagnostics/528normalized signatures; no new or increased diagnostics. Overall tsc exits1."
+    },
+    {
+      "name": "Live event mutation journey",
+      "status": "NOT_RUN_BY_DESIGN",
+      "detail": "Creation, save, withdrawal, reuse and publication mutations tested with fixtures/services; no live event state modified."
+    },
+    {
+      "name": "Physical browsers and GPUs",
+      "status": "MANUAL",
+      "detail": "Chromium responsive/headless software WebGL tested; physical iOS/Android, Safari and hardware-specific behavior not certified."
+    },
+    {
+      "name": "GitHub direct-write restrictions",
+      "status": "NOT_EXERCISED",
+      "detail": "No GitHub write attempted. Re-fetch and check repository policy/permissions when user gives go signal."
+    }
+  ],
+  "resourceIncident": "Combined rerun exhausted Windows8GB resources; discarded. Final event suites ran in sequential capped-heap batches; final WebGL ran separately."
+}

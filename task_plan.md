@@ -1,5 +1,44 @@
 # Student Organization Event Mapping & UI/UX Plan
 
+## October 13 — Approved consistent desktop/mobile editor tools
+
+Active task: implement all approved UX suggestions. User clarified that realistic relative sizing is sufficient; do not claim measured meters or require calibration input. Branch `codex/event-editor-consistent-tools`, base `f3bc9a3`. Plan: `docs/superpowers/plans/2026-10-13-event-editor-consistent-tools.md`.
+
+- [x] Reference sizing and shared 2D/3D policy, presets/reset/aspect lock and 2D resize.
+- [x] Actual placement hit-target cursors, pointer/mode feedback and explicit repeat placement.
+- [x] Compact 3D tools and shared desktop inspector/mobile sheet.
+- [x] Save/retry/newer-edit and issue-focus feedback.
+- [x] Focused/WebGL/build/type verification, read-only review and authorized main delivery.
+
+Completed:feature418a1ad is on local/GitHub main.340 focused tests,11 browser checks and build PASS; baseline type diagnostics unchanged. Manual testing go signal ready. Preserve existing layout coordinates and unrelated files. No live SQL or user event writes.
+
+## October 13 — Event editor usability and reported defects
+
+Current task: fix the reported 3D placement/persistence, 2D floor clipping, asset proportions and controls. Design/plan: `docs/superpowers/plans/2026-10-13-event-editor-usability.md`. Work in existing checkout on `codex/event-editor-usability-fixes`; preserve unrelated files. No live SQL or user-event mutation for verification.
+
+- [x] Inspect screenshots and current editor/page/map implementations; identify framing clamps and placement confirmation/ref boundaries.
+- [x] Reproduce and fix direct placement/persistence through the actual page coordinator, including unchanged grant refresh and immediate revocation.
+- [x] Restore full readonly floor rendering/framing without changing authored event coordinates; include exterior presentation bounds and owner metadata.
+- [x] Improve the asset catalog, controls, cursors, overlay containment and all 14 model proportions; adapt Booth Area preset spacing.
+- [x] Verify relevant unit/browser checks, review, build and deliver within authorized Git workflow. Feature `6a19c10` fast-forwarded and pushed to GitHub main; no conflicts, PR or force push. Backup and unrelated local files preserved.
+
+**Next step:** user refreshes the app and performs the combined manual check in `docs/verification/event-editor-usability/README.md`. Implementation and main integration are complete. Final focused253/public64, browser10/gesture13 and build3644 modules pass; TypeScript1047/1047 unchanged; read-only independent review passes. No new SQL or live database/event/base-map mutation.
+
+## October 12, 2026 — Direct event editing in 3D and main integration
+
+Current authorized task: finish direct event editing in 3D, then commit/push/merge into GitHub main so the user can test the complete flow once. Work in the existing checkout; preserve unrelated local files. The approved scope is place, select, move, rotate and resize event additions in 3D using the same 2D data, history and persistence; admin/public views stay read-only.
+
+- [x] Finish latest-main integration (`origin/main` 377763a); preserve teammate pathfinding, canteen furniture and route-focus changes. Merge `f242aa0`, 156 tests passed.
+- [x] Write the focused specification and implementation plan (`docs/superpowers/plans/2026-10-12-event-3d-editing.md`).
+- [x] Add failing geometry/editor tests, then implement transactional 3D interactions and accessible controls.
+- [x] Verify indoor/outdoor, persistence, history, lock/group boundaries, admin read-only and device fallback; review before merging. Final merged focused233, editing browser13 and preview10 checks pass; build passes. Whole repo has526 reported failures and2 worker memory crashes; representative10 failures reproduced on untouched upstream.
+- [x] Commit feature, fetch again, integrate any intervening main changes, and push a normal fast-forward update to main. Release72a488f confirmed on GitHub main; no PR or force push. Unrelated local files preserved.
+- [x] Prepare one manual test guide and identify the separately imported optional teammate SQL migration in `docs/verification/event-3d-editing/README.md`.
+
+**Next Step:** user performs the combined manual test in `docs/verification/event-3d-editing/README.md`. Implementation and Git integration are complete; no new feature SQL is needed. Broader repository test/type limitations remain documented.
+
+**Errors:** sandbox blocked Git fetch/index writes; elevated retries used. Latest-main merge conflicted in two renderer blocks; combined both features explicitly. No live database SQL was executed.
+
 ## October 9, 2026 — Organization Event Continuity implementation
 
 - Approved plan: `docs/superpowers/plans/2026-10-09-organization-event-continuity.md`.

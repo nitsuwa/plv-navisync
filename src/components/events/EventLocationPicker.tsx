@@ -1,10 +1,9 @@
 import * as React from "react";
-import { Building2, MapPin, Plus, X } from "lucide-react";
+import { Building2, MapPin, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { eventLocationKey } from "../../lib/eventOverlayModel";
 import { floorLookupId, type EventBuildingOption } from "../../lib/eventLocationData";
 import type { EventLocationRef } from "../map-builder/types";
-import { EventLocationSelect } from "./EventLocationSelect";
 
 interface EventLocationPickerProps {
   buildings: EventBuildingOption[];
@@ -20,76 +19,7 @@ export function EventLocationPicker({
   disabled = false,
 }: EventLocationPickerProps) {
   const [search, setSearch] = React.useState("");
-  const [buildingId, setBuildingId] = React.useState(buildings[0]?.buildingId ?? "");
-  const selectedBuilding = buildings.find((building) => building.buildingId === buildingId);
-  const [floorNumber, setFloorNumber] = React.useState<number | null>(selectedBuilding?.floors[0]?.number ?? null);
-  React.useEffect(() => {
-    const buildingStillExists = buildings.some((building) => building.buildingId === buildingId);
-    if (buildingId && !buildingStillExists) {
-      setBuildingId("");
-      setFloorNumber(null);
-      return;
-    }
-    if (selectedBuilding && floorNumber !== null && !selectedBuilding.floors.some((floor) => floor.number === floorNumber)) {
-      setFloorNumber(null);
-    }
-  }, [buildings, buildingId, floorNumber, selectedBuilding]);
   const hasCampus = locations.some((location) => location.type === "campus");
-  const selectedFloor = selectedBuilding?.floors.find((floor) => floor.number === floorNumber);
-  const buildingLocation = selectedBuilding && selectedFloor
-    ? {
-        type: "building" as const,
-        buildingId: selectedBuilding.buildingId,
-        floorId: floorLookupId(selectedBuilding.buildingId, selectedFloor.number),
-        label: `${selectedBuilding.buildingName} — ${selectedFloor.label}`,
-      }
-    : null;
-  const alreadyAdded = buildingLocation
-    ? locations.some((location) => eventLocationKey(location) === eventLocationKey(buildingLocation))
-    : false;
-  const buildingOptions = buildings.map((building) => ({
-    value: building.buildingId,
-    label: building.buildingName,
-  }));
-  const floorOptions = (selectedBuilding?.floors ?? []).map((floor) => {
-    const floorRef: EventLocationRef = {
-      type: "building",
-      buildingId: selectedBuilding!.buildingId,
-      floorId: floorLookupId(selectedBuilding!.buildingId, floor.number),
-      label: `${selectedBuilding!.buildingName} — ${floor.label}`,
-    };
-    const isRequested = locations.some((location) => eventLocationKey(location) === eventLocationKey(floorRef));
-    return {
-      value: String(floor.number),
-      label: floor.label,
-      disabled: isRequested,
-      description: isRequested ? "Already requested" : undefined,
-    };
-  });
-  const allSelectedBuildingFloorsRequested = Boolean(
-    selectedBuilding && selectedBuilding.floors.length > 0 && floorOptions.every((floor) => floor.disabled),
-  );
-
-  const addLocation = () => {
-    if (!buildingLocation || alreadyAdded) return;
-    onChange([...locations, buildingLocation]);
-    if (!selectedBuilding || !selectedFloor) return;
-
-    const requestedKeys = new Set(locations.map(eventLocationKey));
-    requestedKeys.add(eventLocationKey(buildingLocation));
-    const currentFloorIndex = selectedBuilding.floors.findIndex((floor) => floor.number === selectedFloor.number);
-    const orderedFloors = [
-      ...selectedBuilding.floors.slice(currentFloorIndex + 1),
-      ...selectedBuilding.floors.slice(0, currentFloorIndex),
-    ];
-    const nextAvailableFloor = orderedFloors.find((floor) => !requestedKeys.has(eventLocationKey({
-      type: "building",
-      buildingId: selectedBuilding.buildingId,
-      floorId: floorLookupId(selectedBuilding.buildingId, floor.number),
-      label: "",
-    })));
-    setFloorNumber(nextAvailableFloor?.number ?? null);
-  };
 
   const removeLocation = (location: EventLocationRef) => {
     onChange(locations.filter((current) => eventLocationKey(current) !== eventLocationKey(location)));
@@ -148,82 +78,14 @@ export function EventLocationPicker({
 
       <div className="space-y-3">
         <label className="block text-xs font-bold">Search buildings<input aria-label="Search buildings" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a building…" className="mt-2 h-10 w-full rounded-xl border border-border bg-input-background px-3 text-sm" /></label>
+        {buildings.length === 0 && <p role="status" className="rounded-xl border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">No published building floors are available for event requests.</p>}
         {buildings.filter((building) => building.buildingName.toLowerCase().includes(search.toLowerCase())).map((building) => <fieldset key={building.buildingId} aria-label={`Available floors in ${building.buildingName}`} className="rounded-xl border border-border p-3"><legend className="px-1 text-sm font-bold">{building.buildingName}</legend><div className="grid gap-2 sm:grid-cols-2">{building.floors.map((floor) => {
           const ref: EventLocationRef = { type: "building", buildingId: building.buildingId, floorId: floorLookupId(building.buildingId, floor.number), label: `${building.buildingName} — ${floor.label}` };
           const checked = locations.some((location) => eventLocationKey(location) === eventLocationKey(ref));
-          return <label key={floor.number} className={cn("flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm", checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}><input type="checkbox" aria-label={ref.label} checked={checked} disabled={disabled} onChange={() => checked ? removeLocation(ref) : onChange([...locations, ref])} className="accent-primary" />{floor.label}</label>;
+          return <label key={floor.number} className={cn("flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors", disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer", checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}><input type="checkbox" aria-label={ref.label} checked={checked} disabled={disabled} onChange={() => checked ? removeLocation(ref) : onChange([...locations, ref])} className="accent-primary" />{floor.label}</label>;
         })}</div></fieldset>)}
         {buildings.length > 0 && !buildings.some((building) => building.buildingName.toLowerCase().includes(search.toLowerCase())) && <p className="text-xs text-muted-foreground">No matching buildings.</p>}
       </div>
-      <details className="rounded-xl border border-border p-3 space-y-3"><summary className="cursor-pointer text-xs font-semibold text-muted-foreground">Choose one floor using dropdowns</summary>
-        <div className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <Building2 className="h-4 w-4 text-primary" />
-          Add a building floor
-        </div>
-        {buildings.length === 0 ? (
-          <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
-            No published building floors are available for event requests.
-          </p>
-        ) : (
-          <>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <label className="space-y-1">
-                <span className="text-[11px] font-semibold text-muted-foreground">Building</span>
-                <EventLocationSelect
-                  label="Building"
-                  value={buildingId}
-                  options={buildingOptions}
-                  searchable
-                  disabled={disabled}
-                  onChange={(nextId) => {
-                    const nextBuilding = buildings.find((building) => building.buildingId === nextId);
-                    setBuildingId(nextId);
-                    const firstNotRequested = nextBuilding?.floors.find((floor) => {
-                      const key = eventLocationKey({
-                        type: "building",
-                        buildingId: nextId,
-                        floorId: floorLookupId(nextId, floor.number),
-                        label: `${nextBuilding?.buildingName ?? ""} — ${floor.label}`,
-                      });
-                      return !locations.some((location) => eventLocationKey(location) === key);
-                    });
-                    setFloorNumber(firstNotRequested?.number ?? nextBuilding?.floors[0]?.number ?? null);
-                  }}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-[11px] font-semibold text-muted-foreground">Floor</span>
-                <EventLocationSelect
-                  label="Floor"
-                  value={floorNumber === null ? "" : String(floorNumber)}
-                  options={floorOptions}
-                  searchable={(selectedBuilding?.floors.length ?? 0) > 8}
-                  disabled={disabled || !selectedBuilding}
-                  onChange={(nextFloor) => setFloorNumber(nextFloor ? Number(nextFloor) : null)}
-                />
-              </label>
-            </div>
-            <button
-              type="button"
-              onClick={addLocation}
-              disabled={disabled || !buildingLocation || alreadyAdded}
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add building location
-            </button>
-            {alreadyAdded && (
-              <p className="text-[11px] text-muted-foreground">This floor is already requested.</p>
-            )}
-            {allSelectedBuildingFloorsRequested && (
-              <p role="status" className="text-[11px] text-muted-foreground">
-                All published floors for {selectedBuilding?.buildingName} are already requested.
-              </p>
-            )}
-          </>
-        )}
-      </details>
-
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-xs font-bold text-foreground">Selected ({locations.length})</p>

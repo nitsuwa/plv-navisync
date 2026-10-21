@@ -1,0 +1,82 @@
+{
+  "success": false,
+  "totalTests": 77,
+  "passed": 67,
+  "failed": 10,
+  "pending": 0,
+  "durationSeconds": 51,
+  "files": [
+    {
+      "file": "src/hooks/__tests__/useAdminEventSubmissions.test.tsx",
+      "status": "failed",
+      "passed": 5,
+      "failed": 1,
+      "failures": [
+        {
+          "name": "shared admin pending submissions detects new submissions on its timer and retains loaded work on network failure",
+          "message": "AssertionError: expected 1 to be 2 // Object.is equality\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/hooks/__tests__/useAdminEventSubmissions.test.tsx:85:46\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        }
+      ]
+    },
+    {
+      "file": "src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx",
+      "status": "failed",
+      "passed": 10,
+      "failed": 2,
+      "failures": [
+        {
+          "name": "shared Student Org review updates polls visible sessions without resetting an acknowledged update",
+          "message": "AssertionError: expected \"vi.fn()\" to be called 2 times, but got 1 times\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx:104:53\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        },
+        {
+          "name": "shared Student Org review updates refreshes changed feedback on focus and does not acknowledge a newer version with an old card",
+          "message": "AssertionError: expected +0 to be 1 // Object.is equality\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div />\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx:123:65\n    at runWithExpensiveErrorDiagnosticsDisabled (C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\node_modules\\.pnpm\\@testing-library+dom@10.4.1\\node_modules\\@testing-library\\dom\\dist\\config.js:47:12)\n    at checkCallback (C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\node_modules\\.pnpm\\@testing-library+dom@10.4.1\\node_modules\\@testing-library\\dom\\dist\\wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\node_modules\\.pnpm\\@testing-"
+        }
+      ]
+    },
+    {
+      "file": "src/pages/__tests__/StudentMyEventsAccess.test.tsx",
+      "status": "failed",
+      "passed": 12,
+      "failed": 4,
+      "failures": [
+        {
+          "name": "StudentMyEventsPage access does not force an old editor navigation after the user leaves during acknowledgement",
+          "message": "Error: Unable to find role=\"link\" and name \"View maps\"\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"min-h-screen bg-background\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-start justify-between gap-4\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div>\u001b[39m\n            \u001b[36m<a\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground mb-2\"\u001b[39m\n              \u001b[33mdata-discover\u001b[39m=\u001b[32m\"true\"\u001b[39m\n              \u001b[33mhref\u001b[39m=\u001b[32m\"/home\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m"
+        },
+        {
+          "name": "StudentMyEventsPage access acknowledges only the layout whose maps are opened",
+          "message": "Error: Unable to find an element by: [data-testid=\"org-event-card-view-0\"]\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"min-h-screen bg-background\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-start justify-between gap-4\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div>\u001b[39m\n            \u001b[36m<a\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground mb-2\"\u001b[39m\n              \u001b[33mdata-discover\u001b[39m=\u001b[32m\"true\"\u001b[39m\n              \u001b[33mhref\u001b[39m=\u001b[32m\"/home\"\u001b[39m\n            \u001b[36m>\u001b[39m"
+        },
+        {
+          "name": "StudentMyEventsPage access marks only the chosen reviewed layout read and keeps the other layout unread",
+          "message": "Error: Unable to find an element by: [data-testid=\"org-event-card-review-0\"]\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"min-h-screen bg-background\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-start justify-between gap-4\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div>\u001b[39m\n            \u001b[36m<a\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground mb-2\"\u001b[39m\n              \u001b[33mdata-discover\u001b[39m=\u001b[32m\"true\"\u001b[39m\n              \u001b[33mhref\u001b[39m=\u001b[32m\"/home\"\u001b[39m\n            \u001b[36m>\u001b[3"
+        },
+        {
+          "name": "StudentMyEventsPage access explains the next step for a approved proposal",
+          "message": "Error: Unable to find an element with the text: GSO approved this proposal. The administrator controls its schedule and student publication.. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"min-h-screen bg-background\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"max-w-3xl mx-auto px-5 pt-8 pb-24 space-y-6\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-start justify-between gap-4\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div>\u001b[39m\n            \u001b[36m<a\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b["
+        }
+      ]
+    },
+    {
+      "file": "src/lib/__tests__/exteriorApproachNavigation.test.ts",
+      "status": "failed",
+      "passed": 40,
+      "failed": 3,
+      "failures": [
+        {
+          "name": "exterior approach navigation reuses shared access handoff topology and saves two directional Entrances idempotently",
+          "message": "Error: Floor \"Ground Floor\" (floor-1) Door refers to missing Wall \"wall-1\" (Door \"door-1\").\n    at assertFloorPhysicalReferences (C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/floorPlanNormalization.ts:411:13)\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/services/campusStructureService.ts:842:48\n    at Array.forEach (<anonymous>)\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/services/campusStructureService.ts:842:29\n    at Array.forEach (<anonymous>)\n    at serializeCampusStructure (C:/Users/Rj/Documents/GitHub/plv-navisync/src/services/campusStructureService.ts:839:37)\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/exteriorApproachNavigation.test.ts:559:21\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1."
+        },
+        {
+          "name": "exterior approach navigation does not expose a Door or Ramp/Steps transition duplicate in the active context",
+          "message": "AssertionError: expected [] to deeply equal [ ObjectContaining {\"kind\": \"ramp\"} ]\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/exteriorApproachNavigation.test.ts:898:31\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@"
+        },
+        {
+          "name": "exterior approach navigation uses a complete linked Veranda in Emergency's final General fallback tier",
+          "message": "AssertionError: expected [ …(3) ] to include '456a887a-09bc-5f8c-aa40-6637b0401958'\n    at Proxy.<anonymous> (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1319:15)\n    at Proxy.<anonymous> (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n    at C:/Users/Rj/Documents/GitHub/plv-navisync/src/lib/__tests__/exteriorApproachNavigation.test.ts:1019:36\n    at file:///C:/Users/Rj/Documents/GitHub/plv-navisync/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/"
+        }
+      ]
+    }
+  ]
+}

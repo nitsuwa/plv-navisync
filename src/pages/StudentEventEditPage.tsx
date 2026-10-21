@@ -63,6 +63,8 @@ export function StudentEventEditPage() {
 }
 
 function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId:string;organizations:EventOrganizationContext[];historyRoute:boolean}) {
+  const organizationsRef = useRef(organizations);
+  organizationsRef.current = organizations;
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -109,7 +111,7 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
           return;
         }
         if (data.organizationId) {
-          const organization = organizations.find((entry) => entry.organizationId === data.organizationId);
+          const organization = organizationsRef.current.find((entry) => entry.organizationId === data.organizationId);
           if (!organization || serverAccess.organizationId !== organization.organizationId || !serverAccess.grantId || serverAccess.grantId !== organization.grantId) {
             setError("Your organization assignment changed or expired. Return to Organization Events and refresh access before opening this map.");
             return;
@@ -135,7 +137,9 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
       })
       .catch((err) => {if(activeSession.current)setError(err instanceof Error ? err.message : "Failed to load event.");})
       .finally(() => {if(activeSession.current)setLoading(false);});
-  }, [id,ownerId,organizations,historyRoute]);
+  // The parent key remounts this session when a grant changes. A polling refresh
+  // of the same grant must not replace unsaved locations with server data.
+  }, [id,ownerId,historyRoute]);
 
   useEffect(() => {
     if (!overlay?.organizationId) return;

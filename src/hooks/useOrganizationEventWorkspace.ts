@@ -20,6 +20,7 @@ export function useOrganizationEventWorkspace(actorId: string | undefined, organ
   const organizationId = organization?.organizationId;
   const [state, setState] = useState<WorkspaceState>(() => stateFor(key, Boolean(key)));
   const generation = useRef(0);
+  const lastActivationRefreshAt = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!key || !organizationId) {
@@ -46,16 +47,26 @@ export function useOrganizationEventWorkspace(actorId: string | undefined, organ
 
   useEffect(() => {
     if (!key) return;
-    const revalidate = () => { if (document.visibilityState !== "hidden") void refresh(); };
+    const revalidate = () => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    };
+    const revalidateOnActivation = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (lastActivationRefreshAt.current !== null && now - lastActivationRefreshAt.current < 250) return;
+      lastActivationRefreshAt.current = now;
+      void refresh();
+    };
     const timer = window.setInterval(revalidate, 15_000);
-    window.addEventListener("focus", revalidate);
+    window.addEventListener("focus", revalidateOnActivation);
     window.addEventListener("online", revalidate);
-    document.addEventListener("visibilitychange", revalidate);
+    document.addEventListener("visibilitychange", revalidateOnActivation);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", revalidate);
+      window.removeEventListener("focus", revalidateOnActivation);
       window.removeEventListener("online", revalidate);
-      document.removeEventListener("visibilitychange", revalidate);
+      document.removeEventListener("visibilitychange", revalidateOnActivation);
     };
   }, [key, refresh]);
 

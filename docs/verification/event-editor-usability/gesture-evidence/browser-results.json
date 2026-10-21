@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "mode": "real local WebGL renderers, isolated fixtures; no live database writes",
+  "checks": [
+    "Indoor actual pointer drag changes the event item and restores Save after one commit",
+    "One Undo removes the whole drag and Redo restores it in 3D",
+    "Escape cancels the live pointer preview without changing committed coordinates",
+    "Visible rotation handle updates the plotted rotation through the actual scene",
+    "Visible resize handle updates the footprint and retains valid dimensions",
+    "3D edits remain in 2D and save with the same position, footprint and rotation",
+    "Outdoor authored coordinates support actual dragging and explicit asset placement",
+    "Label text and font-size edits appear immediately in the actual 3D scene",
+    "Actual Chromium two-touch input cancels item editing without a replacement drag",
+    "Actual 3D group drag preserves member offsets in the saved layout",
+    "A locked group member prevents the whole group move in the actual scene",
+    "Editable 3D controls and map fit a 390px mobile viewport",
+    "Admin stays read-only and feedback placement still requires 2D"
+  ],
+  "pageErrors": [],
+  "externalRequests": [
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap"
+  ]
+}

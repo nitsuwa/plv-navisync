@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type ComponentPropsWithoutRef, type RefObject } from "react";
 import { Bell, CalendarDays, CheckCheck, Flag, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { createPortal } from "react-dom";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 import type { CampusEventOverlay } from "../map-builder/types";
 import { normalizeReportStatus, type IssueReport, type ReportStatus } from "../../services/reportService";
 import { reportService } from "../../services/reportService";
@@ -70,7 +71,7 @@ const REPORT_STATUS_PRESENTATION: Record<ReportStatus, { label: string; classNam
   under_review: { label: "Under Review", className: "bg-blue-500/10 text-blue-700 dark:text-blue-300" },
   in_progress: { label: "In Progress", className: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" },
   resolved: { label: "Resolved", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
-  rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
+  rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive dark:text-red-300" },
 };
 const REPORT_STATUS_FILTER_OPTIONS: Array<{ value: ReportStatus | "all"; label: string }> = [
   { value: "all", label: "All notifications" },
@@ -79,6 +80,11 @@ const REPORT_STATUS_FILTER_OPTIONS: Array<{ value: ReportStatus | "all"; label: 
     label: status.label,
   })),
 ];
+
+// The shared Radix wrappers forward these DOM props at runtime; their installed declarations omit them.
+const NotificationSelectTrigger = SelectTrigger as unknown as ComponentType<ComponentPropsWithoutRef<"button"> & { size?: "sm" | "default" | "lg" }>;
+const NotificationSelectContent = SelectContent as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { position?: "item-aligned" | "popper"; sideOffset?: number }>;
+const NotificationSelectItem = SelectItem as unknown as ComponentType<ComponentPropsWithoutRef<"div"> & { value: string; disabled?: boolean; textValue?: string }>;
 
 function readStorageKey(ownerId: string) {
   return `${READ_IDS_PREFIX}${encodeURIComponent(ownerId)}`;
@@ -231,6 +237,7 @@ function StudentNotificationFeed({
   reportsSnapshot, reportsSnapshotLoading = false, reportsSnapshotError = false, onRetryReports,
 }: StudentNotificationFeedProps) {
   const isSection = presentation === "section";
+  const filterLabelId = useId();
   const [open, setOpen] = useState(false);
   const notificationPanelRef = useRef<HTMLElement | null>(null);
   const [reports, setReports] = useState<IssueReport[]>([]);
@@ -473,7 +480,7 @@ function StudentNotificationFeed({
                 onClick={markAllRead}
                 disabled={unreadCount === 0}
                 className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold text-primary transition-colors disabled:cursor-default disabled:opacity-45",
+                  "inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold text-primary transition-colors disabled:cursor-default disabled:opacity-45 dark:text-blue-300",
                   isSection
                     ? "min-h-9 rounded-xl border border-border/60 bg-card/60 px-3 hover:border-primary/25 hover:bg-primary/5"
                     : "rounded-lg px-2 py-1.5 hover:bg-primary/8",
@@ -484,21 +491,27 @@ function StudentNotificationFeed({
             </header>
 
             {isSection && (
-              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-card/40 px-3 py-2">
-                <label htmlFor="student-notification-status-filter" className="shrink-0 text-xs font-semibold text-muted-foreground">
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card px-3 py-2">
+                <span id={filterLabelId} className="shrink-0 text-xs font-semibold text-foreground">
                   Report status
-                </label>
-                <select
-                  id="student-notification-status-filter"
-                  aria-label="Filter notifications by report status"
-                  value={reportStatusFilter}
-                  onChange={(event) => setReportStatusFilter(event.target.value as ReportStatus | "all")}
-                  className="h-9 min-w-0 max-w-[70%] rounded-lg border border-border/60 bg-background px-3 text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {REPORT_STATUS_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                </span>
+                <Select value={reportStatusFilter} onValueChange={(value) => setReportStatusFilter(value as ReportStatus | "all")}>
+                  <NotificationSelectTrigger
+                    size="default"
+                    aria-label="Filter notifications by report status"
+                    aria-labelledby={filterLabelId}
+                    className="!h-11 min-w-0 w-[min(15rem,70%)] rounded-xl border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15 [&_svg]:opacity-100"
+                  >
+                    <SelectValue />
+                  </NotificationSelectTrigger>
+                  <NotificationSelectContent position="popper" sideOffset={6} className="z-[80] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-reduce:animate-none">
+                    {REPORT_STATUS_FILTER_OPTIONS.map((option) => (
+                      <NotificationSelectItem key={option.value} value={option.value} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-foreground">
+                        {option.label}
+                      </NotificationSelectItem>
+                    ))}
+                  </NotificationSelectContent>
+                </Select>
               </div>
             )}
 
@@ -526,21 +539,21 @@ function StudentNotificationFeed({
                           className={cn(
                             "flex items-start gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                             isSection
-                              ? "rounded-2xl border border-border/60 bg-card/50 px-4 py-4 hover:border-primary/15 hover:bg-card hover:shadow-sm"
+                              ? "rounded-2xl border border-border/70 bg-card px-3.5 py-3 sm:px-4 sm:py-3.5 hover:border-primary/35 hover:bg-primary/[0.03] hover:shadow-sm"
                               : "px-4 py-3 hover:bg-muted/60",
-                            item.unread && (isSection ? "border-primary/25 bg-primary/[0.04]" : "bg-primary/[0.035]"),
+                            item.unread && (isSection ? "border-primary/55 bg-primary/[0.02] dark:border-blue-300/55" : "bg-primary/[0.02]"),
                           )}
                         >
                           <span className={cn(
                             "mt-0.5 flex shrink-0 items-center justify-center rounded-xl",
                             isSection ? "h-10 w-10" : "h-8 w-8",
-                            item.kind === "report" ? "bg-primary/10 text-primary" : "bg-accent/15 text-accent-foreground",
-                          )}>
+                            item.kind === "report" ? "bg-primary/10 text-primary" : "bg-accent/15 text-foreground",
+                          )} data-notification-icon>
                             <Icon className={cn("h-4 w-4", isSection && "h-[18px] w-[18px]")} aria-hidden="true" />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="flex min-w-0 items-start gap-2">
-                              <span className={cn("min-w-0 flex-1 line-clamp-1 font-bold text-foreground", isSection ? "text-sm" : "text-xs")}>{item.title}</span>
+                              <span className={cn("min-w-0 flex-1 line-clamp-1 text-foreground", item.unread ? "font-extrabold" : "font-semibold", isSection ? "text-sm" : "text-xs")}>{item.title}</span>
                               <span className="flex shrink-0 items-center gap-2">
                                 {item.reportStatus && <span aria-label={`Report status: ${REPORT_STATUS_PRESENTATION[item.reportStatus].label}`} className={cn(
                                   "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold",
@@ -548,13 +561,16 @@ function StudentNotificationFeed({
                                 )}>{REPORT_STATUS_PRESENTATION[item.reportStatus].label}</span>}
                                 {item.phase && <span className={cn(
                                   "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide",
-                                  item.phase === "ongoing" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-primary/10 text-primary",
+                                  item.phase === "ongoing" ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : "bg-primary/10 text-primary dark:text-blue-300",
                                 )}>{item.phase}</span>}
-                                {item.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                                {item.unread && <>
+                                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary ring-2 ring-primary/20" aria-hidden="true" />
+                                  <span className="sr-only">Unread notification</span>
+                                </>}
                               </span>
                             </span>
-                            <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{item.message}</span>
-                            <time className="mt-1.5 block text-[10px] font-medium text-muted-foreground/80" dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
+                            <span className="mt-1 block text-xs leading-relaxed text-foreground/75">{item.message}</span>
+                            <time className={cn("mt-1.5 block font-medium text-foreground/75", isSection ? "text-[11px]" : "text-[10px]")} dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
                           </span>
                         </Link>
                       </li>

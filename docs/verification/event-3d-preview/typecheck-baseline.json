@@ -1,0 +1,28 @@
+{
+  "baseCommit": "b220473",
+  "currentDiagnosticCount": 2365,
+  "baselineDiagnosticCount": 2361,
+  "introducedProductionDiagnostics": [],
+  "introducedTestDiagnostics": [
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "code": "TS2305",
+      "message": "Module '\"@testing-library/react\"' has no exported member 'fireEvent'."
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "code": "TS2305",
+      "message": "Module '\"@testing-library/react\"' has no exported member 'screen'."
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "code": "TS2305",
+      "message": "Module '\"@testing-library/react\"' has no exported member 'waitFor'."
+    },
+    {
+      "file": "src/components/events/__tests__/EventFloorEditor.3d.test.tsx",
+      "code": "TS2305",
+      "message": "Module '\"@testing-library/react\"' has no exported member 'within'."
+    }
+  ]
+}

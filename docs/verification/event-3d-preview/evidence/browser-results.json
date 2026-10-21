@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "mode": "isolated local fixtures; no live database writes",
+  "checks": [
+    "Indoor 3D renders all 14 event assets and the event label",
+    "Zoom and fit/focus camera controls work",
+    "Switching back preserves the 2D viewport",
+    "Outdoor campus renders the same event additions",
+    "Admin review is read-only and feedback placement forces 2D",
+    "Compact admin preview and camera controls fit a 390px viewport",
+    "Graphics context loss offers 2D with all plotted items preserved",
+    "Single tall indoor tent focus keeps its roof in frame",
+    "Outdoor focus reaches an event far from base campus buildings",
+    "Unsupported graphics device preserves the layout and returns to 2D"
+  ],
+  "pageErrors": [],
+  "externalRequests": [
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap",
+    "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap"
+  ],
+  "initialButtons": [
+    "Indoor fixture",
+    "Outdoor fixture",
+    "Toggle admin review",
+    "Toggle feedback placement",
+    "Toggle theme",
+    "",
+    "",
+    "",
+    "",
+    "Save Draft",
+    "Review & submit",
+    "2D layout",
+    "3D layout",
+    "Select",
+    "🪑Furniture",
+    "Label",
+    "Pan",
+    " Objects (15)",
+    "View checks",
+    "Snap",
+    "",
+    "",
+    "",
+    "Focus"
+  ]
+}

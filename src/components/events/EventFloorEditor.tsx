@@ -56,7 +56,7 @@ import { clampViewportPan, getPanToKeepWorldPoint, getViewportFitZoom, getViewpo
 import { fitEventViewport, getContentPanBounds, getFloorPlanContentBounds, getSmoothZoomTarget, normalizeWheelDelta } from "../../lib/eventViewport";
 import { clearEventLayoutDraft, eventLayoutDraftStorageKey, readEventLayoutDraft, writeEventLayoutDraft } from "../../lib/eventDraftPersistence";
 import { ReadonlyOutdoorCampusScene } from "../map-builder/ReadonlyOutdoorVisuals";
-import { ReadonlyFloorPlanScene } from "../map-builder/ReadonlyFloorPlanVisuals";
+import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../map-builder/ReadonlyFloorPlanVisuals";
 import type { EventOverlayStatus } from "../../services/eventOverlayService";
 import { isCanvasTextEditingTarget, useSpacePan } from "../canvas/useSpacePan";
 import { EVENT_ASSET_DRAG_TYPE } from "../canvas/CanvasAssetPalette";
@@ -69,7 +69,7 @@ import {
 } from "./eventAssets";
 import { resolveCanvasAssetKey } from "../canvas/canvasAssetCatalog";
 import { applyLayoutAction, itemsIntersectingRect, nudgeItems, resolveLayoutMoveFromSnapshot, selectionBounds, snapLayoutPosition, type LayoutAction, type LayoutRect, type LayoutSnapGuide } from "../../lib/eventLayoutGeometry";
-import { constrainFurnitureToFloor, resizeFurnitureWithinFloor } from "../../lib/floorGeometry";
+
 import { transformControlMetrics } from "../../lib/campusSelection";
 import { EVENT_LAYOUT_PRESETS, buildEventPreset, fitEventPresetToCanvas, validateEventPresetDraft, type EventLayoutPresetId, type EventPresetDraft } from "../../lib/eventLayoutPresets";
 import { validateEventLayout, eventProtectedAccessRegions } from "../../lib/eventLayoutValidation";
@@ -78,7 +78,15 @@ import { useEventViewportMotion } from "./useEventViewportMotion";
 import { EventLayoutIssues } from "./EventLayoutIssues";
 import { EventEditorTutorial } from "./EventEditorTutorial";
 import { EventItemInspector } from "./EventItemInspector";
+import { EventLayout3DPreview } from "./EventLayout3DPreview";
+import { Event3DEditorControls } from "./Event3DEditorControls";
+import { event3DSelectionIds, mergeEvent3DChanges, type Event3DEditing, type Event3DEditTool, type Event3DLayout } from "../../lib/event3dEditing";
 import { EventSelectionOverlay } from "./EventSelectionOverlay";
+import { constrainEventAsset, eventAssetAllowsResize, eventAssetReferenceFactor, resetEventAssetSize, resizeEventAsset, type EventSizeContext } from "../../lib/eventAssetSizing";
+import { stableEventJson } from "../../lib/stableEventJson";
+import { eventSnapPoint, eventSnapRotation, eventSnapDelta } from "../../lib/eventSnap";
+import { EventSaveStatus } from "./EventSaveStatus";
+import { event3DLayoutBounds, type Event3DCameraSession } from "../../lib/event3dLayout";
 import * as Dialog from "@radix-ui/react-dialog";
 import { clientToEventWorld, type GestureFrame } from "../../lib/eventGestureCoordinates";
 import { eventPlacementGuides } from "../../lib/eventPlacementGuides";
@@ -303,7 +311,7 @@ function buildEventAssetCandidate(input: {
       snapToGrid: input.grid > 0,
     })
     : { x: raw.x, y: raw.y, guides: [] };
-  const item = constrainFurnitureToFloor({ ...raw, x: snapped.x, y: snapped.y }, input.canvasWidth, input.canvasHeight);
+  const item = constrainEventAsset({ ...raw, x: snapped.x, y: snapped.y }, input.canvasWidth, input.canvasHeight);
   const assessment = assessEventPlacement({
     proposed: [item],
     existing: input.existing,
@@ -398,11 +406,31 @@ export function EventFloorEditor({
 }: EventFloorEditorProps) {
   // ── State ──────────────────────────────────────────────────────────────
   const [initialEventLayout] = useState(() => getInitialEventLayout(overlay, readOnly));
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const sizeContext: EventSizeContext = floorPlan.buildingId === "campus" ? "outdoor" : "indoor";
+  const [preserveAspect, setPreserveAspect] = useState(true);
+  const [saveFailure, setSaveFailure] = useState<string | null>(null);
+  const [saveRevision, setSaveRevision] = useState(0);
+  const savedLayoutSignature = useRef(stableEventJson({ furniture: overlay.eventFurniture || [], labels: overlay.eventLabels || [] }));
+  const previousSaveStatus = useRef(saveStatus);
+  useEffect(() => {
+    if (saveStatus === "Saved" && previousSaveStatus.current !== "Saved") {
+      setSaveFailure(null);
+    }
+    previousSaveStatus.current = saveStatus;
+  }, [saveStatus]);
+  const [threeTool, setThreeTool] = useState<Event3DEditTool>("move");
+  const [threeBusy, setThreeBusy] = useState(false);
+  const [threePoint, setThreePoint] = useState<{ x: number; y: number } | null>(null);
+  const [threeError, setThreeError] = useState<string | null>(null);
+  const [threeNotice, setThreeNotice] = useState<string | null>(null);
+  useEffect(() => { if (onFeedbackPoint) setViewMode("2d"); }, [onFeedbackPoint]);
   const [activeTool, setActiveTool] = useState<EventTool>("select");
   const tutorialPreviousToolRef = useRef<EventTool | null>(null);
   const [activeTemplate, setActiveTemplate] = useState(
-    EVENT_FURNITURE_TEMPLATES[0]
+    getEventFurnitureTemplate(EVENT_FURNITURE_TEMPLATES[0].type, sizeContext)
   );
+  useEffect(() => { setActiveTemplate(current => getEventFurnitureTemplate(current.type, sizeContext)); }, [sizeContext]);
   const [eventFurniture, setEventFurniture] = useState<FloorFurniture[]>(
     initialEventLayout.eventFurniture
   );
@@ -419,6 +447,8 @@ export function EventFloorEditor({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<EditorHistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyStateRef = useRef({ entries: [] as EditorHistoryEntry[], index: -1 });
+  const [threeFocusNonce, setThreeFocusNonce] = useState(0);
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [layoutActionError, setLayoutActionError] = useState<string | null>(null);
   const [moveHereArmedIds, setMoveHereArmedIds] = useState<string[] | null>(null);
@@ -436,9 +466,10 @@ export function EventFloorEditor({
   const [editingObject, setEditingObject] = useState<{ id: string; value: string; kind: "furniture" | "labels" } | null>(null);
   const [presetPreview, setPresetPreview] = useState<(EventPresetDraft & { point: { x: number; y: number } }) | null>(null);
   const [placementPoint, setPlacementPoint] = useState<{ x: number; y: number } | null>(null);
+  const [placementCursor, setPlacementCursor] = useState<{ x: number; y: number } | null>(null);
   const [touchPlacementReady, setTouchPlacementReady] = useState(false);
   const lastCanvasPointerTypeRef = useRef<"mouse" | "touch" | "pen" | null>(null);
-  const [repeatPlacement, setRepeatPlacement] = useState(true);
+  const [repeatPlacement, setRepeatPlacement] = useState(false);
   const [selectionArrangeOpen, setSelectionArrangeOpen] = useState(false);
   const [marquee, setMarquee] = useState<LayoutRect | null>(null);
   const [dragging, setDragging] = useState<{
@@ -633,10 +664,20 @@ export function EventFloorEditor({
   // ── Canvas dimensions ──────────────────────────────────────────────────
   const canvasW = floorPlan.canvasW || 800;
   const canvasH = floorPlan.canvasH || 600;
+  const cameraSessions = useRef<Record<string, Event3DCameraSession>>({});
   const viewportLocationKey = `${floorPlan.buildingId}:${floorPlan.id}:${canvasW}:${canvasH}`;
+  const cameraSession = cameraSessions.current[viewportLocationKey] ?? (cameraSessions.current[viewportLocationKey] = {});
   const eventContentBounds = useMemo(
-    () => getFloorPlanContentBounds(floorPlan, eventFurniture, eventLabels),
-    [eventFurniture, eventLabels, floorPlan],
+    () => {
+      const content = getFloorPlanContentBounds(floorPlan, eventFurniture, eventLabels);
+      if (floorPlan.buildingId === "campus") return content;
+      const building = activeCampus?.buildings?.find(building => building.id === floorPlan.buildingId);
+      const presentation = readonlyFloorPlanViewport(floorPlan, building?.exteriorEmergencyStairs);
+      const x = Math.min(content.x, -presentation.offsetX), y = Math.min(content.y, -presentation.offsetY);
+      return { x, y, width: Math.max(content.x + content.width, presentation.width - presentation.offsetX) - x,
+        height: Math.max(content.y + content.height, presentation.height - presentation.offsetY) - y };
+    },
+    [eventFurniture, eventLabels, floorPlan, activeCampus],
   );
   const selectedFurnitureIds = useMemo(
     () => eventFurniture.filter((item) => selectedIds.includes(item.id)).map((item) => item.id),
@@ -748,8 +789,12 @@ export function EventFloorEditor({
     if (!presetPreview || !presetValidation?.options) return [];
     let index = 0;
     const items = buildEventPreset(presetPreview.id, presetPreview.point, presetValidation.options, () => `preview-${++index}`);
-    return fitEventPresetToCanvas(items, canvasW, canvasH);
-  }, [canvasH, canvasW, presetPreview, presetValidation]);
+    const factor = sizeContext === "outdoor" ? 0.4 : 1;
+    const sized = items.map(item => ({ ...item, x: presetPreview.point.x + (item.x - presetPreview.point.x) * factor,
+      y: presetPreview.point.y + (item.y - presetPreview.point.y) * factor, width: item.width * factor, height: item.height * factor,
+      assetVariant: `event-${sizeContext}-reference-v1:standard` }));
+    return fitEventPresetToCanvas(sized, canvasW, canvasH);
+  }, [canvasH, canvasW, presetPreview, presetValidation, sizeContext]);
   const presetAssessment = useMemo(() => {
     if (!presetPreview || !presetValidation?.options || previewItems.length === 0) return null;
     return assessEventPlacement({
@@ -778,11 +823,12 @@ export function EventFloorEditor({
   const viewportBackground = floorPlan.id === "campus" && activeCampus
     ? campusGroundAppearance(activeCampus).color
     : floorPlan.backgroundColor || "var(--map-floor-corridor, #f3f4f6)";
-  const baseMapScene = useMemo(() => (
-    floorPlan.id === "campus" && activeCampus
-      ? <ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(activeCampus)} showBuildings />
-      : <ReadonlyFloorPlanScene floor={floorPlan} />
-  ), [activeCampus, floorPlan]);
+  const baseMapScene = useMemo(() => {
+    if (floorPlan.id === "campus" && activeCampus) return <ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus(activeCampus)} showBuildings />;
+    const building = activeCampus?.buildings?.find(building => building.id === floorPlan.buildingId);
+    return <ReadonlyFloorPlanScene floor={floorPlan} exteriorEmergencyStairs={building?.exteriorEmergencyStairs}
+      floorIndex={Math.max(0, building?.floors.findIndex(floor => floor.number === floorPlan.number) ?? 0)} floorCount={building?.floors.length || 1} />;
+  }, [activeCampus, floorPlan]);
 
   const getEventPanBounds = useCallback((zoomValue: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -849,7 +895,7 @@ export function EventFloorEditor({
       existing: eventFurniture,
       canvasWidth: canvasW,
       canvasHeight: canvasH,
-      grid: floorPlan.gridSize || 0,
+      grid: floorPlan.gridSize || 20,
       zoom,
       snapEnabled,
       blockedRegions: protectedRegions,
@@ -948,40 +994,42 @@ export function EventFloorEditor({
   const pushHistory = useCallback(
     (furniture: FloorFurniture[], labels: FloorLabel[]) => {
       const entry: EditorHistoryEntry = { eventFurniture: furniture, eventLabels: labels };
-      setHistory((prev) => {
-        const trimmed = prev.slice(0, historyIndex + 1);
-        return [...trimmed, entry];
-      });
-      setHistoryIndex((prev) => prev + 1);
+      const current = historyStateRef.current;
+      const entries = [...current.entries.slice(0, current.index + 1), entry];
+      historyStateRef.current = { entries, index: entries.length - 1 };
+      setHistory(entries);
+      setHistoryIndex(entries.length - 1);
     },
-    [historyIndex]
+    []
   );
 
   const undo = useCallback(() => {
     if (historyIndex <= 0) return;
     const prev = history[historyIndex - 1];
-    setEventFurniture(prev.eventFurniture);
-    setEventLabels(prev.eventLabels);
+    setFurniturePreview(prev.eventFurniture);
+    setLabelsPreview(prev.eventLabels);
+    historyStateRef.current.index = historyIndex - 1;
     setHistoryIndex((prev) => prev - 1);
     setSelectedId(null);
     setSelectedType(null);
     setSelectedIds([]);
-  }, [history, historyIndex]);
+  }, [history, historyIndex, setFurniturePreview, setLabelsPreview]);
 
   const redo = useCallback(() => {
     if (historyIndex >= history.length - 1) return;
     const next = history[historyIndex + 1];
-    setEventFurniture(next.eventFurniture);
-    setEventLabels(next.eventLabels);
+    setFurniturePreview(next.eventFurniture);
+    setLabelsPreview(next.eventLabels);
+    historyStateRef.current.index = historyIndex + 1;
     setHistoryIndex((prev) => prev + 1);
     setSelectedId(null);
     setSelectedType(null);
     setSelectedIds([]);
-  }, [history, historyIndex]);
+  }, [history, historyIndex, setFurniturePreview, setLabelsPreview]);
 
   // Initialize history
   useEffect(() => {
-    if (history.length === 0) {
+    if (historyStateRef.current.index < 0) {
       pushHistory(eventFurniture, eventLabels);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -994,15 +1042,15 @@ export function EventFloorEditor({
       setPlacementError(assessment.blockingReason || "This item cannot be placed here.");
       return false;
     }
-    const usedNames = eventFurniture.map((item) => item.name);
+    const usedNames = latestFurnitureRef.current.map((item) => item.name);
     const placed = {
       ...candidate,
       id: genId(),
       name: getUniqueEventObjectName(candidate.name, usedNames),
     };
-    const updated = [...eventFurniture, placed];
-    setEventFurniture(updated);
-    pushHistory(updated, eventLabels);
+    const updated = [...latestFurnitureRef.current, placed];
+    setFurniturePreview(updated);
+    pushHistory(updated, latestLabelsRef.current);
     setSelectedId(placed.id);
     setSelectedType("furniture");
     setSelectedIds([placed.id]);
@@ -1016,7 +1064,7 @@ export function EventFloorEditor({
       setSelectionArrangeOpen(false);
     }
     return true;
-  }, [eventFurniture, eventLabels, pushHistory, readOnly, repeatPlacement]);
+  }, [eventFurniture, eventLabels, pushHistory, readOnly, repeatPlacement, setFurniturePreview]);
 
   const placePreset = useCallback((
     preview: NonNullable<typeof presetPreview>,
@@ -1058,24 +1106,25 @@ export function EventFloorEditor({
   const placeLabel = useCallback(
     (x: number, y: number) => {
       if (readOnly) return;
+      const anchor = eventSnapPoint({ x, y }, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14);
       const newLabel: FloorLabel = {
         id: genId(),
-        x,
-        y,
+        ...anchor,
         text: "Event Label",
         fontSize: 14,
         color: "#1f2937",
         rotation: 0,
         align: "left",
       };
-      const updated = [...eventLabels, newLabel];
-      setEventLabels(updated);
-      pushHistory(eventFurniture, updated);
+      const updated = [...latestLabelsRef.current, newLabel];
+      setLabelsPreview(updated);
+      pushHistory(latestFurnitureRef.current, updated);
       setSelectedId(newLabel.id);
       setSelectedType("label");
       setSelectedIds([newLabel.id]);
+      if (!repeatPlacement) setActiveTool("select");
     },
-    [eventFurniture, eventLabels, pushHistory, readOnly]
+    [eventFurniture, eventLabels, pushHistory, readOnly, setLabelsPreview, repeatPlacement, canvasW, canvasH, floorPlan.gridSize, snapEnabled]
   );
 
   // ── Delete selected ────────────────────────────────────────────────────
@@ -1172,7 +1221,7 @@ export function EventFloorEditor({
           existing: eventFurniture,
           canvasWidth: canvasW,
           canvasHeight: canvasH,
-          grid: floorPlan.gridSize || 0,
+          grid: floorPlan.gridSize || 20,
           zoom,
           snapEnabled,
           blockedRegions: protectedRegions,
@@ -1220,14 +1269,14 @@ export function EventFloorEditor({
     const clientX = Number.isFinite(e.clientX) ? e.clientX : safeLeft + (Number.isFinite(rect.width) ? rect.width / 2 : canvasW / 2);
     const clientY = Number.isFinite(e.clientY) ? e.clientY : safeTop + (Number.isFinite(rect.height) ? rect.height / 2 : canvasH / 2);
     const point = { x: (clientX - safeLeft - pan.x) / safeZoom, y: (clientY - safeTop - pan.y) / safeZoom };
-    const template = getEventFurnitureTemplate(assetKey);
+    const template = getEventFurnitureTemplate(assetKey, sizeContext);
     const candidate = buildEventAssetCandidate({
       template,
       point,
       existing: eventFurniture,
       canvasWidth: canvasW,
       canvasHeight: canvasH,
-      grid: floorPlan.gridSize || 0,
+      grid: floorPlan.gridSize || 20,
       zoom: safeZoom,
       snapEnabled,
       blockedRegions: protectedRegions,
@@ -1235,7 +1284,7 @@ export function EventFloorEditor({
     setPlacementPoint(point);
     setSnapGuides(candidate.guides);
     commitFurnitureCandidate(candidate.item, candidate.assessment);
-  }, [activeTool, canvasH, canvasW, commitFurnitureCandidate, eventFurniture, floorPlan.gridSize, pan, protectedRegions, readOnly, snapEnabled, zoom]);
+  }, [activeTool, canvasH, canvasW, commitFurnitureCandidate, eventFurniture, floorPlan.gridSize, pan, protectedRegions, readOnly, snapEnabled, zoom, sizeContext]);
 
   const getCanvasWorldPoint = useCallback((clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1419,9 +1468,7 @@ export function EventFloorEditor({
         if (deltaDegrees < -180) deltaDegrees += 360;
         const rawRotation = rotateGesture.startRotation + deltaDegrees;
         const normalizedRotation = ((rawRotation % 360) + 360) % 360;
-        const nextRotation = e.shiftKey
-          ? Math.round(normalizedRotation / 15) * 15
-          : Math.round(normalizedRotation * 100) / 100;
+        const nextRotation = eventSnapRotation(normalizedRotation, snapEnabled || e.shiftKey);
         const nextFurniture = latestFurnitureRef.current.map((item) => item.id === rotateGesture.id
           ? { ...item, rotation: nextRotation % 360 }
           : item);
@@ -1436,14 +1483,13 @@ export function EventFloorEditor({
         suppressCanvasClickRef.current = true;
         setSnapGuides([]);
         const nextFurniture = latestFurnitureRef.current.map((item) => item.id === resizeGesture.id
-          ? resizeFurnitureWithinFloor(
+          ? resizeEventAsset(
             resizeGesture.origin,
             resizeGesture.handle,
-            mouseX - resizeGesture.startMouseX,
-            mouseY - resizeGesture.startMouseY,
-            canvasW,
-            canvasH,
-            e.shiftKey,
+            eventSnapDelta(mouseX - resizeGesture.startMouseX, floorPlan.gridSize || 20, snapEnabled),
+            eventSnapDelta(mouseY - resizeGesture.startMouseY, floorPlan.gridSize || 20, snapEnabled),
+            { width: canvasW, height: canvasH },
+            preserveAspect || e.shiftKey,
           )
           : item);
         setFurniturePreview(nextFurniture);
@@ -1480,11 +1526,10 @@ export function EventFloorEditor({
         selectedIds: gesture.ids,
         startPointer: gesture.startPointer,
         bounds: { width: canvasW, height: canvasH },
-        grid: floorPlan.gridSize || 0,
-        threshold: gesture.anchorType === "furniture"
-          ? 6 / Math.max(0.25, gesture.frame.zoom)
-          : 0,
-        snapToGrid: gesture.anchorType === "furniture" && snapEnabled,
+        grid: floorPlan.gridSize || 20,
+        threshold: 6 / Math.max(0.25, gesture.frame.zoom),
+        snapToGrid: snapEnabled,
+        snapGroupsToGrid: true,
         snapEnabled,
       }, { x: mouseX, y: mouseY });
       gestureMovedRef.current = true;
@@ -1501,7 +1546,7 @@ export function EventFloorEditor({
       setFurniturePreview(nextFurniture);
       setLabelsPreview(nextLabels);
     },
-    [floorPlan.gridSize, getCanvasWorldPoint, hasPassedGestureThreshold, readOnly, canvasW, canvasH, setFurniturePreview, setLabelsPreview, snapEnabled]
+    [floorPlan.gridSize, getCanvasWorldPoint, hasPassedGestureThreshold, readOnly, canvasW, canvasH, setFurniturePreview, setLabelsPreview, snapEnabled, preserveAspect]
   );
 
   const cancelPendingPreview = useCallback(() => {
@@ -1577,7 +1622,11 @@ export function EventFloorEditor({
       geometryChanged = Boolean(current && current.rotation !== rotateGestureRef.current.startRotation);
     }
     if (!readOnly && gestureMovedRef.current && geometryChanged) {
-      pushHistory(currentFurniture, currentLabels);
+      const assessment = activeGesture === "resize" ? assessEventPlacement({ proposed: currentFurniture.filter(item => item.id === resizeGestureRef.current?.id), existing: currentFurniture.filter(item => item.id !== resizeGestureRef.current?.id), canvasWidth: canvasW, canvasHeight: canvasH, blockedRegions: protectedRegions, blockOverlaps: false }) : null;
+      if (assessment && !assessment.canPlace && resizeGestureRef.current) {
+        setFurniturePreview(currentFurniture.map(item => item.id === resizeGestureRef.current?.id ? resizeGestureRef.current.origin : item));
+        setThreeError(assessment.blockingReason);
+      } else { pushHistory(currentFurniture, currentLabels); setThreeError(null); }
     }
     resizeGestureRef.current = null;
     rotateGestureRef.current = null;
@@ -1592,7 +1641,7 @@ export function EventFloorEditor({
     setRotating(null);
     setTransforming(false);
     setSnapGuides([]);
-  }, [flushPendingPreview, pushHistory, readOnly]);
+  }, [flushPendingPreview, pushHistory, readOnly, canvasW, canvasH, protectedRegions, setFurniturePreview]);
 
   useEffect(() => cancelPendingPreview, [cancelPendingPreview]);
 
@@ -1607,7 +1656,7 @@ export function EventFloorEditor({
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    if (readOnly || item.locked || (activeTool !== "select" && activeTool !== "furniture") || spaceHeld) return;
+    if (readOnly || item.locked || item.groupId || !eventAssetAllowsResize(item) || activeTool !== "select" || spaceHeld) return;
     const frame = beginTransformGesture(e.clientX, e.clientY);
     if (!frame) return;
     lastPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -1670,7 +1719,7 @@ export function EventFloorEditor({
     const nextLabelLayouts = nudgeItems(labelLayouts, selectedIds, dx, dy, { width: canvasW, height: canvasH });
     const nextLabels = nextLabelLayouts.map(({ width: _width, height: _height, ...label }) => label);
     setEventFurniture(nextFurniture);
-    setEventLabels(nextLabels);
+    setLabelsPreview(nextLabels);
     pushHistory(nextFurniture, nextLabels);
   }, [canvasH, canvasW, eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds, selectedIds]);
 
@@ -1687,24 +1736,89 @@ export function EventFloorEditor({
   }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurnitureIds]);
   const rotateClockwise = useCallback(() => rotateSelection("clockwise"), [rotateSelection]);
 
-  const updateSelectedFurniture = useCallback((changes: Partial<FloorFurniture>, options?: { allowLocked?: boolean }) => {
+  const updateSelectedFurniture = useCallback((changes: Partial<FloorFurniture>, options?: { allowLocked?: boolean; sizePreset?: string }) => {
     if (readOnly || selectedFurnitureIds.length !== 1) return;
-    if (selectedFurniture?.locked && !options?.allowLocked) return;
-    const selected = new Set(selectedFurnitureIds);
-    const nextFurniture = eventFurniture.map((item) => selected.has(item.id)
-      ? { ...item, ...changes }
-      : item);
-    setEventFurniture(nextFurniture);
-    pushHistory(nextFurniture, eventLabels);
-  }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedFurniture, selectedFurnitureIds]);
+    const current = latestFurnitureRef.current.find(item => item.id === selectedFurnitureIds[0]);
+    if (!current || (current.locked && !options?.allowLocked)) return;
+    const dimensionChange = changes.width !== undefined || changes.height !== undefined;
+    if (dimensionChange && (!eventAssetAllowsResize(current) || current.groupId)) { setThreeError("Choose a size preset for this item instead of stretching it."); return; }
+    if (["x", "y", "rotation", "width", "height"].some(key => key in changes && !Number.isFinite(changes[key as keyof FloorFurniture] as number))) return;
+    let candidate = options?.sizePreset ? resetEventAssetSize(current, getEventFurnitureTemplate(current.assetKey || current.type), sizeContext, { width: canvasW, height: canvasH }, options.sizePreset) : { ...current, ...changes };
+    if (dimensionChange) {
+      if (preserveAspect && changes.width !== undefined && changes.height === undefined) candidate.height = current.height * changes.width / current.width;
+      if (preserveAspect && changes.height !== undefined && changes.width === undefined) candidate.width = current.width * changes.height / current.height;
+      const minimum = 8 * eventAssetReferenceFactor(current.assetVariant);
+      if (candidate.width < minimum || candidate.height < minimum) { setThreeError(`Use dimensions of at least ${minimum} map units.`); return; }
+    }
+    const geometryChange = options?.sizePreset || ["x", "y", "rotation", "width", "height"].some(key => key in changes);
+    if (geometryChange) {
+      candidate = constrainEventAsset(candidate, canvasW, canvasH);
+      const assessment = assessEventPlacement({ proposed: [candidate], existing: latestFurnitureRef.current.filter(item => item.id !== current.id), canvasWidth: canvasW, canvasHeight: canvasH, blockedRegions: protectedRegions, blockOverlaps: false });
+      if (!assessment.canPlace) { setThreeError(assessment.blockingReason); return; }
+    }
+    if (stableEventJson(candidate) === stableEventJson(current)) return;
+    const nextFurniture = latestFurnitureRef.current.map(item => item.id === current.id ? candidate : item);
+    setFurniturePreview(nextFurniture); pushHistory(nextFurniture, latestLabelsRef.current); setThreeError(null);
+  }, [pushHistory, readOnly, selectedFurnitureIds, sizeContext, canvasW, canvasH, preserveAspect, protectedRegions, setFurniturePreview]);
 
   const updateSelectedLabel = useCallback((changes: Partial<FloorLabel>, options?: { allowLocked?: boolean }) => {
     if (readOnly || !selectedLabel) return;
     if (selectedLabel.locked && !options?.allowLocked) return;
     const nextLabels = eventLabels.map((item) => item.id === selectedLabel.id ? { ...item, ...changes } : item);
-    setEventLabels(nextLabels);
+    setLabelsPreview(nextLabels);
     pushHistory(eventFurniture, nextLabels);
-  }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedLabel]);
+  }, [eventFurniture, eventLabels, pushHistory, readOnly, selectedLabel, setLabelsPreview]);
+
+  const selectThreeItem = useCallback((id: string) => {
+    const ids = event3DSelectionIds({ furniture: latestFurnitureRef.current, labels: latestLabelsRef.current }, id);
+    setSelectedIds(ids); setSelectedId(ids.length ? id : null);
+    setSelectedType(ids.length ? latestFurnitureRef.current.some(item => item.id === id) ? "furniture" : "label" : null);
+    const selected = latestFurnitureRef.current.find(item => item.id === id);
+    if (!selected || !eventAssetAllowsResize(selected)) setThreeTool(current => current === "resize" ? "move" : current);
+    setThreeError(null);
+  }, []);
+  const commitThreeGeometry = useCallback((start: Event3DLayout, next: Event3DLayout) => {
+    if (readOnly || JSON.stringify(start) === JSON.stringify(next)) return;
+    const current = { furniture: latestFurnitureRef.current, labels: latestLabelsRef.current };
+    const merged = mergeEvent3DChanges(current, start, next);
+    if (!merged) { setThreeError("This item changed or is locked. Select it again before editing."); return; }
+    const changed = merged.furniture.filter(item => item !== current.furniture.find(before => before.id === item.id));
+    if (changed.some(item => { const before = current.furniture.find(before => before.id === item.id)!; return !eventAssetAllowsResize(before) && (item.width !== before.width || item.height !== before.height); })) { setThreeError("Choose a size preset for this item instead of stretching it."); return; }
+    if (changed.length) {
+      const assessment = assessEventPlacement({ proposed: changed, existing: merged.furniture.filter(item => !changed.some(change => change.id === item.id)), canvasWidth: canvasW, canvasHeight: canvasH, blockedRegions: protectedRegions, blockOverlaps: false });
+      if (!assessment.canPlace) { setThreeError(assessment.blockingReason); return; }
+    }
+    setFurniturePreview(merged.furniture); setLabelsPreview(merged.labels); pushHistory(merged.furniture, merged.labels); setThreeError(null);
+  }, [readOnly, canvasW, canvasH, protectedRegions, pushHistory, setFurniturePreview, setLabelsPreview]);
+  const threeCandidate = useMemo(() => threeTool === "place-item" && threePoint ? buildEventAssetCandidate({ template: activeTemplate, point: threePoint, existing: eventFurniture, canvasWidth: canvasW, canvasHeight: canvasH, grid: floorPlan.gridSize || 20, zoom: 1, snapEnabled, blockedRegions: protectedRegions }) : null, [threeTool, threePoint, activeTemplate, eventFurniture, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions]);
+  const placeThreeItem = useCallback(() => {
+    if (readOnly || threeBusy || !threePoint) return;
+    if (threeTool === "place-item" && threeCandidate) {
+      if (!commitFurnitureCandidate(threeCandidate.item, threeCandidate.assessment)) return;
+    } else if (threeTool === "place-label") placeLabel(threePoint.x, threePoint.y);
+    else return;
+    if (!repeatPlacement) { setThreePoint(null); setThreeTool("move"); } setThreeError(null);
+    setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
+  }, [readOnly, threeBusy, threePoint, threeTool, threeCandidate, commitFurnitureCandidate, placeLabel, canvasW, canvasH, activeTemplate.name, repeatPlacement]);
+  const placeThreePoint = useCallback((point: { x: number; y: number }) => {
+    if (readOnly) return;
+    if (threeTool === "place-item") {
+      const candidate = buildEventAssetCandidate({ template: activeTemplate, point, existing: latestFurnitureRef.current, canvasWidth: canvasW, canvasHeight: canvasH, grid: floorPlan.gridSize || 20, zoom: 1, snapEnabled, blockedRegions: protectedRegions });
+      if (!commitFurnitureCandidate(candidate.item, candidate.assessment)) { setThreePoint(point); setThreeError(candidate.assessment.blockingReason); return; }
+    } else if (threeTool === "place-label") {
+      placeLabel(point.x, point.y);
+    } else return;
+    if (!repeatPlacement) { setThreePoint(null); setThreeTool("move"); } setThreeError(null);
+    setThreeNotice(`Added ${threeTool === "place-label" ? "label" : activeTemplate.name}. Save Draft to keep your changes.`);
+  }, [readOnly, threeTool, activeTemplate, canvasW, canvasH, floorPlan.gridSize, snapEnabled, protectedRegions, commitFurnitureCandidate, placeLabel, repeatPlacement]);
+  const threeEditing: Event3DEditing | undefined = readOnly ? undefined : {
+    tool: threeTool, selectedIds, bounds: { width: canvasW, height: canvasH }, grid: snapEnabled ? floorPlan.gridSize || 20 : 0,
+    preserveAspect,
+    placement: threeCandidate ? { furniture: [{ ...threeCandidate.item, color: threeCandidate.assessment.canPlace ? threeCandidate.item.color : "#ef4444" }], labels: [] } : threeTool === "place-label" && threePoint ? { furniture: [], labels: [{ id: "3d-label-preview", ...eventSnapPoint(threePoint, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14), text: "Event Label", fontSize: 14, color: "#1f2937", rotation: 0 }] } : undefined,
+    onSelect: selectThreeItem, onPlacementPoint: point => { setThreePoint(point); setThreeError(null); }, onPlace: placeThreePoint,
+    onCancelPlacement: () => { setThreePoint(null); setThreeTool("move"); setThreeError(null); setThreeNotice("Placement cancelled."); },
+    onCommit: commitThreeGeometry, onBusyChange: setThreeBusy,
+  };
 
   const renameEventObject = useCallback((id: string, kind: "furniture" | "labels", proposedName: string) => {
     if (readOnly) return;
@@ -2374,7 +2488,7 @@ export function EventFloorEditor({
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || viewMode === "3d") return;
       if (e.key === "Escape" && objectListOpen && !editingObject) {
         e.preventDefault();
         setObjectListOpen(false);
@@ -2487,23 +2601,41 @@ export function EventFloorEditor({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [activeTool, deleteSelected, undo, redo, readOnly, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
+  }, [activeTool, deleteSelected, undo, redo, readOnly, viewMode, duplicateSelection, nudgeSelection, resetViewport, rotateSelection, selectTool, selectedIds.length, selectedFurnitureIds.length, objectListOpen, editingObject, selectedLabel, beginInlineLabelEdit]);
 
   // ── Save / Submit handlers ─────────────────────────────────────────────
-  const busy = saving || submittingLocal || isSaving || isSubmitting;
+  const busy = saving || submittingLocal || isSaving || isSubmitting || threeBusy;
+  const currentLayoutSignature = stableEventJson({ furniture: eventFurniture, labels: eventLabels });
+  const localSaveStatus = saving || isSaving ? "Saving…" : saveFailure ? "Save failed — retry" : currentLayoutSignature === savedLayoutSignature.current ? "Saved" : "Unsaved changes";
+  // saveRevision refreshes the fallback status when only the acknowledgement changed.
+  void saveRevision;
 
   const handleSave = async () => {
     finishInteractionRef.current("save");
     const currentFurniture = latestFurnitureRef.current;
     const currentLabels = latestLabelsRef.current;
+    const submittedSignature = stableEventJson({ furniture: currentFurniture, labels: currentLabels });
+    setSaveFailure(null);
     setSaving(true);
     try {
       const saved = await onSave(currentFurniture, currentLabels);
-      if (saved !== false && draftLocation) {
+      if (saved === false) {
+        // The coordinator also returns false when the submitted revision was
+        // saved successfully but newer edits are still waiting to be saved.
+        if (stableEventJson({ furniture: latestFurnitureRef.current, labels: latestLabelsRef.current }) === submittedSignature) setSaveFailure("Save failed. Your changes are still here.");
+        return;
+      }
+      savedLayoutSignature.current = submittedSignature;
+      setSaveRevision(value => value + 1);
+      const unchanged = stableEventJson({ furniture: latestFurnitureRef.current, labels: latestLabelsRef.current }) === submittedSignature;
+      if (unchanged) setThreeNotice(null);
+      if (unchanged && draftLocation) {
         draftDirtyRef.current = false;
         clearEventLayoutDraft(overlay.id, draftLocation);
         setDraftRecovered(false);
       }
+    } catch (error) {
+      setSaveFailure(error instanceof Error ? error.message : "Unable to save. Your changes are still here.");
     } finally {
       setSaving(false);
     }
@@ -2536,6 +2668,18 @@ export function EventFloorEditor({
     setInspectorOpen(true);
   };
   const closeInspector = () => setInspectorOpen(false);
+  const focusIssueItems = (ids: string[]) => {
+    const validIds = ids.filter(id => eventFurniture.some(item => item.id === id) || eventLabels.some(label => label.id === id));
+    if (!validIds.length) return;
+    const last = validIds[validIds.length - 1];
+    setSelectedIds(validIds); setSelectedId(last); setSelectedType(eventFurniture.some(item => item.id === last) ? "furniture" : "label");
+    if (viewMode === "3d") { setThreeTool("move"); setThreePoint(null); setThreeFocusNonce(value => value + 1); return; }
+    setActiveTool("select"); setPlacementPoint(null);
+    const bounds = event3DLayoutBounds(eventFurniture.filter(item => validIds.includes(item.id)), eventLabels.filter(label => validIds.includes(label.id)));
+    const viewport = canvasRef.current?.getBoundingClientRect();
+    if (bounds && viewport) animateViewportTo(fitEventViewport({ canvasWidth: canvasW, canvasHeight: canvasH, contentBounds: bounds, viewportWidth: viewport.width, viewportHeight: viewport.height, padding: 72, minZoom: getEventMinZoom(), maxZoom: 2 }), 180);
+  };
+  const layoutChecksNode = <EventLayoutIssues compact warnings={layoutWarnings} onFocusItems={focusIssueItems} disabled={itemGestureActive || threeBusy} />;
   const inspectorProps = {
     isOpen: inspectorOpen,
     furniture: selectedFurniture,
@@ -2551,6 +2695,11 @@ export function EventFloorEditor({
     onRotate: rotateClockwise,
     onUpdateLayer: updateSelectedLayer,
     onUngroup: ungroupSelection,
+    mode: viewMode as "2d" | "3d", sizeContext, busy: threeBusy || itemGestureActive,
+    preserveAspect, onAspectChange: () => setPreserveAspect(value => !value),
+    onResetSize: () => updateSelectedFurniture({}, { sizePreset: "standard" }),
+    onSizePreset: (preset: string) => updateSelectedFurniture({}, { sizePreset: preset }),
+    onDuplicate: duplicateSelection, onDelete: deleteSelected, error: threeError,
   };
   const inspectorPanel = <EventItemInspector {...inspectorProps} />;
   const getSelectedActionsPosition = (
@@ -2562,8 +2711,8 @@ export function EventFloorEditor({
     const viewportWidth = canvasRef.current?.clientWidth || Number.POSITIVE_INFINITY;
     const viewportHeight = canvasRef.current?.clientHeight || Number.POSITIVE_INFINITY;
     const left = Math.max(12, Math.min(worldX * zoom + pan.x, viewportWidth - estimatedWidth - 12));
-    const below = worldBottom * zoom + pan.y + 12;
-    const above = worldTop * zoom + pan.y - 68;
+    const below = worldBottom * zoom + pan.y + (selectedFurniture ? 64 : 12);
+    const above = worldTop * zoom + pan.y - (selectedFurniture ? 116 : 68);
     return {
       left,
       top: below + 56 <= viewportHeight - 12 ? below : Math.max(12, above),
@@ -2680,16 +2829,16 @@ export function EventFloorEditor({
             </div>
           </div>
         </div>
-        {!readOnly && <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
-          {tutorialAccountId && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
+        {!readOnly && <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+          {tutorialAccountId && viewMode === "2d" && <EventEditorTutorial key={tutorialAccountId} accountId={tutorialAccountId} onStepChange={handleTutorialStepChange} />}
           {/* Undo/Redo */}
           <button
             type="button"
             aria-label="Undo"
             title="Undo"
             onClick={undo}
-            disabled={historyIndex <= 0}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
+            disabled={historyIndex <= 0 || threeBusy}
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Undo2 className="h-3.5 w-3.5" />
           </button>
@@ -2698,51 +2847,67 @@ export function EventFloorEditor({
             aria-label="Redo"
             title="Redo"
             onClick={redo}
-            disabled={historyIndex >= history.length - 1}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
+            disabled={historyIndex >= history.length - 1 || threeBusy}
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Redo2 className="h-3.5 w-3.5" />
           </button>
           {/* Delete */}
           <button
             onClick={deleteSelected}
-            disabled={!selectedId}
+            disabled={!selectedId || threeBusy}
             aria-label="Delete selected items"
             title="Delete selected items (Del)"
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
+            className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors text-muted-foreground disabled:opacity-30"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
-          {saveStatus && <span data-event-tour="save-status" role="status" className="text-[10px] text-muted-foreground">{saveStatus}</span>}
+          <div className="order-first flex w-full justify-end sm:order-none sm:w-auto"><EventSaveStatus status={saveFailure ? "Save failed — retry" : saveStatus || localSaveStatus} /></div>
+          {saveFailure && <button type="button" aria-label="Retry save" disabled={busy} onClick={handleSave} className="min-h-11 rounded-xl border border-destructive/40 px-3 text-xs font-semibold text-destructive">Retry</button>}
           {/* Save */}
           <button
             data-event-tour="save"
+            aria-label="Save Draft"
             onClick={handleSave}
             disabled={busy}
-            className="flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-xl border border-border text-[11px] sm:text-xs font-bold text-foreground hover:bg-muted transition-all disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap h-11 px-2.5 sm:px-3 rounded-xl border border-border text-[11px] sm:text-xs font-bold text-foreground hover:bg-muted transition-all disabled:opacity-50"
           >
             {saving || isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            Save Draft
+            <span className="sm:hidden">Save</span><span className="hidden sm:inline">Save Draft</span>
           </button>
           {/* Submit */}
           <button
             data-event-tour="submit"
+            aria-label={overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}
             onClick={handleSubmit}
             disabled={busy}
-            className="flex items-center gap-1.5 h-8 px-3 sm:px-4 rounded-xl bg-primary text-primary-foreground text-[11px] sm:text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap h-11 px-3 sm:px-4 rounded-xl bg-primary text-primary-foreground text-[11px] sm:text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
           >
             {submittingLocal || isSubmitting ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
               <Send className="h-3 w-3" />
             )}
-            {overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}
+            <span className="sm:hidden">Review</span><span className="hidden sm:inline">{overlay.status === "pending" ? "Review & update GSO" : "Review & submit"}</span>
           </button>
         </div>}
       </div>
 
       {/* Toolbar */}
-      {!readOnly && <div className="flex min-w-0 flex-wrap items-center gap-1 px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2">
+        <div role="group" aria-label="Event layout view" className="flex gap-1 rounded-xl bg-muted p-1">
+          {(["2d", "3d"] as const).map(mode => <button key={mode} type="button" aria-label={mode === "2d" ? "2D layout" : readOnly ? "3D preview" : "3D layout"} aria-pressed={viewMode === mode} disabled={mode === "3d" && Boolean(onFeedbackPoint)} onClick={() => {
+            finishInteractionRef.current("switch");
+            finishInlineLabelEdit();
+            commitObjectRename();
+            setInspectorOpen(false); setObjectListOpen(false); setAssetCatalogOpen(false); setPresetMenuOpen(false); setPresetPreview(null); setMoveHereArmedIds(null); setMoveHerePreview(null);
+            setThreePoint(null); setThreeError(null);
+            setViewMode(mode);
+          }} className={cn("min-h-9 rounded-lg px-3 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40", viewMode === mode ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>{mode === "2d" ? "2D layout" : readOnly ? "3D preview" : "3D layout"}</button>)}
+        </div>
+        {onFeedbackPoint && <p className="text-xs text-muted-foreground">Place feedback pins in 2D.</p>}
+      </div>
+      {!readOnly && viewMode === "2d" && <div className="flex min-w-0 flex-wrap items-center gap-1 px-3 py-2 sm:px-4 border-b border-border bg-card/50 shrink-0">
         {EVENT_TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
@@ -2822,21 +2987,32 @@ export function EventFloorEditor({
             <button type="button" aria-label="Delete selected items" onClick={deleteSelected} className="h-8 shrink-0 rounded-lg border border-destructive/30 px-3 text-xs font-bold text-destructive hover:bg-destructive/10">Delete</button>
           </>
         )}
-        {!readOnly && <div className="ml-auto"><EventLayoutIssues compact warnings={layoutWarnings} onFocusItems={(ids) => {
-          const furnitureIds = ids.filter((id) => eventFurniture.some((item) => item.id === id));
-          if (furnitureIds.length === 0) return;
-          setSelectedId(furnitureIds.at(-1) ?? null);
-          setSelectedType("furniture");
-          setSelectedIds(furnitureIds);
-          setInspectorOpen(false);
-        }} disabled={itemGestureActive} /></div>}
+        {!readOnly && <div className="ml-auto">{layoutChecksNode}</div>}
         </div>}
 
       {/* Canvas */}
-      <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1">
+      {viewMode === "3d" && <div className="flex min-h-0 min-w-0 flex-1">
+        <EventLayout3DPreview key={viewportLocationKey} cameraSession={cameraSession} floorPlan={floorPlan} campus={activeCampus} furniture={eventFurniture} labels={eventLabels}
+          selectedIds={selectedIds} editing={threeEditing} editingBusy={threeBusy} focusRequest={threeFocusNonce} onReturnTo2D={() => setViewMode("2d")}
+          placementLabel={threeTool === "place-label" ? "Label" : activeTemplate.name} placementValid={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)}
+          editorTools={!readOnly && <Event3DEditorControls tool={threeTool}
+            onToolChange={tool => { setThreeNotice(tool === "move" && (threeTool === "place-item" || threeTool === "place-label") ? "Placement cancelled." : null); setThreeTool(tool); setThreePoint(tool === "place-item" || tool === "place-label" ? { x: canvasW / 2, y: canvasH / 2 } : null); setThreeError(null); }}
+            template={activeTemplate.type} onTemplateChange={type => setActiveTemplate(getEventFurnitureTemplate(type, sizeContext))}
+            furniture={eventFurniture} labels={eventLabels} selectedIds={selectedIds} onSelect={selectThreeItem} onOpenDetails={openInspectorFrom}
+            onToggleLock={selectedFurniture ? toggleSelectedLock : toggleSelectedLabelLock} onDuplicate={duplicateSelection}
+            placementPoint={threePoint} canPlace={threeTool === "place-label" || Boolean(threeCandidate?.assessment.canPlace)} onPlace={placeThreeItem}
+            busy={threeBusy} snap={snapEnabled} onSnapChange={() => setSnapEnabled(value => !value)}
+            error={threeError || threeCandidate?.assessment.blockingReason || null} notice={threeNotice}
+            repeatPlacement={repeatPlacement} onRepeatChange={() => setRepeatPlacement(value => !value)} layoutChecks={layoutChecksNode} />} />
+
+        {!readOnly && !inspectorViewportCompact && inspectorOpen && hasInspectorSelection &&
+          <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[17rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">{inspectorPanel}</aside>}
+      </div>}
+      <div data-testid="event-editor-workspace" className="flex min-h-0 min-w-0 flex-1" style={viewMode === "3d" ? { display: "none" } : undefined}>
       <div
         ref={canvasRef}
         data-event-tour="canvas"
+        data-event-placement={effectiveTool === "furniture" ? "item" : effectiveTool === "text" ? "label" : undefined}
         tabIndex={0}
         aria-label="Event layout canvas"
         className="min-h-0 min-w-0 flex-1 overflow-hidden overscroll-contain relative select-none cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
@@ -2869,10 +3045,14 @@ export function EventFloorEditor({
         onPointerMove={(event) => {
           if (activePointerIdsRef.current.size > 0 || (event.target as Element).closest("[data-event-editor-chrome]")) {
             setFeedbackCursorPoint(null);
+            setPlacementCursor(null);
             return;
           }
           const point = getCanvasWorldPoint(event.clientX, event.clientY);
           if (!point) return;
+          const placing = !readOnly && (activeTool === "furniture" || activeTool === "text");
+          const box = event.currentTarget.getBoundingClientRect();
+          setPlacementCursor(placing && event.pointerType !== "touch" ? { x: Math.max(8, Math.min(box.width - 140, event.clientX - box.left + 16)), y: Math.max(8, Math.min(box.height - 40, event.clientY - box.top + 18)) } : null);
           if (feedbackPlacementActive && event.pointerType !== "touch" && point.x >= 0 && point.y >= 0 && point.x <= canvasW && point.y <= canvasH) {
             const rect = event.currentTarget.getBoundingClientRect();
             const cursorPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -2891,7 +3071,7 @@ export function EventFloorEditor({
               existing: eventFurniture,
               canvasWidth: canvasW,
               canvasHeight: canvasH,
-              grid: floorPlan.gridSize || 0,
+              grid: floorPlan.gridSize || 20,
               zoom,
               snapEnabled,
               blockedRegions: protectedRegions,
@@ -2899,10 +3079,12 @@ export function EventFloorEditor({
             setPlacementPoint(point);
             setSnapGuides(candidate.guides);
             setPlacementError(candidate.assessment.blockingReason);
+          } else if (activeTool === "text") {
+            setPlacementPoint(eventSnapPoint(point, { width: canvasW, height: canvasH }, floorPlan.gridSize || 20, snapEnabled, 14));
           }
         }}
-        onPointerLeave={() => setFeedbackCursorPoint(null)}
-        onPointerCancel={() => setFeedbackCursorPoint(null)}
+        onPointerLeave={() => { setFeedbackCursorPoint(null); setPlacementCursor(null); }}
+        onPointerCancel={() => { setFeedbackCursorPoint(null); setPlacementCursor(null); }}
         onLostPointerCapture={handleCanvasLostPointerCapture}
         onWheelCapture={(e) => {
           // Capture browser pinch/page-zoom gestures even when the pointer is over the asset picker.
@@ -2912,6 +3094,11 @@ export function EventFloorEditor({
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        {!readOnly && (activeTool === "furniture" || activeTool === "text") && <div data-testid="event-2d-placement-mode" data-event-editor-chrome className="absolute bottom-3 left-3 z-50 max-w-[calc(100%-1.5rem)] rounded-xl border border-primary/30 bg-card/95 px-3 py-2 shadow-sm">
+          <p role="status" className="text-xs"><strong className="text-primary">Placing {activeTool === "text" ? "Label" : activeTemplate.name}</strong><span className="block text-muted-foreground">{placementError ? "Blocked position · Choose open space" : "Preview · Click or tap to place"}</span></p>
+          {activeTool === "text" && <div className="mt-1 flex items-center gap-2"><label className="flex min-h-11 items-center gap-2 text-xs"><input type="checkbox" checked={repeatPlacement} onChange={event => setRepeatPlacement(event.target.checked)} />Keep placing</label><button type="button" aria-label="Cancel label placement" onClick={() => selectTool("select")} className="min-h-11 rounded-lg border border-border px-3 text-xs font-bold">Cancel</button></div>}
+        </div>}
+        {!readOnly && (activeTool === "furniture" || activeTool === "text") && placementCursor && <div data-testid="event-2d-pointer-badge" aria-hidden="true" className="pointer-events-none absolute z-50 rounded-lg border border-primary bg-card px-2 py-1 text-xs font-semibold text-primary shadow-sm" style={{ left: placementCursor.x, top: placementCursor.y }}>+ {activeTool === "text" ? "Label" : activeTemplate.name}</div>}
         {feedbackPlacementActive && feedbackCursorPoint && <div ref={feedbackCursorRef} data-testid="feedback-pin-cursor-preview" aria-hidden="true" className="pointer-events-none absolute z-50 h-8 w-8 -translate-x-1/2 -translate-y-full" style={{ left: feedbackCursorPoint.x, top: feedbackCursorPoint.y }}>
           <MapPin className="h-full w-full fill-amber-500 stroke-white drop-shadow-md" strokeWidth={2} />
         </div>}
@@ -2952,7 +3139,7 @@ export function EventFloorEditor({
               setPresetMenuOpen(false);
               setObjectListOpen(false);
               setInspectorOpen(false);
-              setActiveTemplate(getEventFurnitureTemplate(asset.key));
+              setActiveTemplate(getEventFurnitureTemplate(asset.key, sizeContext));
               setPresetPreview(null);
               setPlacementPoint(null);
               setTouchPlacementReady(false);
@@ -3306,7 +3493,7 @@ export function EventFloorEditor({
               )}
             >
               <Magnet className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="hidden sm:inline">Snap</span>
+              <span className="text-[11px]">Snap {snapEnabled ? "on" : "off"}</span>
             </button>
           )}
             <button
@@ -3385,7 +3572,7 @@ export function EventFloorEditor({
           }}
         >
           {/* Base Floor Plan (read-only rendering) */}
-          <svg width={canvasW} height={canvasH} className="absolute inset-0">
+          <svg width={canvasW} height={canvasH} className="absolute inset-0 overflow-visible" data-testid="event-base-map">
             {/* Background */}
             <rect
               width={canvasW}
@@ -3465,6 +3652,7 @@ export function EventFloorEditor({
               }, "item")}
             >
               <EventAssetVisual type={resolveCanvasAssetKey(f) ?? f.type} label={f.name} className="absolute inset-0 h-full w-full" />
+              {!readOnly && effectiveTool === "select" && (f.width * zoom < 24 || f.height * zoom < 24) && <span data-event-hit-area aria-hidden="true" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ width: Math.max(f.width, (inspectorViewportCompact ? 44 : 32) / zoom), height: Math.max(f.height, (inspectorViewportCompact ? 44 : 32) / zoom) }} />}
               </div>
             );
           })}
@@ -3502,14 +3690,15 @@ export function EventFloorEditor({
 
           <EventSelectionOverlay
             items={eventFurniture}
-            selectedIds={selectedIds}
+            selectedIds={effectiveTool === "select" ? selectedIds : []}
             zoom={zoom}
-            readOnly={readOnly}
+            readOnly={readOnly || effectiveTool !== "select"}
             panActive={effectiveTool === "pan" || isPanning || pinchActive}
             onRotatePointerDown={(event, item) => beginPointerGesture(event, () => {
               if (effectiveTool === "pan" || event.button === 1) handlePanStart(event);
               else handleRotateStart(event, item);
             }, "handle")}
+            onResizePointerDown={(event, item) => beginPointerGesture(event, () => handleResizeStart(event, item, "se"), "handle")}
           />
 
           {eventSelectionBounds && selectedFurnitureIds.length > 1 && !readOnly && (
@@ -3571,6 +3760,7 @@ export function EventFloorEditor({
               /> : l.text}
             </div>
           ))}
+          {!readOnly && activeTool === "text" && placementPoint && <div data-testid="event-label-placement-preview" aria-hidden="true" className="pointer-events-none absolute rounded border border-dashed border-primary bg-card/60 px-1 text-sm font-bold text-primary opacity-60" style={{ left: placementPoint.x, top: placementPoint.y }}>Label</div>}
           {presetPreview && (
             <div data-testid="event-preset-preview" aria-label="Preset placement preview" className="pointer-events-none absolute inset-0 z-40">
               {previewItems.map((item) => (
@@ -3700,8 +3890,8 @@ export function EventFloorEditor({
 
         {/* Instructions overlay */}
         {eventFurniture.length === 0 && eventLabels.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center text-muted-foreground">
+          <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex justify-start">
+            <div className="max-w-sm rounded-xl border border-border bg-card/95 p-3 text-muted-foreground shadow-sm">
               <p className="text-sm font-bold mb-1">
                 {readOnly ? "No event additions yet" : "Click to place event items"}
               </p>
@@ -3714,7 +3904,7 @@ export function EventFloorEditor({
           </div>
         )}
       </div>
-      {!readOnly && !inspectorViewportCompact && inspectorOpen && hasInspectorSelection && (
+      {viewMode === "2d" && !readOnly && !inspectorViewportCompact && inspectorOpen && hasInspectorSelection && (
         <aside data-testid="event-item-inspector-rail" aria-label="Event item inspector rail" className="flex w-[17rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4">
           {selectedIds.length > 1 ? (
             <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
@@ -3732,7 +3922,7 @@ export function EventFloorEditor({
           <span>
             {eventFurniture.length} furniture · {eventLabels.length} labels
           </span>
-          <span className="capitalize">Tool: {effectiveTool}</span>
+          <span className="capitalize">{viewMode === "3d" ? readOnly ? "3D preview" : "3D editing" : `Tool: ${effectiveTool}`}</span>
         </div>
         <div className="flex items-center gap-2">
           {overlay.status && (
@@ -3760,7 +3950,7 @@ export function EventFloorEditor({
               {panStatus}
             </span>
             {readOnly && <span className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 font-bold text-foreground">Read-only</span>}
-            <span className="hidden sm:inline">{readOnly
+            <span className="hidden sm:inline">{viewMode === "3d" ? readOnly ? "Read-only 3D preview" : "Edit event additions · Published base map stays read-only" : readOnly
               ? "Published base map and submitted additions"
               : "Hold V: Select · T: Label · Drag empty map: select · Del: delete · Space + drag: pan"}</span>
           </span>

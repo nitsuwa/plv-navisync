@@ -1,0 +1,13 @@
+{
+  "mode": "build",
+  "command": [
+    "node",
+    "node_modules/vite/bin/vite.js",
+    "build"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "startedAt": "2026-10-15T06:55:05.401Z",
+  "finishedAt": "2026-10-15T06:56:20.651Z",
+  "logFile": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\docs\\verification\\pre-merge-readiness\\logs\\build.log"
+}

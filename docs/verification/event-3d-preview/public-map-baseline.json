@@ -1,0 +1,20 @@
+{
+  "baseCommit": "b220473",
+  "method": "Vite load hook supplies original CampusMapPage.tsx from HEAD without replacing working files",
+  "passed": 39,
+  "failed": 3,
+  "failures": [
+    {
+      "title": "CampusMapPage event overlays loads student event previews from the allowlisted feed when the panel opens",
+      "message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'campus-test' ]"
+    },
+    {
+      "title": "CampusMapPage event overlays shows the compact building details and keeps the zoom dock mounted across sheet states",
+      "message": "Error: expect(element).toHaveClass(\"right-3 bottom-3 md:bottom-6 items-start\")"
+    },
+    {
+      "title": "CampusMapPage event overlays keeps Profile anchored and does not move the camera or lower-left utility",
+      "message": "Error: expect(element).toHaveClass(\"right-3 bottom-3 md:bottom-6 items-start\")"
+    }
+  ]
+}

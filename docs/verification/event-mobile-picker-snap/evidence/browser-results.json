@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "checks": [
+    "14 real asset models retain stable height; width/depth changes do not create giant heights",
+    "Actual ground and HTML room labels have crosshair; pointer badge/mode are visible; camera chrome stays clickable; hover adds no data",
+    "Shared desktop Details commits proportional sizes, Escape cancels numeric draft; 2D resize handle works and one Undo restores size",
+    "2D item and label modes expose crosshair, pointer badge, ghost and explicit cancellation",
+    "Keep placing persists mode; each placement is retained and each Undo removes exactly one item",
+    "Chairs cannot stretch; table aspect unlocking changes width independently; actual 3D resize is undoable; reference Reset survives save and reopen",
+    "Outdoor chair has smaller realistic reference footprint; variant change is undoable and exact shared dimensions survive 2D/reopen",
+    "Failed local save retains the layout and explicit Retry acknowledges successful save",
+    "360/390/768/1440 layouts have usable canvas, no page overflow, viewport-sized issue panel and correct sheet/rail with focus return",
+    "Mobile dark mode, native single-touch placement and keyboard label placement work",
+    "Admin review remains read-only"
+  ],
+  "pageErrors": [],
+  "externalRequests": [
+    "https://fonts.googleapis.com/css2",
+    "https://fonts.googleapis.com/css2"
+  ],
+  "mode": "Isolated published-map fixture. Local memory saves; external requests blocked."
+}

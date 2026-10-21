@@ -24,13 +24,21 @@ const multiBuildingOptions = [
 ];
 
 describe("EventLocationPicker", () => {
-  it("offers floors directly without the building-add cycle", () => {
+  it("offers direct floor checkboxes without the legacy dropdown fallback", () => {
     render(<EventLocationPicker buildings={buildings} locations={[]} onChange={vi.fn()} />);
     expect(screen.getByRole("checkbox", { name: "Science Building — Floor 2" })).toBeInTheDocument();
+    expect(screen.queryByText("Choose one floor using dropdowns")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Floor" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Search buildings"), { target: { value: "missing" } });
     expect(screen.queryByRole("checkbox", { name: "Science Building — Floor 2" })).not.toBeInTheDocument();
   });
-  it("adds campus grounds and a building floor, then removes only the selected request", () => {
+  it("explains when no published building floors are available", () => {
+    render(<EventLocationPicker buildings={[]} locations={[]} onChange={vi.fn()} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("No published building floors are available for event requests.");
+  });
+  it("adds campus grounds and a building floor directly, then removes only the selected request", () => {
     let selected: EventLocationRef[] = [];
     const onChange = vi.fn((next: EventLocationRef[]) => {
       selected = next;
@@ -42,11 +50,7 @@ describe("EventLocationPicker", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
     expect(onChange).toHaveBeenLastCalledWith([campus]);
 
-    fireEvent.click(screen.getByRole("combobox", { name: /building/i }));
-    fireEvent.click(screen.getByRole("option", { name: "Science Building" }));
-    fireEvent.click(screen.getByRole("combobox", { name: /floor/i }));
-    fireEvent.click(screen.getByRole("option", { name: "Floor 2" }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 2" }));
     expect(onChange).toHaveBeenLastCalledWith([
       campus,
       {
@@ -58,7 +62,7 @@ describe("EventLocationPicker", () => {
     ]);
   });
 
-  it("prevents duplicate requests and has no proposal date controls", () => {
+  it("shows selected floors as checked and has no proposal date controls", () => {
     const location: EventLocationRef = {
       type: "building",
       buildingId: "science",
@@ -68,8 +72,7 @@ describe("EventLocationPicker", () => {
     const onChange = vi.fn();
     render(<EventLocationPicker buildings={buildings} locations={[location]} onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
-    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Science Building — Floor 1" })).toBeChecked();
     expect(screen.queryByLabelText(/start date|end date/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /remove science building/i }));
     expect(onChange).toHaveBeenLastCalledWith([]);
@@ -85,14 +88,9 @@ describe("EventLocationPicker", () => {
     view = render(<EventLocationPicker buildings={multiBuildingOptions} locations={selected} onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
-    expect(screen.getByRole("combobox", { name: "Floor" })).toHaveTextContent("Floor 2");
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
-    expect(screen.getByRole("status")).toHaveTextContent("All published floors for Science Building are already requested.");
-
-    fireEvent.click(screen.getByRole("combobox", { name: "Building" }));
-    fireEvent.click(screen.getByRole("option", { name: "Engineering Building" }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 2" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Engineering Building — Ground Floor" }));
 
     expect(selected).toEqual([
       { type: "campus", label: "Campus Grounds" },

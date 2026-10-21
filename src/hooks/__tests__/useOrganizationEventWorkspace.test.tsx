@@ -30,14 +30,21 @@ describe("useOrganizationEventWorkspace", () => {
     expect(result.current.events.map((event) => event.id)).toEqual(["new-record"]);
   });
 
-  it("revalidates on focus and reconnect, and exposes retry after a failed refresh", async () => {
+  it("coalesces focus and visibility revalidation, and exposes retry after a failed refresh", async () => {
     vi.mocked(eventOverlayService.listOrganizationEvents).mockResolvedValue({ events: [], total: 0 });
     const { result } = renderHook(() => useOrganizationEventWorkspace("rep-a", org(), true));
     await waitFor(() => expect(eventOverlayService.listOrganizationEvents).toHaveBeenCalledTimes(1));
-    act(() => window.dispatchEvent(new Event("online")));
-    await waitFor(() => expect(eventOverlayService.listOrganizationEvents).toHaveBeenCalledTimes(2));
-    act(() => window.dispatchEvent(new Event("focus")));
+
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(eventOverlayService.listOrganizationEvents).toHaveBeenCalledTimes(2);
+
+    await act(async () => { window.dispatchEvent(new Event("online")); await Promise.resolve(); });
     await waitFor(() => expect(eventOverlayService.listOrganizationEvents).toHaveBeenCalledTimes(3));
+
     vi.mocked(eventOverlayService.listOrganizationEvents).mockRejectedValueOnce(new Error("Offline"));
     await act(async () => result.current.refresh());
     expect(result.current.error).toBe("Offline");

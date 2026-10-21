@@ -180,3 +180,18 @@
     max-width: calc(100% - 1.5rem);
   }
 }
+/* Placement stays recognizable even when the base renderer changes its inline cursor. */
+[data-event-3d-tool="place-item"] canvas,
+[data-event-3d-tool="place-label"] canvas {
+  cursor: crosshair !important;
+}
+
+/* The actual hit target can be a Drei HTML wrapper, not the canvas. */
+[data-event-3d-tool="place-item"], [data-event-3d-tool="place-item"] *,
+[data-event-3d-tool="place-label"], [data-event-3d-tool="place-label"] *,
+[data-event-placement], [data-event-placement] * { cursor: crosshair !important; }
+[data-event-3d-tool="place-item"] button, [data-event-3d-tool="place-label"] button,
+[data-event-placement] [data-event-item] { pointer-events: none; }
+[data-event-3d-tool] [data-event-editor-chrome], [data-event-3d-tool] [data-event-editor-chrome] *,
+[data-event-placement] [data-event-editor-chrome], [data-event-placement] [data-event-editor-chrome] * { cursor: auto !important; }
+[data-event-3d-tool] [data-event-editor-chrome] button, [data-event-placement] [data-event-editor-chrome] button { pointer-events: auto !important; cursor: pointer !important; }

@@ -1,0 +1,58 @@
+{
+  "status": "PASS",
+  "base": "f3bc9a38c78b518ba9fd953dd6a16aaeecf0a149",
+  "branch": "codex/event-editor-consistent-tools",
+  "focusedTests": {
+    "suites": 43,
+    "command": "vitest run affected editor/coordinator/geometry/public-map files --maxWorkers=1",
+    "passed": 340,
+    "evidence": "evidence/focused-results.json",
+    "failed": 0
+  },
+  "browser": {
+    "viewports": [
+      360,
+      390,
+      768,
+      1440
+    ],
+    "liveDataWrites": false,
+    "externalRequestsBlocked": true,
+    "status": "PASS",
+    "pageErrors": [],
+    "checks": 11
+  },
+  "build": {
+    "existingLargeChunkWarning": true,
+    "exitCode": 0,
+    "modules": 3647
+  },
+  "types": {
+    "currentDiagnostics": 1047,
+    "note": "Pre-existing repository errors; diagnostic path/line/code identities unchanged. Native multi-threaded rerun hit Windows memory limits.",
+    "changedEditorFileDiagnostics": 0,
+    "command": "tsc --noEmit --pretty false --singleThreaded",
+    "baselineDiagnostics": 1047
+  },
+  "review": {
+    "independent": "consistent_tools_review",
+    "resolved": [
+      "Preserve legacy dimensions for non-size edits, reject impossible rotated footprints",
+      "Precision-safe inward clamping of corrected rotated boundaries",
+      "Viewport-anchored issue popup outside scroll region",
+      "Clear stale failure on authoritative acknowledgement",
+      "Distinguish saved earlier revision from failure while retaining newer edits"
+    ]
+  },
+  "sqlRequired": false,
+  "physicalDeviceFollowUp": "Check real iOS/Android GPU and keyboard behavior with manual-test.md",
+  "delivery": {
+    "pullRequestCreated": false,
+    "featureCommit": "418a1ad2bfdf0503e8bcd86f2c918a49a926c2cb",
+    "integration": "fast-forward",
+    "conflicts": 0,
+    "backupBranch": "backup/pre-event-consistent-tools-20261013",
+    "githubMainFeaturePushed": true,
+    "forcePush": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "mode": "types-baseline",
+  "command": [
+    "node",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "--singleThreaded",
+    "--project",
+    ".tmp/pre-merge-readiness/baseline/tsconfig.json"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "startedAt": "2026-10-15T05:50:54.480Z",
+  "finishedAt": "2026-10-15T05:51:44.119Z",
+  "logFile": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\docs\\verification\\pre-merge-readiness\\logs\\types-baseline.log"
+}

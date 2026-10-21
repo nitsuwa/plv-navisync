@@ -5,7 +5,11 @@ import { CalendarDays, DoorOpen, Flag, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 import type { ReadonlyOutdoorCampus } from "../../lib/readonlyOutdoorCampus";
-import type { CampusDecorAsset, CampusPath } from "../map-builder/types";
+import type { CampusDecorAsset, CampusPath, FloorFurniture, FloorLabel } from "../map-builder/types";
+import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
+import type { Event3DEditing } from "../../lib/event3dEditing";
+import { EventPreviewCamera } from "../events/EventPreviewCamera";
+import { event3DOutdoorTargetBounds, type Event3DCameraRequest, type Event3DCameraSession } from "../../lib/event3dLayout";
 import { DECOR_ASSET_MAP } from "../map-builder/constants";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
@@ -71,6 +75,11 @@ interface StudentCampus3DRendererProps {
   selectedPlaceId?: string | null;
   showEvents?: boolean;
   eventVenues?: EventVenue[];
+  eventFurniture?: readonly FloorFurniture[];
+  eventLabels?: readonly FloorLabel[];
+  eventEditing?: Event3DEditing;
+  previewCamera?: Event3DCameraRequest;
+  previewCameraSession?: Event3DCameraSession;
   selectedEventLocationId?: string | null;
   darkMode?: boolean;
   reducedMotion?: boolean;
@@ -1536,7 +1545,7 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
           <Html position={[0, 0.405, 0.061]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}><span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span></Html>
         </>}
       </group>
-      {canEnterFromCampus && !isActiveDoor && <Html position={[0, 0.43, 0.08]} center distanceFactor={12} zIndexRange={hasRoute ? [25, 0] : [55, 0]}>
+      {onEnterBuilding && canEnterFromCampus && !isActiveDoor && <Html position={[0, 0.43, 0.08]} center distanceFactor={12} zIndexRange={hasRoute ? [25, 0] : [55, 0]}>
         <div className="group/entrance relative">
           {hasRoute && !exploreTransitionsEnabled
             ? <span aria-label={`Entrance at ${buildingName}`} title={`Enter ${buildingName} building`} className="grid h-6 w-6 place-items-center rounded-full border border-white/70 bg-blue-800/45 text-white/85"><DoorOpen className="h-3 w-3" /></span>
@@ -2320,7 +2329,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     const first = campusMapPointToWorld({ x: content.x - content.width / 2, y: content.y - content.height / 2 });
     const second = campusMapPointToWorld({ x: content.x + content.width / 2, y: content.y + content.height / 2 });
     const padding = Math.max(1.5, campusMapSizeToWorld(Math.max(content.width, content.height) * 0.12));
-    return {
+    return event3DOutdoorTargetBounds({
       minX: Math.min(first.x, second.x) - padding,
       maxX: Math.max(first.x, second.x) + padding,
       minY: -0.04,
@@ -2474,7 +2483,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     </group>)}
     <MemoOutdoorAssetLayer assets={campus.decorAssets} suhayHusaySelected={suhayHusaySelected} />
     {campus.buildings.map((building) => <MemoBuilding key={building.id} building={building} selected={props.selectedBuildingId === building.id} onSelectBuilding={selectBuilding} shouldSuppressClick={shouldSuppressClick} />)}
-    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={enterBuilding} shouldSuppressClick={shouldSuppressClick} />
+    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={props.onEnterBuilding ? enterBuilding : undefined} shouldSuppressClick={shouldSuppressClick} />
     {campus.markers.map((marker) => {
       const position = worldTuple(marker, STUDENT_CAMPUS_3D_GROUND_EPSILON);
       const selected = props.selectedPlaceId === marker.id;
@@ -2528,6 +2537,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </group>;
     })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}
+    <Event3DSceneLayout furniture={props.eventFurniture} labels={props.eventLabels} editing={props.eventEditing} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
     {hasRoute && routes.map((segment, index) => <group key={segment.id}>
       <MemoPathSurface path={segment} route halo />
       <MemoPathSurface path={segment} route />

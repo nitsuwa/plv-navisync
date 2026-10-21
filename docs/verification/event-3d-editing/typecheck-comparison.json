@@ -1,0 +1,27 @@
+{
+  "baselineCommit": "75096c5",
+  "baselineDiagnostics": 1047,
+  "currentDiagnostics": 1047,
+  "increasedFileCodeCounts": [],
+  "exactMessageAdditions": [
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '({ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 27 more ... | { ...; })[]' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 1
+    },
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '{ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 27 more ... | { ...; }' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 3
+    }
+  ],
+  "unchangedSourceMessageDifferences": [
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '({ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 27 more ... | { ...; })[]' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 1
+    },
+    {
+      "diagnostic": "src/services/database.ts: error TS2352: Conversion of type '{ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 27 more ... | { ...; }' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "added": 3
+    }
+  ],
+  "comparison": "Same installed dependencies. File/code multiplicities and exact messages compared ignoring line numbers. Unchanged source verified against Git; native compiler may vary truncated union display order."
+}

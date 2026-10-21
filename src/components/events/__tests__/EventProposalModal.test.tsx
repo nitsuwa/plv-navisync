@@ -180,7 +180,7 @@ describe("EventProposalModal", () => {
     expect(screen.queryByLabelText(/event starts|event ends|start date|end date/i)).not.toBeInTheDocument();
     expect(document.querySelector('input[type="date"], input[type="time"], input[type="datetime-local"]')).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 1" }));
     fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
     fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
@@ -198,7 +198,7 @@ describe("EventProposalModal", () => {
     fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "A student event" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 1" }));
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
 
     expect(screen.getByLabelText(/event title/i)).toHaveValue("Campus Fair");
@@ -259,11 +259,39 @@ describe("EventProposalModal", () => {
     fireEvent.click(confirmButton);
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
 
-    expect(within(screen.getByRole("alertdialog", { name: /review event proposal/i })).getByRole("status")).toHaveTextContent("Preparing your event workspace");
+    const reviewDialog = screen.getByRole("alertdialog", { name: /review event proposal/i });
+    expect(reviewDialog).toHaveAttribute("aria-busy", "true");
+    expect(within(reviewDialog).getByRole("status")).toHaveTextContent("Preparing your event workspace");
+    expect(within(reviewDialog).getByTestId("proposal-loading-track")).toBeInTheDocument();
+    expect(within(reviewDialog).getByRole("button", { name: /creating/i })).toBeDisabled();
     expect(createButton).toBeDisabled();
     fireEvent.keyDown(screen.getByRole("alertdialog", { name: /review event proposal/i }), { key: "Escape" });
     fireEvent.pointerDown(screen.getByTestId("proposal-modal-backdrop"), { pointerType: "mouse" });
     expect(onClose).not.toHaveBeenCalled();
+
+    resolveCreate();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows a distinct loading state while uploading a poster before creating the draft", async () => {
+    let resolveUpload!: (result: { error: null }) => void;
+    let resolveCreate!: () => void;
+    const onClose = vi.fn();
+    const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    posterStorage.upload.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve; }));
+    render(<EventProposalModal buildings={buildings} onClose={onClose} onCreate={onCreate} />);
+    fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Campus Fair" } });
+    fireEvent.change(screen.getByLabelText(/event poster/i), { target: { files: [new File(["poster"], "fair.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
+
+    const review = screen.getByRole("alertdialog", { name: /review event proposal/i });
+    expect(await within(review).findByRole("status")).toHaveTextContent("Uploading event poster");
+    resolveUpload({ error: null });
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(within(review).getByRole("status")).toHaveTextContent("Preparing your event workspace");
 
     resolveCreate();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -276,7 +304,7 @@ describe("EventProposalModal", () => {
     fireEvent.change(screen.getByLabelText(/event poster/i), { target: { files: [new File(["poster"], "fair.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /campus grounds/i }));
-    fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Science Building — Floor 1" }));
     fireEvent.click(screen.getByRole("button", { name: /create & design maps/i }));
     fireEvent.click(screen.getByRole("button", { name: /confirm & design/i }));
     expect(await screen.findByText(/network unavailable/i)).toBeInTheDocument();
@@ -304,8 +332,8 @@ describe("EventProposalModal", () => {
     render(<EventProposalModal buildings={tenFloorBuilding} onClose={vi.fn()} onCreate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/event title/i), { target: { value: "Campus Fair" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    for (let index = 0; index < 10; index += 1) {
-      fireEvent.click(screen.getByRole("button", { name: /add building location/i }));
+    for (let index = 1; index <= 10; index += 1) {
+      fireEvent.click(screen.getByRole("checkbox", { name: `Science Building — Floor ${index}` }));
     }
 
     expect(screen.getByRole("dialog", { name: /create event proposal/i })).toHaveClass("h-[100dvh]");

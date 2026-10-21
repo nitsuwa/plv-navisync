@@ -200,10 +200,12 @@ export function getFloorPlanContentBounds(
     return { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
   }
 
-  const minX = Math.max(0, Math.min(...rects.map((rect) => rect.x)));
-  const minY = Math.max(0, Math.min(...rects.map((rect) => rect.y)));
-  const maxX = Math.min(canvasWidth, Math.max(...rects.map((rect) => rect.x + rect.width)));
-  const maxY = Math.min(canvasHeight, Math.max(...rects.map((rect) => rect.y + rect.height)));
+  // Published legacy floors can have annex rooms and exterior circulation
+  // beyond their recorded canvas. Framing must not crop authored geometry.
+  const minX = Math.min(...rects.map((rect) => rect.x));
+  const minY = Math.min(...rects.map((rect) => rect.y));
+  const maxX = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
 
   if (maxX <= minX || maxY <= minY) {
     return { x: 0, y: 0, width: canvasWidth, height: canvasHeight };

@@ -1,0 +1,66 @@
+{
+  "baseline": "75096c5",
+  "method": "Current repository test config and dependencies; read-only Vite pre-load hook replaces every changed existing production TS/TSX module with git show 75096c5 source. Selected tests match upstream source. No working source file is overwritten.",
+  "results": [
+    {
+      "file": "src/hooks/__tests__/useAdminEventSubmissions.test.tsx",
+      "currentFailureNames": [
+        "shared admin pending submissions detects new submissions on its timer and retains loaded work on network failure"
+      ],
+      "upstreamFailureNames": [
+        "shared admin pending submissions detects new submissions on its timer and retains loaded work on network failure"
+      ],
+      "sameFailureNames": true,
+      "upstreamPassed": 5,
+      "upstreamFailed": 1
+    },
+    {
+      "file": "src/hooks/__tests__/useStudentOrgEventUpdates.test.tsx",
+      "currentFailureNames": [
+        "shared Student Org review updates polls visible sessions without resetting an acknowledged update",
+        "shared Student Org review updates refreshes changed feedback on focus and does not acknowledge a newer version with an old card"
+      ],
+      "upstreamFailureNames": [
+        "shared Student Org review updates polls visible sessions without resetting an acknowledged update",
+        "shared Student Org review updates refreshes changed feedback on focus and does not acknowledge a newer version with an old card"
+      ],
+      "sameFailureNames": true,
+      "upstreamPassed": 10,
+      "upstreamFailed": 2
+    },
+    {
+      "file": "src/pages/__tests__/StudentMyEventsAccess.test.tsx",
+      "currentFailureNames": [
+        "StudentMyEventsPage access acknowledges only the layout whose maps are opened",
+        "StudentMyEventsPage access does not force an old editor navigation after the user leaves during acknowledgement",
+        "StudentMyEventsPage access explains the next step for a approved proposal",
+        "StudentMyEventsPage access marks only the chosen reviewed layout read and keeps the other layout unread"
+      ],
+      "upstreamFailureNames": [
+        "StudentMyEventsPage access acknowledges only the layout whose maps are opened",
+        "StudentMyEventsPage access does not force an old editor navigation after the user leaves during acknowledgement",
+        "StudentMyEventsPage access explains the next step for a approved proposal",
+        "StudentMyEventsPage access marks only the chosen reviewed layout read and keeps the other layout unread"
+      ],
+      "sameFailureNames": true,
+      "upstreamPassed": 12,
+      "upstreamFailed": 4
+    },
+    {
+      "file": "src/lib/__tests__/exteriorApproachNavigation.test.ts",
+      "currentFailureNames": [
+        "exterior approach navigation does not expose a Door or Ramp/Steps transition duplicate in the active context",
+        "exterior approach navigation reuses shared access handoff topology and saves two directional Entrances idempotently",
+        "exterior approach navigation uses a complete linked Veranda in Emergency's final General fallback tier"
+      ],
+      "upstreamFailureNames": [
+        "exterior approach navigation does not expose a Door or Ramp/Steps transition duplicate in the active context",
+        "exterior approach navigation reuses shared access handoff topology and saves two directional Entrances idempotently",
+        "exterior approach navigation uses a complete linked Veranda in Emergency's final General fallback tier"
+      ],
+      "sameFailureNames": true,
+      "upstreamPassed": 40,
+      "upstreamFailed": 3
+    }
+  ]
+}

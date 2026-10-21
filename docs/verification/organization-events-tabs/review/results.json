@@ -1,0 +1,133 @@
+{
+  "reviewDate": "2026-10-15",
+  "timezone": "Asia/Manila",
+  "verdict": "CHANGES_REQUESTED",
+  "productionSourceChangedDuringReview": false,
+  "originalHead": "95b546122ba66fe52343bcf9111495844fcf320d",
+  "findings": [
+    {
+      "id": "R1",
+      "requirement": "U16",
+      "summary": "Running app serves another worktree and lacks the delivered tabs components",
+      "result": "FAIL",
+      "priority": 1
+    },
+    {
+      "id": "R2",
+      "requirement": "U9",
+      "summary": "Delayed acknowledgement overrides the newer History tab selection",
+      "result": "FAIL",
+      "priority": 2
+    },
+    {
+      "id": "R3",
+      "requirement": "U4",
+      "summary": "First History activation restores zero instead of aligning below tabs",
+      "result": "FAIL",
+      "priority": 2
+    },
+    {
+      "id": "R4",
+      "requirement": "U7",
+      "summary": "Desktop ordinary collapsed draft card is 387.75px; only one primary action visible",
+      "result": "NEEDS_IMPROVEMENT",
+      "priority": 2
+    }
+  ],
+  "commands": [
+    {
+      "evidenceLog": "logs/tests.log",
+      "exitCode": 0,
+      "testsFailed": 0,
+      "testFilesPassed": 11,
+      "testsPassed": 81,
+      "testsSkipped": 0,
+      "name": "Focused plan suite"
+    },
+    {
+      "exitCode": 0,
+      "name": "Production build",
+      "evidenceLog": "logs/build.log",
+      "warning": "Chunks exceed 500kB"
+    },
+    {
+      "exitCode": 1,
+      "name": "TypeScript",
+      "taskImplementationDiagnosticEntries": 0,
+      "evidenceLog": "logs/typescript.log",
+      "diagnosticEntries": 1047
+    },
+    {
+      "exitCode": 0,
+      "name": "Targeted mocked browser probe",
+      "meaning": "Reproductions ran successfully; product behavior fails the indicated expectations"
+    }
+  ],
+  "runtime": {
+    "url": "http://localhost:5173",
+    "servedPageSource": "C:/Users/Rj/.codex/worktrees/event-history-uiux/plv-navisync/src/pages/StudentMyEventsPage.tsx",
+    "usesWorkspaceTabs": false,
+    "usesCurrentWorkCard": false,
+    "newTabsModuleContentType": "text/html",
+    "serverChangedByReview": false
+  },
+  "browserProbe": [
+    {
+      "case": "First pointer history activation aligns with tabs",
+      "viewport": "390x844",
+      "before": 420,
+      "expectedScrollY": 369.5,
+      "actualScrollY": 0,
+      "tabViewportTop": 435.5,
+      "navbarHeight": 57,
+      "screenshot": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\.tmp\\organization-events-tabs\\review-first-history-390.png"
+    },
+    {
+      "case": "Compact current cards at 1440x900",
+      "cards": [
+        {
+          "title": "Campus Culture Week 2026",
+          "height": 387.75,
+          "top": 455.75,
+          "primaryActionBottom": 766.5,
+          "primaryActionVisible": true
+        },
+        {
+          "title": "Student Organization Fair",
+          "height": 461.75,
+          "top": 855.5,
+          "primaryActionBottom": 1240.25,
+          "primaryActionVisible": false
+        },
+        {
+          "title": "TEST: College Week 2026",
+          "height": 460.25,
+          "top": 1329.25,
+          "primaryActionBottom": 1712.5,
+          "primaryActionVisible": false
+        }
+      ]
+    },
+    {
+      "case": "First pointer history activation aligns with tabs",
+      "viewport": "1440x900",
+      "before": 420,
+      "expectedScrollY": 254.75,
+      "actualScrollY": 0,
+      "tabViewportTop": 320.75,
+      "navbarHeight": 57,
+      "screenshot": "C:\\Users\\Rj\\Documents\\GitHub\\plv-navisync\\.tmp\\organization-events-tabs\\review-first-history-1440.png"
+    },
+    {
+      "case": "Tab navigation cancels delayed editor navigation",
+      "selectedUrl": "http://127.0.0.1:5181/student/events?scenario=review-delay-ack&theme=dark&view=history",
+      "actualUrlAfterAcknowledgement": "http://127.0.0.1:5181/student/events/event-pending/edit",
+      "stayedInHistory": false
+    }
+  ],
+  "fullMatrixRerunDuringReview": false,
+  "liveRpc400Checked": false,
+  "liveRequestsForwarded": 0,
+  "liveMutations": 0,
+  "verificationServerStopped": true
+}

@@ -1,5 +1,12 @@
 # Findings & Decisions
 
+## October 13 — Consistent editor tools
+
+- User approved all suggested UX changes, then explicitly replaced exact calibration with approximate proportions against existing buildings/doors. The floor scale feature exists but is hidden behind an admin feature flag; no calibration/schema work is needed for this request.
+- 2D explicitly reports fixed furniture while 3D permits arbitrary chair footprint resizing. A shared asset-specific policy must cover both UI and callbacks/gesture helpers.
+- Current crosshair CSS targets only canvas. Drei HTML and other actual hit targets can inherit a different cursor. Tests must inspect elementFromPoint across the real surface, not only canvas computed style.
+- Outdoor buildings are rendered at a compressed scale compared with indoor floors; new outdoor reference furniture must be smaller. Existing assetVariant survives private/public/reuse projections and can identify reference model height without new SQL or bulk-changing saved drafts.
+
 ## October 9 — Organization Event Continuity
 
 Current owner checks span frontend, SQL policies, triggers, feedback/revision RPCs, and notification receipts. Replacing only a UI creator filter would leave successors denied and original creators authorized. History/reuse and media references must move together with database authorization. PGlite runs real PostgreSQL SQL/RLS but does not establish separate-session concurrency guarantees; a separate PostgreSQL runtime is being investigated for race tests.
@@ -295,3 +302,16 @@ Announcements and Today's Schedule/classes are intentionally excluded from this 
 ## October 8, 2026 — final event context/recovery findings
 
 Resolved defects and evidence are in docs/verification/event-final-audit/README.md. Event/map/venue identity now stays explicit across campus/floor and collapsed states. Owner+event keyed editor sessions reject foreign data and stale completions. Event reads distinguish expired/transport failures from missing records. Measured compact header/error and complete floor bounds drive fit; detail disclosure preserves manual zoom. Admin pin drafts retain map space and reachable form controls on320px instead of clipping/overlap. UI changes use existing palette and all previous dirty work is preserved. Verification is browser/control-fixture scoped, with native200% Edge zoom; physical devices and second liveOrg account are not certified.
+# October 12 — direct event editing in 3D
+
+- User authorized both direct 3D editing and GitHub main integration, with manual testing after all work.
+- Latest remote main is `377763a`; merge `f242aa0` retains teammate canteen/route focus and event previews. All 156 combined map/route/preview tests pass, including the prior failing public map test file.
+- Existing EventFloorEditor owns state/history/autosave; keep in-scene gesture previews local until release to avoid half-finished autosaves.
+- EventItemInspector currently presents fixed-size furniture. Add separate 3D controls for resize rather than changing the 2D inspector's existing contract.
+- Teammate migration `20261012033256_cache_event_safe_published_snapshots.sql` caches the existing event-free publication projection. It is separate from 3D editing; no live SQL has been run.
+- Restoring OrbitControls can change the camera through residual damping; compute the final pointer ray before restoring controls. Track all pressed pointers and suppress editing until every finger lifts after multi-touch cancellation.
+- Outdoor WorldCamera reacts to canvas resizing and competed with EventPreviewCamera when selection controls expanded. Event previews must use one camera owner; public route navigation keeps its existing WorldCamera.
+- Native TypeScript comparison against f242aa0 has no increased file/code diagnostic counts. The repo still has substantial existing errors; the production Vite build succeeds independently.
+- Final comparison against latest75096c5 is1,047diagnostics on both sides, no increased file/code counts. Four representative non-3D test suites reproduce the same10 failures on upstream source. Whole-suite memory errors and existing broader failures prevent a clean full-suite claim; final233 focused and23 browser checks pass.
+
+October 13 implementation findings: shared geometry policy prevents chair/equipment stretching; approximate outdoor factor 0.4 uses persisted assetVariant and stable model height. Position-only constraints preserve tiny/oversized legacy footprints. Actual crosshair includes HTML surfaces and camera chrome stays interactive. Native browser testing exposed a floating action bar covering the 2D resize target; spacing now reserves the control area. Layout issue popup uses a viewport-anchored portal outside scrolling tools. Coordinator false can mean saved older revision with newer unsaved edits, so failure feedback is signature-aware. Default 3D camera fits map to retain building context; Focus is explicit.

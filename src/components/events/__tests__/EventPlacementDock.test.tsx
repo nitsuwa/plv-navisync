@@ -29,7 +29,7 @@ describe("EventPlacementDock", () => {
     expect(withinText(quickAssets)).toEqual(["Chair", "Table", "Booth", "Stage"]);
     fireEvent.click(screen.getByRole("button", { name: "Table" }));
     expect(props.onSelectAsset).toHaveBeenCalledWith(expect.objectContaining({ key: "table" }));
-    expect(screen.getByText("Place multiple")).toBeInTheDocument();
+    expect(screen.getByText("Keep placing")).toBeInTheDocument();
   });
 
   it("opens Layouts without using selection Arrange terminology", () => {
@@ -41,7 +41,7 @@ describe("EventPlacementDock", () => {
 
   it("changes repeat placement and exposes a separate cancel action", () => {
     const { props } = renderDock();
-    fireEvent.click(screen.getByRole("switch", { name: "Place multiple" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Keep placing" }));
     expect(props.onRepeatPlacementChange).toHaveBeenCalledWith(false);
     fireEvent.click(screen.getByRole("button", { name: "Cancel placement" }));
     expect(props.onCancelPlacement).toHaveBeenCalledTimes(1);
