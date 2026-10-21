@@ -1,0 +1,61 @@
+{
+  "viewport": "390x844",
+  "errors": [],
+  "modeBeforeMapPick": "emergency",
+  "modeDuringMapPick": "emergency",
+  "mapBuildingOptions": [
+    {
+      "label": "SC5FSTUDENT CENTER BUILDING",
+      "id": "ce5404c9-1f44-4f59-88be-2a90630b8c87"
+    },
+    {
+      "label": "CABA6FCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+      "id": "15676664-3144-4fd6-8954-0b99b5bf437b"
+    },
+    {
+      "label": "CAN1FCANTEEN",
+      "id": "3181f9f5-895f-47ae-99d6-6fcd15263d53"
+    },
+    {
+      "label": "COED6FCOLLEGE OF EDUCATION BUILDING",
+      "id": "1218c2f6-c4dd-4888-9f87-84dc67b1055d"
+    },
+    {
+      "label": "CEIT6FCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+      "id": "e23793a1-fb00-4641-807f-bb4bcf5cbb1b"
+    }
+  ],
+  "selectedMapTarget": "STUDENT CENTER BUILDING",
+  "modeAfterMapPick": "emergency",
+  "plannerCountAfterMapPick": 1,
+  "findRouteEnabled": true,
+  "sosStatus": "Destination · Emergency Assembly Point",
+  "modeAfterFindRoute": "emergency",
+  "routeReady": true,
+  "routePhase": "preview",
+  "plannerCountAfterFindRoute": 1,
+  "previewArrowsBefore": [
+    "translate(488.8866354277384,349.5520899308635) rotate(91.82796824430501)",
+    "translate(555.3515471500182,440) rotate(0)",
+    "translate(536.1001704450646,535.8497443324031) rotate(123.69006752597979)"
+  ],
+  "previewArrowsAfter": [
+    "translate(488.7874626722442,352.6595029363491) rotate(91.82796824430501)",
+    "translate(558.4605422967002,440) rotate(0)",
+    "translate(534.3756102271366,538.436584659295) rotate(123.69006752597979)"
+  ],
+  "previewArrowsMove": true,
+  "startRouteEnabled": true,
+  "guidedArrows": {
+    "samples": 16,
+    "changedFrames": 1,
+    "moved": true,
+    "paused": true,
+    "last": "[\"translate(488.4050484479734,364.64181529683333) rotate(91.82796824430501)\",\"translate(570.4489554587137,440) rotate(0)\",\"translate(527.7256350937387,548.411547359392) rotate(123.69006752597979)\"]",
+    "transform": "[\"translate(488.4050484479734,364.64181529683333) rotate(91.82796824430501)\",\"translate(570.4489554587137,440) rotate(0)\",\"translate(527.7256350937387,548.411547359392) rotate(123.69006752597979)\"]"
+  },
+  "guidedPhase": "navigating",
+  "modeAfter3dSwitch": null,
+  "phaseAfter3dSwitch": "navigating",
+  "threeDCanvasVisible": true
+}

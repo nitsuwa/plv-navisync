@@ -88,11 +88,54 @@ export function ToolbarTooltip({
   const shortcutText = shortcut ?? def?.shortcut ?? "";
   const description = hint ?? def?.description ?? "";
 
+  const hasOpenModal = () => Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const tooltipWidth = 280;
+    const tooltipHeight = 104;
+    const padding = 12;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const centerX = rect.left + rect.width / 2;
+    const clampedX = Math.max(tooltipWidth / 2 + padding, Math.min(centerX, window.innerWidth - tooltipWidth / 2 - padding));
+    const spaceAbove = rect.top - padding;
+    const spaceBelow = viewportHeight - rect.bottom - padding;
+    const showAbove = spaceAbove >= tooltipHeight || spaceAbove >= spaceBelow;
+    const y = showAbove
+      ? Math.max(padding + tooltipHeight, rect.top - 8)
+      : Math.min(rect.bottom + 8, viewportHeight - padding - tooltipHeight);
+    setPos({ x: clampedX, y, above: showAbove });
+  };
+
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!show || typeof document === "undefined") return;
+    const hideForModal = () => {
+      if (!hasOpenModal()) return;
+      focusedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      setShow(false);
+    };
+    const observer = new MutationObserver(hideForModal);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["role", "aria-modal"] });
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
+    if (triggerRef.current) resizeObserver?.observe(triggerRef.current);
+    hideForModal();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      resizeObserver?.disconnect();
+    };
+  }, [show]);
 
   const dismissTooltip = () => {
     focusedRef.current = false;
@@ -104,26 +147,9 @@ export function ToolbarTooltip({
   };
 
   const handleMouseEnter = () => {
-    if (!triggerRef.current) return;
+    if (!triggerRef.current || hasOpenModal()) return;
     if (timerRef.current) clearTimeout(timerRef.current);
-    const rect = triggerRef.current.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const TOOLTIP_WIDTH = 280;
-    const padding = 12;
-
-    // Clamp X to viewport bounds
-    const clampedX = Math.max(TOOLTIP_WIDTH / 2 + padding, Math.min(centerX, window.innerWidth - TOOLTIP_WIDTH / 2 - padding));
-
-    // Check if there's enough space above, otherwise show below
-    const spaceAbove = rect.top;
-    const tooltipHeight = 104; // approximate
-    const showAbove = spaceAbove >= tooltipHeight + 12;
-
-    setPos({
-      x: clampedX,
-      y: showAbove ? rect.top - 8 : rect.bottom + 8,
-      above: showAbove,
-    });
+    updatePosition();
 
     timerRef.current = setTimeout(() => setShow(true), 400);
   };
@@ -135,7 +161,7 @@ export function ToolbarTooltip({
   };
 
   const handleFocus = () => {
-    if (suppressFocusRef.current) return;
+    if (suppressFocusRef.current || hasOpenModal()) return;
     focusedRef.current = true;
     handleMouseEnter();
   };
@@ -169,10 +195,9 @@ export function ToolbarTooltip({
             position: "fixed",
             left: pos.x,
             ...(pos.above ? { top: pos.y, transform: "translate(-50%, -100%)" } : { top: pos.y, transform: "translate(-50%, 0)" }),
-            // Keep tooltips below modal/dialog stacks (and the tutorial
-            // spotlight) so a stale hint can never float above a foreground
-            // confirmation surface.
-            zIndex: 40,
+            // Sit above ordinary properties panels (z-index 50), but below
+            // editor modal layers. The open-modal observer hides stale hints.
+            zIndex: 55,
             pointerEvents: "none",
           }}
         >
@@ -181,7 +206,7 @@ export function ToolbarTooltip({
             initial={{ opacity: 0, y: pos.above ? 4 : -4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.16, ease: "easeOut" }}
-            className={`relative w-[280px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-border/60 shadow-xl ${tooltipClassName ?? ""}`}
+            className={`relative w-[280px] max-h-[calc(100dvh-24px)] max-w-[calc(100vw-24px)] overflow-y-auto overflow-x-hidden rounded-lg border border-border/60 shadow-xl ${tooltipClassName ?? ""}`}
             style={{
               background: "var(--popover, var(--card))",
               backdropFilter: "blur(12px)",

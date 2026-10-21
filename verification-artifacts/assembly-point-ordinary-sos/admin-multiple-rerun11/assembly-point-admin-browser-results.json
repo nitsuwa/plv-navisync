@@ -1,0 +1,194 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "1e80c4ca-70d0-45ee-8654-1d4738ca0dfb",
+      "name": "Emergency Assembly Point",
+      "nodeId": "b975112a-47e1-479a-8905-645f9eef64a2",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "ce716803-9514-44c6-b2a9-f0bdc31b34ed",
+        "1fa5485d-4cdf-46a4-9594-16cdf4ef4e7d"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "placementAttempt-TEST ONLY - East Gathering Area": {
+      "candidate": {
+        "id": "99748238-3644-4e6d-b497-feb263084e58",
+        "x": 462,
+        "y": 440
+      },
+      "screenPoint": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "marker": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "snapKind": "waypoint"
+    },
+    "placementAttempt-TEST ONLY - Secondary Open Space": {
+      "candidate": {
+        "id": "2c7f6cf7-b6a9-455b-b901-043b0f867e8f",
+        "x": 507,
+        "y": 828
+      },
+      "screenPoint": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "marker": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "snapKind": "waypoint"
+    },
+    "multipleAssignments": [
+      {
+        "id": "1e80c4ca-70d0-45ee-8654-1d4738ca0dfb",
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "primary"
+          },
+          {
+            "code": "SC",
+            "designation": "primary"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "15eba476-daef-422b-a7b0-51535bbea289",
+        "name": "TEST ONLY - East Gathering Area",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "COED",
+            "designation": "primary"
+          },
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "376c893d-a90a-47e3-abb9-73741b854d7b",
+        "name": "TEST ONLY - Secondary Open Space",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          },
+          {
+            "code": "COED",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "uniqueIds": true,
+        "primaryConflicts": [],
+        "alternateCountForCaba": 2
+      }
+    ],
+    "multipleSave": {
+      "draftPointCount": 3,
+      "savedSnapshotPointCount": 3,
+      "allThreeApproved": true,
+      "noDanglingEdges": true
+    },
+    "multipleReload": {
+      "pointCount": 3,
+      "allApproved": true,
+      "names": [
+        "TEST ONLY - Admin Main Assembly Point A",
+        "TEST ONLY - East Gathering Area",
+        "TEST ONLY - Secondary Open Space"
+      ],
+      "connectedCount": 3,
+      "noDanglingEdges": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-three-points-saved-1440.png",
+    "assembly-point-three-points-reloaded-1440.png",
+    "assembly-point-admin-browser-failure.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  },
+  "failure": {
+    "message": "locator.click: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Expand Test Route' })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" title=\"Expand Test Route\" aria-label=\"Expand Test Route\" class=\"h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    4 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n",
+    "stack": "locator.click: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Expand Test Route' })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" title=\"Expand Test Route\" aria-label=\"Expand Test Route\" class=\"h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    4 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is visible, enabled and stable\u001b[22m\n\u001b[2m      - scrolling into view if needed\u001b[22m\n\u001b[2m      - done scrolling\u001b[22m\n\u001b[2m      - <div role=\"dialog\" aria-modal=\"true\" aria-label=\"Unsaved Changes\" class=\"fixed inset-0 z-[200] flex items-center justify-center bg-background/80 backdrop-blur-md p-4\">…</div> intercepts pointer events\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\assembly-point-ordinary-sos\\assembly-point-multiple-admin-browser.cjs:556:69)"
+  }
+}

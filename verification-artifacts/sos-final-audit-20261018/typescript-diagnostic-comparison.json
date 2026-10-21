@@ -1,0 +1,9 @@
+{
+  "baseline": "verification-artifacts/floating-floor-picker-20261018/typescript-current.txt",
+  "current": "verification-artifacts/sos-final-audit-20261018/typescript-current-final.txt",
+  "identityDefinition": "source file + TypeScript code + diagnostic message (line shifts ignored)",
+  "baselineDiagnostics": 1029,
+  "currentDiagnostics": 1029,
+  "newDiagnostics": [],
+  "resolvedDiagnostics": []
+}

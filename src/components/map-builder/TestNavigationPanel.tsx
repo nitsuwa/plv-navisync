@@ -28,6 +28,13 @@ import { polylineCrossesBuilding } from "../../lib/editorPlacement";
 import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairRouteReadiness } from "../../lib/exteriorEmergencyStairs";
 import { campusWorldPointToExteriorFloor, exteriorApproachEntranceReadiness, exteriorApproachNodeId, exteriorFloorPointToCampusWorld, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { campusGates, campusGateNodeIds, outdoorNetworkReachesCampusGate } from "../../lib/campusGates";
+import {
+  campusWidePrimaryAssemblyPoint,
+  hasEmergencyAssemblyPointConfiguredForBuilding,
+  isAssemblyPointAssignedForBuilding,
+  resolvedAssemblyPointsForBuilding,
+} from "../../lib/emergencyAssemblyPoints";
+import { assessEmergencyAuthoredPath } from "../../lib/emergencyPathEligibility";
 import { filterRoutineNavigationEdges, filterRoutineNavigationNodes } from "../../lib/routineNavigationGraph";
 import { validateNavigationGraph } from "../../lib/validateNavigationGraph";
 import type { GraphPath, GraphPathEdgeTraversal, NavigationRouteSearchCache, PreparedNavigationGraph } from "../../lib/pathfinding";
@@ -204,6 +211,8 @@ export type TestRouteSession = {
   /** The automatically selected safe outdoor endpoint used by Emergency mode. */
   emergencyDestinationValue?: string;
   emergencyDestinationLabel?: string;
+  /** Empty means the assigned Primary; a value is an explicit Admin test selection. */
+  emergencyAssemblyPointId?: string;
   routeMode: RouteMode;
   /** Standard-only preference for the intermediate cross-floor method. */
   routePreference?: StandardRoutePreference;
@@ -353,6 +362,8 @@ interface TestNavigationPanelProps {
   currentBuildingId?: string;
   currentFloorId?: string;
   inspectorVisible?: boolean;
+  /** Actual right inset reserved by the visible Properties inspector. */
+  inspectorRightInset?: number;
   onCompactModeChange?: (compact: boolean) => void;
   /** Cancel any host-level transition presentation (for example an elevator ride). */
   onRouteTransitionCancel?: () => void;
@@ -1504,6 +1515,8 @@ export type EmergencyDestinationCandidate = {
    * its outdoor-side target. This prevents a shared outdoor junction from
    * making an unreachable Emergency Exit appear usable via another entrance. */
   entranceNodeId: string;
+  /** Authored Entrance identity, kept separate from the graph node identity. */
+  entranceId?: string;
   label: string;
   /** Lower values are higher-priority emergency tiers. */
   priority: 0 | 1 | 2;
@@ -1516,8 +1529,15 @@ export type EmergencyDestinationCandidate = {
   stairNodeIds?: string[];
   stairBuildingId?: string;
   stairId?: string;
-  /** Exterior stair candidates finish at a Campus Gate after crossing the
-   * outdoor network; keep this separate from the stair discharge node. */
+  /** Final Assembly Point, when this candidate is a complete evacuation route. */
+  assemblyPointId?: string;
+  assemblyPointName?: string;
+  assemblyPointDesignation?: "primary" | "alternate";
+  /** False for retained building-exit/Campus Gate test previews. */
+  completeAssemblyRoute?: boolean;
+  /** A complete graph path exists even if destination approval is still pending. */
+  graphCompleteAssemblyRoute?: boolean;
+  /** The egress discharge stays distinct from the final outdoor destination. */
   outdoorDischargeNodeId?: string;
   campusGatePurpose?: "general" | "emergency_exit";
 };
@@ -1556,14 +1576,20 @@ function combineEmergencyRouteLegs(legs: GraphPath[]): GraphPath | null {
 
 /** Trace the exact edge and traversal direction selected for every route hop. */
 export function routeEdgeTrace(
-  path: GraphPath,
+  path: Pick<GraphPath, "nodeIds" | "edgeTraversals">,
   edges: Pick<NavigationEdge, "id" | "startNodeId" | "endNodeId" | "bidirectional" | "bendPoints">[],
+  preferredEdgeIds: readonly string[] = [],
 ): Array<GraphPathEdgeTraversal & { edgeId?: string }> {
+  const preferred = new Set(preferredEdgeIds);
   return path.nodeIds.slice(0, -1).map((fromNodeId, index) => {
     const toNodeId = path.nodeIds[index + 1];
     const recorded = path.edgeTraversals?.[index];
     if (recorded?.fromNodeId === fromNodeId && recorded.toNodeId === toNodeId) return recorded;
-    const edge = edges.find((candidate) => candidate.startNodeId === fromNodeId && candidate.endNodeId === toNodeId)
+    const edge = edges.find((candidate) => preferred.has(candidate.id)
+      && candidate.startNodeId === fromNodeId && candidate.endNodeId === toNodeId)
+      ?? edges.find((candidate) => preferred.has(candidate.id)
+        && candidate.bidirectional && candidate.startNodeId === toNodeId && candidate.endNodeId === fromNodeId)
+      ?? edges.find((candidate) => candidate.startNodeId === fromNodeId && candidate.endNodeId === toNodeId)
       ?? edges.find((candidate) => candidate.bidirectional && candidate.startNodeId === toNodeId && candidate.endNodeId === fromNodeId);
     const reversed = !!edge && (edge.startNodeId !== fromNodeId || edge.endNodeId !== toNodeId);
     return {
@@ -1598,34 +1624,106 @@ function emergencyOutdoorTarget(
  * tried before Emergency Exit entrances; safe General Entrances are retained
  * as the final fallback when every dedicated egress is unreachable from the
  * selected start. Service Entrances are intentionally excluded. */
+export type EmergencyDestinationSelection = {
+  /** Use only the assigned Primary Assembly Point (the default SOS policy). */
+  primaryOnly?: boolean;
+  /** Keep a clearly incomplete exit-only preview when no Assembly Point is assigned. */
+  allowExitOnlyPreview?: boolean;
+  /** Restrict candidates to one explicitly selected Assembly Point. */
+  assemblyPointId?: string;
+  /** Student-only mode: discard physically connected but ineligible candidates before egress-tier fallback. */
+  eligibleOnly?: boolean;
+};
+
 export function emergencyDestinationCandidatePools(
   campus: Campus,
   routeEdges: NavigationEdge[],
+  selection: EmergencyDestinationSelection = {},
+  startNodeId?: string,
 ): { emergency: EmergencyDestinationCandidate[]; general: EmergencyDestinationCandidate[] } {
   const emergency: EmergencyDestinationCandidate[] = [];
   const general: EmergencyDestinationCandidate[] = [];
   const nodes = campus.navNodes ?? [];
+  const routeStart = startNodeId ? nodes.find((node) => node.id === startNodeId) : undefined;
   const campusGateNodes = campusGateNodeIds(campus)
     .map((id) => nodes.find((node) => node.id === id))
     .filter((node): node is NavigationNode => !!node);
   const gatesByNodeId = new Map(campusGateNodes.map((node) => [node.id, campusGates(campus).find((gate) => gate.id === node.gateId)]));
-  const expandToCampusGates = (pool: EmergencyDestinationCandidate[]) => campusGateNodes.length === 0
-    ? (campusGates(campus).length === 0 ? pool : [])
-    : pool.flatMap((candidate) => {
-      const discharge = nodes.find((node) => node.id === candidate.nodeId);
-      if (!discharge) return [];
-      return campusGateNodes.map((target) => {
-        const gate = gatesByNodeId.get(target.id);
-        return {
+  const expandToOutdoorDestinations = (pool: EmergencyDestinationCandidate[]) => pool.flatMap((candidate) => {
+    const discharge = nodes.find((node) => node.id === candidate.nodeId);
+    if (!discharge) return [];
+    const buildingId = candidate.stairBuildingId
+      ?? nodes.find((node) => node.id === candidate.entranceNodeId)?.buildingId;
+    // SOS destination resolution honors building-level assignments first and
+    // inherits the explicitly designated campus Primary when no valid
+    // building-level destination overrides it.
+    const primaryOnly = selection.primaryOnly ?? Boolean(selection.assemblyPointId);
+    const policy = primaryOnly ? "fixed_primary" : "nearest_eligible";
+    const resolved = buildingId ? resolvedAssemblyPointsForBuilding(campus, buildingId, policy) : [];
+    const allConfiguredAssemblyPoints = resolved.sort((left, right) =>
+      (left.designation === "primary" ? 0 : 1) - (right.designation === "primary" ? 0 : 1)
+      || left.point.name.localeCompare(right.point.name));
+    const assignedAssemblyPoints = selection.assemblyPointId
+      ? (() => {
+          const explicit = buildingId ? (campus.assemblyPoints ?? []).flatMap((point) => {
+            const assignment = point.buildingAssignments?.find((item) => item.buildingId === buildingId);
+            return assignment && isAssemblyPointAssignedForBuilding(campus, point, buildingId)
+              ? [{ point, designation: assignment.designation }]
+              : [];
+          }) : [];
+          const inherited = buildingId ? campusWidePrimaryAssemblyPoint(campus) : null;
+          const configured = explicit.some(({ point }) => point.id === selection.assemblyPointId)
+            ? explicit
+            : inherited ? [...explicit, { point: inherited, designation: "primary" as const }] : explicit;
+          return configured.filter(({ point }) => point.id === selection.assemblyPointId);
+        })()
+      : allConfiguredAssemblyPoints;
+    const hasConfiguredAssemblyAssignment = buildingId
+      ? hasEmergencyAssemblyPointConfiguredForBuilding(campus, buildingId)
+      : false;
+    const allowUnassignedExitPreview = selection.allowExitOnlyPreview && !hasConfiguredAssemblyAssignment && !selection.assemblyPointId;
+    if ((primaryOnly || selection.assemblyPointId) && assignedAssemblyPoints.length === 0 && !allowUnassignedExitPreview) return [];
+    if (assignedAssemblyPoints.length > 0) {
+      return assignedAssemblyPoints.flatMap(({ point, designation }) => {
+        const target = nodes.find((node) => node.id === point.navNodeId && node.assemblyPointId === point.id);
+        if (!target) return [];
+        return [{
           ...candidate,
           value: `node:${target.id}`,
           nodeId: target.id,
+          assemblyPointId: point.id,
+          assemblyPointName: point.name?.trim() || "Emergency Assembly Point",
+          assemblyPointDesignation: designation,
+          // This candidate exists only after graph search found a complete
+          // route to this exact anchor. Legacy review fingerprints do not gate it.
+          completeAssemblyRoute: true,
+          graphCompleteAssemblyRoute: true,
           outdoorDischargeNodeId: discharge.id,
-          campusGatePurpose: gate?.purpose,
-          label: `${candidate.label} -> ${gate?.name?.trim() || "Campus Gate"}`,
-        };
+          campusGatePurpose: undefined,
+          label: `${candidate.label} -> ${point.name?.trim() || "Emergency Assembly Point"}`,
+        }];
       });
+    }
+    // Preserve the existing Admin Test Route view as a clearly incomplete
+    // building-exit preview. Student SOS resolution filters these candidates.
+    if (campusGateNodes.length === 0) return [{
+      ...candidate,
+      completeAssemblyRoute: false,
+      label: `${candidate.label} · building-exit preview only`,
+    }];
+    return campusGateNodes.map((target) => {
+      const gate = gatesByNodeId.get(target.id);
+      return {
+        ...candidate,
+        value: `node:${target.id}`,
+        nodeId: target.id,
+        completeAssemblyRoute: false,
+        outdoorDischargeNodeId: discharge.id,
+        campusGatePurpose: gate?.purpose,
+        label: `${candidate.label} -> ${gate?.name?.trim() || "Campus Gate"} · building-exit preview only`,
+      };
     });
+  });
   for (const building of campus.buildings ?? []) {
     const buildingLabel = building.name?.trim() || building.code?.trim() || "Building";
     for (const entrance of building.entrances ?? []) {
@@ -1640,6 +1738,7 @@ export function emergencyDestinationCandidatePools(
           nodeId: target.id,
           entranceNodeId: (campus.navNodes ?? []).find((node) => node.buildingId === building.id
             && node.entranceId === entrance.id && !node.floorId)?.id ?? "",
+          entranceId: entrance.id,
           label: `${buildingLabel} · ${entrance.name?.trim() || "Emergency Exit"}`,
           // A complete Exterior Emergency Stair is the dedicated evacuation
           // chain and outranks an Emergency Exit entrance.  The latter remains
@@ -1653,6 +1752,7 @@ export function emergencyDestinationCandidatePools(
           nodeId: target.id,
           entranceNodeId: (campus.navNodes ?? []).find((node) => node.buildingId === building.id
             && node.entranceId === entrance.id && !node.floorId)?.id ?? "",
+          entranceId: entrance.id,
           label: `${buildingLabel} · ${entrance.name?.trim() || "General Entrance"}`,
           priority: 2,
           kind: "general",
@@ -1663,7 +1763,13 @@ export function emergencyDestinationCandidatePools(
     // designated Emergency egress. It competes with Emergency Exit entrances
     // before any General Entrance fallback is considered.
     for (const stair of canonicalExteriorEmergencyStairsForBuilding(building)) {
-      const readiness = exteriorEmergencyStairRouteReadiness(building, stair, nodes, routeEdges);
+      // An exterior stair's authored emergency-use designation must be
+      // affirmative. More importantly, assess only the selected origin
+      // Floor's descent chain; a broken unrelated upper landing must not hide
+      // a complete route from a lower served Floor.
+      if (stair.state !== "open" || stair.emergencySafe !== true) continue;
+      const startFloorId = routeStart?.buildingId === building.id ? routeStart.floorId : undefined;
+      const readiness = exteriorEmergencyStairRouteReadiness(building, stair, nodes, routeEdges, startFloorId);
       if (!readiness.ready || !readiness.outdoorNodeId) continue;
       emergency.push({
         value: `node:${readiness.outdoorNodeId}`,
@@ -1679,7 +1785,7 @@ export function emergencyDestinationCandidatePools(
       });
     }
   }
-  const namedEmergency = expandToCampusGates(emergency).map((candidate) => {
+  const namedEmergency = expandToOutdoorDestinations(emergency).map((candidate) => {
     if (candidate.kind !== "exterior_stair" || !candidate.stairId) return candidate;
     const ownerBuilding = (campus.buildings ?? []).find((building) => building.id === candidate.stairBuildingId);
     const ownerIndex = ownerBuilding
@@ -1689,13 +1795,41 @@ export function emergencyDestinationCandidatePools(
     const displayName = owner?.label?.trim() || `Exterior Stair ${ownerIndex + 1}`;
     return { ...candidate, label: `${candidate.label} · ${displayName}` };
   });
-  return { emergency: namedEmergency, general: expandToCampusGates(general) };
+  return { emergency: namedEmergency, general: expandToOutdoorDestinations(general) };
 }
 
 /** An ordinary Elevator may be the person's starting location, but it is not
  * itself an emergency-safe transition. Treat only that endpoint as a neutral
  * local anchor so its local Walking Network can lead to a Stair/exit while
  * preserving all emergency edge filtering. */
+/** Rank complete egresses by physical route priority, then full path cost.
+ * A same-level Emergency Exit is preferred first. Otherwise, a complete
+ * Exterior Emergency Stair route outranks a lower-floor exit reached using
+ * indoor stairs. */
+export function emergencyEgressRoutePriority(
+  campus: Campus,
+  candidate: Pick<EmergencyDestinationCandidate, "kind">,
+  nodeIds: readonly string[],
+): number {
+  const nodeById = new Map((campus.navNodes ?? []).map((node) => [node.id, node]));
+  const pathNodes = nodeIds.map((id) => nodeById.get(id)).filter((node): node is NavigationNode => !!node);
+  const firstExteriorStairIndex = pathNodes.findIndex((node) => !!node.exteriorEmergencyStairId);
+  // Rank by the complete route's physical egress. An eligible indoor Stair
+  // can be the correct first leg before a lower-floor Exterior Emergency
+  // Stair, and must not demote that complete exterior-stair route.
+  const usesExteriorStair = candidate.kind === "exterior_stair" || firstExteriorStairIndex >= 0;
+  const usesVerticalTransition = pathNodes.some((node, index) => {
+    if (index === 0) return false;
+    const previous = pathNodes[index - 1];
+    return Boolean(node.stairId || node.exteriorEmergencyStairId || node.type === "stair" || node.emergencyStair
+      || (previous.floorId && node.floorId && previous.floorId !== node.floorId));
+  });
+  if (candidate.kind === "emergency_exit" && !usesVerticalTransition) return -1;
+  if (usesExteriorStair) return 0;
+  if (candidate.kind === "emergency_exit" || usesVerticalTransition) return 1;
+  return 2;
+}
+
 function emergencySearchNodes(nodes: NavigationNode[], startNodeId: string): NavigationNode[] {
   const start = nodes.find((node) => node.id === startNodeId);
   if (!start || start.emergencySafe === true || (!start.elevatorId && start.type !== "elevator")) return nodes;
@@ -2053,15 +2187,16 @@ function entranceEgressRoute(
  * route-mode candidate qualification does not alter global pathfinding or
  * Standard/Accessible routing.
  */
-export function chooseEmergencyDestinationCandidate(
+export function chooseEmergencyDestinationCandidates(
   campus: Campus,
   routeEdges: NavigationEdge[],
   startNodeId: string,
-): { candidate: EmergencyDestinationCandidate; path: GraphPath } | null {
+  selection: EmergencyDestinationSelection = {},
+): Array<{ candidate: EmergencyDestinationCandidate; path: GraphPath }> {
   const nodes = campus.navNodes ?? [];
   const indexes = buildTestRouteLookupIndexes(campus);
   const searchNodes = emergencySearchNodes(nodes, startNodeId);
-  const pools = emergencyDestinationCandidatePools(campus, routeEdges);
+  const pools = emergencyDestinationCandidatePools(campus, routeEdges, selection, startNodeId);
   let explicitGraph: PreparedNavigationGraph | undefined;
   let derivedGraph: PreparedNavigationGraph | undefined;
   let explicitSearchCache: NavigationRouteSearchCache | undefined;
@@ -2081,6 +2216,18 @@ export function chooseEmergencyDestinationCandidate(
   }, 0);
   const stableEgressKey = (candidate: EmergencyDestinationCandidate) => `${candidate.stairBuildingId ?? ""}:${candidate.kind}:${candidate.stairId ?? candidate.entranceNodeId ?? ""}`;
   const stableCandidateKey = (candidate: EmergencyDestinationCandidate) => `${stableEgressKey(candidate)}:${candidate.nodeId}`;
+  const eligiblePath = (candidate: EmergencyDestinationCandidate, path: GraphPath) => {
+    if (!selection.eligibleOnly) return true;
+    const originBuildingId = indexes.nodeById.get(startNodeId)?.buildingId;
+    const assessment = assessEmergencyAuthoredPath(campus, routeEdges, {
+      nodeIds: path.nodeIds,
+      edgeIds: routeEdgeTrace(path, routeEdges).map((traversal) => traversal.edgeId),
+      destinationNodeId: candidate.nodeId,
+      originBuildingId,
+      destinationPoint: path.waypoints.at(-1),
+    });
+    return assessment.connected && assessment.emergencyEligible;
+  };
   const reachableCandidates = (pool: EmergencyDestinationCandidate[]) => {
     const evaluated = pool
     .map((candidate) => ({
@@ -2089,16 +2236,35 @@ export function chooseEmergencyDestinationCandidate(
         ? exteriorEmergencyStairRoute(campus, searchNodes, startNodeId, candidate, getExplicitGraph(), getExplicitSearchCache(), indexes)
         : entranceEgressRoute(campus, routeEdges, searchNodes, startNodeId, candidate, getDerivedGraph(), getDerivedSearchCache(), indexes),
     }))
-    .filter((entry): entry is { candidate: EmergencyDestinationCandidate; route: EmergencyCandidateRoute } => !!entry.route);
-    return evaluated.sort((left, right) => left.route.path.distanceM - right.route.path.distanceM
+    .filter((entry): entry is { candidate: EmergencyDestinationCandidate; route: EmergencyCandidateRoute } => !!entry.route)
+    .filter((entry) => eligiblePath(entry.candidate, entry.route.path));
+    return evaluated.sort((left, right) => emergencyEgressRoutePriority(campus, left.candidate, left.route.path.nodeIds)
+      - emergencyEgressRoutePriority(campus, right.candidate, right.route.path.nodeIds)
+      || left.route.path.distanceM - right.route.path.distanceM
       || transitionCount(left.route.path) - transitionCount(right.route.path)
       || stableEgressKey(left.candidate).localeCompare(stableEgressKey(right.candidate))
       || (left.candidate.campusGatePurpose === "emergency_exit" ? 0 : 1) - (right.candidate.campusGatePurpose === "emergency_exit" ? 0 : 1)
       || left.route.outdoorGateDistanceM - right.route.outdoorGateDistanceM
       || stableCandidateKey(left.candidate).localeCompare(stableCandidateKey(right.candidate)));
   };
-  const selected = reachableCandidates(pools.emergency)[0] ?? reachableCandidates(pools.general)[0];
-  return selected ? { candidate: selected.candidate, path: selected.route.path } : null;
+  // Preserve the existing emergency-first/fallback behavior, but make every
+  // complete candidate available to room-level Admin review. This lets the
+  // reviewer choose two distinct physical egresses without weakening the
+  // canonical graph, safety filters, or complete-route checks.
+  const emergencyRoutes = reachableCandidates(pools.emergency);
+  const selectedRoutes = emergencyRoutes.length > 0 ? emergencyRoutes : reachableCandidates(pools.general);
+  return selectedRoutes.map(({ candidate, route }) => ({ candidate, path: route.path }));
+}
+
+/** Backwards-compatible single-best candidate used by existing Test Route
+ * and student Emergency flows. */
+export function chooseEmergencyDestinationCandidate(
+  campus: Campus,
+  routeEdges: NavigationEdge[],
+  startNodeId: string,
+  selection: EmergencyDestinationSelection = {},
+): { candidate: EmergencyDestinationCandidate; path: GraphPath } | null {
+  return chooseEmergencyDestinationCandidates(campus, routeEdges, startNodeId, selection)[0] ?? null;
 }
 
 function linkedNodeKind(node: CampusNavNode): "room" | "door" | "stair" | "elevator" | "ramp" | null {
@@ -2112,15 +2278,27 @@ function linkedNodeKind(node: CampusNavNode): "room" | "door" | "stair" | "eleva
 
 /** Resolve a Door label for admin-facing route controls without exposing IDs. */
 export function semanticDoorDisplayName(campus: Campus, node: CampusNavNode): string {
-  if (!node.doorId) return node.name || "Door";
+  if (!node.doorId) return "entrance";
   const building = (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
   const floor = building?.floors.find((candidate) => candidate.id === node.floorId);
   const door = floor?.doors.find((candidate) => candidate.id === node.doorId);
-  if (!door) return node.name || "Door";
-  // A Room access Door is the most useful semantic name in Test Route.
+  const isInternalDoorLabel = (value: string | undefined) => {
+    const label = value?.trim();
+    if (!label) return true;
+    return label.toLowerCase() === node.doorId?.toLowerCase()
+      || /^door(?:[\s#_-]*(?:\d+|[a-z]))?$/i.test(label)
+      || /^door[-_][a-f\d-]{6,}$/i.test(label);
+  };
+  if (!door) return !isInternalDoorLabel(node.name) ? node.name!.trim() : "doorway";
+  const authoredLabel = !isInternalDoorLabel(door?.label) ? door?.label?.trim()
+    : !isInternalDoorLabel(node.name) ? node.name?.trim()
+      : undefined;
+  if (authoredLabel) return authoredLabel;
+
+  // A Room access Door is described by the Room it serves, not its entity ID.
   for (const candidateFloor of building?.floors ?? []) {
     const room = (candidateFloor.rooms ?? []).find((candidate) => roomAccessDoorIds(candidate).includes(door.id));
-    if (room) return `${roomDisplayName(room, candidateFloor.rooms.findIndex((item) => item.id === room.id))} Door`;
+    if (room) return `${roomDisplayName(room, candidateFloor.rooms.findIndex((item) => item.id === room.id))} entrance`;
   }
   // Entrance transitions identify an exterior-facing Door without changing the
   // physical Door record or its canonical graph identity.
@@ -2133,17 +2311,17 @@ export function semanticDoorDisplayName(campus: Campus, node: CampusNavNode): st
       && candidate.entranceId,
     );
     const entrance = entranceNode && building?.entrances?.find((candidate) => candidate.id === entranceNode.entranceId);
-    if (entrance) return `${entrance.name?.trim() || `${building?.code ?? "Building"} Entrance`} Door`;
+    if (entrance) return `${entrance.name?.trim() || building?.code || "Building"} entrance`;
   }
-  if (door.label?.trim()) return door.label.trim();
-  const index = floor?.doors.findIndex((candidate) => candidate.id === door.id) ?? -1;
-  return index >= 0 ? `Door ${index + 1}` : "Door";
+  if (door?.isEmergencyExit) return "emergency exit";
+  return "doorway";
 }
 
 function linkedNodeLabel(node: CampusNavNode, campus?: Campus): string {
   const kind = linkedNodeKind(node);
-  if (campus && node.doorId) {
-    return semanticDoorDisplayName(campus, node);
+  if (campus) {
+    const semantic = routeLocationLabel(campus, node);
+    if (semantic.kind !== "walking") return semantic.label;
   }
   const fallback = kind === "door" ? "Door"
     : kind === "stair" ? "Stair"
@@ -2153,7 +2331,7 @@ function linkedNodeLabel(node: CampusNavNode, campus?: Campus): string {
   return node.name || fallback;
 }
 
-function routeLocationLabel(campus: Campus, node: CampusNavNode): { label: string; kind: string } {
+function routeLocationLabel(campus: Campus, node: CampusNavNode): { label: string; kind: string; stageLabel?: string; roomLabel?: string; emergency?: boolean } {
   const building = (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
   if (node.roomId && building) {
     for (const floor of building.floors ?? []) {
@@ -2164,12 +2342,17 @@ function routeLocationLabel(campus: Campus, node: CampusNavNode): { label: strin
   if (node.doorId && building) {
     for (const floor of building.floors ?? []) {
       const door = floor.doors.find((candidate) => candidate.id === node.doorId);
-      if (door) return { label: semanticDoorDisplayName(campus, node), kind: "door" };
+      if (door) {
+        const linkedRoom = floor.rooms.find((candidate) => roomAccessDoorIds(candidate).includes(door.id));
+        const roomLabel = linkedRoom && roomDisplayName(linkedRoom, floor.rooms.findIndex((candidate) => candidate.id === linkedRoom.id));
+        const label = semanticDoorDisplayName(campus, node);
+        return { label, kind: "door", stageLabel: roomLabel ?? label.replace(/\s+(entrance|exit)$/i, ""), roomLabel, emergency: door.isEmergencyExit };
+      }
     }
   }
   if (node.entranceId && building) {
     const entrance = (building.entrances ?? []).find((candidate) => candidate.id === node.entranceId);
-    if (entrance) return { label: entrance.name || `${building.code} Entrance`, kind: "entrance" };
+    if (entrance) return { label: entrance.name || `${building.code} Entrance`, kind: "entrance", stageLabel: entrance.name || building.code };
   }
   if (node.derivedOwnerType === "entrance_ramp" && node.derivedRole === "outer") {
     return { label: "Ramp", kind: "exterior_ramp" };
@@ -2177,25 +2360,34 @@ function routeLocationLabel(campus: Campus, node: CampusNavNode): { label: strin
   if (node.derivedOwnerType === "entrance_steps" && node.derivedRole === "outer") {
     return { label: "Stairs", kind: "exterior_stairs" };
   }
+  if (node.exteriorEmergencyStairId && building) {
+    const stair = building.exteriorEmergencyStairs?.find((candidate) => candidate.id === node.exteriorEmergencyStairId);
+    return { label: stair?.label?.trim() || "Emergency Stair", kind: "stair", emergency: true };
+  }
   if (node.stairId && building) {
     const floor = building.floors.find((candidate) => candidate.id === node.floorId);
-    const index = floor?.stairs.findIndex((candidate) => candidate.id === node.stairId) ?? -1;
-    return { label: node.name || (index >= 0 ? `Stair ${index + 1}` : "Stair"), kind: "stair" };
+    const stair = floor?.stairs.find((candidate) => candidate.id === node.stairId);
+    return { label: stair?.label?.trim() || "Stair", kind: "stair", emergency: stair?.emergencySafe || node.emergencyStair };
   }
   if (node.elevatorId && building) {
     const floor = building.floors.find((candidate) => candidate.id === node.floorId);
-    const index = floor?.elevators.findIndex((candidate) => candidate.id === node.elevatorId) ?? -1;
-    return { label: node.name || (index >= 0 ? `Elevator ${index + 1}` : "Elevator"), kind: "elevator" };
+    const elevator = floor?.elevators.find((candidate) => candidate.id === node.elevatorId);
+    return { label: elevator?.label?.trim() || "Elevator", kind: "elevator" };
   }
   if (node.rampId && building) {
     const floor = building.floors.find((candidate) => candidate.id === node.floorId);
-    const index = floor?.ramps.findIndex((candidate) => candidate.id === node.rampId) ?? -1;
-    return { label: node.name || (index >= 0 ? `Ramp ${index + 1}` : "Ramp"), kind: "ramp" };
+    const ramp = floor?.ramps.find((candidate) => candidate.id === node.rampId);
+    return { label: ramp?.label?.trim() || "Ramp", kind: "ramp" };
   }
   if (node.gateId) {
     const gate = campusGates(campus).find((candidate) => candidate.id === node.gateId);
-    return { label: gate?.name?.trim() || node.name || "Campus Gate", kind: "gate" };
+    return { label: gate?.name?.trim() || (gate?.purpose === "emergency_exit" ? "Emergency Exit" : "Campus Gate"), kind: "gate" };
   }
+  if (node.assemblyPointId) {
+    const point = (campus.assemblyPoints ?? []).find((candidate) => candidate.id === node.assemblyPointId);
+    return { label: point?.name?.trim() || "Emergency Assembly Point", kind: "assembly" };
+  }
+  if (!node.floorId) return { label: "the campus path", kind: "walking" };
   return { label: "the hallway", kind: "walking" };
 }
 
@@ -2221,41 +2413,151 @@ function entranceEmergencyNodes(
   return nodes.filter((node) => !!node.floorId || allowed.has(node.id));
 }
 
-export function humanRouteSteps(campus: Campus, nodeIds: string[], destinationValue?: string): string[] {
+function routeFloorLabel(campus: Campus, node: CampusNavNode): string {
+  const building = (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
+  const floor = building?.floors.find((candidate) => candidate.id === node.floorId);
+  return floor?.label?.trim() || (floor ? `Floor ${floor.number}` : "the next floor");
+}
+
+function routeConnectorIdentity(node: CampusNavNode, kind: string): string | undefined {
+  if (node.transitionSharedId) return `${kind}:${node.transitionSharedId}`;
+  if (kind === "stair" && node.stairId) return `stair:${node.stairId}`;
+  if (kind === "elevator" && node.elevatorId) return `elevator:${node.elevatorId}`;
+  return undefined;
+}
+
+function routeBuildingLabel(campus: Campus, node: CampusNavNode): string {
+  const building = (campus.buildings ?? []).find((candidate) => candidate.id === node.buildingId);
+  return building?.name?.trim() || building?.code?.trim() || "the building";
+}
+
+/** Turn canonical graph nodes into concise route events for the Admin Test Route panel. */
+export function humanRouteSteps(campus: Campus, nodeIds: string[], destinationValue?: string, routeMode: RouteMode = "standard"): string[] {
   if (nodeIds.length === 0) return [];
-  const nodes = campus.navNodes ?? [];
-  const locations = nodeIds.map((id) => {
-    const node = nodes.find((candidate) => candidate.id === id);
-    return node ? routeLocationLabel(campus, node) : { label: "the hallway", kind: "walking" };
+  const nodesById = new Map((campus.navNodes ?? []).map((node) => [node.id, node]));
+  const entries = nodeIds.flatMap((id) => {
+    const node = nodesById.get(id);
+    return node ? [{ node, location: routeLocationLabel(campus, node) }] : [];
   });
-  const steps = [`Start at ${locations[0].label}`];
-  for (let i = 1; i < locations.length - 1; i += 1) {
-    const location = locations[i];
-    if (i === locations.length - 2 && locations[locations.length - 1]?.kind === "room" && location.kind === "door") continue;
-    if (location.kind === "door") {
-      steps.push(locations[i - 1]?.kind === "room" ? `Exit through ${location.label}` : `Enter through ${location.label}`);
+  if (!entries.length) return [];
+
+  const first = entries[0];
+  const startLabel = first.location.kind === "door" && first.location.roomLabel
+    ? `${first.location.roomLabel} exit`
+    : first.location.label;
+  const steps = [`Start at ${startLabel}`];
+  const add = (step: string) => {
+    if (steps[steps.length - 1] !== step) steps.push(step);
+  };
+  const findNextAnchor = (from: number) => {
+    let index = from;
+    while (index < entries.length && entries[index].location.kind === "walking") index += 1;
+    return index;
+  };
+
+  for (let i = 1; i < entries.length; i += 1) {
+    const previous = entries[i - 1];
+    const current = entries[i];
+    const previousIdentity = routeConnectorIdentity(previous.node, previous.location.kind);
+    const currentIdentity = routeConnectorIdentity(current.node, current.location.kind);
+    const isFloorTransition = previous.location.kind === current.location.kind
+      && (current.location.kind === "stair" || current.location.kind === "elevator" || current.location.kind === "ramp")
+      && previous.node.buildingId === current.node.buildingId
+      && previous.node.floorId !== current.node.floorId
+      && !!previousIdentity && previousIdentity === currentIdentity;
+    if (isFloorTransition) {
+      const verb = current.location.kind === "ramp" || (routeMode === "emergency" && current.location.emergency) ? "Use" : "Take";
+      add(`${verb} the ${current.location.label} to ${routeFloorLabel(campus, current.node)}.`);
+      continue;
     }
-    else if (location.kind === "entrance") steps.push(`Pass ${location.label}`);
-    else if (location.kind === "exterior_ramp") steps.push("Continue outside via ramp");
-    else if (location.kind === "exterior_stairs") steps.push("Continue outside via stairs");
-    else if (location.kind !== "walking") steps.push(`Continue to ${location.label}`);
-    else if (steps[steps.length - 1] !== "Continue along the hallway") steps.push("Continue along the hallway");
+
+    if (current.location.kind === "walking") {
+      const anchorIndex = findNextAnchor(i);
+      if (anchorIndex < entries.length) {
+        const targetEntry = entries[anchorIndex];
+        const final = entries[entries.length - 1];
+        const target = anchorIndex === entries.length - 2 && final.location.kind === "room"
+          ? final.location
+          : targetEntry.location;
+        if (target.kind === "stair" || target.kind === "elevator" || target.kind === "ramp") {
+          const outside = !current.node.floorId && !targetEntry.node.floorId;
+          add(`${outside ? "Follow the campus path" : "Follow the hallway"} to the ${target.label}.`);
+        } else if (target.kind === "entrance" || target.kind === "gate" || target.kind === "assembly" || target.kind === "exterior_ramp" || target.kind === "exterior_stairs") {
+          add(`Follow the campus path to the ${target.label}.`);
+        } else if (target.kind === "room") {
+          add(`${current.node.floorId ? "Follow the hallway" : "Follow the campus path"} toward ${target.label}.`);
+        }
+      }
+      i = anchorIndex - 1;
+      continue;
+    }
+
+    if (current.location.kind === "door") {
+      const final = entries[entries.length - 1];
+      const isDestinationRoomDoor = i === entries.length - 2 && final.location.kind === "room"
+        && current.location.roomLabel === final.location.label;
+      if (isDestinationRoomDoor) continue;
+
+      const next = entries[i + 1];
+      const previousIsOutside = !previous.node.floorId;
+      const nextIsOutside = !!next && !next.node.floorId;
+      if (current.location.roomLabel && previous.location.kind === "room"
+        && previous.location.label === current.location.roomLabel) {
+        const nextAnchorIndex = findNextAnchor(i + 1);
+        const nextAnchor = entries[nextAnchorIndex];
+        const last = entries[entries.length - 1];
+        const nextTarget = nextAnchorIndex === entries.length - 2 && last.location.kind === "room"
+          ? last.location
+          : nextAnchor?.location;
+        const towards = nextTarget?.kind === "stair" || nextTarget?.kind === "elevator" || nextTarget?.kind === "ramp"
+          ? ` and follow the hallway to the ${nextTarget.label}`
+          : nextTarget?.kind === "room"
+            ? ` and follow the hallway toward ${nextTarget.label}`
+            : " and continue into the hallway";
+        add(`Leave ${current.location.roomLabel}${towards}.`);
+        i = Math.max(i, nextAnchorIndex - 1);
+      } else if (previousIsOutside || (previous.location.kind === "entrance" && current.node.floorId)) {
+        add(`Enter ${routeBuildingLabel(campus, current.node)}.`);
+      } else if (nextIsOutside || (!next?.node.floorId && current.node.floorId)) {
+        add(current.location.emergency
+          ? `Exit ${routeBuildingLabel(campus, current.node)} through the emergency exit.`
+          : `Exit ${routeBuildingLabel(campus, current.node)}.`);
+      } else if (next?.location.kind === "room") {
+        add(`Enter ${next.location.label}.`);
+      }
+      continue;
+    }
+
+    if (current.location.kind === "entrance") {
+      if (previous.node.floorId && !current.node.floorId) add(`Exit ${routeBuildingLabel(campus, previous.node)}.`);
+      continue;
+    }
+
+    // Connector nodes only need an approach instruction (emitted for the
+    // preceding walk run) and an explicit floor-change instruction above.
+    if (current.location.kind === "room" && i < entries.length - 1) {
+      add(`Continue toward ${current.location.label}.`);
+    }
   }
-  if (locations.length > 1) {
-    const final = locations[locations.length - 1];
-    const before = locations[locations.length - 2];
-    if (final.kind === "room" && before?.kind === "door") steps.push(`Enter through ${before.label}`);
-    if (destinationValue?.startsWith("building:") && final.kind === "entrance") {
+
+  const final = entries[entries.length - 1];
+  if (entries.length > 1) {
+    if (destinationValue?.startsWith("building:")) {
       const buildingId = destinationValue.slice("building:".length);
       const building = (campus.buildings ?? []).find((candidate) => candidate.id === buildingId);
-      const buildingLabel = building?.name?.trim() || building?.code?.trim() || "the building";
-      steps.push(`Arrive at ${buildingLabel} via ${final.label}`);
-    } else if (destinationValue?.startsWith("building:")) {
-      const buildingId = destinationValue.slice("building:".length);
-      const building = (campus.buildings ?? []).find((candidate) => candidate.id === buildingId);
-      steps.push(`Arrive at ${building?.name?.trim() || building?.code?.trim() || final.label}`);
+      add(`Arrive at ${building?.name?.trim() || building?.code?.trim() || final.location.label}.`);
+    } else if (final.location.kind === "door") {
+      const building = (campus.buildings ?? []).find((candidate) => candidate.id === final.node.buildingId);
+      const explicitDoorTarget = destinationValue === `node:${final.node.id}`;
+      const semanticFallback = final.location.label === "doorway"
+        || final.location.label === "emergency exit"
+        || final.location.label === `${final.location.roomLabel} entrance`;
+      const doorTargetLabel = explicitDoorTarget && !semanticFallback
+        ? final.location.label
+        : final.location.roomLabel || building?.name?.trim() || building?.code?.trim() || final.location.label;
+      add(`Arrive at ${doorTargetLabel}.`);
     } else {
-      steps.push(`Arrive at ${final.label}`);
+      add(`Arrive at ${final.location.label}.`);
     }
   }
   return steps;
@@ -2276,14 +2578,18 @@ function routeSegments(campus: Campus, nodeIds: string[]): { context: string; fr
   const locations = nodeIds.map((id) => {
     const node = nodes.find((candidate) => candidate.id === id);
     return node ? { node, location: routeLocationLabel(campus, node) } : null;
-  }).filter(Boolean) as { node: CampusNavNode; location: { label: string; kind: string } }[];
+  }).filter(Boolean) as { node: CampusNavNode; location: { label: string; kind: string; stageLabel?: string } }[];
   const segments: { context: string; from: string; to: string }[] = [];
   let start = 0;
   while (start < locations.length) {
     let end = start;
     const context = routeContextLabel(campus, locations[start].node);
     while (end + 1 < locations.length && routeContextLabel(campus, locations[end + 1].node) === context) end += 1;
-    if (end > start) segments.push({ context, from: locations[start].location.label, to: locations[end].location.label });
+    if (end > start) segments.push({
+      context,
+      from: locations[start].location.stageLabel ?? locations[start].location.label,
+      to: locations[end].location.stageLabel ?? locations[end].location.label,
+    });
     start = end + 1;
   }
   return segments;
@@ -3098,6 +3404,7 @@ export function routeContinuationMarkers(
   const outdoorIndices = routeNodes
     .map((node, index) => node.type === "outdoor" && !node.floorId && !node.exteriorZoneId && !node.derivedOwnerType ? index : -1)
     .filter((index) => index >= 0);
+  let inboundFloorContinuation = false;
 
   // A continuation marker belongs only to the active route context. Floorless
   // canonical Entrance/threshold nodes are projected into a Floor view, but
@@ -3108,15 +3415,26 @@ export function routeContinuationMarkers(
       .filter((index) => index >= 0);
     if (activeFloorIndices.length === 0 || !routeHasOutdoorNetwork || outdoorIndices.length === 0) return [];
 
-    // Only the last indoor Floor before the route reaches the Outdoor network
-    // owns an outbound continuation cue. Earlier Floors in a multi-Floor route
-    // use their Stair/Elevator transition markers instead.
     const firstOutdoorIndex = outdoorIndices[0];
-    if (Math.min(...activeFloorIndices) >= firstOutdoorIndex) return [];
-    const lastIndoorIndexBeforeOutdoor = floorIndices.filter((index) => index < firstOutdoorIndex).at(-1);
-    if (lastIndoorIndexBeforeOutdoor === undefined
-      || routeNodes[lastIndoorIndexBeforeOutdoor]?.buildingId !== currentContext.buildingId
-      || routeNodes[lastIndoorIndexBeforeOutdoor]?.floorId !== currentContext.floorId) return [];
+    if (Math.min(...activeFloorIndices) < firstOutdoorIndex) {
+      // Only the last indoor Floor before the route reaches the Outdoor
+      // network owns an outbound continuation cue. Earlier Floors in a
+      // multi-Floor route use their Stair/Elevator transition markers instead.
+      const lastIndoorIndexBeforeOutdoor = floorIndices.filter((index) => index < firstOutdoorIndex).at(-1);
+      if (lastIndoorIndexBeforeOutdoor === undefined
+        || routeNodes[lastIndoorIndexBeforeOutdoor]?.buildingId !== currentContext.buildingId
+        || routeNodes[lastIndoorIndexBeforeOutdoor]?.floorId !== currentContext.floorId) return [];
+    } else {
+      // For an inbound route, the first Floor after the Outdoor network owns
+      // the access-feature cue. This keeps a linked Ramp/Steps instruction
+      // visible on the destination Floor and lets the presentation layer
+      // suppress the duplicate Entrance marker at the same handoff.
+      const firstFloorAfterOutdoor = floorIndices.find((index) => index > firstOutdoorIndex);
+      const destinationFloor = firstFloorAfterOutdoor === undefined ? undefined : routeNodes[firstFloorAfterOutdoor];
+      if (destinationFloor?.buildingId !== currentContext.buildingId
+        || destinationFloor?.floorId !== currentContext.floorId) return [];
+      inboundFloorContinuation = true;
+    }
   } else if (currentContext?.kind === "outdoor") {
     const firstOutdoorIndex = outdoorIndices[0];
     const firstFloorIndex = floorIndices[0];
@@ -3150,7 +3468,7 @@ export function routeContinuationMarkers(
       kind: feature.derivedOwnerType === "entrance_ramp" ? "ramp" : "steps",
       x: featurePosition.x,
       y: featurePosition.y,
-      ...(!currentContext && inferredOutdoorDirection === "inbound"
+      ...(inboundFloorContinuation || (!currentContext && inferredOutdoorDirection === "inbound")
         ? { instruction: feature.derivedOwnerType === "entrance_ramp" ? "Continue inside via ramp" : "Continue inside via stairs" }
         : {}),
     }];
@@ -3237,8 +3555,7 @@ export function presentationRouteTransitionMarkers(
   if (continuationPoints.length === 0) return withoutBuildingEntranceCue;
   return withoutBuildingEntranceCue.filter((marker) => {
     if (currentContext.kind === "floor" && marker.kind === "entrance"
-      && continuationMarkers.some((continuation) => (continuation.kind === "ramp" || continuation.kind === "steps")
-        && continuationPoints.some((point) => samePoint(point, marker)))) return false;
+      && continuationMarkers.some((continuation) => continuation.kind === "ramp" || continuation.kind === "steps")) return false;
     if (marker.kind !== "ramp" && marker.kind !== "stair") return true;
     if (marker.targetNodeId && continuationNodeIds.has(marker.targetNodeId)) return false;
     return !continuationPoints.some((point) => samePoint(point, marker));
@@ -3856,6 +4173,7 @@ export function TestNavigationPanel({
   currentBuildingId,
   currentFloorId,
   inspectorVisible = false,
+  inspectorRightInset,
   onCompactModeChange,
   onRouteTransitionCancel,
   onClose,
@@ -3870,6 +4188,7 @@ export function TestNavigationPanel({
   const [destValue, setDestValue] = useState(persistedSession?.destValue ?? "");
   const [emergencyDestinationValue, setEmergencyDestinationValue] = useState(persistedSession?.emergencyDestinationValue ?? "");
   const [emergencyDestinationLabel, setEmergencyDestinationLabel] = useState(persistedSession?.emergencyDestinationLabel ?? "");
+  const [emergencyAssemblyPointId, setEmergencyAssemblyPointId] = useState(persistedSession?.emergencyAssemblyPointId ?? "");
   const [routeMode, setRouteMode] = useState<RouteMode>(persistedSession?.routeMode ?? "standard");
   const [routePreference, setRoutePreference] = useState<StandardRoutePreference>(persistedSession?.routePreference ?? "best");
   const [draftRoutePreference, setDraftRoutePreference] = useState<StandardRoutePreference>(persistedSession?.routePreference ?? "best");
@@ -3905,6 +4224,7 @@ export function TestNavigationPanel({
       setDestValue("");
       setEmergencyDestinationValue("");
       setEmergencyDestinationLabel("");
+      setEmergencyAssemblyPointId("");
       setRouteMode("standard");
       setRoutePreference("best");
       setDraftRoutePreference("best");
@@ -3924,6 +4244,7 @@ export function TestNavigationPanel({
     setDestValue((value) => value === persistedSession.destValue ? value : persistedSession.destValue);
     setEmergencyDestinationValue((value) => value === (persistedSession.emergencyDestinationValue ?? "") ? value : (persistedSession.emergencyDestinationValue ?? ""));
     setEmergencyDestinationLabel((value) => value === (persistedSession.emergencyDestinationLabel ?? "") ? value : (persistedSession.emergencyDestinationLabel ?? ""));
+    setEmergencyAssemblyPointId((value) => value === (persistedSession.emergencyAssemblyPointId ?? "") ? value : (persistedSession.emergencyAssemblyPointId ?? ""));
     setRouteMode((value) => value === persistedSession.routeMode ? value : persistedSession.routeMode);
     const hydratedPreference = persistedSession.routeMode === "standard"
       ? (persistedSession.routePreference ?? "best")
@@ -3947,6 +4268,37 @@ export function TestNavigationPanel({
   const buildings = campus.buildings ?? [];
   const routeGraph = useMemo(() => sharedTestRouteGraph(campus, routeMode), [campus, routeMode]);
   const { routeCampus, nodes, edges, routineGraph, preparedRoutineGraph, graphRevision } = routeGraph;
+  const emergencyStartBuildingId = useMemo(() => {
+    const [kind, firstId] = startValue.split(":");
+    // Semantic Room values are `room:<buildingId>:<roomId>`; using the
+    // building component keeps the Admin destination picker scoped correctly.
+    if (kind === "building" || kind === "room") return firstId;
+    if (kind === "node") return nodes.find((node) => node.id === firstId)?.buildingId;
+    return currentBuildingId ?? currentContext?.buildingId;
+  }, [startValue, buildings, nodes, currentBuildingId, currentContext?.buildingId]);
+  const emergencyAssemblyPointOptions = useMemo(() => {
+    if (!emergencyStartBuildingId) return [];
+    return resolvedAssemblyPointsForBuilding(campus, emergencyStartBuildingId).map(({ point, designation }) => ({
+      id: point.id,
+      name: point.name?.trim() || "Emergency Assembly Point",
+      designation,
+    })).sort((left, right) => (left.designation === "primary" ? 0 : 1) - (right.designation === "primary" ? 0 : 1)
+      || left.name.localeCompare(right.name));
+  }, [campus, emergencyStartBuildingId]);
+  const emergencyPrimaryAssemblyPoint = emergencyAssemblyPointOptions.find((point) => point.designation === "primary");
+  const emergencyResolvedAssemblyPointId = emergencyDestinationValue.startsWith("node:")
+    ? nodes.find((node) => node.id === emergencyDestinationValue.slice("node:".length))?.assemblyPointId
+    : undefined;
+  const emergencyResolvedAssemblyPoint = emergencyAssemblyPointOptions.find((point) => point.id === emergencyResolvedAssemblyPointId)
+    ?? emergencyAssemblyPointOptions.find((point) => point.id === emergencyAssemblyPointId)
+    ?? emergencyPrimaryAssemblyPoint;
+  const emergencyResolvedGate = emergencyDestinationValue.startsWith("node:")
+    ? nodes.find((node) => node.id === emergencyDestinationValue.slice("node:".length) && node.gateId)
+    : undefined;
+  const emergencyCampusGateFallback = !emergencyResolvedAssemblyPoint && Boolean(emergencyResolvedGate)
+    && /Campus Gate/i.test(emergencyDestinationLabel);
+  const emergencyExitOnlyPreview = !emergencyResolvedAssemblyPoint
+    && /building-exit preview only/i.test(emergencyDestinationLabel);
 
   const prioritizeContext = useCallback((options: OptionEntry[]) => {
     if (!currentBuildingId && !currentFloorId) return options;
@@ -3980,6 +4332,7 @@ export function TestNavigationPanel({
       destValue,
       emergencyDestinationValue,
       emergencyDestinationLabel,
+      emergencyAssemblyPointId,
       routeMode,
       routePreference,
       result,
@@ -3991,7 +4344,7 @@ export function TestNavigationPanel({
       previewRoute,
       pendingFocus,
     });
-  }, [destValue, emergencyDestinationLabel, emergencyDestinationValue, error, hasCalculatedRoute, manualCollapsed, manualExpanded, pendingFocus, previewRoute, routeMode, routePreference, result, setRouteSession, startValue]);
+  }, [destValue, emergencyAssemblyPointId, emergencyDestinationLabel, emergencyDestinationValue, error, hasCalculatedRoute, manualCollapsed, manualExpanded, pendingFocus, previewRoute, routeMode, routePreference, result, setRouteSession, startValue]);
   useEffect(() => {
     onCompactModeChange?.(compact);
   }, [compact, onCompactModeChange]);
@@ -4027,7 +4380,7 @@ export function TestNavigationPanel({
     setResult(normalized);
     markSessionInteraction();
   }, [buildings, campus, destValue, hasCalculatedRoute, markSessionInteraction, onHighlightRoute, result, routeMode, routineGraph.edges, routineGraph.nodes]);
-  const displaySteps = useMemo(() => result ? humanRouteSteps(routeCampus, result.nodeIds, destValue) : [], [destValue, result, routeCampus]);
+  const displaySteps = useMemo(() => result ? humanRouteSteps(routeCampus, result.nodeIds, destValue, routeMode) : [], [destValue, result, routeCampus, routeMode]);
   const displaySegments = useMemo(() => result ? routeSegments(routeCampus, result.nodeIds) : [], [result, routeCampus]);
   const routeMethod = useMemo(() => result && routeMode === "standard" ? routeTransitionMethod(routeCampus, result.nodeIds) : null, [result, routeCampus, routeMode]);
   useEffect(() => {
@@ -4037,6 +4390,7 @@ export function TestNavigationPanel({
     setter(mapPickResult.value);
     setEmergencyDestinationValue("");
     setEmergencyDestinationLabel("");
+    setEmergencyAssemblyPointId("");
     setError(null);
     setResult(null);
     setHasCalculatedRoute(false);
@@ -4175,7 +4529,26 @@ export function TestNavigationPanel({
       // Prefer a reachable designated Emergency Exit or complete Exterior
       // Emergency Stair. Only when every designated egress is unreachable do
       // we consider a safe General Entrance fallback.
-      const selected = chooseEmergencyDestinationCandidate(campus, edges, fromId);
+      const selection = {
+        // Admin Test Route follows the same default destination policy as
+        // Student SOS: use the building's approved Primary. Alternates are
+        // only considered when an Admin explicitly selects one in this panel.
+        primaryOnly: !emergencyAssemblyPointId,
+        assemblyPointId: emergencyAssemblyPointId || undefined,
+        // Keep the existing clearly incomplete exit-only diagnostic when no
+        // Assembly Point assignment exists in the draft.
+        allowExitOnlyPreview: true,
+      } as const;
+      const emergencyStartIds = activeStartValue.startsWith("room:") && startRoomCandidateIds.length > 0
+        ? startRoomCandidateIds
+        : [fromId];
+      const selected = emergencyStartIds.flatMap((startNodeId) =>
+        chooseEmergencyDestinationCandidates(campus, edges, startNodeId, selection),
+      ).sort((left, right) => emergencyEgressRoutePriority(campus, left.candidate, left.path.nodeIds)
+        - emergencyEgressRoutePriority(campus, right.candidate, right.path.nodeIds)
+        || left.path.distanceM - right.path.distanceM
+        || (left.candidate.entranceId ?? left.candidate.stairId ?? "")
+          .localeCompare(right.candidate.entranceId ?? right.candidate.stairId ?? ""))[0];
       if (!selected) {
         setError(NO_EMERGENCY_ROUTE_ERROR);
         setEmergencyDestinationValue("");
@@ -4184,6 +4557,9 @@ export function TestNavigationPanel({
         setLoading(false);
         return;
       }
+      // Room SOS compares every real connected Room Door and starts at the
+      // door used by the chosen shortest complete route.
+      fromId = selected.path.nodeIds[0] ?? fromId;
       activeDestValue = selected.candidate.value;
       toId = selected.candidate.nodeId;
       activeEmergencyDestinationLabel = selected.candidate.label;
@@ -4426,6 +4802,7 @@ export function TestNavigationPanel({
       routePreference: activeRoutePreference,
       emergencyDestinationValue: emergencyMode ? activeDestValue : emergencyDestinationValue,
       emergencyDestinationLabel: activeEmergencyDestinationLabel,
+      emergencyAssemblyPointId: emergencyMode ? emergencyAssemblyPointId : undefined,
       result: path,
       error: null,
       hasCalculatedRoute: true,
@@ -4447,7 +4824,7 @@ export function TestNavigationPanel({
       }
     }
     setLoading(false);
-  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, routeMode, routePreference, nodes, edges, routineGraph, preparedRoutineGraph, campus, routeCampus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
+  }, [startValue, destValue, emergencyDestinationLabel, emergencyDestinationValue, emergencyAssemblyPointId, routeMode, routePreference, nodes, edges, routineGraph, preparedRoutineGraph, campus, routeCampus, currentContext, manualCollapsed, manualExpanded, markSessionInteraction, onHighlightRoute, onFocusNode, onRouteStartFocus, onRouteTransitionCancel, pendingFocus, previewRoute, setRouteSession]);
 
   calculateRouteRef.current = handleCalculate;
     useEffect(() => {
@@ -4536,6 +4913,7 @@ export function TestNavigationPanel({
     setPendingFocus(undefined);
     setEmergencyDestinationValue("");
     setEmergencyDestinationLabel("");
+    setEmergencyAssemblyPointId("");
     liveRouteEnabledRef.current = false;
     onHighlightRoute(null);
     sessionInteractionRef.current = false;
@@ -4551,6 +4929,7 @@ export function TestNavigationPanel({
     markSessionInteraction();
     setEmergencyDestinationValue("");
     setEmergencyDestinationLabel("");
+    setEmergencyAssemblyPointId("");
     if (nextMode !== "standard") {
       // Standard preferences are deliberately transient to Standard mode.
       // Leaving it resets the applied and draft values so a later return
@@ -4635,7 +5014,7 @@ export function TestNavigationPanel({
     previousLayoutOwnerKeyRef.current = layoutOwnerKey;
     if (routePreferenceOpen) cancelRoutePreference();
   }, [cancelRoutePreference, layoutOwnerKey, routePreferenceOpen]);
-  const preferenceAvoidRightInset = inspectorVisible ? 268 : 0;
+  const preferenceAvoidRightInset = inspectorRightInset ?? (inspectorVisible ? 268 : 0);
   const handleReverseRoute = useCallback(() => {
     if (!startValue && !destValue) return;
     const nextStartValue = destValue;
@@ -4671,13 +5050,13 @@ export function TestNavigationPanel({
     const destinationOption = destOptions.find((option) => option.value === destValue);
     const startLabel = compactRouteLocationLabel(startOption, "Start");
     const destinationLabel = routeMode === "emergency"
-      ? (emergencyDestinationLabel || "Safest exit")
+      ? (emergencyDestinationLabel || emergencyPrimaryAssemblyPoint?.name || "Approved Assembly Point")
       : compactRouteLocationLabel(destinationOption, "Destination");
     const fullLocationName = (option: OptionEntry | undefined, fallback: string) =>
       option ? `${option.label}${option.subtitle ? ` · ${option.subtitle}` : ""}` : fallback;
     const fullStartLabel = fullLocationName(startOption, "Start");
     const fullDestinationLabel = routeMode === "emergency"
-      ? (emergencyDestinationLabel || "Safest exit")
+      ? (emergencyDestinationLabel || emergencyPrimaryAssemblyPoint?.name || "Approved Assembly Point")
       : fullLocationName(destinationOption, "Destination");
     const modeLabel = routeModeOptions.find((option) => option.key === routeMode)?.label ?? "Standard";
     const statusLabel = result ? "Route Found" : routeMode === "standard" ? "No Route" : `No ${modeLabel} Route`;
@@ -4804,7 +5183,6 @@ export function TestNavigationPanel({
                <span className={cn("shrink-0 text-[10px] font-extrabold", result ? routeMode === "accessible" ? "text-teal-700 dark:text-teal-300" : routeMode === "emergency" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400" : "text-destructive")}>
                 {statusLabel}
               </span>
-              {result && <span data-testid="test-route-time-summary" className="shrink-0 text-[9px] text-muted-foreground"><strong>{result.minutes} min</strong></span>}
             </div>
             {routeSummary}
             </>
@@ -4872,7 +5250,7 @@ export function TestNavigationPanel({
           label="Start"
           value={startValue}
           options={startOptions}
-          onChange={(value) => { markSessionInteraction(); setStartValue(value); setEmergencyDestinationValue(""); setEmergencyDestinationLabel(""); setError(null); setResult(null); setHasCalculatedRoute(false); setManualCollapsed(false); setManualExpanded(false); setPreviewRoute(false); setPendingFocus(undefined); liveRouteEnabledRef.current = false; onHighlightRoute(null); }}
+          onChange={(value) => { markSessionInteraction(); setStartValue(value); setEmergencyDestinationValue(""); setEmergencyDestinationLabel(""); setEmergencyAssemblyPointId(""); setError(null); setResult(null); setHasCalculatedRoute(false); setManualCollapsed(false); setManualExpanded(false); setPreviewRoute(false); setPendingFocus(undefined); liveRouteEnabledRef.current = false; onHighlightRoute(null); }}
           onPickOnMap={onPickOnMap ? () => onPickOnMap("start") : undefined}
         />
 
@@ -4902,11 +5280,49 @@ export function TestNavigationPanel({
           <div data-testid="test-route-emergency-destination" className="space-y-1.5">
             <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Destination</label>
             <div className="rounded-lg border border-red-200 bg-red-50/60 px-2.5 py-2 dark:border-red-800/40 dark:bg-red-950/20">
-              <div className="text-[11px] font-semibold text-red-700 dark:text-red-300">Safest available exit</div>
+              <div className="text-[11px] font-semibold text-red-700 dark:text-red-300">
+                {emergencyResolvedAssemblyPoint?.name ?? (emergencyCampusGateFallback
+                  ? `${emergencyResolvedGate?.name?.trim() || "Campus Gate"} · Fallback`
+                  : emergencyExitOnlyPreview ? "Exit-only preview" : "No approved Assembly Point assigned")}
+              </div>
               <div className="mt-0.5 text-[9px] leading-snug text-red-700/75 dark:text-red-300/75">
-                Selected automatically from emergency-safe routes.
+                {emergencyResolvedAssemblyPoint
+                  ? emergencyResolvedAssemblyPoint.designation === "primary" ? "Assigned approved Primary destination." : "Explicit Alternate destination for this Admin test."
+                  : emergencyCampusGateFallback
+                    ? "No Assembly Point is assigned to this building. This is the original Campus Gate fallback, not an Assembly Point."
+                  : emergencyExitOnlyPreview
+                    ? "This path ends at a building egress and is not a complete approved evacuation route."
+                    : "No complete approved Assembly Point route is available for this start."}
               </div>
             </div>
+            {emergencyAssemblyPointOptions.some((point) => point.designation === "alternate") && (
+              <label className="block space-y-1">
+                <span className="block text-[9px] font-semibold text-muted-foreground">Admin test destination</span>
+                <select
+                  aria-label="Admin test Assembly Point destination"
+                  data-testid="test-route-assembly-point-select"
+                  value={emergencyAssemblyPointId}
+                  onChange={(event) => {
+                    markSessionInteraction();
+                    setEmergencyAssemblyPointId(event.target.value);
+                    setEmergencyDestinationValue("");
+                    setEmergencyDestinationLabel("");
+                    setError(null);
+                    setResult(null);
+                    setHasCalculatedRoute(false);
+                    setPreviewRoute(false);
+                    liveRouteEnabledRef.current = false;
+                    onHighlightRoute(null);
+                  }}
+                  className="h-8 w-full rounded-lg border border-border bg-background px-2 text-[10px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">Assigned Primary — {emergencyPrimaryAssemblyPoint?.name ?? "Unavailable"}</option>
+                  {emergencyAssemblyPointOptions.filter((point) => point.designation === "alternate").map((point) => (
+                    <option key={point.id} value={point.id}>Alternate — {point.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         ) : (
           <LocationPicker
@@ -5040,13 +5456,14 @@ export function TestNavigationPanel({
                 {routeMode === "emergency" ? "Emergency Route" : routeMode === "accessible" ? "Accessible Route" : "Route Found"}
               </span>
             </div>
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span><strong>{result.minutes} min</strong> estimated walk</span>
-              {routeMethod && <><span className="opacity-50">·</span><span data-testid="test-route-transition-method"><strong>Via {routeMethod}</strong></span></>}
-            </div>
+            {routeMethod && (
+              <div className="text-[10px] text-muted-foreground" data-testid="test-route-transition-method">
+                <strong>Via {routeMethod}</strong>
+              </div>
+            )}
             {routeMode === "emergency" && emergencyDestinationLabel && (
               <div data-testid="test-route-emergency-exit" className="border-t border-current/10 pt-1.5 text-[10px] text-red-700 dark:text-red-300">
-                <span className="font-bold uppercase tracking-wide">Safe exit</span>
+                <span className="font-bold uppercase tracking-wide">Egress and destination</span>
                 <span className="ml-1.5">{emergencyDestinationLabel}</span>
               </div>
             )}

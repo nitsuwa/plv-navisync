@@ -3,12 +3,12 @@ import { RouterProvider } from "react-router";
 import { router } from "./routes";
 import { LoadingScreen } from "../components/LoadingScreen";
 import { CampusDataProvider } from "../contexts/CampusDataContext";
-import { AuthProvider, useAuth } from "../contexts/StudentAuthContext";
+import { AuthProvider, useAuthBootstrap } from "../contexts/StudentAuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 
 function AppRuntime() {
-  const auth = useAuth();
+  const auth = useAuthBootstrap();
   const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
   const [minimumElapsed, setMinimumElapsed] = useState(false);
   const [exiting, setExiting] = useState(false);

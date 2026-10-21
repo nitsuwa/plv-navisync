@@ -1,0 +1,192 @@
+{
+  "localDraft": {
+    "publishStatus": "draft",
+    "lifecycleStatus": "draft",
+    "visibleToStudents": false,
+    "preview": "browser-local published-like snapshot only"
+  },
+  "isolation": "TEST ONLY exact saved local Admin campus served as browser-local published-like snapshot; remote writes blocked",
+  "source": {
+    "campusId": "90000000-0000-4000-8000-000000000198",
+    "campusName": "TEST ONLY - Isolated Assembly Point Editor",
+    "pointCount": 3,
+    "room": "CABA LECTURE HALL",
+    "smartMultiExit": false,
+    "approvedRouteCount": 0,
+    "primaryName": "TEST ONLY - Admin Main Assembly Point A",
+    "primaryNodeId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+    "approvedRouteDestination": "fccd345a-eaeb-4148-8735-d742b2fb61a8"
+  },
+  "browserErrors": [],
+  "screenshots": [
+    "student-automatic-sos-route-a-preview-1440.png",
+    "student-automatic-sos-active-2d-1440.png",
+    "student-automatic-sos-active-3d-1440.png",
+    "student-approved-route-failure.png"
+  ],
+  "progression": [
+    {
+      "iteration": 1,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 2,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 3,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 4,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 5,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 6,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 7,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 8,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 9,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 10,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 3",
+      "step": "STEP 6 OF 11",
+      "instruction": "Take the Left Stair down to Floor 2."
+    },
+    {
+      "iteration": 11,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 3",
+      "step": "STEP 6 OF 11",
+      "instruction": "Take the Left Stair down to Floor 2."
+    },
+    {
+      "iteration": 12,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 3",
+      "step": "STEP 6 OF 11",
+      "instruction": "Take the Left Stair down to Floor 2."
+    }
+  ],
+  "safetySetup": {
+    "note": "TEST ONLY in-memory simulation of authorized stair designation and current Assembly Point review; no source file, production data, or remote service was changed",
+    "stairCountMarkedForTest": 12,
+    "assemblyPointValidation": {
+      "connection": "connected",
+      "readiness": "approved",
+      "reviewReasons": [],
+      "reasons": [],
+      "fingerprint": "b9b755f1"
+    },
+    "candidateCount": 2,
+    "eligibleCandidateCount": 2,
+    "candidates": [
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "complete": true,
+        "stairReviewRequired": false,
+        "assemblyPointReviewRequired": false,
+        "distanceM": 273
+      },
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "complete": true,
+        "stairReviewRequired": false,
+        "assemblyPointReviewRequired": false,
+        "distanceM": 305
+      }
+    ]
+  },
+  "planner": {
+    "status": "not-calculated",
+    "text": "Destination · TEST ONLY - Admin Main Assembly Point A",
+    "primaryShown": true,
+    "findEnabled": true
+  },
+  "routePreview": {
+    "destinationShown": true,
+    "routeAOnly": true,
+    "startCount": 1,
+    "startDisabled": false
+  },
+  "active2d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "active3d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 0,
+    "markerProgress": []
+  },
+  "active2dReturn": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "rendererRoundTripPreserved": true,
+  "failure": {
+    "message": "locator.click: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Next', exact: true }).first()\u001b[22m\n\u001b[2m    - locator resolved to <button disabled type=\"button\" class=\"min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40\">Next</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not enabled\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not enabled\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is not enabled\u001b[22m\n\u001b[2m  - retrying click action\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m  - element was detached from the DOM, retrying\u001b[22m\n",
+    "stack": "locator.click: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Next', exact: true }).first()\u001b[22m\n\u001b[2m    - locator resolved to <button disabled type=\"button\" class=\"min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40\">Next</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not enabled\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m      - element is not enabled\u001b[22m\n\u001b[2m    - retrying click action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is not enabled\u001b[22m\n\u001b[2m  - retrying click action\u001b[22m\n\u001b[2m    - waiting 500ms\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m  - element was detached from the DOM, retrying\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\route-discovery-admin\\admin-automatic-sos-student.cjs:142:112)"
+  }
+}

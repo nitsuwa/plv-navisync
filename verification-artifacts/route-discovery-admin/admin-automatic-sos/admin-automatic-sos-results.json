@@ -1,0 +1,157 @@
+{
+  "isolation": "TEST ONLY saved local campus; real FloorEditor + properties controls; remote writes blocked",
+  "target": {
+    "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+    "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+    "floor": "Floor 6",
+    "floorId": "c6a8cedf-d462-4abc-aa68-f5465b2e158e",
+    "room": "CABA LECTURE HALL",
+    "roomId": "ffe40872-45b8-4ca2-a148-61e6c7d00b40",
+    "initialSmartMultiExit": false
+  },
+  "browserErrors": [],
+  "smartMultiExitInitiallyOff": true,
+  "graphDiagnosis": {
+    "message": "A complete graph path reaches the assigned Primary Assembly Point. Review that destination before approving this room route.",
+    "doorReadiness": [
+      {
+        "doorId": "e8c65d31-3df9-4be5-a208-cb3be25800fd",
+        "label": "Room door 1",
+        "state": "route_needs_review",
+        "detail": "A connected route reaches the assigned Primary Assembly Point, but one or more paths or Stair landings need emergency-use review.",
+        "routeCount": 0
+      },
+      {
+        "doorId": "7ea80284-8929-4ed5-a0cc-0466dfe3a806",
+        "label": "Room door 2",
+        "state": "route_needs_review",
+        "detail": "A connected route reaches the assigned Primary Assembly Point, but one or more paths or Stair landings need emergency-use review.",
+        "routeCount": 0
+      }
+    ],
+    "candidates": [
+      {
+        "id": "e8c65d31-3df9-4be5-a208-cb3be25800fd::exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "doorId": "e8c65d31-3df9-4be5-a208-cb3be25800fd",
+        "doorLabel": "Room door 1",
+        "exitId": "exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "exitLabel": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "assemblyPointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "completeAssemblyRoute": false,
+        "graphCompleteAssemblyRoute": true,
+        "emergencyUseReviewRequired": true,
+        "assemblyPointReviewRequired": true,
+        "distanceM": 273,
+        "transitions": [
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair"
+        ],
+        "steps": [
+          "Start from Door",
+          "Walk 12m to Waypoint",
+          "Walk 73m to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Take the stairs to Left Stair",
+          "Walk 15m to Waypoint",
+          "Walk 12m to Exterior Stair 2",
+          "Already at Exterior Stair 2.",
+          "Start from Exterior Stair 2",
+          "Walk 57m to Walking Point",
+          "Walk 31m to Walking Point",
+          "Walk 6m to Walking Point",
+          "Walk 9m to Walking Point",
+          "Walk 51m to Walking Point",
+          "Walk 4m to TEST ONLY - Admin Main Assembly Point A",
+          "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2"
+        ]
+      },
+      {
+        "id": "7ea80284-8929-4ed5-a0cc-0466dfe3a806::exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433",
+        "doorId": "7ea80284-8929-4ed5-a0cc-0466dfe3a806",
+        "doorLabel": "Room door 2",
+        "exitId": "exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433",
+        "exitLabel": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "assemblyPointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "completeAssemblyRoute": false,
+        "graphCompleteAssemblyRoute": true,
+        "emergencyUseReviewRequired": true,
+        "assemblyPointReviewRequired": true,
+        "distanceM": 305,
+        "transitions": [
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair"
+        ],
+        "steps": [
+          "Start from Door",
+          "Walk 12m to Waypoint",
+          "Walk 11m to Waypoint",
+          "Walk 51m to Waypoint",
+          "Walk 67m to Waypoint",
+          "Walk 17m to Waypoint",
+          "Walk 21m to Waypoint",
+          "Walk 15m to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Take the stairs to Right Stair",
+          "Walk 15m to Waypoint",
+          "Walk 12m to Exterior Stair 1",
+          "Already at Exterior Stair 1.",
+          "Start from Exterior Stair 1",
+          "Walk 18m to Walking Point",
+          "Walk 46m to Walking Point",
+          "Walk 15m to Walking Point",
+          "Walk 4m to TEST ONLY - Admin Main Assembly Point A",
+          "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1"
+        ]
+      }
+    ],
+    "studentSos": null
+  },
+  "ordinaryValidationSummary": "Assembly Point needs review A connected path exists. Review the assigned Primary Assembly Point before student guidance.",
+  "ordinaryCandidateCount": 1,
+  "ordinaryCandidates": [
+    "ROUTE Room door 1 → Exterior Stair 2 Needs review Destination: TEST ONLY - Admin Main Assembly Point A · 273 m · 5 floor transitions Preview Route Inspect Left Stair"
+  ],
+  "ordinaryPreview": "Start from Door Walk 12m to Waypoint Walk 73m to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Walk 15m to Waypoint Walk 12m to Exterior Stair 2 Connected path · emergency-use review required. Assembly Point review required before this route can be used for student guidance.",
+  "smartMultiExitEnabled": true,
+  "smartCandidateCount": 2,
+  "smartCandidates": [
+    "LEFT EXIT Room door 1 → Exterior Stair 2 Needs review Destination: TEST ONLY - Admin Main Assembly Point A · 273 m · 5 floor transitions Preview Route Inspect Left Stair",
+    "RIGHT EXIT Room door 2 → Exterior Stair 1 Needs review Destination: TEST ONLY - Admin Main Assembly Point A · 305 m · 5 floor transitions Preview Route Inspect Right Stair"
+  ],
+  "roomDraftConfig": {
+    "enabled": true,
+    "routes": []
+  },
+  "smartDistinctExitIds": [
+    "exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+    "exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433"
+  ],
+  "smartSharedAssemblyPointIds": [
+    "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411"
+  ],
+  "mobileLayout": {
+    "viewportWidth": 390,
+    "width": 223,
+    "clientWidth": 223,
+    "scrollWidth": 223
+  },
+  "screenshots": [
+    "admin-automatic-sos-room-properties-caba-test-only-desktop.png",
+    "admin-automatic-sos-smart-multi-exit-caba-test-only-desktop.png",
+    "admin-automatic-sos-room-properties-caba-test-only-mobile-390.png"
+  ]
+}

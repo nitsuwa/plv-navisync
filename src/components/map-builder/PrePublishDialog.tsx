@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   AlertTriangle, CheckCircle2, X, Globe, Building2, MapPin,
@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils";
 import type { Campus, CampusBuilding } from "./types";
 import type { ValidationIssue, ValidationSeverity } from "./ValidationErrorsDialog";
 import { resolveIssueTarget } from "../../lib/issueLocate";
+import { evaluateSosPublicationPreflight } from "../../lib/sosPublicationPreflight";
 
 // ── Check definitions (B7 Phase 3: mapped to ACTUAL current validators) ────
 
@@ -113,11 +114,13 @@ function suggestedResolution(type: string): string | null {
 interface PrePublishDialogProps {
   open: boolean;
   campus: Campus;
+  publishedSnapshot?: string;
   errors: ValidationIssue[];
   onClose: () => void;
-  onPublish: () => void;
+  onPublish: () => void | Promise<void>;
   onReviewIssue: (issue: ValidationIssue) => void;
   isPublishing?: boolean;
+  publishError?: string | null;
 }
 
 // ── Severity helpers ───────────────────────────────────────────────────────
@@ -129,10 +132,25 @@ function severityScore(severity: ValidationSeverity): number {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function PrePublishDialog({
-  open, campus, errors, onClose, onPublish, onReviewIssue, isPublishing,
+  open, campus, publishedSnapshot, errors, onClose, onPublish, onReviewIssue, isPublishing, publishError,
 }: PrePublishDialogProps) {
-  const [expandedGroup, setExpandedGroup] = useState<string | null>("structure");
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const sosPreflight = useMemo(() => open ? evaluateSosPublicationPreflight(campus, publishedSnapshot) : null, [open, campus, publishedSnapshot]);
+  const firstIssueGroup = useMemo(
+    () => CHECK_GROUPS.find((group) => errors.some((issue) => issueTypeMatchesGroup(issue.type, group)))?.id ?? null,
+    [errors],
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setExpandedGroup(null);
+      setConfirmPublish(false);
+      return;
+    }
+    setExpandedGroup(firstIssueGroup);
+    setConfirmPublish(false);
+  }, [open, firstIssueGroup]);
 
   // ── Group errors by check group (B7 Phase 3: uses ACTUAL current types) ──
   const groupedIssues = useMemo(() => {
@@ -218,7 +236,7 @@ export function PrePublishDialog({
             backdropFilter: "blur(8px)",
             WebkitBackdropFilter: "blur(8px)",
           }}
-          onClick={onClose}
+          onClick={() => { if (!isPublishing) onClose(); }}
           role="dialog"
           aria-modal="true"
           aria-label="Pre-publish validation"
@@ -253,27 +271,31 @@ export function PrePublishDialog({
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-extrabold text-foreground" style={{ fontFamily: "var(--font-sans)" }}>
-                  {readiness === "ready" ? "Ready to Publish" :
+                  {isPublishing ? "Publishing Campus…" : readiness === "ready" ? "Ready to Publish" :
                    readiness === "warning" ? "Needs Attention" :
                    "Not Ready to Publish"}
                 </h2>
                 <p className="mt-0.5 text-sm text-muted-foreground leading-relaxed" style={{ fontFamily: "var(--font-body)" }}>
-                  {readiness === "ready"
+                  {isPublishing
+                    ? "Publishing the saved campus version. This operation cannot be dismissed while it is in progress."
+                    : readiness === "ready"
                     ? "Your campus map passes all pre-publish checks. You can publish it now."
                     : readiness === "warning"
                       ? "There are warnings that won't block publishing, but you may want to review them."
                       : "Fix the errors below before publishing your campus map."}
                 </p>
               </div>
-              <button onClick={onClose}
+              {!isPublishing && <button onClick={onClose}
+                type="button"
+                aria-label="Close publish review"
                 className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </button>}
             </div>
 
             {/* ═══ CAMPUS SNAPSHOT ═══ */}
-            <div className="px-6 py-2 shrink-0">
+            {!isPublishing && <div className="px-6 py-2 shrink-0">
               <div className="flex flex-wrap gap-2 p-2.5 rounded-xl border border-border/60 bg-muted/20">
                 {[
                   { label: "Buildings", value: bldgs.length, color: "var(--primary)" },
@@ -292,10 +314,10 @@ export function PrePublishDialog({
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
 
             {/* ═══ VALIDATION SUMMARY (B7 Phase 3) ═══ */}
-            <div className="px-6 py-1.5 shrink-0">
+            {!isPublishing && <div className="px-6 py-1.5 shrink-0">
               <div className="flex flex-wrap items-center gap-2">
                 <div className={cn(
                   "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold",
@@ -317,10 +339,38 @@ export function PrePublishDialog({
                   {summary.passed} of {summary.total} checks passed
                 </span>
               </div>
-            </div>
+            </div>}
 
             {/* Scrollable check groups */}
             <div className="flex-1 overflow-y-auto px-6 pb-2 min-h-0 scrollbar-show-on-hover space-y-1.5">
+              {isPublishing ? (
+                <div className="flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border border-primary/15 bg-primary/5 px-5 py-7 text-center" role="status" aria-live="polite">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-bold text-foreground">Publishing campus data…</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Please wait for server confirmation.</p>
+                  </div>
+                </div>
+              ) : <>
+              {sosPreflight && <section className="rounded-xl border border-border bg-muted/20 p-3" data-testid="sos-publication-preflight" aria-label="SOS publication readiness">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-extrabold text-foreground">SOS snapshot preflight</h3>
+                    <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">Read-only route checks against the exact in-memory snapshot proposed for publication. SOS findings do not block unrelated campus publishing.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-border bg-card px-2 py-1 text-[9px] font-bold text-muted-foreground">{sosPreflight.assemblyPointCount} point{sosPreflight.assemblyPointCount === 1 ? "" : "s"} · {sosPreflight.assignedBuildingCount} assigned</span>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {sosPreflight.checks.map((check) => <div key={check.id} className="flex items-start gap-1.5" data-testid={`sos-preflight-${check.state}`}>
+                    {check.state === "pass" ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" />
+                      : check.state === "attention" ? <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+                        : <Info className="mt-0.5 h-3 w-3 shrink-0 text-slate-500" />}
+                    <p className="min-w-0 text-[9px] leading-relaxed text-muted-foreground">{check.detail}</p>
+                  </div>)}
+                </div>
+                {!sosPreflight.serializationPassed && <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2 py-1.5 text-[9px] font-semibold text-amber-800 dark:text-amber-200">Resolve the snapshot serialization finding above before relying on published SOS behavior. This notice does not change the existing publish gate.</p>}
+                <p className="mt-2 border-t border-border/70 pt-2 text-[9px] leading-relaxed text-muted-foreground">A draft change reaches students only after an authorized publication. Physical stair suitability still requires authoritative asset information.</p>
+              </section>}
               {CHECK_GROUPS.map((group) => {
                 const data = groupedIssues.get(group.id);
                 if (!data) return null;
@@ -393,7 +443,10 @@ export function PrePublishDialog({
                                       <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-blue-500" />
                                     )}
                                     <div className="flex-1 min-w-0">
-                                      <span className="text-xs leading-relaxed text-foreground block">{issue.message}</span>
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className={cn("rounded-full px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wide", issue.severity === "error" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300" : issue.severity === "warning" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300")}>{issue.severity === "info" ? "Info" : issue.severity === "warning" ? "Warning" : "Error"}</span>
+                                        <span className="text-xs leading-relaxed text-foreground">{issue.message}</span>
+                                      </div>
                                       {location && (
                                         <span className="text-[9px] text-muted-foreground mt-0.5 flex items-center gap-1">
                                           <MapPin className="h-2 w-2 shrink-0" />{location}
@@ -407,7 +460,7 @@ export function PrePublishDialog({
                                       onClick={() => onReviewIssue(issue)}
                                       className="shrink-0 h-6 px-2 rounded-lg border border-border text-[9px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
                                     >
-                                      Fix <ArrowRight className="h-2.5 w-2.5" />
+                                      {issue.severity === "error" ? "Fix" : "Inspect"} <ArrowRight className="h-2.5 w-2.5" />
                                     </button>
                                   </div>
                                 </div>
@@ -428,17 +481,20 @@ export function PrePublishDialog({
                   </div>
                 );
               })}
+              </>}
             </div>
+
+            {publishError && !isPublishing && <p className="mx-6 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300" role="alert">{publishError}</p>}
 
             {/* ═══ FOOTER ═══ */}
             <div className="flex items-center gap-2.5 px-6 py-4 border-t border-border shrink-0">
-              <button onClick={onClose}
+              {!isPublishing && <button onClick={onClose}
                 className="h-10 px-4 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               >
                 Cancel
-              </button>
-              <div className="flex-1" />
-              {readiness === "ready" ? (
+              </button>}
+              {isPublishing ? <span className="ml-auto inline-flex items-center gap-2 text-xs font-bold text-primary"><Loader2 className="h-4 w-4 animate-spin" /> Publishing…</span> : <div className="flex-1" />}
+              {!isPublishing && readiness === "ready" ? (
                 confirmPublish ? (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setConfirmPublish(false)}
@@ -463,7 +519,7 @@ export function PrePublishDialog({
                     <Globe className="h-3.5 w-3.5" /> Publish Now
                   </button>
                 )
-              ) : readiness === "warning" ? (
+              ) : !isPublishing && readiness === "warning" ? (
                 confirmPublish ? (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setConfirmPublish(false)}
@@ -488,13 +544,13 @@ export function PrePublishDialog({
                     <AlertTriangle className="h-3.5 w-3.5" /> Review Warnings & Publish
                   </button>
                 )
-              ) : (
+              ) : !isPublishing ? (
                 <button disabled
                   className="h-10 px-5 rounded-xl bg-muted text-muted-foreground text-xs font-extrabold cursor-not-allowed flex items-center gap-1.5"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" /> Fix Errors to Publish
                 </button>
-              )}
+              ) : null}
             </div>
           </motion.div>
         </motion.div>

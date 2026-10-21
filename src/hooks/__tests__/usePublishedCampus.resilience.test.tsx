@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../contexts/StudentAuthContext", () => ({
-  useAuth: () => ({ session: null, profile: null }),
+  useAuthUserId: () => null,
 }));
 
 vi.mock("../../services/campusService", () => ({

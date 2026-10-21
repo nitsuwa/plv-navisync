@@ -1,0 +1,194 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "777e0f5b-9556-42a9-823c-42b8c6ab45fb",
+      "name": "Emergency Assembly Point",
+      "nodeId": "73a31553-7d58-49bb-9af8-feec01b54504",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "d8876851-5173-478f-8df1-fdae3f2d29c2",
+        "f271a52d-d91f-4ccf-aeb8-188df191412c"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "placementAttempt-TEST ONLY - East Gathering Area": {
+      "candidate": {
+        "id": "99748238-3644-4e6d-b497-feb263084e58",
+        "x": 462,
+        "y": 440
+      },
+      "screenPoint": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "marker": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "snapKind": "waypoint"
+    },
+    "placementAttempt-TEST ONLY - Secondary Open Space": {
+      "candidate": {
+        "id": "2c7f6cf7-b6a9-455b-b901-043b0f867e8f",
+        "x": 507,
+        "y": 828
+      },
+      "screenPoint": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "marker": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "snapKind": "waypoint"
+    },
+    "multipleAssignments": [
+      {
+        "id": "777e0f5b-9556-42a9-823c-42b8c6ab45fb",
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "primary"
+          },
+          {
+            "code": "SC",
+            "designation": "primary"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "77800050-e694-4f9c-bb62-c4755bb58b1e",
+        "name": "TEST ONLY - East Gathering Area",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "COED",
+            "designation": "primary"
+          },
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "ba1633f5-2e96-4fe1-bf7b-b52d5f6f25e3",
+        "name": "TEST ONLY - Secondary Open Space",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          },
+          {
+            "code": "COED",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "uniqueIds": true,
+        "primaryConflicts": [],
+        "alternateCountForCaba": 2
+      }
+    ],
+    "multipleSave": {
+      "draftPointCount": 3,
+      "savedSnapshotPointCount": 3,
+      "allThreeApproved": true,
+      "noDanglingEdges": true
+    },
+    "multipleReload": {
+      "pointCount": 3,
+      "allApproved": true,
+      "names": [
+        "TEST ONLY - Admin Main Assembly Point A",
+        "TEST ONLY - East Gathering Area",
+        "TEST ONLY - Secondary Open Space"
+      ],
+      "connectedCount": 3,
+      "noDanglingEdges": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-three-points-saved-1440.png",
+    "assembly-point-three-points-reloaded-1440.png",
+    "assembly-point-admin-browser-failure.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  },
+  "failure": {
+    "message": "locator.fill: Error: strict mode violation: locator('[data-testid=\"test-route-full\"]').first().locator('input[placeholder^=\"Search/select location\"]') resolved to 2 elements:\n    1) <input value=\"\" placeholder=\"Search/select location…\" class=\"block min-w-0 max-w-full w-full h-9 pl-7 pr-2 rounded-lg border border-border bg-input-background text-foreground text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/20\"/> aka getByRole('textbox', { name: 'Search/select location…' }).first()\n    2) <input value=\"\" placeholder=\"Search/select location…\" class=\"block min-w-0 max-w-full w-full h-9 pl-7 pr-2 rounded-lg border border-border bg-input-background text-foreground text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/20\"/> aka getByRole('textbox', { name: 'Search/select location…' }).nth(1)\n\nCall log:\n\u001b[2m  - waiting for locator('[data-testid=\"test-route-full\"]').first().locator('input[placeholder^=\"Search/select location\"]')\u001b[22m\n",
+    "stack": "locator.fill: Error: strict mode violation: locator('[data-testid=\"test-route-full\"]').first().locator('input[placeholder^=\"Search/select location\"]') resolved to 2 elements:\n    1) <input value=\"\" placeholder=\"Search/select location…\" class=\"block min-w-0 max-w-full w-full h-9 pl-7 pr-2 rounded-lg border border-border bg-input-background text-foreground text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/20\"/> aka getByRole('textbox', { name: 'Search/select location…' }).first()\n    2) <input value=\"\" placeholder=\"Search/select location…\" class=\"block min-w-0 max-w-full w-full h-9 pl-7 pr-2 rounded-lg border border-border bg-input-background text-foreground text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-primary/20\"/> aka getByRole('textbox', { name: 'Search/select location…' }).nth(1)\n\nCall log:\n\u001b[2m  - waiting for locator('[data-testid=\"test-route-full\"]').first().locator('input[placeholder^=\"Search/select location\"]')\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\assembly-point-ordinary-sos\\assembly-point-multiple-admin-browser.cjs:546:25)"
+  }
+}

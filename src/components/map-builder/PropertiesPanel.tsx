@@ -66,6 +66,8 @@ import { buildingCoverPublicUrl, uploadBuildingCoverImage, uploadCampusPlaceCove
 import { BuildingWeeklyHoursEditor } from "./BuildingWeeklyHoursEditor";
 import { deriveBuildingAccessibilityFacts, facilityIsOnAuthoredMap } from "../../lib/buildingInformation";
 import { buildingNavigationHealth, reviewTargetForRoomIssue } from "./buildingNavigationHealth";
+import { EmergencyAssemblyPointPropertiesSection } from "./EmergencyAssemblyPointPropertiesSection";
+import type { AssemblyPoint } from "./types";
 
 type TabId = "basic" | "style" | "advanced";
 
@@ -105,6 +107,7 @@ interface PropertiesPanelProps {
   allDecorAssets: CampusDecorAsset[];
   selRoute: CampusRoute | undefined;
   selNavNode?: NavigationNode | undefined;
+  selAssemblyPoint?: AssemblyPoint | undefined;
   selNavEdge?: NavigationEdge | undefined;
   /** B5 Phase 6.10: the selected outdoor nav edge is blocked by an obstacle. */
   navEdgeBlocked?: boolean;
@@ -153,6 +156,12 @@ interface PropertiesPanelProps {
   onRemoveEntranceConnection?: (buildingId: string, entranceId: string) => void;
   onViewEntranceIndoorDoor?: (buildingId: string, floorId: string, doorId: string) => void;
   onUpdateMarker: (id: string, changes: Partial<CampusMarker>) => void;
+  onUpdateAssemblyPoint?: (id: string, changes: Partial<AssemblyPoint>) => void;
+  onReassignPrimaryAssemblyPoint?: (fromPointId: string, toPointId: string, buildingId: string) => void;
+  onConnectAssemblyPoint?: (id: string) => void;
+  onInspectAssemblyPointOutdoorNetwork?: (id: string) => void;
+  onClearAssemblyPointOutdoorNetworkInspection?: () => void;
+  onDeleteAssemblyPoint?: (id: string) => void;
   onUpdatePath?: (id: string, changes: Partial<CampusPath>) => void;
   /** Select a physical Pathway from generated navigation provenance. */
   onSelectPath?: (id: string) => void;
@@ -711,7 +720,7 @@ export function PropertiesPanel({
   issueItems = [],
   selectedPathPoint, selectedPathPointIsJunction, selectedPathPointIsAttached = false, selectedPathPointCanBeRemoved,
   selDecorAsset, allDecorAssets,
-  selNavNode, selNavEdge, navEdgeBlocked, selEventOverlay, allNavNodes, allNavEdges, entranceLinkStatus, entranceOutdoorLinkStatus, entranceDoorOptions,
+  selNavNode, selAssemblyPoint, selNavEdge, navEdgeBlocked, selEventOverlay, allNavNodes, allNavEdges, entranceLinkStatus, entranceOutdoorLinkStatus, entranceDoorOptions,
   allBuildings,
   layer,
   multiSelected, multiSelectedBuildings, selectedOutdoorCount,
@@ -719,7 +728,8 @@ export function PropertiesPanel({
   onUpdateBuilding, onAddExteriorEmergencyStair, focusedExteriorEmergencyStairId, onFocusExteriorEmergencyStair, onUpdateExteriorEmergencyStair, onDeleteExteriorEmergencyStair,
   onAddEntrance, onSelectEntrance, onUpdateEntrance, onDeleteEntrance,
   onConnectEntranceToDoor, onConnectEntranceToWalkingNetwork, onDisconnectEntranceFromWalkingNetwork, onSelectEntranceWalkingConnection, onRemoveEntranceConnection, onViewEntranceIndoorDoor,
-  onUpdateMarker, onUpdatePath, onSelectPath, hoveredPathId = null, onPathHover, onAddPathBend, onRemoveSelectedPathPoint,
+  onUpdateMarker, onUpdateAssemblyPoint, onReassignPrimaryAssemblyPoint, onConnectAssemblyPoint, onInspectAssemblyPointOutdoorNetwork, onClearAssemblyPointOutdoorNetworkInspection, onDeleteAssemblyPoint,
+  onUpdatePath, onSelectPath, hoveredPathId = null, onPathHover, onAddPathBend, onRemoveSelectedPathPoint,
   onDisconnectSelectedPathPoint, onDetachSelectedPathPoint, onAddWaypointAtSelectedPathPoint, onAddPathToNavigation, pathNavigationLegacy,
   onDeletePath, onUpdateRoute,
   onUpdateEventOverlay,
@@ -2874,6 +2884,19 @@ export function PropertiesPanel({
               </>
             );
           })()
+        )}
+
+        {selAssemblyPoint && !isMultiMode && navigationCampus && (
+          <EmergencyAssemblyPointPropertiesSection
+            campus={navigationCampus}
+            point={selAssemblyPoint}
+            onUpdate={(id, changes) => onUpdateAssemblyPoint?.(id, changes)}
+            onReassignPrimary={onReassignPrimaryAssemblyPoint}
+            onConnect={(id) => onConnectAssemblyPoint?.(id)}
+            onInspectOutdoorNetwork={onInspectAssemblyPointOutdoorNetwork}
+            onClearOutdoorNetworkInspection={onClearAssemblyPointOutdoorNetworkInspection}
+            onDelete={(id) => onDeleteAssemblyPoint?.(id)}
+          />
         )}
 
         {/* ── NAV NODE PROPERTIES (Navigation layer) ── */}

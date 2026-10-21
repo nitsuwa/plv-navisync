@@ -1,0 +1,164 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "c4499611-e789-419e-965f-3e92d63adc6b",
+      "name": "Emergency Assembly Point",
+      "nodeId": "89951d03-8a37-41da-8fa5-5cc9eb177907",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "7d3f831d-d197-49ef-b889-12951566578b",
+        "4e163a4c-cfb3-4dba-9a76-a31be0b6eae0"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "multipleAssignments": [
+      {
+        "id": "c4499611-e789-419e-965f-3e92d63adc6b",
+        "name": "TEST ONLY - East Gathering Area",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "SC",
+            "designation": "primary"
+          },
+          {
+            "code": "COED",
+            "designation": "primary"
+          },
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "c4499611-e789-419e-965f-3e92d63adc6b",
+        "name": "TEST ONLY - East Gathering Area",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "SC",
+            "designation": "primary"
+          },
+          {
+            "code": "COED",
+            "designation": "primary"
+          },
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "6deb6059-8c62-4594-92fa-a337bef7177f",
+        "name": "TEST ONLY - Secondary Open Space",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "primary"
+          },
+          {
+            "code": "COED",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "uniqueIds": false,
+        "primaryConflicts": [],
+        "alternateCountForCaba": 1
+      }
+    ],
+    "multipleSave": {
+      "draftPointCount": 2,
+      "savedSnapshotPointCount": 2,
+      "allThreeApproved": false,
+      "noDanglingEdges": true
+    },
+    "multipleReload": {
+      "pointCount": 2,
+      "allApproved": true,
+      "names": [
+        "TEST ONLY - East Gathering Area",
+        "TEST ONLY - Secondary Open Space"
+      ],
+      "connectedCount": 2,
+      "noDanglingEdges": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-three-points-saved-1440.png",
+    "assembly-point-three-points-reloaded-1440.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  }
+}

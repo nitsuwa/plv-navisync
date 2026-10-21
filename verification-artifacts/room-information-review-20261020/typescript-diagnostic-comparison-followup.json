@@ -1,0 +1,10 @@
+{
+  "baselinePath": "verification-artifacts/sos-multifloor-arrival-20261019/typescript-current-final.txt",
+  "currentPath": "verification-artifacts/room-information-review-20261020/tsc-current-followup.txt",
+  "baselineDiagnostics": 1029,
+  "currentDiagnostics": 1023,
+  "introducedDiagnosticIdentities": 0,
+  "resolvedDiagnosticIdentities": 2,
+  "introducedInRoomInformationFiles": [],
+  "introducedSamples": []
+}

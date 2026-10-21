@@ -77,6 +77,8 @@ export interface TransitionMarkerViewport {
   width: number;
   height: number;
   pan?: { x: number; y: number };
+  /** ViewBox units represented by one screen pixel after SVG meet scaling. */
+  screenSpaceScale?: number;
 }
 
 /**
@@ -256,18 +258,27 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport, red
   let resolvedLabelOffsetY = labelOffsetY;
   if (labelLayout && viewport) {
     const pan = viewport.pan ?? { x: 0, y: 0 };
-    const markerScreenX = pan.x + (marker.x + cueX) * labelZoom;
-    const markerScreenY = pan.y + (marker.y + cueY) * labelZoom;
-    const margin = 8;
-    const left = markerScreenX + labelX;
-    const right = left + labelLayout.width;
-    if (left < margin) labelX += margin - left;
-    else if (right > viewport.width - margin) labelX -= right - (viewport.width - margin);
+    // Student labels are rendered in screen-sized units by canceling the
+    // camera zoom. Their map-space footprint therefore uses the SVG fit scale,
+    // not the ordinary camera zoom used by the authored marker point.
+    const screenSpaceScale = Number.isFinite(viewport.screenSpaceScale) && (viewport.screenSpaceScale ?? 0) > 0
+      ? viewport.screenSpaceScale!
+      : 1;
+    // The pill is a direct child of the screen-space marker group, while the
+    // glyph alone is offset by cueX/cueY. Clamp from the shared world anchor
+    // so the calculation matches the rendered label hierarchy.
+    const markerScreenX = pan.x + marker.x * labelZoom;
+    const markerScreenY = pan.y + marker.y * labelZoom;
+    const margin = 8 * screenSpaceScale;
+    const left = markerScreenX + labelX * screenSpaceScale;
+    const right = left + labelLayout.width * screenSpaceScale;
+    if (left < margin) labelX += (margin - left) / screenSpaceScale;
+    else if (right > viewport.width - margin) labelX -= (right - (viewport.width - margin)) / screenSpaceScale;
     // The normal placement is above the cue.  Near the top edge, flip it
     // below the cue so the hover/focus instruction remains fully readable.
-    const top = markerScreenY + resolvedLabelOffsetY + 1;
+    const top = markerScreenY + (resolvedLabelOffsetY + 1) * screenSpaceScale;
     if (top < margin) resolvedLabelOffsetY = glyphRadius + 5;
-    const bottom = markerScreenY + resolvedLabelOffsetY + 1 + labelLayout.height;
+    const bottom = markerScreenY + (resolvedLabelOffsetY + 1 + labelLayout.height) * screenSpaceScale;
     if (bottom > viewport.height - margin) resolvedLabelOffsetY = -(labelLayout.height + glyphRadius + 5);
   }
   const labelShiftX = labelLayout ? labelX - labelLayout.x : 0;

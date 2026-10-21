@@ -2,6 +2,7 @@
 // Every Supabase request is intercepted. This does not prove live Supabase access.
 // Server authorization is separately exercised by the disposable SQL harnesses.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -199,7 +200,8 @@ try {
  await missing.ctx.close();
  // An isolated extension uses the browser's actual tabs.setZoom API. It is
  // removed with the temporary browser profile; CSS zoom/pinch is not substituted.
- const tempRoot=path.resolve('.tmp'); const zoomRoot=fs.mkdtempSync(path.join(tempRoot,'continuity-zoom-'));
+ const tempRoot=path.join(os.tmpdir(),'plv-navisync-browser-profiles'); fs.mkdirSync(tempRoot,{recursive:true});
+ const zoomRoot=fs.mkdtempSync(path.join(tempRoot,'continuity-zoom-'));
  const extension=path.join(zoomRoot,'extension'); fs.mkdirSync(extension);
  fs.writeFileSync(path.join(extension,'manifest.json'),JSON.stringify({manifest_version:3,name:'Disposable continuity zoom check',version:'1.0',permissions:['tabs'],background:{service_worker:'worker.js'}}));
  fs.writeFileSync(path.join(extension,'worker.js'),'chrome.runtime.onInstalled.addListener(() => {});');
@@ -221,7 +223,7 @@ try {
  } catch(error) { report.checks.push({name:'Actual 200% browser zoom',status:'UNVERIFIED',error:error.message.split('\n')[0]});console.log(JSON.stringify(report.checks.at(-1))); }
  finally {
   await zoomContext?.close();
-  if(path.dirname(path.resolve(zoomRoot))!==tempRoot||!path.basename(zoomRoot).startsWith('continuity-zoom-'))throw new Error('Unsafe browser profile cleanup path');
+  if(path.dirname(path.resolve(zoomRoot))!==path.resolve(tempRoot)||!path.basename(zoomRoot).startsWith('continuity-zoom-'))throw new Error('Unsafe browser profile cleanup path');
   fs.rmSync(zoomRoot,{recursive:true,force:true});
  }
 } finally {

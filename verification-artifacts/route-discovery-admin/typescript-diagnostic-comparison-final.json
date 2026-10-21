@@ -1,0 +1,10 @@
+{
+    "typecheckExit":  1,
+    "baselineDiagnostics":  1039,
+    "currentDiagnostics":  1036,
+    "newDiagnosticIdentitiesComparedToRecordedBaseline":  0,
+    "resolvedDiagnosticIdentitiesComparedToRecordedBaseline":  3,
+    "priorCurrentDiagnostics":  1036,
+    "newDiagnosticIdentitiesSincePriorCurrent":  0,
+    "resolvedDiagnosticIdentitiesSincePriorCurrent":  0
+}

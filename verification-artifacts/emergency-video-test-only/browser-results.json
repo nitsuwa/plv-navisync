@@ -1,0 +1,145 @@
+{
+  "browser": "Chromium headless against local Vite app",
+  "network": "all external requests blocked or handled by in-memory test adapter",
+  "fixture": "TEST ONLY",
+  "results": {
+    "adminUpload": "PASS — actual Admin component upload/progress/metadata flow; exact MP4 bytes stored only in local test adapter.",
+    "captionUpload": "PASS — attached supplied VTT via real Admin component.",
+    "adminPreview": "PASS — browser decoded sample in actual Admin preview 960×540 (16.00s).",
+    "adminApprovalInBrowser": "NOT VERIFIED — preview UI is browser-tested; publishing requires current approved route fingerprints. Existing isolated integration tests cover approval/publication with mocked service boundary.",
+    "adminReviewGate": "PASS — publishing is blocked while the test room has no current Admin-approved route fingerprint.",
+    "testPublication": "SIMULATED — Node test adapter seeded a published metadata row; no campus map or real publication was written.",
+    "studentPlayback": "PASS — StudentSelectedPlaceCard decoded and rendered real frames (960×540, 16.00s, 4 decoded frames).",
+    "mutedAutoplay": "PASS — real Chromium playback began muted.",
+    "playbackProgression": "PASS — media time advanced.",
+    "voiceover": "PASS — explicit action unmuted playback and Chromium produced a non-silent audio signal (RMS 0.05180). Actual speaker loudness still needs manual confirmation.",
+    "playPause": "PASS — Student Play/Pause controls changed actual media state.",
+    "captions": "PASS — browser loaded WebVTT and activated expected cue: This is a fictional PLV NaviSync video player test.",
+    "looping": "PASS — seeking near end observed natural loop wrap.",
+    "replayAndSeek": "PASS — Replay reset and media seeking advanced to a new time.",
+    "fullscreen": "PASS — actual video entered browser fullscreen.",
+    "download": "PASS — downloaded 223833 bytes identical to sample; SHA-256 c607f8008e6aded43e2b71aad2305b813f65135228c5f3b3ba3093f2fb955029.",
+    "desktopPosition": "PASS — selected-room component places guide beneath room card at 1440px.",
+    "mobilePosition": "PASS — compact guide appears above room card at 390×844 with no horizontal overflow.",
+    "emergencyModeCard": "PASS — emergency mode replaces player with compact Watch control and unmounts playback."
+  },
+  "filesChangedByTest": [],
+  "adapter": {
+    "rows": 1,
+    "objects": 2,
+    "events": [
+      {
+        "type": "blocked-external-request",
+        "method": "GET",
+        "path": "/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js"
+      },
+      {
+        "type": "blocked-external-request",
+        "method": "GET",
+        "path": "/css2"
+      },
+      {
+        "type": "object-upload",
+        "bytes": 223833,
+        "mime": "video/mp4"
+      },
+      {
+        "type": "metadata-insert",
+        "roomId": "TEST_ONLY_ROOM",
+        "campusId": "TEST_ONLY_CAMPUS"
+      },
+      {
+        "type": "object-upload",
+        "bytes": 313,
+        "mime": "text/vtt"
+      },
+      {
+        "type": "metadata-update",
+        "status": "draft",
+        "fields": [
+          "id"
+        ]
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "ttl": 900
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73-575d1f07-fe24-4bcb-93d7-5710439cc7fb.vtt",
+        "ttl": 900
+      },
+      {
+        "type": "media-get",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "range": "bytes=0-",
+        "found": true
+      },
+      {
+        "type": "media-get",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73-575d1f07-fe24-4bcb-93d7-5710439cc7fb.vtt",
+        "range": null,
+        "found": true
+      },
+      {
+        "type": "metadata-update",
+        "status": "draft",
+        "fields": [
+          "id"
+        ]
+      },
+      {
+        "type": "student-publication-rpc",
+        "published": true
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "ttl": 900
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "ttl": 900
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73-575d1f07-fe24-4bcb-93d7-5710439cc7fb.vtt",
+        "ttl": 900
+      },
+      {
+        "type": "media-get",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "range": "bytes=0-",
+        "found": true
+      },
+      {
+        "type": "media-get",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73-575d1f07-fe24-4bcb-93d7-5710439cc7fb.vtt",
+        "range": null,
+        "found": true
+      },
+      {
+        "type": "student-publication-rpc",
+        "published": true
+      },
+      {
+        "type": "signed-url",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "ttl": 900
+      },
+      {
+        "type": "media-get",
+        "object": "TEST_ONLY_CAMPUS/TEST_ONLY_ROOM/814b3a45-92e3-41cc-b28e-e8707f4a2c73.mp4",
+        "range": null,
+        "found": true
+      }
+    ],
+    "pageErrors": [
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+      "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+    ],
+    "externalRequestsBlocked": 2
+  }
+}

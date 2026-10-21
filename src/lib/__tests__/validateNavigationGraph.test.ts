@@ -113,6 +113,25 @@ describe("validateNavigationGraph", () => {
     expect(result.issues.some((issue) => issue.message.includes("no floor assignment"))).toBe(false);
   });
 
+  it("does not show a false missing-floor warning for a connected campus Assembly Point", () => {
+    const campus = baseCampus({
+      assemblyPoints: [{
+        id: "assembly-a", name: "Main Assembly Point", x: 100, y: 100,
+        campusId: "c1", navNodeId: "assembly-anchor",
+      }],
+      navNodes: [
+        node({ id: "assembly-anchor", name: "Main Assembly Point", type: "assembly", x: 100, y: 100, campusId: "c1", assemblyPointId: "assembly-a" }),
+        node({ id: "outdoor-1", type: "outdoor", x: 120, y: 100, campusId: "c1" }),
+      ],
+      navEdges: [edge({ id: "assembly-link", startNodeId: "outdoor-1", endNodeId: "assembly-anchor" })],
+    });
+
+    const result = validateNavigationGraph(campus);
+    expect(result.issues.some((issue) => issue.nodeId === "assembly-anchor"
+      && issue.message.includes("no floor assignment"))).toBe(false);
+    expect(result.issues.some((issue) => issue.type === "nav_orphan_node" && issue.nodeId === "assembly-anchor")).toBe(false);
+  });
+
   it("flags orphan node as warning", () => {
     const campus = baseCampus({
       navNodes: [

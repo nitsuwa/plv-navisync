@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Componen
 import { Bell, CalendarDays, CheckCheck, Flag, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
+import { createPortal } from "react-dom";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 import type { CampusEventOverlay } from "../map-builder/types";
 import { normalizeReportStatus, type IssueReport, type ReportStatus } from "../../services/reportService";
@@ -238,6 +239,7 @@ function StudentNotificationFeed({
   const isSection = presentation === "section";
   const filterLabelId = useId();
   const [open, setOpen] = useState(false);
+  const notificationPanelRef = useRef<HTMLElement | null>(null);
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [eventClockMs, setEventClockMs] = useState(() => Date.now());
   const [preferences, setPreferences] = useState<StudentNotificationPreferences | null>(null);
@@ -342,7 +344,9 @@ function StudentNotificationFeed({
   useEffect(() => {
     if (!open) return;
     const dismissOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !containerRef?.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node
+        && !containerRef?.current?.contains(event.target)
+        && !notificationPanelRef.current?.contains(event.target)) setOpen(false);
     };
     const dismissEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -431,9 +435,10 @@ function StudentNotificationFeed({
         )}>{unreadCount > 9 ? "9+" : unreadCount}</span>}
       </button>}
 
-      <AnimatePresence>
-        {(open || isSection) && (
+      {(() => {
+        const notificationPanel = (
           <motion.section
+            ref={notificationPanelRef}
             id={isSection ? "student-notifications" : undefined}
             role={isSection ? "region" : "dialog"}
             aria-label="Student notifications"
@@ -596,8 +601,12 @@ function StudentNotificationFeed({
               )}
             </div>
           </motion.section>
-        )}
-      </AnimatePresence>
+        );
+        if (mapTrigger && !isSection && typeof document !== "undefined") {
+          return createPortal(<AnimatePresence>{open && notificationPanel}</AnimatePresence>, document.body);
+        }
+        return <AnimatePresence>{(open || isSection) && notificationPanel}</AnimatePresence>;
+      })()}
     </div>
   );
 }

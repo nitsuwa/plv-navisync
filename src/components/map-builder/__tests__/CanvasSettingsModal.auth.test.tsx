@@ -94,4 +94,51 @@ describe("CanvasSettingsModal authenticated save behavior", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Save Settings" })).toBeInTheDocument();
   });
+
+  it("keeps Nearest Eligible configurable in authorized campus settings and persists it", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    render(<CanvasSettingsModal open campus={makeCampus()} onSave={onSave} onClose={onClose} />);
+
+    fireEvent.change(screen.getByTestId("canvas-settings-sos-policy"), { target: { value: "nearest_eligible" } });
+    await confirmSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({
+        accessibility: false,
+        emergency: false,
+        eventLayer: false,
+        gps: false,
+        emergencyDestinationPolicy: "nearest_eligible",
+      }),
+    }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("does not designate a campus Primary implicitly and saves an explicit choice without changing building assignments", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const point = {
+      id: "assembly-main", name: "Main Assembly Point", x: 300, y: 240, navNodeId: "assembly-node",
+      buildingAssignments: [{ buildingId: "building-a", designation: "primary" as const }],
+    };
+    const campus = makeCampus({ assemblyPoints: [point] });
+    render(<CanvasSettingsModal open campus={campus} onSave={onSave} onClose={onClose} />);
+
+    const primaryPicker = screen.getByTestId("canvas-settings-campus-primary-assembly");
+    expect(primaryPicker).toHaveValue("");
+    fireEvent.change(primaryPicker, { target: { value: point.id } });
+    await confirmSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      assemblyPoints: [expect.objectContaining({
+        id: point.id,
+        campusWidePrimary: true,
+        buildingAssignments: point.buildingAssignments,
+      })],
+    }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

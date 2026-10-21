@@ -1,0 +1,791 @@
+{
+  "samples": 49,
+  "changingArrowPhases": 1,
+  "outdoorFrameCaptured": true,
+  "laterFrameCaptured": true,
+  "handoffs": [
+    "Continue to Ground Floor",
+    "Continue Outside"
+  ],
+  "arrivalObserved": true,
+  "timeline": [
+    {
+      "t": 16918.60000000149,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 17230.699999999255,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 17538.800000000745,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 17846.800000000745,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": "Continue to Ground Floor",
+      "routeBody": "GUIDED NAVIGATION\n\nStep 2 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nTake the Right Stair down to Ground Floor.\n\nTap the Right Stair or press Continue.\n\nContinue to Ground Floor\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 18222.39999999851,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 2 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nTake the Right Stair down to Ground Floor.\n\nResume\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 18536.60000000149,
+      "phase": "navigating",
+      "floor": "2",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M1001,300 L1001,231 L960,231 L960,160",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 2 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nTake the Right Stair down to Ground Floor.\n\nResume\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 18865.199999999255,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 19173.5,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 19487.699999999255,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 19797.199999999255,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 20108.10000000149,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 20421.10000000149,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 20731.300000000745,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 3 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 21062.60000000149,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": "Continue Outside",
+      "routeBody": "GUIDED NAVIGATION\n\nStep 4 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nExit via Exterior Stair 1 to Campus.\n\nYou’re at the building exit. Tap Exit to Campus on the map or press Continue.\n\nContinue Outside\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 21413.699999999255,
+      "phase": "navigating",
+      "floor": "1",
+      "campusLegs": 0,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M960,160 L960,230 L1014,229",
+          "count": "2"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 4 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nExit via Exterior Stair 1 to Campus.\n\nResume\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 21935.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 23245.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 24742.199999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 25055.89999999851,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 25365.300000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 25674.10000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 25984.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 26293.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 26607.5,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 26919.89999999851,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 27229.800000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 27541.60000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 27854.10000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 28165.60000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 28477.199999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 28786.199999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 29097.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 29410.60000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 29719.10000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 30032.60000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 30350.89999999851,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 30665.89999999851,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 30999.800000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 31373.5,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 31698.300000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 32023.300000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 32333.300000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 32644.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 32971.5,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 33439.300000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 33966.800000000745,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 34307.699999999255,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 5 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Emergency Assembly Point · Exterior Stair 1.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 34670.10000000149,
+      "phase": "navigating",
+      "floor": null,
+      "campusLegs": 1,
+      "flows": [
+        {
+          "phase": null,
+          "path": "M146,462 L146,380 L214,380 L214,440 L293,440 L360,440 L360,500 L520,560 L496,596 L496,680",
+          "count": "5"
+        }
+      ],
+      "transition": null,
+      "routeBody": "GUIDED NAVIGATION\n\nStep 6 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nArrive at Emergency Assembly Point.\n\nPause\n1×\nExpand",
+      "arrived": false
+    },
+    {
+      "t": 35283.89999999851,
+      "phase": "arrived",
+      "floor": null,
+      "campusLegs": 0,
+      "flows": [],
+      "transition": null,
+      "routeBody": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-201 to Emergency Assembly Point.\n\nArrival\n\nRoute A\nRoute B\n\nArrived at Emergency Assembly Point\n\nFollow campus personnel's instructions.\n\nPrevious step\nRestart Route\nEdit Route\nDone",
+      "arrived": true
+    }
+  ]
+}

@@ -69,10 +69,11 @@ beforeEach(() => {
 });
 
 function canvasSvg(container: HTMLElement): SVGSVGElement {
-  // The editor stays mounted across layer switches (single canvas svg), but
-  // picking the LAST svg matching the canvas viewBox stays robust either way.
-  const svgs = Array.from(container.querySelectorAll("svg")).filter((s) => s.getAttribute("viewBox") === "0 0 900 680");
-  const svg = svgs[svgs.length - 1];
+  // The editor renders a pointer-events-none interaction overlay after the
+  // actual canvas. Select the main SVG that owns the canvas mouse handlers.
+  const svg = Array.from(container.querySelectorAll<SVGSVGElement>("svg"))
+    .find((candidate) => candidate.getAttribute("viewBox") === "0 0 900 680"
+      && candidate.getAttribute("data-testid") !== "campus-interaction-overlay");
   expect(svg).toBeTruthy();
   Object.defineProperty(svg, "getBoundingClientRect", {
     configurable: true,
@@ -81,11 +82,14 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
   return svg as SVGSVGElement;
 }
 
-/** Switch to the Navigation layer via its tab, then return the ACTIVE editor svg. */
+/** Switch the editor into the Navigation layer, then return the ACTIVE editor svg. */
 function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  const navigationControl = screen.queryByText("Navigation")
-    ?? screen.getByRole("button", { name: /Show and edit the walking network|Hide navigation/ });
-  fireEvent.click(navigationControl);
+  // Use the explicit visibility control: selecting a muted navigation tool
+  // from the Campus layer does not reliably activate the graph editor.
+  if (!container.querySelector("[data-testid='navigation-hierarchy-sidebar']")) {
+    fireEvent.click(within(container).getByRole("button", { name: "Show and edit the walking network" }));
+  }
+  expect(container.querySelector("[data-testid='navigation-hierarchy-sidebar']"), "Navigation layer should be active before graph interactions").toBeTruthy();
   return canvasSvg(container);
 }
 
@@ -194,7 +198,7 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
 
     expect(latest!.navNodes).toHaveLength(1);
-    expect(latest!.navNodes![0]).toMatchObject({ name: "Waypoint", type: "outdoor", x: 350, y: 250, campusId: "c1", accessible: true });
+    expect(latest!.navNodes![0]).toMatchObject({ name: "Walking Point", type: "outdoor", x: 350, y: 250, campusId: "c1", accessible: true });
     // Visible node + waypoint properties panel
     expect(navNodeAt(container, 350, 250)).toBeTruthy();
     expect(screen.getByTestId("nav-node-props")).toBeTruthy();

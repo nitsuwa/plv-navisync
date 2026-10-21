@@ -1,4 +1,4 @@
-import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../components/map-builder/types";
+import type { Campus, CampusPath, GeneratedPathIntersectionEdgeRef, GeneratedPathIntersectionRef, NavigationEdge, NavigationNode } from "../components/map-builder/types";
 import { createNavEdge, createNavNode, findDuplicateNavEdge, isSelfEdge } from "./navigationGraph";
 import { reconcileEntranceOutdoorConnections, type EntranceOutdoorReconciliationOptions } from "./entranceTransitions";
 
@@ -49,6 +49,18 @@ export function pathwayHasOwnedNavigation(path: CampusPath | undefined): boolean
   return Boolean(path && validVertexIds(path));
 }
 
+/** True for paths attached to artwork only, before they own or join a real navigation network. */
+export function isVisualOnlyPathAttachment(
+  path: CampusPath | undefined,
+  nodes: NavigationNode[] | undefined,
+  edges: NavigationEdge[] | undefined,
+): boolean {
+  return Boolean(path?.visualAttachments?.length
+    && !pathwayHasOwnedNavigation(path)
+    && !path.pathNetworkId
+    && !pathwayHasLegacyNavigationChain(path, nodes, edges));
+}
+
 /**
  * Conservative legacy detection used by the UI. It deliberately does not
  * claim ownership: old conversions predate provenance and must remain manual
@@ -88,6 +100,312 @@ function pathPairExists(nodeIds: string[], edge: NavigationEdge): boolean {
     if ((edge.startNodeId === a && edge.endNodeId === b) || (edge.startNodeId === b && edge.endNodeId === a)) return true;
   }
   return false;
+}
+
+type ReconciledPathSegment = {
+  path: CampusPath;
+  index: number;
+  ref: GeneratedPathIntersectionRef;
+  key: string;
+  startNodeId: string;
+  endNodeId: string;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
+type SegmentHit = { segment: ReconciledPathSegment; t: number };
+type PathIntersectionGroup = {
+  networkId: string;
+  point: { x: number; y: number };
+  hits: Map<string, SegmentHit>;
+};
+
+const segmentRefKey = (ref: GeneratedPathIntersectionRef) =>
+  `${ref.pathId}:${ref.startVertexId}:${ref.endVertexId}`;
+const intersectionNodeRefsKey = (refs: GeneratedPathIntersectionRef[]) =>
+  refs.map(segmentRefKey).sort().join("|");
+const intersectionEdgeRefKey = (ref: GeneratedPathIntersectionEdgeRef) =>
+  `${segmentRefKey(ref)}:${ref.fromJunctionKey}>${ref.toJunctionKey}`;
+const cross2 = (a: { x: number; y: number }, b: { x: number; y: number }) => a.x * b.y - a.y * b.x;
+const subtract = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: a.x - b.x, y: a.y - b.y });
+
+/**
+ * Return a proper segment crossing from the authored centerlines. Collinear
+ * overlaps are not guessed into junctions; endpoint-to-segment T hits and
+ * interior X hits are accepted within floating-point tolerance.
+ */
+function lineSegmentIntersection(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+  d: { x: number; y: number },
+): { t: number; u: number; point: { x: number; y: number } } | null {
+  const r = subtract(b, a);
+  const s = subtract(d, c);
+  const denominator = cross2(r, s);
+  if (Math.abs(denominator) < 1e-8) return null;
+  const offset = subtract(c, a);
+  const rawT = cross2(offset, s) / denominator;
+  const rawU = cross2(offset, r) / denominator;
+  const endpointTolerance = 1e-8;
+  if (rawT < -endpointTolerance || rawT > 1 + endpointTolerance || rawU < -endpointTolerance || rawU > 1 + endpointTolerance) return null;
+  const t = Math.max(0, Math.min(1, rawT));
+  const u = Math.max(0, Math.min(1, rawU));
+  const pointA = { x: a.x + r.x * t, y: a.y + r.y * t };
+  const pointB = { x: c.x + s.x * u, y: c.y + s.y * u };
+  return { t, u, point: { x: (pointA.x + pointB.x) / 2, y: (pointA.y + pointB.y) / 2 } };
+}
+
+function adjacentSegments(a: ReconciledPathSegment, b: ReconciledPathSegment): boolean {
+  if (a.path.id !== b.path.id) return false;
+  if (Math.abs(a.index - b.index) === 1) return true;
+  const ids = validVertexIds(a.path);
+  return Boolean(ids && a.path.points.length > 2 && pointKey(a.path.points[0]) === pointKey(a.path.points[a.path.points.length - 1])
+    && Math.min(a.index, b.index) === 0 && Math.max(a.index, b.index) === a.path.points.length - 2);
+}
+
+function visualAttachmentOwnsIntersection(
+  source: CampusPath,
+  sourceSegmentIndex: number,
+  target: CampusPath,
+  point: { x: number; y: number },
+): boolean {
+  return (source.visualAttachments ?? []).some((attachment) => {
+    if (attachment.targetPathId !== target.id) return false;
+    const sourcePoint = source.points[attachment.pointIndex];
+    if (!sourcePoint || Math.hypot(sourcePoint.x - point.x, sourcePoint.y - point.y) > 0.002) return false;
+    if (attachment.pointIndex !== sourceSegmentIndex && attachment.pointIndex !== sourceSegmentIndex + 1) return false;
+    // Visual attachments are deliberately non-navigable. Their target segment
+    // index and fraction can become stale when the target Pathway is split or
+    // gains vertices, but the persisted source point + target path identity
+    // still marks this exact endpoint contact as visual-only. Requiring the
+    // old segment index here would silently promote legacy visual joins into
+    // physical navigation junctions after an otherwise unrelated edit.
+    return true;
+  });
+}
+
+/**
+ * Compile intersections only where pathway ownership establishes a shared
+ * physical network. Visual-only attachments, explicitly disconnected points,
+ * different authored elevations, and paths without navigation ownership stay
+ * separate. The compiler adds graph topology without changing CampusPath
+ * centerline geometry.
+ */
+function reconcilePathwayIntersections(
+  campus: Campus,
+  paths: CampusPath[],
+  pathNodeIds: Map<string, string[]>,
+  previousIntersectionNodes: NavigationNode[],
+  previousIntersectionEdges: NavigationEdge[],
+  makeId: PathwayIdFactory,
+): Campus {
+  const eligiblePaths = paths.filter((path) => Boolean(path.pathNetworkId && validVertexIds(path)));
+  const segments: ReconciledPathSegment[] = [];
+  for (const path of eligiblePaths) {
+    const vertexIds = validVertexIds(path);
+    const nodeIds = pathNodeIds.get(path.id);
+    if (!vertexIds || !nodeIds) continue;
+    for (let index = 0; index < path.points.length - 1; index += 1) {
+      const startVertexId = vertexIds[index];
+      const endVertexId = vertexIds[index + 1];
+      const startNodeId = nodeIds[index];
+      const endNodeId = nodeIds[index + 1];
+      if (!startVertexId || !endVertexId || !startNodeId || !endNodeId || startNodeId === endNodeId) continue;
+      segments.push({
+        path,
+        index,
+        ref: { pathId: path.id, startVertexId, endVertexId },
+        key: `${path.id}:${startVertexId}:${endVertexId}`,
+        startNodeId,
+        endNodeId,
+        start: path.points[index],
+        end: path.points[index + 1],
+      });
+    }
+  }
+
+  const groups = new Map<string, PathIntersectionGroup>();
+  // Sort by the horizontal extent first so ordinary campus maps compare only
+  // nearby segments. This reconciliation also runs while editing geometry, so
+  // a full segment-pair scan on every pointer update would be needlessly costly.
+  const bounds = segments.map((segment) => ({
+    segment,
+    minX: Math.min(segment.start.x, segment.end.x),
+    maxX: Math.max(segment.start.x, segment.end.x),
+    minY: Math.min(segment.start.y, segment.end.y),
+    maxY: Math.max(segment.start.y, segment.end.y),
+  })).sort((a, b) => a.minX - b.minX || a.minY - b.minY || a.segment.key.localeCompare(b.segment.key));
+  let active: typeof bounds = [];
+  for (const current of bounds) {
+    active = active.filter((candidate) => candidate.maxX >= current.minX - 1e-8);
+    for (const candidate of active) {
+      if (candidate.maxY < current.minY - 1e-8 || current.maxY < candidate.minY - 1e-8) continue;
+      const left = candidate.segment;
+      const right = current.segment;
+      if (left.path.pathNetworkId !== right.path.pathNetworkId) continue;
+      if (left.path.elevation !== right.path.elevation) continue;
+      if (adjacentSegments(left, right)) continue;
+      const hit = lineSegmentIntersection(left.start, left.end, right.start, right.end);
+      if (!hit) continue;
+      const point = { x: Number(hit.point.x.toFixed(6)), y: Number(hit.point.y.toFixed(6)) };
+      if (pathPointIsDisconnected(left.path, point) || pathPointIsDisconnected(right.path, point)) continue;
+      if (visualAttachmentOwnsIntersection(left.path, left.index, right.path, point)
+        || visualAttachmentOwnsIntersection(right.path, right.index, left.path, point)) continue;
+
+      const leftEndpoint = hit.t <= 1e-8 ? left.startNodeId : hit.t >= 1 - 1e-8 ? left.endNodeId : undefined;
+      const rightEndpoint = hit.u <= 1e-8 ? right.startNodeId : hit.u >= 1 - 1e-8 ? right.endNodeId : undefined;
+      // Existing endpoint-to-endpoint topology is already canonicalized by
+      // reconcilePathwayNavigation; it needs no derived split records.
+      if (leftEndpoint && rightEndpoint && leftEndpoint === rightEndpoint) continue;
+
+      const key = `${left.path.pathNetworkId}:${pointKey(point)}`;
+      const group = groups.get(key) ?? { networkId: left.path.pathNetworkId!, point, hits: new Map<string, SegmentHit>() };
+      group.hits.set(left.key, { segment: left, t: hit.t });
+      group.hits.set(right.key, { segment: right, t: hit.u });
+      groups.set(key, group);
+    }
+    active.push(current);
+  }
+
+  if (groups.size === 0) return campus;
+  const nodes = [...(campus.navNodes ?? [])];
+  const edges = [...(campus.navEdges ?? [])];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const previousNodeById = new Map(previousIntersectionNodes.map((node) => [node.id, node]));
+  const previousEdgeByKey = new Map<string, NavigationEdge>();
+  for (const edge of previousIntersectionEdges) {
+    for (const ref of edge.generatedFromPathIntersectionSegments ?? []) previousEdgeByKey.set(intersectionEdgeRefKey(ref), edge);
+  }
+  const cutsBySegment = new Map<string, { segment: ReconciledPathSegment; cuts: Map<string, { t: number; nodeId: string }> }>();
+  const pathById = new Map(paths.map((path) => [path.id, path]));
+
+  for (const [groupKey, group] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const hits = [...group.hits.values()];
+    const refs = Array.from(new Map(hits.map(({ segment }) => [segmentRefKey(segment.ref), segment.ref])).values())
+      .sort((a, b) => segmentRefKey(a).localeCompare(segmentRefKey(b)));
+    const refsKey = intersectionNodeRefsKey(refs);
+    const endpointIds = Array.from(new Set(hits.flatMap(({ segment, t }) =>
+      t <= 1e-8 ? [segment.startNodeId] : t >= 1 - 1e-8 ? [segment.endNodeId] : [],
+    )));
+    let junction = endpointIds
+      .map((id) => nodeById.get(id))
+      .find((node): node is NavigationNode => Boolean(node && Math.hypot(node.x - group.point.x, node.y - group.point.y) <= 0.01));
+
+    // A vertex already owned by another member of the same explicitly joined
+    // network is a legitimate canonical endpoint. Manual nodes are never
+    // claimed through coordinate proximity.
+    if (!junction) {
+      junction = nodes.find((node) => {
+        if (!node.generatedFromPathVertices?.length || pointKey(node) !== pointKey(group.point)) return false;
+        return node.generatedFromPathVertices.some((ref) => pathById.get(ref.pathId)?.pathNetworkId === group.networkId);
+      });
+    }
+
+    let isGeneratedIntersectionNode = false;
+    if (!junction) {
+      const reusable = previousIntersectionNodes.find((node) => {
+        const priorRefs = node.generatedFromPathIntersections ?? [];
+        const hasStableSegment = priorRefs.some((prior) => refs.some((current) => segmentRefKey(prior) === segmentRefKey(current)));
+        const hasSameNetworkOwner = priorRefs.some((prior) => pathById.get(prior.pathId)?.pathNetworkId === group.networkId);
+        return hasStableSegment || (hasSameNetworkOwner && Math.hypot(node.x - group.point.x, node.y - group.point.y) <= 0.01);
+      });
+      if (reusable) {
+        junction = {
+          ...reusable,
+          x: group.point.x,
+          y: group.point.y,
+          generatedFromPathIntersections: refs,
+        };
+        isGeneratedIntersectionNode = true;
+      } else {
+        junction = {
+          ...createNavNode({
+            id: makeId("nn"),
+            x: group.point.x,
+            y: group.point.y,
+            campusId: campus.id,
+            name: "Path Junction",
+            type: "outdoor",
+            color: "#16a34a",
+          }),
+          x: group.point.x,
+          y: group.point.y,
+          generatedFromPathIntersections: refs,
+        };
+        isGeneratedIntersectionNode = true;
+      }
+      nodeById.set(junction.id, junction);
+      const index = nodes.findIndex((node) => node.id === junction!.id);
+      if (index < 0) nodes.push(junction);
+      else nodes[index] = junction;
+    }
+
+    const junctionKey = isGeneratedIntersectionNode ? `intersection:${refsKey}` : `node:${junction.id}`;
+    for (const { segment, t } of hits) {
+      const nearStart = t <= 1e-8;
+      const nearEnd = t >= 1 - 1e-8;
+      const nodeId = nearStart ? segment.startNodeId : nearEnd ? segment.endNodeId : junction.id;
+      const key = nearStart ? `node:${segment.startNodeId}` : nearEnd ? `node:${segment.endNodeId}` : junctionKey;
+      const record = cutsBySegment.get(segment.key) ?? { segment, cuts: new Map<string, { t: number; nodeId: string }>() };
+      record.cuts.set(key, { t: nearStart ? 0 : nearEnd ? 1 : t, nodeId });
+      cutsBySegment.set(segment.key, record);
+    }
+    // A stale compiler-created node may have an explicit manual edge. Keep it
+    // as an ordinary user-owned node even if the physical crossing is gone.
+    const prior = previousNodeById.get(junction.id);
+    if (prior && !isGeneratedIntersectionNode && !junction.generatedFromPathIntersections) {
+      const index = nodes.findIndex((node) => node.id === junction!.id);
+      if (index >= 0) nodes[index] = junction;
+    }
+  }
+
+  for (const { segment, cuts } of cutsBySegment.values()) {
+    const interior = [...cuts.values()].filter((cut) => cut.t > 1e-8 && cut.t < 1 - 1e-8);
+    if (interior.length === 0) continue;
+    const parent = edges.find((edge) =>
+      edge.type !== "entrance_transition" && edge.type !== "floor_transition" && edge.type !== "cross_floor"
+      && ((edge.startNodeId === segment.startNodeId && edge.endNodeId === segment.endNodeId)
+        || (edge.startNodeId === segment.endNodeId && edge.endNodeId === segment.startNodeId))
+      && (edge.generatedFromPathIds?.includes(segment.path.id)
+        || !edges.some((candidate) => candidate.generatedFromPathIds?.includes(segment.path.id)
+          && ((candidate.startNodeId === segment.startNodeId && candidate.endNodeId === segment.endNodeId)
+            || (candidate.startNodeId === segment.endNodeId && candidate.endNodeId === segment.startNodeId)))),
+    );
+    if (!parent || parent.bendPoints?.length) continue;
+    const startIsParentStart = parent.startNodeId === segment.startNodeId;
+    const orderedCuts = [...interior].sort((a, b) => startIsParentStart ? a.t - b.t : b.t - a.t);
+    const points = startIsParentStart
+      ? [{ nodeId: parent.startNodeId, t: 0, key: `node:${parent.startNodeId}` }, ...orderedCuts.map((cut) => ({ nodeId: cut.nodeId, t: cut.t, key: [...cuts.entries()].find(([, value]) => value === cut)?.[0] ?? `node:${cut.nodeId}` })), { nodeId: parent.endNodeId, t: 1, key: `node:${parent.endNodeId}` }]
+      : [{ nodeId: parent.startNodeId, t: 1, key: `node:${parent.startNodeId}` }, ...orderedCuts.map((cut) => ({ nodeId: cut.nodeId, t: cut.t, key: [...cuts.entries()].find(([, value]) => value === cut)?.[0] ?? `node:${cut.nodeId}` })), { nodeId: parent.endNodeId, t: 0, key: `node:${parent.endNodeId}` }];
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const from = points[index];
+      const to = points[index + 1];
+      if (from.nodeId === to.nodeId) continue;
+      const ref: GeneratedPathIntersectionEdgeRef = {
+        ...segment.ref,
+        fromJunctionKey: from.key,
+        toJunctionKey: to.key,
+      };
+      const cached = previousEdgeByKey.get(intersectionEdgeRefKey(ref));
+      const lengthFraction = Math.abs(to.t - from.t);
+      const edge: NavigationEdge = {
+        ...parent,
+        id: cached?.id ?? makeId("ne"),
+        startNodeId: from.nodeId,
+        endNodeId: to.nodeId,
+        distance: Math.max(0.001, parent.distance * lengthFraction),
+        generatedFromPathIds: [...new Set([...(parent.generatedFromPathIds ?? []), segment.path.id])],
+        generatedFromPathIntersectionSegments: [ref],
+      };
+      // Keep the source segment and its compiled branches as separate graph
+      // edges. This preserves the original stable edge ID and gives the new
+      // junction a cost-neutral, direction-safe path through the same surface.
+      edges.push(edge);
+    }
+  }
+
+  return { ...campus, navNodes: nodes, navEdges: edges };
 }
 
 /**
@@ -452,11 +770,28 @@ export function reconcilePathwayNavigation(
   // structurally deleted. A generated node may otherwise be conservatively
   // retained as an unowned node because an authored edge still references it.
   const originalNodes = campus.navNodes ?? [];
+  const originalEdges = campus.navEdges ?? [];
   const originalEntranceNodeIds = new Set(originalNodes.filter((node) => node.entranceId && !node.floorId).map((node) => node.id));
   const originalGeneratedNodeIds = new Set(originalNodes.filter((node) => node.generatedFromPathVertices?.length).map((node) => node.id));
+  const previousIntersectionNodes = originalNodes.filter((node) => node.generatedFromPathIntersections?.length);
+  const previousIntersectionNodeIds = new Set(previousIntersectionNodes.map((node) => node.id));
+  const previousIntersectionEdges = originalEdges.filter((edge) => edge.generatedFromPathIntersectionSegments?.length);
+  const externalIntersectionReferences = new Set(originalEdges
+    .filter((edge) => !edge.generatedFromPathIntersectionSegments?.length)
+    .flatMap((edge) => [edge.startNodeId, edge.endNodeId])
+    .filter((nodeId) => previousIntersectionNodeIds.has(nodeId)));
+  const baseNodes = originalNodes
+    .filter((node) => !previousIntersectionNodeIds.has(node.id))
+    .concat(previousIntersectionNodes
+      .filter((node) => externalIntersectionReferences.has(node.id))
+      .map((node) => {
+        const { generatedFromPathIntersections: _derived, ...manualNode } = node;
+        return manualNode;
+      }));
+  const baseEdges = originalEdges.filter((edge) => !edge.generatedFromPathIntersectionSegments?.length);
   const collapsed = collapseDuplicateOwnedObjects(
-    [...(campus.navNodes ?? [])],
-    [...(campus.navEdges ?? [])],
+    [...baseNodes],
+    [...baseEdges],
     paths,
   );
   const sharedCollapsed = collapseSharedGeneratedJunctions(collapsed.nodes, collapsed.edges, paths);
@@ -641,7 +976,15 @@ export function reconcilePathwayNavigation(
   // Pathway moves can move an Entrance's generated target without changing
   // the bridge IDs. Recompute only that bridge's bend geometry so it continues
   // to leave the building safely while preserving every other edge/object.
-  return reconcileEntranceOutdoorConnections({ ...campus, navNodes: nodes, navEdges: edges }, options);
+  const withIntersections = reconcilePathwayIntersections(
+    { ...campus, navNodes: nodes, navEdges: edges },
+    paths,
+    pathNodeIds,
+    previousIntersectionNodes,
+    previousIntersectionEdges,
+    makeId,
+  );
+  return reconcileEntranceOutdoorConnections(withIntersections, options);
 }
 
 /**

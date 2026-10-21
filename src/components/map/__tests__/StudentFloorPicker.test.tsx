@@ -67,6 +67,22 @@ describe("StudentFloorPicker", () => {
     expect(screen.getAllByRole("option")).toHaveLength(4);
   });
 
+  it("still mounts the menu when an embedded Preview wrapper omits the map-surface marker", async () => {
+    setViewport(390, 760);
+    render(
+      <div data-testid="embedded-preview-wrapper">
+        <StudentFloorPicker buildingName="Science Hall" floors={floors} activeFloor={1} onSelect={vi.fn()} />
+      </div>,
+    );
+    const trigger = screen.getByRole("button", { name: /Choose floor/ });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect(280, 78, 378, 122));
+
+    fireEvent.click(trigger);
+
+    expect(await screen.findByTestId("student-floor-picker-menu")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+  });
+
   it("keeps the desktop trigger anchored at the upper right in normal and route states", () => {
     const normal = renderPicker({ width: 1024, height: 768 });
     const root = screen.getByTestId("student-floor-picker");
@@ -116,6 +132,63 @@ describe("StudentFloorPicker", () => {
     expect(screen.getByTestId("student-floor-picker")).toHaveClass("hidden", "md:block");
     expect(screen.getByTestId("student-floor-picker-inline")).toHaveClass("md:hidden");
     expect(screen.getAllByRole("button", { name: /Choose floor/ })).toHaveLength(2);
+  });
+
+  it("keeps the single account-anchored picker available outside an open route panel", () => {
+    setViewport(390, 844);
+    const onSelect = vi.fn();
+    render(
+      <div data-testid="student-map-surface">
+        <div data-testid="student-map-floating-account-controls">
+          <StudentFloorPicker
+            accountAnchor
+            belowAccount
+            buildingCode="CABA"
+            buildingName="College of Accountancy and Business Administration"
+            floors={floors}
+            activeFloor={2}
+            routePanelOpen
+            onSelect={onSelect}
+          />
+        </div>
+        <section data-testid="route-planner-dialog" />
+      </div>,
+    );
+
+    const picker = screen.getByTestId("student-floor-picker");
+    const trigger = screen.getByRole("button", { name: "Choose floor. Current floor: Floor 2" });
+    expect(picker).toHaveAttribute("data-account-anchor", "true");
+    expect(picker).toHaveAttribute("data-below-account", "true");
+    expect(picker).toHaveClass("absolute", "right-0");
+    expect(picker.className).toContain("top-[calc(100%+0.875rem)]");
+    expect(trigger).toHaveTextContent("CABA · 2F");
+    expect(trigger).not.toHaveClass("hidden");
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /Floor 3/ }));
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(3);
+    expect(screen.queryByTestId("student-floor-picker-menu")).not.toBeInTheDocument();
+  });
+
+  it("keeps the floating picker inline beside profile controls when the map header row is free", () => {
+    setViewport(390, 844);
+    render(
+      <div data-testid="student-map-floating-account-controls">
+        <StudentFloorPicker
+          accountAnchor
+          buildingCode="CABA"
+          buildingName="College of Accountancy and Business Administration"
+          floors={floors}
+          activeFloor={2}
+          onSelect={vi.fn()}
+        />
+      </div>,
+    );
+    const picker = screen.getByTestId("student-floor-picker");
+    expect(picker).toHaveClass("relative", "shrink-0");
+    expect(picker).not.toHaveClass("absolute");
+    expect(picker).not.toHaveAttribute("data-below-account", "true");
+    expect(screen.getByRole("button", { name: "Choose floor. Current floor: Floor 2" })).toHaveTextContent("CABA · 2F");
   });
 
   it("flips above the chip and remains within the visible surface when the lower area is short", () => {
@@ -260,6 +333,24 @@ describe("StudentFloorPicker", () => {
       obstacles: [{ left: 0, right: 390, top: 210, bottom: 700 }],
     });
     expect(layout.kind).toBe("sheet");
+  });
+
+  it("removes the old popover immediately when a selected-room collision requires the sheet", () => {
+    const { trigger, surface, onSelect } = renderPicker({ width: 390, height: 760 });
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("student-floor-picker-menu")).toHaveAttribute("data-placement", "below");
+    fireEvent.click(screen.getByRole("option", { name: /Floor 2/ }));
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(2);
+
+    const roomCard = document.createElement("div");
+    roomCard.setAttribute("data-testid", "student-selected-place-card");
+    vi.spyOn(roomCard, "getBoundingClientRect").mockReturnValue(rect(48, 130, 342, 420));
+    surface.append(roomCard);
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("student-floor-picker-menu")).toHaveAttribute("data-placement", "sheet");
+    expect(screen.getAllByTestId("student-floor-picker-menu")).toHaveLength(1);
+    expect(screen.getAllByTestId("student-floor-picker-scrim")).toHaveLength(1);
   });
 
   it("keeps menu pointer input from bubbling to the map surface", () => {

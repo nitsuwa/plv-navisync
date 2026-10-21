@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { Accessibility as AccessibilityIcon } from "lucide-react";
 import type { FloorDoor, FloorElevatorItem, FloorLabel, FloorPath, FloorRamp, FloorRoom, FloorStairs, FloorWall, FloorWindow } from "./types";
 import { ROOM_MAP } from "./constants";
 import { roomOutlinePoints, roomShapePath, roomShapeBounds, roomShapeHorizontalSpan, roomShapeLabelPoint } from "../../lib/roomShape";
 import { layoutRoomLabel, roomLabelLineCenterY } from "../../lib/roomLabel";
+import { floorRoomNamePreviewKey, useFloorTextPreview, type FloorTextPreviewStore } from "./floorTextPreviewStore";
 
 export function wallMaterialStyle(material?: string) {
   if (material === "glass") return { coreOpacity: 0.62, casingOpacity: 0.72, dash: "6 3", casing: "#60a5fa" };
@@ -11,6 +12,93 @@ export function wallMaterialStyle(material?: string) {
   if (material === "wood") return { coreOpacity: 0.98, casingOpacity: 0.78, dash: "9 2 1.5 2", casing: "#92400e" };
   if (material === "drywall") return { coreOpacity: 0.92, casingOpacity: 0.58, dash: "12 4", casing: "#64748b" };
   return { coreOpacity: 1, casingOpacity: 0.85, dash: undefined, casing: "#2f3a46" };
+}
+
+export interface WallOpeningSymbolDomGeometry {
+  kind: "door" | "open_passage" | "window";
+  width: number;
+  wallThickness: number;
+  direction?: string;
+  doorType?: "single" | "double";
+  hinge?: "left" | "right";
+  swingSide?: "a" | "b";
+}
+
+/**
+ * Update an already-rendered opening symbol during a fast editor gesture.
+ * Mutating its primitives keeps a Door swing circular; scaling its parent
+ * group would stretch the leaf and arc as generic freeform artwork.
+ */
+export function updateWallOpeningSymbolDomGeometry(group: SVGGElement, geometry: WallOpeningSymbolDomGeometry) {
+  const { kind, width, wallThickness, direction = "left", doorType = "single", hinge, swingSide = "a" } = geometry;
+  const half = width / 2;
+  const jamb = Math.max(wallThickness / 2 + 2, 4);
+  const set = (part: string, attrs: Record<string, string | number>, index?: number) => {
+    const elements = group.querySelectorAll<SVGElement>(`[data-opening-part="${part}"]`);
+    const element = index === undefined ? null : elements[index];
+    const targets = index === undefined ? Array.from(elements) : element ? [element] : [];
+    for (const target of targets) for (const [name, value] of Object.entries(attrs)) target.setAttribute(name, String(value));
+  };
+  const setOutline = (x: number, y: number, outlineWidth: number, outlineHeight: number) =>
+    set("selection-outline", { x, y, width: outlineWidth, height: outlineHeight });
+  set("resize-handle-start", { x: -half - 3, y: -5, width: 6, height: 10 });
+  set("resize-handle-end", { x: half - 3, y: -5, width: 6, height: 10 });
+
+  set("wall-cut", { x1: -half, x2: half });
+  set("jamb-start", { x1: -half, x2: -half, y1: -jamb, y2: jamb });
+  set("jamb-end", { x1: half, x2: half, y1: -jamb, y2: jamb });
+
+  if (kind === "open_passage") {
+    set("hit-target", { x1: -half, x2: half });
+    set("passage-rail", { x1: -half + 2, x2: half - 2 });
+    setOutline(-half - 3, -jamb - 3, width + 6, jamb * 2 + 6);
+    return;
+  }
+
+  if (kind === "door") {
+    const sliding = direction === "sliding";
+    const double = doorType === "double" || direction === "double";
+    const leaf = double ? width / 2 : width;
+    const hingeValue = hinge ?? (direction === "right" ? "right" : "left");
+    const sideSign = swingSide === "b" ? 1 : -1;
+    set("hit-target", { x1: -half, x2: half });
+    if (sliding) {
+      set("door-leaf", { x1: -half, x2: half, y1: -5.5, y2: -5.5 });
+      set("sliding-track", { x1: -half * 0.55, x2: half, y1: 4.5, y2: 4.5 });
+    } else if (double) {
+      const openY = sideSign * leaf;
+      set("door-hinge", { cx: -half }, 0);
+      set("door-hinge", { cx: half }, 1);
+      set("door-leaf", { x1: -half, x2: -half, y1: 0, y2: openY }, 0);
+      set("door-leaf", { x1: half, x2: half, y1: 0, y2: openY }, 1);
+      set("door-swing-arc", {
+        d: `M 0 0 A ${leaf} ${leaf} 0 0 ${swingSide === "b" ? 0 : 1} ${-half} ${openY}`,
+      }, 0);
+      set("door-swing-arc", {
+        d: `M 0 0 A ${leaf} ${leaf} 0 0 ${swingSide === "b" ? 1 : 0} ${half} ${openY}`,
+      }, 1);
+    } else {
+      const hingeX = hingeValue === "right" ? half : -half;
+      const closedX = hingeValue === "right" ? -half : half;
+      const arcSweep = hingeValue === "right"
+        ? (swingSide === "b" ? 1 : 0)
+        : (swingSide === "b" ? 0 : 1);
+      set("door-hinge", { cx: hingeX });
+      set("door-leaf", { x1: hingeX, y1: 0, x2: hingeX, y2: sideSign * leaf });
+      set("door-swing-arc", { d: `M ${closedX} 0 A ${leaf} ${leaf} 0 0 ${arcSweep} ${hingeX} ${sideSign * leaf}` });
+    }
+    setOutline(-half - 3, sideSign < 0 ? -leaf - 4 : -6, width + 6, leaf + 10);
+    return;
+  }
+
+  const rail = Math.max(wallThickness / 2 + 2, 4.5);
+  set("hit-target", { x1: -half, x2: half });
+  set("window-glass", { x: -half, width });
+  set("window-glazing-upper", { x1: -half, x2: half, y1: -rail, y2: -rail });
+  set("window-glazing-lower", { x1: -half, x2: half, y1: rail, y2: rail });
+  set("window-divider", { y1: -rail - 2, y2: rail + 2 });
+  set("window-midline", { x1: -half + 3, x2: half - 3 });
+  setOutline(-half - 3, -rail - 3, width + 6, rail * 2 + 6);
 }
 
 function WallOpeningSymbolView({
@@ -56,13 +144,13 @@ function WallOpeningSymbolView({
   if (kind === "open_passage") {
     return (
       <>
-        <line data-testid={testId("open-passage-wall-cut")} x1={-half} y1={0} x2={half} y2={0}
+        <line data-testid={testId("open-passage-wall-cut")} data-opening-part="wall-cut" x1={-half} y1={0} x2={half} y2={0}
           stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-        <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={-half + 2} y1={-jamb - 1} x2={half - 2} y2={-jamb - 1} stroke={color} strokeWidth={1.2} strokeLinecap="round" opacity={0.72} />
-        <line data-testid={hitId} x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
-        {selected && <rect data-testid={testId("opening-selection-outline")} x={-half - 3} y={-jamb - 3} width={width + 6} height={jamb * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+        <line data-opening-part="jamb-start" x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line data-opening-part="jamb-end" x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line data-opening-part="passage-rail" x1={-half + 2} y1={-jamb - 1} x2={half - 2} y2={-jamb - 1} stroke={color} strokeWidth={1.2} strokeLinecap="round" opacity={0.72} />
+        <line data-testid={hitId} data-opening-part="hit-target" x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
+        {selected && <rect data-testid={testId("opening-selection-outline")} data-opening-part="selection-outline" x={-half - 3} y={-jamb - 3} width={width + 6} height={jamb * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
         {locked && (
           <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
         )}
@@ -84,15 +172,15 @@ function WallOpeningSymbolView({
       : (swingSide === "b" ? 0 : 1);
     return (
       <>
-        <line data-testid={testId("door-wall-cut")} x1={-half} y1={0} x2={half} y2={0}
+        <line data-testid={testId("door-wall-cut")} data-opening-part="wall-cut" x1={-half} y1={0} x2={half} y2={0}
           stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-        <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <line x1={-half} y1={0} x2={half} y2={0} data-testid={hitId} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
+        <line data-opening-part="jamb-start" x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line data-opening-part="jamb-end" x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+        <line x1={-half} y1={0} x2={half} y2={0} data-testid={hitId} data-opening-part="hit-target" stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
         {sliding ? (
           <>
-            <line data-testid={testId("door-leaf")} x1={-half} y1={-5.5} x2={half} y2={-5.5} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
-            <line x1={-half * 0.55} y1={4.5} x2={half} y2={4.5} stroke={color} strokeWidth={1.6} strokeLinecap="round" opacity={0.65} />
+            <line data-testid={testId("door-leaf")} data-opening-part="door-leaf" x1={-half} y1={-5.5} x2={half} y2={-5.5} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+            <line data-opening-part="sliding-track" x1={-half * 0.55} y1={4.5} x2={half} y2={4.5} stroke={color} strokeWidth={1.6} strokeLinecap="round" opacity={0.65} />
           </>
         ) : double ? (
           (() => {
@@ -101,26 +189,26 @@ function WallOpeningSymbolView({
             const openY = sideSign * doubleLeaf;
             return (
           <>
-            <circle data-testid={testId("door-hinge")} cx={-half} cy={0} r={2.3} fill={color} />
-            <circle data-testid={testId("door-hinge")} cx={half} cy={0} r={2.3} fill={color} />
-            <line data-testid={testId("door-leaf")} x1={-half} y1={0} x2={leftOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-            <line data-testid={testId("door-leaf")} x1={half} y1={0} x2={rightOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-            <path data-testid={testId("door-swing-arc")} d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 0 : 1} ${leftOpenX} ${openY}`}
+            <circle data-testid={testId("door-hinge")} data-opening-part="door-hinge" cx={-half} cy={0} r={2.3} fill={color} />
+            <circle data-testid={testId("door-hinge")} data-opening-part="door-hinge" cx={half} cy={0} r={2.3} fill={color} />
+            <line data-testid={testId("door-leaf")} data-opening-part="door-leaf" x1={-half} y1={0} x2={leftOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+            <line data-testid={testId("door-leaf")} data-opening-part="door-leaf" x1={half} y1={0} x2={rightOpenX} y2={openY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+            <path data-testid={testId("door-swing-arc")} data-opening-part="door-swing-arc" d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 0 : 1} ${leftOpenX} ${openY}`}
               fill="none" stroke={color} strokeWidth={1.5} opacity={0.82} />
-            <path data-testid={testId("door-swing-arc")} d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 1 : 0} ${rightOpenX} ${openY}`}
+            <path data-testid={testId("door-swing-arc")} data-opening-part="door-swing-arc" d={`M 0 0 A ${doubleLeaf} ${doubleLeaf} 0 0 ${swingSide === "b" ? 1 : 0} ${rightOpenX} ${openY}`}
               fill="none" stroke={color} strokeWidth={1.5} opacity={0.82} />
           </>
             );
           })()
         ) : (
           <>
-            <circle data-testid={testId("door-hinge")} cx={hingeX} cy={0} r={2.4} fill={color} />
-            <line data-testid={testId("door-leaf")} x1={hingeX} y1={0} x2={hingeX} y2={sideSign * leaf} stroke={color} strokeWidth={2.7} strokeLinecap="round" />
-            <path data-testid={testId("door-swing-arc")} d={`M ${closedX} 0 A ${leaf} ${leaf} 0 0 ${arcSweep} ${hingeX} ${sideSign * leaf}`}
+            <circle data-testid={testId("door-hinge")} data-opening-part="door-hinge" cx={hingeX} cy={0} r={2.4} fill={color} />
+            <line data-testid={testId("door-leaf")} data-opening-part="door-leaf" x1={hingeX} y1={0} x2={hingeX} y2={sideSign * leaf} stroke={color} strokeWidth={2.7} strokeLinecap="round" />
+            <path data-testid={testId("door-swing-arc")} data-opening-part="door-swing-arc" d={`M ${closedX} 0 A ${leaf} ${leaf} 0 0 ${arcSweep} ${hingeX} ${sideSign * leaf}`}
               fill="none" stroke={color} strokeWidth={1.6} opacity={0.84} />
           </>
         )}
-        {selected && <rect data-testid={testId("opening-selection-outline")} x={-half - 3} y={(sideSign < 0 ? -leaf - 4 : -6)} width={width + 6} height={leaf + 10} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+        {selected && <rect data-testid={testId("opening-selection-outline")} data-opening-part="selection-outline" x={-half - 3} y={(sideSign < 0 ? -leaf - 4 : -6)} width={width + 6} height={leaf + 10} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
         {locked && (
           <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
         )}
@@ -130,17 +218,17 @@ function WallOpeningSymbolView({
   const rail = Math.max(wallThickness / 2 + 2, 4.5);
   return (
     <>
-      <line data-testid={testId("window-wall-cut")} x1={-half} y1={0} x2={half} y2={0}
+      <line data-testid={testId("window-wall-cut")} data-opening-part="wall-cut" x1={-half} y1={0} x2={half} y2={0}
         stroke={background} strokeWidth={gapStroke} strokeLinecap="butt" />
-      <rect x={-half} y={-rail} width={width} height={rail * 2} fill="rgba(125, 211, 252, 0.16)" stroke="none" />
-      <line x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      <line x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      <line data-testid={hitId} x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
-      <line data-testid={testId("window-glazing")} x1={-half} y1={-rail} x2={half} y2={-rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
-      <line x1={-half} y1={rail} x2={half} y2={rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
-      <line x1={0} y1={-rail - 2} x2={0} y2={rail + 2} stroke={color} strokeWidth={1.4} opacity={0.8} />
-      <line x1={-half + 3} y1={0} x2={half - 3} y2={0} stroke="#e0f2fe" strokeWidth={1.1} opacity={0.9} />
-      {selected && <rect data-testid={testId("opening-selection-outline")} x={-half - 3} y={-rail - 3} width={width + 6} height={rail * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+      <rect data-opening-part="window-glass" x={-half} y={-rail} width={width} height={rail * 2} fill="rgba(125, 211, 252, 0.16)" stroke="none" />
+      <line data-opening-part="jamb-start" x1={-half} y1={-jamb} x2={-half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <line data-opening-part="jamb-end" x1={half} y1={-jamb} x2={half} y2={jamb} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <line data-testid={hitId} data-opening-part="hit-target" x1={-half} y1={0} x2={half} y2={0} stroke="transparent" strokeWidth={28} strokeLinecap="butt" />
+      <line data-testid={testId("window-glazing")} data-opening-part="window-glazing-upper" x1={-half} y1={-rail} x2={half} y2={-rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <line data-opening-part="window-glazing-lower" x1={-half} y1={rail} x2={half} y2={rail} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <line data-opening-part="window-divider" x1={0} y1={-rail - 2} x2={0} y2={rail + 2} stroke={color} strokeWidth={1.4} opacity={0.8} />
+      <line data-opening-part="window-midline" x1={-half + 3} y1={0} x2={half - 3} y2={0} stroke="#e0f2fe" strokeWidth={1.1} opacity={0.9} />
+      {selected && <rect data-testid={testId("opening-selection-outline")} data-opening-part="selection-outline" x={-half - 3} y={-rail - 3} width={width + 6} height={rail * 2 + 6} rx={1.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
       {locked && (
         <path d="M-2 -3 V-4.5 C-2 -6 -1 -7 0 -7 C1 -7 2 -6 2 -4.5 V-3 M-3 -3 H3 V2 H-3 Z" fill="#0f172a" stroke="white" strokeWidth={0.6} />
       )}
@@ -488,7 +576,16 @@ function FloorRoomArtworkView({
 export const FloorRoomArtwork = memo(FloorRoomArtworkView);
 
 /** Room name plaque from the shared authored geometry and wrapping rules. */
-function FloorRoomLabelArtworkView({ room, emphasized = false, studentSelected = false, opacity = 0.78 }: { room: FloorRoom; emphasized?: boolean; studentSelected?: boolean; opacity?: number }) {
+function FloorRoomLabelArtworkView({ room, emphasized = false, studentSelected = false, opacity = 0.78, textPreviewStore, previewFloorId }: { room: FloorRoom; emphasized?: boolean; studentSelected?: boolean; opacity?: number; textPreviewStore?: FloorTextPreviewStore; previewFloorId?: string }) {
+  const previewKey = previewFloorId ? floorRoomNamePreviewKey(previewFloorId, room.id) : undefined;
+  const displayName = useFloorTextPreview(
+    textPreviewStore,
+    previewKey,
+    room.name,
+  );
+  useEffect(() => {
+    if (previewKey && textPreviewStore?.get(previewKey) === room.name) textPreviewStore.set(previewKey, undefined);
+  }, [previewKey, room.name, textPreviewStore]);
   const palette = ROOM_MAP[room.type] ?? ROOM_MAP.classroom;
   const points = roomOutlinePoints(room);
   const custom = Array.isArray(room.shapePoints) && room.shapePoints.length >= 3;
@@ -498,7 +595,7 @@ function FloorRoomLabelArtworkView({ room, emphasized = false, studentSelected =
   const shapeSpan = roomShapeHorizontalSpan(points, center.y);
   const labelSpan = shapeSpan >= Math.max(1, bounds.w * 0.1) ? shapeSpan : bounds.w;
   const layout = layoutRoomLabel({
-    text: room.name,
+    text: displayName,
     maxWidth: Math.max(1, Math.min(labelSpan * 0.86, labelSpan - 8)),
     fontSize,
     minFontSize: Math.max(6, fontSize * 0.82),
@@ -525,11 +622,15 @@ function FloorRoomLabelArtworkView({ room, emphasized = false, studentSelected =
 export const FloorRoomLabelArtwork = memo(FloorRoomLabelArtworkView);
 
 /** Authored Floor label text; editor hit/selection controls remain external. */
-function FloorLabelArtworkView({ label }: { label: FloorLabel }) {
+function FloorLabelArtworkView({ label, previewText, textPreviewStore }: { label: FloorLabel; previewText?: string; textPreviewStore?: FloorTextPreviewStore }) {
+  const text = useFloorTextPreview(textPreviewStore, previewText, label.text);
+  useEffect(() => {
+    if (previewText && textPreviewStore?.get(previewText) === label.text) textPreviewStore.set(previewText, undefined);
+  }, [label.text, previewText, textPreviewStore]);
   const anchor = label.align === "center" ? "middle" : label.align === "right" ? "end" : "start";
   return <text data-testid="floor-label-artwork" x={label.x} y={label.y} textAnchor={anchor}
     fill={label.color || "#475569"} fontSize={label.fontSize || 8} fontWeight="600"
-    className="pointer-events-none select-none">{label.text}</text>;
+    className="pointer-events-none select-none">{text}</text>;
 }
 
 export const FloorLabelArtwork = memo(FloorLabelArtworkView);

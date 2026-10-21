@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Campus } from "../../components/map-builder/types";
+import type { AssemblyPoint, Campus } from "../../components/map-builder/types";
 import { canvasAppearanceRecordId, directoryFromSnapshot, hydrateCampusStructure, serializeCampusStructure } from "../campusStructureService";
 
 const ids = {
@@ -85,6 +85,112 @@ describe("campus structure mapping", () => {
       navigationNodes: payload.navigation_nodes.map((v) => v as never), navigationEdges: payload.navigation_edges.map((v) => v as never),
     });
     expect(hydrated).toMatchObject({ canvasGroundMaterial: "pavers", canvasGroundColor: "#b9ad98", canvasGroundTexture: "subtle" });
+  });
+
+  it("round-trips an Assembly Point, outdoor anchor, approval and building assignment through structure rows", () => {
+    const pointId = "10000000-0000-4000-8000-000000000008";
+    const anchorId = "10000000-0000-4000-8000-000000000009";
+    const approachId = "10000000-0000-4000-8000-000000000010";
+    const approachEdgeId = "10000000-0000-4000-8000-000000000011";
+    const point: AssemblyPoint = {
+      id: pointId,
+      name: "TEST ONLY Assembly Point",
+      x: 320,
+      y: 160,
+      campusId: ids.campus,
+      navNodeId: anchorId,
+      buildingAssignments: [{ buildingId: ids.building, designation: "primary" }],
+      safetyReview: {
+        status: "approved",
+        approvedAt: "2026-10-18T00:00:00.000Z",
+        approvedByRole: "super_admin",
+        fingerprint: "fixture-review-fingerprint",
+      },
+    };
+    const source: Campus = {
+      ...campus,
+      assemblyPoints: [point],
+      navNodes: [
+        ...campus.navNodes!,
+        { id: approachId, name: "Outdoor approach", type: "outdoor", x: 280, y: 160, campusId: ids.campus, accessible: true, color: "green" },
+        { id: anchorId, name: point.name, type: "assembly", x: point.x, y: point.y, campusId: ids.campus, assemblyPointId: pointId, accessible: true, color: "green" },
+      ],
+      navEdges: [
+        ...campus.navEdges!,
+        { id: approachEdgeId, startNodeId: approachId, endNodeId: anchorId, distance: 40, bidirectional: true, accessible: true, emergencySafe: true, type: "outdoor", color: "green", width: 3 },
+      ],
+    };
+
+    const payload = serializeCampusStructure(source);
+    const pointRow = payload.map_elements.find((row) => (row.metadata as { kind?: string })?.kind === "assembly_point");
+    expect(pointRow?.id).toBe(pointId);
+    expect(pointRow?.element_type).toBe("assembly_area");
+    expect((pointRow?.metadata as { ui?: AssemblyPoint }).ui).toMatchObject({
+      id: pointId,
+      navNodeId: anchorId,
+      buildingAssignments: [{ buildingId: ids.building, designation: "primary" }],
+      safetyReview: { status: "approved", fingerprint: "fixture-review-fingerprint" },
+    });
+    expect(payload.navigation_nodes.find((row) => row.id === anchorId)).toMatchObject({
+      node_type: "assembly_area",
+      metadata: expect.objectContaining({ ui: expect.objectContaining({ assemblyPointId: pointId }) }),
+    });
+    expect(payload.navigation_edges.find((row) => row.id === approachEdgeId)).toMatchObject({
+      from_node_id: approachId,
+      to_node_id: anchorId,
+    });
+
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: payload.buildings.map((row) => ({ ...row, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((row) => row as never),
+      mapElements: payload.map_elements.map((row) => row as never),
+      navigationNodes: payload.navigation_nodes.map((row) => row as never),
+      navigationEdges: payload.navigation_edges.map((row) => row as never),
+    });
+    expect(hydrated.assemblyPoints).toEqual([point]);
+    expect(hydrated.navNodes?.find((node) => node.id === anchorId)).toMatchObject({
+      type: "assembly",
+      assemblyPointId: pointId,
+      x: point.x,
+      y: point.y,
+    });
+    expect(hydrated.navEdges?.some((edge) => edge.id === approachEdgeId && edge.endNodeId === anchorId)).toBe(true);
+  });
+
+  it("round-trips room-level multi-exit assignments through the existing Room metadata channel", () => {
+    const emergencyEvacuation = {
+      enabled: true,
+      routes: [{
+        id: "door-1::entrance-east",
+        doorId: "door-1",
+        exitId: "entrance-east",
+        destinationNodeId: "exit-node",
+        label: "East Exit",
+        approved: false,
+      }],
+    };
+    const authored = {
+      ...campus,
+      buildings: campus.buildings.map((building) => ({
+        ...building,
+        floors: building.floors.map((floor) => ({
+          ...floor,
+          rooms: floor.rooms.map((room) => ({ ...room, emergencyEvacuation })),
+        })),
+      })),
+    } as unknown as Campus;
+    const payload = serializeCampusStructure(authored);
+    const roomRow = payload.map_elements.find((row) => row.id === ids.room)!;
+    expect((roomRow.metadata as { ui: { emergencyEvacuation?: unknown } }).ui.emergencyEvacuation).toEqual(emergencyEvacuation);
+
+    const hydrated = hydrateCampusStructure(authored, {
+      buildings: payload.buildings.map((row) => ({ ...row, campus_id: ids.campus }) as never),
+      floors: payload.floors.map((row) => row as never),
+      mapElements: payload.map_elements.map((row) => row as never),
+      navigationNodes: payload.navigation_nodes.map((row) => row as never),
+      navigationEdges: payload.navigation_edges.map((row) => row as never),
+    });
+    expect(hydrated.buildings[0]?.floors[0]?.rooms[0]?.emergencyEvacuation).toEqual(emergencyEvacuation);
   });
 
   it("reuses one deterministic canvas appearance row across repeated serializations", () => {

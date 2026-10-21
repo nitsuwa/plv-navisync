@@ -75,6 +75,10 @@ export default defineConfig(({ mode }) => ({
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
+    // Scan the shipped application entry only. Verification artifacts and
+    // browser profiles also contain HTML that must never be treated as app code.
+    entries: ['index.html'],
+    force: true,
     include: ['react', 'react-dom', 'react-router'],
   },
 

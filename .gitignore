@@ -65,3 +65,8 @@ LPT9
 
 # Disposable local verification runtimes, browser profiles, and raw test output
 /.tmp/
+
+# Browser profiles contain generated extension pages and browser-owned data.
+/verification-artifacts/**/edge-profile/
+/verification-artifacts/**/browser-profile/
+/verification-artifacts/**/chromium-profile/

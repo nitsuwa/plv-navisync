@@ -1,0 +1,3927 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "test-fixture",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {},
+  "browserErrors": [],
+  "screenshots": [
+    "smart-multiexit-desktop-1440-both-routes.png",
+    "smart-multiexit-desktop-1440-route-a-preview.png",
+    "smart-multiexit-desktop-1440-route-a-preview-3d.png",
+    "smart-multiexit-desktop-1440-route-b-transition.png",
+    "smart-multiexit-desktop-1440-route-b-preview.png",
+    "smart-multiexit-desktop-1440-route-b-active-3d-paused.png",
+    "smart-multiexit-desktop-1440-route-b-active-explore.png",
+    "smart-multiexit-mobile-390-both-routes.png",
+    "smart-multiexit-mobile-390-route-a-preview.png",
+    "smart-multiexit-mobile-390-route-a-preview-3d.png",
+    "smart-multiexit-mobile-390-route-b-transition.png",
+    "smart-multiexit-mobile-390-route-b-preview.png",
+    "smart-multiexit-mobile-390-route-b-active-3d-paused.png",
+    "smart-multiexit-mobile-390-route-b-active-explore.png",
+    "smart-multiexit-mobile-360-both-routes.png",
+    "smart-multiexit-mobile-360-route-a-preview.png",
+    "smart-multiexit-mobile-360-route-b-transition.png",
+    "smart-multiexit-mobile-360-route-b-preview.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "fixtureSummary": {
+    "testOnly": true,
+    "source": "read-only published MAIN CAMPUS - PLV snapshot; edits and synthetic review stay local to this test",
+    "point": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "name": "TEST ONLY - Main Assembly Point A",
+      "navNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+      "x": 146,
+      "y": 380,
+      "connection": "connected",
+      "review": "approved",
+      "incidentEdges": 3,
+      "assignedBuildings": 4,
+      "placementModel": "placed directly on an existing authored outdoor waypoint"
+    },
+    "rooms": [
+      {
+        "name": "PLV AUDITORIUM",
+        "building": "STUDENT CENTER BUILDING",
+        "displayFloor": "Floor 5",
+        "internalFloor": 6,
+        "assignedDoorCount": 3,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "disconnected",
+            "routeCount": 0
+          },
+          {
+            "label": "Room door 3",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 5,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 5,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 4.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 3.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 2.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Ground Floor.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "arrive",
+              "instruction": "Arrive at STUDENT CENTER BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 5
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 180,
+                "y": 301
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 5,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 293,
+                "y": 263
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CABA LECTURE HALL",
+        "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 2,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 11,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Right Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 391,
+                "y": 360
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 1014,
+                "y": 229
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 146,
+                "y": 462
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ASSEMBLY HALL",
+        "building": "COLLEGE OF EDUCATION BUILDING",
+        "displayFloor": "Ground Floor",
+        "internalFloor": 1,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 1
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 1
+          }
+        ],
+        "routeCount": 1,
+        "distinctPhysicalExits": 1,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 1,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF EDUCATION BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 1
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 409,
+                "y": 739
+              },
+              "end": {
+                "x": 564,
+                "y": 6
+              }
+            },
+            {
+              "index": 1,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 1201,
+                "y": 370
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CEIT LECTURE HALL",
+        "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 15,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 13,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Left Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 139,
+                "y": 360
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 867,
+                "y": 463
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "preview3d-desktop-1440": {
+    "canvasVisible": true,
+    "phase": "preview",
+    "bodyHasDestination": true
+  },
+  "routeSelection": [
+    {
+      "viewport": "desktop-1440",
+      "overviewState": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(-5.684341886080802e-14 0) scale(1)",
+        "progressMarkerCount": 0,
+        "progressMarkerRect": null,
+        "routePanelRect": {
+          "x": 12,
+          "y": 69,
+          "width": 460,
+          "height": 540.125
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 3,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A\nRoom door 2 → Exterior Stair 1",
+            "ariaLabel": "Route A: Room door 2 to Exterior Stair 1",
+            "disabled": false
+          },
+          {
+            "text": "Route B\nRoom door 1 → Exterior Stair 2",
+            "ariaLabel": "Route B: Room door 1 to Exterior Stair 2",
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeASelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": null,
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 706.2615966796875,
+          "y": 747.4465942382812,
+          "width": 26,
+          "height": 25.99993896484375
+        },
+        "routePanelRect": {
+          "x": 12,
+          "y": 69,
+          "width": 460,
+          "height": 555.25
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeBSelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(254.99999999999997 52.901041666666615) scale(1.05)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 553.0470581054688,
+          "y": 749.125,
+          "width": 26,
+          "height": 25.99993896484375
+        },
+        "routePanelRect": {
+          "x": 12,
+          "y": 69,
+          "width": 460,
+          "height": 555.25
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "rapidSwitchFinal": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(254.99999999999997 52.901041666666615) scale(1.05)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 553.0470581054688,
+          "y": 749.125,
+          "width": 26,
+          "height": 25.99993896484375
+        },
+        "routePanelRect": {
+          "x": 12,
+          "y": 69,
+          "width": 460,
+          "height": 555.25
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "cameraSamples": [
+        {
+          "transform": null,
+          "computedTransform": "matrix(0.890266, 0, 0, 0.890266, 305.147, 36.4296)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 605.4979712542366,
+            "y": 657.6886435116039
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(0.890266, 0, 0, 0.890266, 305.147, 36.4296)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 605.4979712542366,
+            "y": 657.6886435116039
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(0.892298, 0, 0, 0.892298, 304.509, 36.6391)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 604.9960266562069,
+            "y": 659.0173806583181
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(0.892298, 0, 0, 0.892298, 304.509, 36.6391)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 604.9960266562069,
+            "y": 659.0173806583181
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.01483, 0, 0, 1.01483, 266.041, 49.2747)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 574.7326467738433,
+            "y": 739.1320832196404
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.03248, 0, 0, 1.03248, 260.5, 51.0944)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 570.3740710090188,
+            "y": 750.6703383501838
+          }
+        },
+        {
+          "transform": "translate(254.99999999999997 52.901041666666615) scale(1.05)",
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 255, 52.901)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 566.0470494663015,
+            "y": 762.1249775606043
+          }
+        },
+        {
+          "transform": "translate(254.99999999999997 52.901041666666615) scale(1.05)",
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 255, 52.901)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 566.0470494663015,
+            "y": 762.1249775606043
+          }
+        }
+      ],
+      "cameraPositionFrames": [
+        "605.5,657.7",
+        "605.0,659.0",
+        "574.7,739.1",
+        "570.4,750.7",
+        "566.0,762.1"
+      ],
+      "cameraMotionObserved": true,
+      "cameraGroupDuringTransition": 1
+    },
+    {
+      "viewport": "mobile-390",
+      "overviewState": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(20.923076923076962 -11.487179487179478) scale(0.958974358974359)",
+        "progressMarkerCount": 0,
+        "progressMarkerRect": null,
+        "routePanelRect": {
+          "x": 8,
+          "y": 270.36572265625,
+          "width": 374,
+          "height": 497.55145263671875
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 3,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A\nRoom door 2 → Exterior Stair 1",
+            "ariaLabel": "Route A: Room door 2 to Exterior Stair 1",
+            "disabled": false
+          },
+          {
+            "text": "Route B\nRoom door 1 → Exterior Stair 2",
+            "ariaLabel": "Route B: Room door 1 to Exterior Stair 2",
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeASelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(99.44999999999996 -148) scale(1.05)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 181.99998474121094,
+          "y": 376.5,
+          "width": 26.000015258789062,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 254.75,
+          "width": 374,
+          "height": 513.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeBSelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": null,
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 181.95602416992188,
+          "y": 376.2249450683594,
+          "width": 25.999984741210938,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 254.75,
+          "width": 374,
+          "height": 513.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "rapidSwitchFinal": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(234.69210521646283 -483.02764116599565) scale(1.98063233657221)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 182,
+          "y": 376.5,
+          "width": 26,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 254.75,
+          "width": 374,
+          "height": 513.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "cameraSamples": [
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 215.583, -602.54)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 187.69361957381753,
+            "y": 343.80393880956314
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 215.583, -602.54)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 187.69361957381753,
+            "y": 343.80393880956314
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 215.583, -602.54)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 187.69361957381753,
+            "y": 343.80393880956314
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 215.583, -602.54)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 187.69361957381753,
+            "y": 343.80393880956314
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 222.806, -557.365)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 190.45540429564082,
+            "y": 361.0768682816449
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 225.581, -540.008)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 191.51649555038003,
+            "y": 367.7132262061624
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 231.378, -503.758)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 193.7326677126043,
+            "y": 381.5737536935245
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.98063, 0, 0, 1.98063, 234.577, -483.747)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 194.9560209302341,
+            "y": 389.22494316101074
+          }
+        }
+      ],
+      "cameraPositionFrames": [
+        "187.7,343.8",
+        "190.5,361.1",
+        "191.5,367.7",
+        "193.7,381.6",
+        "195.0,389.2"
+      ],
+      "cameraMotionObserved": true,
+      "cameraGroupDuringTransition": 1
+    },
+    {
+      "viewport": "mobile-360",
+      "overviewState": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(-5.684341886080802e-14 -22.666666666666657) scale(1)",
+        "progressMarkerCount": 0,
+        "progressMarkerRect": null,
+        "routePanelRect": {
+          "x": 8,
+          "y": 230.79693603515625,
+          "width": 344,
+          "height": 492.205810546875
+        },
+        "progressMarkerCovered": false,
+        "startMarkerCount": 3,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A\nRoom door 2 → Exterior Stair 1",
+            "ariaLabel": "Route A: Room door 2 to Exterior Stair 1",
+            "disabled": false
+          },
+          {
+            "text": "Route B\nRoom door 1 → Exterior Stair 2",
+            "ariaLabel": "Route B: Room door 1 to Exterior Stair 2",
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeASelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(99.44999999999996 -148) scale(1.05)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 166.99998474121094,
+          "y": 354.5,
+          "width": 26.000015258789062,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 209.75,
+          "width": 344,
+          "height": 514.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "routeBSelected": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": null,
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 158.92095947265625,
+          "y": 354.5,
+          "width": 25.999984741210938,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 209.75,
+          "width": 344,
+          "height": 514.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "rapidSwitchFinal": {
+        "phase": "preview",
+        "collapsed": "false",
+        "cameraTransform": "translate(364.04999999999995 -148) scale(1.05)",
+        "progressMarkerCount": 1,
+        "progressMarkerRect": {
+          "x": 167,
+          "y": 354.5,
+          "width": 26,
+          "height": 26
+        },
+        "routePanelRect": {
+          "x": 8,
+          "y": 209.75,
+          "width": 344,
+          "height": 514.25
+        },
+        "progressMarkerCovered": true,
+        "startMarkerCount": 2,
+        "emergencyHumanMarkerCount": 0,
+        "routeButtonPressed": [
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "false"
+          },
+          {
+            "label": null,
+            "pressed": "true"
+          }
+        ],
+        "stepText": null,
+        "floor": "Choose floor. Current floor: Floor 6",
+        "visibleButtons": [
+          {
+            "text": "Both Routes",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route A",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "Route B",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "FOLLOW",
+            "ariaLabel": "Return to Follow mode",
+            "disabled": false
+          },
+          {
+            "text": "EXPLORE",
+            "ariaLabel": "Switch to Explore mode",
+            "disabled": false
+          },
+          {
+            "text": "Start",
+            "ariaLabel": null,
+            "disabled": false
+          },
+          {
+            "text": "",
+            "ariaLabel": "Switch to 3D view",
+            "disabled": false
+          }
+        ]
+      },
+      "cameraSamples": [
+        {
+          "transform": "translate(99.44999999999996 -148) scale(1.05)",
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 99.45, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 86.61176128948436,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": "translate(99.44999999999996 -148) scale(1.05)",
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 99.45, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 86.61176128948436,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": "translate(99.44999999999996 -148) scale(1.05)",
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 99.45, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 86.61176128948436,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 99.9862, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 86.80099809871001,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 146.94, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 103.37291815701654,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 203.627, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 123.38001798180974,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 275.303, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 148.67751948973714,
+            "y": 367.4999939413632
+          }
+        },
+        {
+          "transform": null,
+          "computedTransform": "matrix(1.05, 0, 0, 1.05, 341.159, -148)",
+          "markerWorld": "translate(139,360)",
+          "markerScreen": {
+            "x": 171.92094923468198,
+            "y": 367.4999939413632
+          }
+        }
+      ],
+      "cameraPositionFrames": [
+        "86.6,367.5",
+        "86.8,367.5",
+        "103.4,367.5",
+        "123.4,367.5",
+        "148.7,367.5",
+        "171.9,367.5"
+      ],
+      "cameraMotionObserved": true,
+      "cameraGroupDuringTransition": 1
+    }
+  ],
+  "navigationRuns": [
+    {
+      "viewport": "desktop-1440",
+      "rendererRoundTrip": {
+        "threeD": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "returned2D": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 438.0212097167969,
+                "y": 568.5802001953125,
+                "width": 37.800140380859375,
+                "height": 37.8001708984375
+              },
+              "screen": {
+                "x": 456.9212662191952,
+                "y": 587.4803197524127
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 456.9212662191952,
+            "y": 587.4803197524127
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "pause": {
+        "before": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,395.8898573923377)",
+              "progress": "0.0927386495926039",
+              "visible": true,
+              "rect": {
+                "x": 553.0470581054688,
+                "y": 764.4989624023438,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 566.0470494663015,
+                "y": 777.4989820666688
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,395.8898573923377)",
+          "markerScreen": {
+            "x": 566.0470494663015,
+            "y": 777.4989820666688
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "oneVisibleProgressMarker": true,
+        "afterHold": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,395.8898573923377)",
+              "progress": "0.0927386495926039",
+              "visible": true,
+              "rect": {
+                "x": 553.0470581054688,
+                "y": 764.4989624023438,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 566.0470494663015,
+                "y": 777.4989820666688
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,395.8898573923377)",
+          "markerScreen": {
+            "x": 566.0470494663015,
+            "y": 777.4989820666688
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "frozen": true
+      },
+      "resume": {
+        "afterResume": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(137.15193538998832,414)",
+              "progress": "0.14431024447031443",
+              "visible": true,
+              "rect": {
+                "x": 550.3076171875,
+                "y": 745.9881591796875,
+                "width": 25.99993896484375,
+                "height": 25.99993896484375
+              },
+              "screen": {
+                "x": 563.3075602036466,
+                "y": 758.9881277645336
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(137.15193538998832,414)",
+          "markerScreen": {
+            "x": 563.3075602036466,
+            "y": 758.9881277645336
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Pause",
+              "label": "Pause navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "sameStep": true,
+        "markerMoved": true
+      },
+      "stepping": {
+        "afterNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 435.941162109375,
+                "y": 572.4852905273438,
+                "width": 26.000030517578125,
+                "height": 26
+              },
+              "screen": {
+                "x": 448.941172431497,
+                "y": 585.4852833467371
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 448.941172431497,
+            "y": 585.4852833467371
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "afterPrevious": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,365.3643564364056)",
+              "progress": "0.013861386140582965",
+              "visible": true,
+              "rect": {
+                "x": 553.0470581054688,
+                "y": 728.5541381835938,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 566.0470494663015,
+                "y": 741.5541204095045
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,365.3643564364056)",
+          "markerScreen": {
+            "x": 566.0470494663015,
+            "y": 741.5541204095045
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": true
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "singleStepRoundTrip": true
+      },
+      "explore": {
+        "beforeNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 351.6815490722656,
+                "y": 550.3892822265625,
+                "width": 43.49853515625,
+                "height": 43.49859619140625
+              },
+              "screen": {
+                "x": 373.43079959644996,
+                "y": 572.1385749368108
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 373.43079959644996,
+            "y": 572.1385749368108
+          },
+          "cameraTransform": "translate(193.41010707831737 106.7183336632864) scale(1.1850561579857113)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "afterPrevious": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 360.4307861328125,
+                "y": 559.1385498046875,
+                "width": 26.000030517578125,
+                "height": 26
+              },
+              "screen": {
+                "x": 373.43079959644996,
+                "y": 572.1385749368108
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 373.43079959644996,
+            "y": 572.1385749368108
+          },
+          "cameraTransform": "translate(193.41010707831737 106.7183336632864) scale(1.1850561579857113)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": true
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.\nInspected context",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "cameraPreservedOnPrevious": true,
+        "afterNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 360.4307861328125,
+                "y": 559.1385498046875,
+                "width": 26.000030517578125,
+                "height": 26
+              },
+              "screen": {
+                "x": 373.43079959644996,
+                "y": 572.1385749368108
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 373.43079959644996,
+            "y": 572.1385749368108
+          },
+          "cameraTransform": "translate(193.41010707831737 106.7183336632864) scale(1.1850561579857113)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "cameraPreservedOnNext": true,
+        "stepRoundTrip": true,
+        "returnFollow": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 447.3812561035156,
+                "y": 559.1385498046875,
+                "width": 25.999969482421875,
+                "height": 26
+              },
+              "screen": {
+                "x": 460.3812318689683,
+                "y": 572.1385749368108
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 460.3812318689683,
+            "y": 572.1385749368108
+          },
+          "cameraTransform": "translate(254.99999999999994 106.7183336632864) scale(1.1850561579857113)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "transitionInteractions": [],
+      "floorTransitions": {
+        "forward": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 4.",
+          "step": 4,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 5",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": "translate(50.99999999999993 22.999999999999996) scale(0.9)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "enteredTransitionAt": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 435.941162109375,
+                "y": 572.4852905273438,
+                "width": 26.000030517578125,
+                "height": 26
+              },
+              "screen": {
+                "x": 448.941172431497,
+                "y": 585.4852833467371
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 448.941172431497,
+            "y": 585.4852833467371
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "pauseRequestedDuringHandoff": true,
+        "restoredFloor": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 479.21612548828125,
+                "y": 583.3040161132812,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 492.2161368201761,
+                "y": 596.3040188060088
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 492.2161368201761,
+            "y": 596.3040188060088
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "backwardSteps": [
+          {
+            "phase": "navigating",
+            "instruction": "Take the Left Stair down to Floor 5.",
+            "step": 3,
+            "total": 11,
+            "floor": "Choose floor. Current floor: Floor 6",
+            "markerCount": 1,
+            "visibleMarkerCount": 1,
+            "routeProgressMarkers": [
+              {
+                "transform": "translate(60,160)",
+                "progress": "1",
+                "visible": true,
+                "rect": {
+                  "x": 479.21612548828125,
+                  "y": 583.3040161132812,
+                  "width": 26,
+                  "height": 26
+                },
+                "screen": {
+                  "x": 492.2161368201761,
+                  "y": 596.3040188060088
+                },
+                "parentTestId": null
+              }
+            ],
+            "markerTransform": "translate(60,160)",
+            "markerScreen": {
+              "x": 492.2161368201761,
+              "y": 596.3040188060088
+            },
+            "cameraTransform": null,
+            "visibleControls": [
+              {
+                "text": "FOLLOW",
+                "label": "Switch to Follow mode",
+                "disabled": false
+              },
+              {
+                "text": "EXPLORE",
+                "label": "Switch to Explore mode",
+                "disabled": false
+              },
+              {
+                "text": "Previous",
+                "label": null,
+                "disabled": false
+              },
+              {
+                "text": "Continue",
+                "label": null,
+                "disabled": false
+              }
+            ]
+          }
+        ],
+        "stableAfterHandoff": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 4.",
+          "step": 4,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 5",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": "translate(50.99999999999993 22.999999999999996) scale(0.9)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "stoppedAtFirstFloor": true,
+        "restored": true,
+        "stableAfterRestore": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 479.21612548828125,
+                "y": 583.3040161132812,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 492.2161368201761,
+                "y": 596.3040188060088
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 492.2161368201761,
+            "y": 596.3040188060088
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "viewport": "mobile-390",
+      "rendererRoundTrip": {
+        "threeD": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "returned2D": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 182.57379150390625,
+                "y": 327.62542724609375,
+                "width": 10.274871826171875,
+                "height": 10.274871826171875
+              },
+              "screen": {
+                "x": 187.71122367241801,
+                "y": 332.76285586637607
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 187.71122367241801,
+            "y": 332.76285586637607
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "pause": {
+        "before": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,395.3041763678696)",
+              "progress": "0.09122526193247957",
+              "visible": true,
+              "rect": {
+                "x": 181.83641052246094,
+                "y": 342.4754943847656,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.83641311701604,
+                "y": 355.47548801111105
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,395.3041763678696)",
+          "markerScreen": {
+            "x": 194.83641311701604,
+            "y": 355.47548801111105
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "oneVisibleProgressMarker": true,
+        "afterHold": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,395.3041763678696)",
+              "progress": "0.09122526193247957",
+              "visible": true,
+              "rect": {
+                "x": 181.83641052246094,
+                "y": 342.4754943847656,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.83641311701604,
+                "y": 355.47548801111105
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,395.3041763678696)",
+          "markerScreen": {
+            "x": 194.83641311701604,
+            "y": 355.47548801111105
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "frozen": true
+      },
+      "resume": {
+        "afterResume": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(138.94276775311744,414)",
+              "progress": "0.13968277066377927",
+              "visible": true,
+              "rect": {
+                "x": 181.95127868652344,
+                "y": 379.6568603515625,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.95126980418223,
+                "y": 392.65687126271865
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(138.94276775311744,414)",
+          "markerScreen": {
+            "x": 194.95126980418223,
+            "y": 392.65687126271865
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Pause",
+              "label": "Pause navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "sameStep": true,
+        "markerMoved": true
+      },
+      "stepping": {
+        "afterNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 181.99998474121094,
+                "y": 376.5,
+                "width": 26.000015258789062,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.99999489503747,
+                "y": 389.49999708287856
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 194.99999489503747,
+            "y": 389.49999708287856
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "afterPrevious": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(139,360)",
+              "progress": "0",
+              "visible": true,
+              "rect": {
+                "x": 182,
+                "y": 155.3490753173828,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.99999945303972,
+                "y": 168.34907251245838
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(139,360)",
+          "markerScreen": {
+            "x": 194.99999945303972,
+            "y": 168.34907251245838
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "singleStepRoundTrip": true
+      },
+      "explore": {
+        "beforeNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 175.16969299316406,
+                "y": 246.90447998046875,
+                "width": 10.438232421875,
+                "height": 10.438232421875
+              },
+              "screen": {
+                "x": 180.38880272472605,
+                "y": 252.12360045489143
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 180.38880272472605,
+            "y": 252.12360045489143
+          },
+          "cameraTransform": "translate(408.7860894285873 -297.2921272827857) scale(1.05)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "afterPrevious": {
+          "phase": "navigating",
+          "instruction": "Follow the path toward Left Stair.",
+          "step": 2,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,181.25306930731278)",
+              "progress": "0.9450825082498377",
+              "visible": true,
+              "rect": {
+                "x": 167.38880920410156,
+                "y": 247.6560821533203,
+                "width": 26,
+                "height": 25.999984741210938
+              },
+              "screen": {
+                "x": 180.38880272472605,
+                "y": 260.6560813843645
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,181.25306930731278)",
+          "markerScreen": {
+            "x": 180.38880272472605,
+            "y": 260.6560813843645
+          },
+          "cameraTransform": "translate(408.7860894285873 -297.2921272827857) scale(1.05)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": true
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.\nCURRENT\nInspected context",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "cameraPreservedOnPrevious": true,
+        "afterNext": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 167.38880920410156,
+                "y": 239.12359619140625,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 180.38880272472605,
+                "y": 252.12360045489143
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 180.38880272472605,
+            "y": 252.12360045489143
+          },
+          "cameraTransform": "translate(408.7860894285873 -297.2921272827857) scale(1.05)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Return to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "2\nFollow the path toward Left Stair.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "8\nFollow the path toward Exterior Stair 2.",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "10\nFollow the path toward TEST ONLY - Main Assembly Point A.",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "cameraPreservedOnNext": true,
+        "stepRoundTrip": true,
+        "returnFollow": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 175.08822631835938,
+                "y": 376.5,
+                "width": 26,
+                "height": 26
+              },
+              "screen": {
+                "x": 188.08822971231797,
+                "y": 389.49999708287856
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 188.08822971231797,
+            "y": 389.49999708287856
+          },
+          "cameraTransform": "translate(428.92307692307696 61.999999999999986) scale(1.05)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "transitionInteractions": [],
+      "floorTransitions": {
+        "forward": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 4.",
+          "step": 4,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 5",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": "translate(20.923076923076962 -11.487179487179478) scale(0.958974358974359)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "enteredTransitionAt": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 181.99998474121094,
+                "y": 135.725341796875,
+                "width": 26.000015258789062,
+                "height": 26
+              },
+              "screen": {
+                "x": 194.99999489503747,
+                "y": 148.7253413480871
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 194.99999489503747,
+            "y": 148.7253413480871
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "pauseRequestedDuringHandoff": true,
+        "restoredFloor": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 173.6212615966797,
+                "y": 304.873779296875,
+                "width": 26.000015258789062,
+                "height": 26
+              },
+              "screen": {
+                "x": 186.62127269716822,
+                "y": 317.87379147024717
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 186.62127269716822,
+            "y": 317.87379147024717
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "backwardSteps": [
+          {
+            "phase": "navigating",
+            "instruction": "Take the Left Stair down to Floor 5.",
+            "step": 3,
+            "total": 11,
+            "floor": "Choose floor. Current floor: Floor 6",
+            "markerCount": 1,
+            "visibleMarkerCount": 1,
+            "routeProgressMarkers": [
+              {
+                "transform": "translate(60,160)",
+                "progress": "1",
+                "visible": true,
+                "rect": {
+                  "x": 173.6212615966797,
+                  "y": 304.873779296875,
+                  "width": 26.000015258789062,
+                  "height": 26
+                },
+                "screen": {
+                  "x": 186.62127269716822,
+                  "y": 317.87379147024717
+                },
+                "parentTestId": null
+              }
+            ],
+            "markerTransform": "translate(60,160)",
+            "markerScreen": {
+              "x": 186.62127269716822,
+              "y": 317.87379147024717
+            },
+            "cameraTransform": null,
+            "visibleControls": [
+              {
+                "text": "FOLLOW",
+                "label": "Switch to Follow mode",
+                "disabled": false
+              },
+              {
+                "text": "EXPLORE",
+                "label": "Switch to Explore mode",
+                "disabled": false
+              },
+              {
+                "text": "Previous",
+                "label": null,
+                "disabled": false
+              },
+              {
+                "text": "Continue",
+                "label": null,
+                "disabled": false
+              }
+            ]
+          }
+        ],
+        "stableAfterHandoff": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 4.",
+          "step": 4,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 5",
+          "markerCount": 0,
+          "visibleMarkerCount": 0,
+          "routeProgressMarkers": [],
+          "markerTransform": null,
+          "markerScreen": null,
+          "cameraTransform": "translate(20.923076923076962 -11.487179487179478) scale(0.958974358974359)",
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Resume",
+              "label": "Resume navigation",
+              "disabled": false
+            },
+            {
+              "text": "Next",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        },
+        "stoppedAtFirstFloor": true,
+        "restored": true,
+        "stableAfterRestore": {
+          "phase": "navigating",
+          "instruction": "Take the Left Stair down to Floor 5.",
+          "step": 3,
+          "total": 11,
+          "floor": "Choose floor. Current floor: Floor 6",
+          "markerCount": 1,
+          "visibleMarkerCount": 1,
+          "routeProgressMarkers": [
+            {
+              "transform": "translate(60,160)",
+              "progress": "1",
+              "visible": true,
+              "rect": {
+                "x": 173.6212615966797,
+                "y": 304.873779296875,
+                "width": 26.000015258789062,
+                "height": 26
+              },
+              "screen": {
+                "x": 186.62127269716822,
+                "y": 317.87379147024717
+              },
+              "parentTestId": null
+            }
+          ],
+          "markerTransform": "translate(60,160)",
+          "markerScreen": {
+            "x": 186.62127269716822,
+            "y": 317.87379147024717
+          },
+          "cameraTransform": null,
+          "visibleControls": [
+            {
+              "text": "FOLLOW",
+              "label": "Switch to Follow mode",
+              "disabled": false
+            },
+            {
+              "text": "EXPLORE",
+              "label": "Switch to Explore mode",
+              "disabled": false
+            },
+            {
+              "text": "Previous",
+              "label": null,
+              "disabled": false
+            },
+            {
+              "text": "Continue",
+              "label": null,
+              "disabled": false
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "preview3d-mobile-390": {
+    "canvasVisible": true,
+    "phase": "preview",
+    "bodyHasDestination": true
+  },
+  "routeSelectionSummary": {
+    "expectedOverview": "both routes visible, preview phase, no active progress markers",
+    "expectedSelected": "preview phase, selected alternative highlighted, no auto-play, one start-position progress marker",
+    "noBrowserErrors": true
+  }
+}

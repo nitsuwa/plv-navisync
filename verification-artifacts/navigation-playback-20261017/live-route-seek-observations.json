@@ -1,0 +1,34 @@
+{
+    "fixture":  "Campus Gate to BUSINESS OFFICE SIMULATION ROOM; 2D Student Map in Chromium",
+    "previousSeek":  {
+                         "fromStep":  "Step 3 of 5",
+                         "toStep":  "Step 2 of 5",
+                         "samples":  38,
+                         "uniqueProgressValues":  38,
+                         "first":  {
+                                       "progress":  0.94144444444444764,
+                                       "transform":  "translate(278.99688994207236,672.3249740828506)"
+                                   },
+                         "last":  {
+                                      "progress":  0.13027777777777771,
+                                      "transform":  "translate(193.76554281465033,380)"
+                                  },
+                         "direction":  "backward"
+                     },
+    "nextSeek":  {
+                     "fromStep":  "Step 2 of 5",
+                     "toStep":  "Step 3 of 5",
+                     "samples":  37,
+                     "uniqueProgressValues":  37,
+                     "first":  {
+                                   "progress":  0.032722222223463993,
+                                   "transform":  "translate(128.79313634105264,380)"
+                               },
+                     "last":  {
+                                  "progress":  0.84944444444567324,
+                                  "transform":  "translate(340.2671458654262,672.8355595488786)"
+                              },
+                     "direction":  "forward"
+                 },
+    "markersObserved":  1
+}

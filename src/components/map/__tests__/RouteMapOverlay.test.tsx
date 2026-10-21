@@ -1,6 +1,6 @@
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RouteMapOverlay, routeChevronCount, routeChevronPath, routePolylineLength, routeProgressGeometry, segmentBearing } from "../RouteMapOverlay";
+import { RouteMapOverlay, routeChevronCount, routeChevronMotionTransform, routeChevronPath, routePolylineLength, routeProgressGeometry, segmentBearing } from "../RouteMapOverlay";
 
 const points = [{ x: 10, y: 20 }, { x: 80, y: 20 }, { x: 80, y: 100 }, { x: 180, y: 100 }];
 
@@ -20,7 +20,7 @@ describe("RouteMapOverlay", () => {
     const { container } = render(<svg><RouteMapOverlay points={points} mode={mode} animated={false} layer="line" /></svg>);
     const strokes = container.querySelectorAll("[data-route-strokes] polyline");
     expect(strokes).toHaveLength(3);
-    expect(container.querySelector('[data-testid="route-outer-casing"]')).toHaveAttribute("stroke", "#60a5fa");
+    expect(container.querySelector('[data-testid="route-outer-casing"]')).toHaveAttribute("stroke", mode === "emergency" ? "#ffffff" : "#60a5fa");
     expect(container.querySelector(`polyline[stroke="${color}"][stroke-width="6"]`)).toHaveAttribute("points", "10,20 80,20 80,100 180,100");
     expect(container.querySelector('[data-testid="route-direction-chevrons"]')).toHaveAttribute("data-travel-direction", "start-to-destination");
     expect([...strokes].every((stroke) => Number(stroke.getAttribute("opacity") ?? 1) > 0)).toBe(true);
@@ -58,32 +58,25 @@ describe("RouteMapOverlay", () => {
     const { container, rerender } = render(<svg><RouteMapOverlay points={points} mode="standard" walkProgress={0.2} animated /></svg>);
     const baseRoute = container.querySelector('[data-testid="route-outer-casing"]');
     const flow = container.querySelector('[data-testid="route-direction-flow"]');
-    expect(flow).toHaveAttribute("data-motion-path", "M60,20 L80,20 L80,100 L180,100");
-    expect(flow?.querySelector("animateMotion")).toHaveAttribute("rotate", "auto");
+    expect(flow).toHaveAttribute("data-motion-path", "M10,20 L80,20 L80,100 L180,100");
+    expect(flow?.querySelector("[data-testid='route-direction-chevron']")).toHaveAttribute("transform", "translate(10,20) rotate(0)");
 
     rerender(<svg><RouteMapOverlay points={points} mode="standard" walkProgress={0.55} animated /></svg>);
     expect(container.querySelector('[data-testid="route-outer-casing"]')).toBe(baseRoute);
-    // Sparse: 2–4 chevrons, never the old busy triple/full-path arrow sets.
+    // Chevrons stay sparse on short routes and scale with long route length.
     const chevrons = [...container.querySelectorAll('[data-testid="route-direction-chevron"]')];
     expect(chevrons.length).toBeGreaterThanOrEqual(2);
-    expect(chevrons.length).toBeLessThanOrEqual(4);
+    expect(chevrons.length).toBeLessThanOrEqual(24);
     expect(container.querySelector('[data-testid="route-direction-flow"]')).toHaveAttribute("data-chevron-count", String(chevrons.length));
     // Static and animated chevron sets never overlap on the same stroke.
     expect(container.querySelector('[data-testid="route-direction-chevrons"]')).not.toBeInTheDocument();
-    // ONE shared phase: identical duration and constant fractional spacing,
-    // so no chevron can ever overtake another.
-    const motions = chevrons.map((chevron) => chevron.querySelector("animateMotion"));
-    expect(new Set(motions.map((motion) => motion?.getAttribute("dur"))).size).toBe(1);
+    // Every arrow is driven from a single route phase and sampled from the
+    // unchanged full path, even as the walking marker advances.
     const offsets = chevrons.map((chevron) => Number(chevron.getAttribute("data-chevron-offset")));
     const gaps = offsets.map((offset, index) =>
       (index === 0 ? offset + 1 - offsets[offsets.length - 1]! : offset - offsets[index - 1]!));
     expect(new Set(gaps.map((gap) => Number(gap.toFixed(4)))).size).toBe(1);
-    // Every chevron follows the SAME canonical route path.
-    expect(new Set(motions.map((motion) => motion?.getAttribute("path"))).size).toBe(1);
-    motions.forEach((motion, index) => {
-      expect(motion).toHaveAttribute("rotate", "auto");
-      expect(motion).toHaveAttribute("begin", `-${(offsets[index]! * Number((motion!.getAttribute("dur") ?? "18s").replace("s", ""))).toFixed(3)}s`);
-    });
+    expect(chevrons.every((chevron) => Boolean(chevron.getAttribute("transform")))).toBe(true);
     const completed = container.querySelector('[data-testid="completed-route-line"]');
     const current = container.querySelector("[data-route-current-position]");
     expect(completed).toHaveAttribute("points", "10,20 80,20 80,87.5");
@@ -113,17 +106,93 @@ describe("RouteMapOverlay", () => {
 
     expect(container.querySelector('[data-testid="route-outer-casing"]')).toBe(routeBase);
     expect(completed).toHaveAttribute("data-progress", "0.55");
-    expect(completed).toHaveAttribute("stroke-dasharray", "137.5 250");
-    expect(remaining).toHaveAttribute("stroke-dasharray", "112.5 250");
-    expect(remaining).toHaveAttribute("stroke-dashoffset", "-137.5");
+    expect(completed).toHaveAttribute("points", "10,20 80,20 80,87.5");
+    expect(remaining).toHaveAttribute("points", "10,20 80,20 80,100 180,100");
+    expect(remaining).not.toHaveAttribute("stroke-dashoffset");
     expect(current).toHaveAttribute("transform", "translate(80,87.5)");
+  });
+
+  it("keeps the complete authored route stroke visible while the progress highlight follows the marker", () => {
+    const { container, rerender } = render(<svg><RouteMapOverlay points={points} mode="standard" walkProgress={0.25} animated={false} layer="line" /></svg>);
+    const fullRoute = container.querySelector('[data-testid="remaining-route-line"]');
+    expect(fullRoute).toHaveAttribute("points", "10,20 80,20 80,100 180,100");
+    expect(fullRoute).not.toHaveAttribute("stroke-dashoffset");
+
+    rerender(<svg><RouteMapOverlay points={points} mode="standard" walkProgress={0.75} animated={false} layer="line" /></svg>);
+    const completed = container.querySelector('[data-testid="completed-route-line"]');
+    const current = routeProgressGeometry(points, 0.75).position;
+    expect(completed?.getAttribute("points")?.split(" ").at(-1)).toBe(`${current.x},${current.y}`);
+    expect(fullRoute).toHaveAttribute("points", "10,20 80,20 80,100 180,100");
   });
 
   it("keeps directional flow moving through route Preview without showing a player", () => {
     const { container } = render(<svg><RouteMapOverlay points={points} mode="standard" animated layer="line" /></svg>);
     expect(container.querySelector('[data-testid="route-direction-flow"]')).toBeInTheDocument();
     expect(container.querySelector('[data-route-current-position]')).not.toBeInTheDocument();
-    expect(container.querySelector('[data-testid="route-direction-chevron"] animateMotion')).toHaveAttribute("dur", "18s");
+    expect(container.querySelector('[data-testid="route-direction-chevron"]')).toHaveAttribute("transform", "translate(10,20) rotate(0)");
+  });
+
+  it("keeps arrows on their current route phase while paused", () => {
+    const { container, rerender } = render(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused /></svg>);
+    const group = container.querySelector('[data-testid="route-direction-flow"]');
+    const arrow = container.querySelector('[data-testid="route-direction-chevron"]');
+    expect(group).toBeInTheDocument();
+    expect(container.querySelector('[data-route-group]')).toHaveAttribute("data-flow-paused", "true");
+    const transform = arrow?.getAttribute("transform");
+    rerender(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused={false} /></svg>);
+    expect(container.querySelector('[data-testid="route-direction-chevron"]')).toHaveAttribute("transform", transform);
+  });
+
+  it("resumes Explore arrow motion from the retained phase after playback pauses", () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 0;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    window.requestAnimationFrame = (callback) => {
+      const id = ++nextFrameId;
+      callbacks.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => { callbacks.delete(id); };
+    const runNextFrame = (time: number) => {
+      const entry = callbacks.entries().next().value as [number, FrameRequestCallback] | undefined;
+      expect(entry).toBeDefined();
+      if (!entry) return;
+      callbacks.delete(entry[0]);
+      act(() => entry[1](time));
+    };
+
+    const view = render(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused /></svg>);
+    const root = view.container.querySelector("[data-route-group]");
+    const arrow = view.container.querySelector('[data-testid="route-direction-chevron"]');
+    expect(root).toHaveAttribute("data-flow-paused", "true");
+    const initialTransform = arrow?.getAttribute("transform");
+
+    view.rerender(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused={false} /></svg>);
+    expect(root).not.toHaveAttribute("data-flow-paused");
+    runNextFrame(1000);
+    runNextFrame(1500);
+    const retainedPhase = Number(root?.getAttribute("data-flow-phase-distance"));
+    const movingTransform = arrow?.getAttribute("transform");
+    expect(retainedPhase).toBeGreaterThan(0);
+    expect(movingTransform).not.toBe(initialTransform);
+
+    view.rerender(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused /></svg>);
+    expect(root).toHaveAttribute("data-flow-paused", "true");
+    expect(arrow).toHaveAttribute("transform", movingTransform);
+    view.rerender(<svg><RouteMapOverlay points={points} mode="emergency" animated flowPaused={false} /></svg>);
+    runNextFrame(4000);
+    runNextFrame(4500);
+    expect(Number(root?.getAttribute("data-flow-phase-distance"))).toBeGreaterThan(retainedPhase);
+
+    view.unmount();
+    window.requestAnimationFrame = originalRequestAnimationFrame;
+    window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  it("samples moving-arrow position and direction through route turns", () => {
+    expect(routeChevronMotionTransform(points, 0, 2)).toBe("translate(10,20) rotate(0)");
+    expect(routeChevronMotionTransform(points, 1, 2)).toBe("translate(80,75) rotate(90)");
   });
 
   it("orients static chevrons along the path toward its destination", () => {
@@ -134,12 +203,30 @@ describe("RouteMapOverlay", () => {
     expect(west).toContain("M");
   });
 
-  it("derives a sparse 2–4 chevron count from route geometry alone", () => {
+  it("keeps long directional routes covered without leaving huge gaps between arrows", () => {
     expect(routeChevronCount([{ x: 0, y: 0 }, { x: 40, y: 0 }])).toBe(2);
     expect(routeChevronCount([{ x: 0, y: 0 }, { x: 320, y: 0 }])).toBe(2);
     expect(routeChevronCount([{ x: 0, y: 0 }, { x: 480, y: 0 }])).toBe(3);
-    expect(routeChevronCount([{ x: 0, y: 0 }, { x: 2000, y: 0 }])).toBe(4);
+    expect(routeChevronCount([{ x: 0, y: 0 }, { x: 2000, y: 0 }])).toBe(13);
+    expect(routeChevronCount([{ x: 0, y: 0 }, { x: 10000, y: 0 }])).toBe(24);
     expect(routePolylineLength(points)).toBe(250);
+  });
+
+  it("replaces every moving arrow when an outdoor route is replaced", () => {
+    const routeA = [{ x: 0, y: 0 }, { x: 1600, y: 0 }];
+    const routeB = [{ x: 20, y: 40 }, { x: 20, y: 1000 }, { x: 1020, y: 1000 }];
+    const { container, rerender } = render(<svg><RouteMapOverlay points={routeA} mode="emergency" animated layer="line" /></svg>);
+    const oldFlow = container.querySelector('[data-testid="route-direction-flow"]');
+    expect(oldFlow).toHaveAttribute("data-motion-path", "M0,0 L1600,0");
+    expect(oldFlow?.querySelectorAll('[data-testid="route-direction-chevron"]')).toHaveLength(10);
+
+    rerender(<svg><RouteMapOverlay points={routeB} mode="emergency" animated layer="line" /></svg>);
+    const nextFlow = container.querySelector('[data-testid="route-direction-flow"]');
+    expect(nextFlow).toBe(oldFlow);
+    expect(nextFlow).toHaveAttribute("data-motion-path", "M20,40 L20,1000 L1020,1000");
+    expect(nextFlow?.querySelector('[data-testid="route-direction-chevron"]')).toHaveAttribute("transform", "translate(20,40) rotate(90)");
+    expect(nextFlow?.querySelectorAll('[data-testid="route-direction-chevron"]')).toHaveLength(13);
+    expect(container.querySelectorAll('[data-testid="route-direction-flow"]')).toHaveLength(1);
   });
 
   it("only draws A/B markers on true endpoint layers", () => {
@@ -169,6 +256,9 @@ describe("RouteMapOverlay", () => {
     expect(container.querySelector('[data-route-marker="start"] .student-map-screen-marker')).toBeInTheDocument();
     expect(container.querySelector('[data-route-marker="destination"] .student-map-screen-marker')).toBeInTheDocument();
     expect(container.querySelector("[data-route-current-position] .student-map-screen-marker")).toBeInTheDocument();
+    const progressMarker = container.querySelector("[data-route-current-position]");
+    expect(progressMarker?.querySelector('circle[r="10.2"]')).toHaveAttribute("fill", "#0f172a");
+    expect(progressMarker?.querySelector('circle[r="8.6"]')).toHaveAttribute("fill", "#0f766e");
   });
 
   it("gives Start a short green reveal and renders a destination pin at the final route point", () => {

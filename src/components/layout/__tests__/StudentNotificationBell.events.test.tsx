@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eventPreviewFixture } from "../../../test/eventFullPackFixtures";
 
@@ -23,7 +24,11 @@ vi.mock("../../../services/studentPreferencesService", () => ({
   loadStudentPreferences: mocks.loadStudentPreferences,
 }));
 
-import { StudentNotificationBell, StudentNotificationsSection } from "../StudentNotificationBell";
+import {
+  StudentNotificationBell,
+  StudentNotificationBellForCampus,
+  StudentNotificationsSection,
+} from "../StudentNotificationBell";
 
 describe("student event notifications", () => {
   beforeEach(() => {
@@ -49,6 +54,33 @@ describe("student event notifications", () => {
         }),
       ],
     });
+  });
+
+  it("portals the map notification panel above map stacking layers and keeps clicks inside it open", async () => {
+    const triggerContainer = createRef<HTMLDivElement>();
+    render(
+      <MemoryRouter>
+        <div style={{ position: "relative", zIndex: 20 }}>
+          <StudentNotificationBellForCampus
+            campusId="campus-map"
+            ownerId="map-student"
+            isStudentOrg={false}
+            eventUpdates={[]}
+            unreadEventIds={new Set()}
+            markEventRead={vi.fn()}
+            refreshEventUpdates={vi.fn().mockResolvedValue(undefined)}
+            containerRef={triggerContainer}
+          />
+        </div>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Notifications/ }));
+    const panel = await screen.findByRole("dialog", { name: "Student notifications" });
+    expect(panel.parentElement).toBe(document.body);
+    expect(panel).toHaveClass("z-[70]");
+    fireEvent.pointerDown(panel);
+    expect(panel).toBeInTheDocument();
   });
 
   it("shows ongoing and upcoming published campus events, excludes ended events, and marks one read", async () => {

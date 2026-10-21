@@ -1460,6 +1460,9 @@ export interface ReadonlyOutdoorCampusSceneProps {
   /** Student-only landmark artwork override; Admin/Preview keep generic authored artwork. */
   studentSuhayHusayLandmark?: boolean;
   emergencyMode?: boolean;
+  /** Only Assembly Points used by a current complete eligible SOS route are exposed to the Student Map. */
+  emergencyAssemblyPointIds?: ReadonlySet<string>;
+  activeEmergencyAssemblyPointId?: string | null;
 }
 
 interface ReadonlyOutdoorArtworkLayerProps extends Pick<ReadonlyOutdoorCampusSceneProps,
@@ -1529,7 +1532,7 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
 });
 
 type ReadonlyOutdoorTransitionLayerProps = Pick<ReadonlyOutdoorCampusSceneProps,
-  "campus" | "showBuildings" | "showLabels" | "selectedCampusPlaceId" | "onSelectCampusPlace" | "onClickEntrance" | "showEntryPills" | "compactEntryActions" | "routeRelevantEntranceIds" | "activeEntranceId" | "suppressActiveEntranceId" | "suppressActiveEntranceBuildingId" | "reducedMotion" | "zoom" | "studentZoom" | "studentPixelScale" | "mapPickActive" | "emergencyMode">;
+  "campus" | "showBuildings" | "showLabels" | "selectedCampusPlaceId" | "onSelectCampusPlace" | "onClickEntrance" | "showEntryPills" | "compactEntryActions" | "routeRelevantEntranceIds" | "activeEntranceId" | "suppressActiveEntranceId" | "suppressActiveEntranceBuildingId" | "reducedMotion" | "zoom" | "studentZoom" | "studentPixelScale" | "mapPickActive" | "emergencyMode" | "emergencyAssemblyPointIds" | "activeEmergencyAssemblyPointId">;
 
 const ReadonlyOutdoorTransitionLayer = memo(function ReadonlyOutdoorTransitionLayer({
   campus,
@@ -1550,6 +1553,8 @@ const ReadonlyOutdoorTransitionLayer = memo(function ReadonlyOutdoorTransitionLa
   studentPixelScale = 1,
   mapPickActive = false,
   emergencyMode = false,
+  emergencyAssemblyPointIds,
+  activeEmergencyAssemblyPointId,
 }: ReadonlyOutdoorTransitionLayerProps) {
   const [hoveredEntranceId, setHoveredEntranceId] = useState<string | null>(null);
   const buildingById = useMemo(() => new Map(campus.buildings.map((building) => [building.id, building])), [campus.buildings]);
@@ -1584,6 +1589,17 @@ const ReadonlyOutdoorTransitionLayer = memo(function ReadonlyOutdoorTransitionLa
       return isCampusGate(marker)
         ? <OutdoorCampusGateVisual key={`marker-${marker.id}`} marker={marker} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} pickTarget={pickTarget} onSelect={onSelectCampusPlace} screenConsistent={compactEntryActions} studentZoom={studentZoom * studentPixelScale} />
         : <OutdoorMarkerVisual key={`marker-${marker.id}`} marker={marker} zoom={zoom} showLabel={showLabels} selected={selectedCampusPlaceId === marker.id} pickTarget={pickTarget} onSelect={onSelectCampusPlace} />;
+    })}
+    {emergencyMode && emergencyAssemblyPointIds && campus.assemblyPoints.filter((point) => emergencyAssemblyPointIds.has(point.id)).map((point) => {
+      const active = point.id === activeEmergencyAssemblyPointId;
+      return <g key={`emergency-assembly-${point.id}`} data-testid="student-emergency-assembly-point" data-assembly-point-id={point.id}
+        transform={`translate(${point.x},${point.y})`} className="pointer-events-none">
+        <circle cy={-8} r={active ? 14 : 11} fill={active ? "#15803d" : "#16a34a"} stroke="white" strokeWidth={active ? 3 : 2.4} />
+        <path d="M-3 6V-15 M-3-14H7L4-10H-3" fill="#16a34a" stroke="white" strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+        <text x={0} y={22} textAnchor="middle" fill="#14532d" fontSize={active ? 7.2 : 6.4} fontWeight={800} stroke="white" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round">{point.name}</text>
+        <text x={0} y={30} textAnchor="middle" fill="#334155" fontSize={4.9} fontWeight={600} stroke="white" strokeWidth={2} paintOrder="stroke" strokeLinejoin="round">Designated emergency gathering location</text>
+        <title>{point.name} — Designated emergency gathering location</title>
+      </g>;
     })}
     {showBuildings && orderedEntrances.map(renderEntrance)}
   </g>;
@@ -1624,6 +1640,8 @@ export const ReadonlyOutdoorCampusScene = memo(function ReadonlyOutdoorCampusSce
       studentPixelScale={props.studentPixelScale}
       mapPickActive={props.mapPickActive}
       emergencyMode={props.emergencyMode}
+      emergencyAssemblyPointIds={props.emergencyAssemblyPointIds}
+      activeEmergencyAssemblyPointId={props.activeEmergencyAssemblyPointId}
     />
   </g>;
 });

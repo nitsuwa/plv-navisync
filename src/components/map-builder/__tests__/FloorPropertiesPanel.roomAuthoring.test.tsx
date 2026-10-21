@@ -21,6 +21,77 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Room authoring properties", () => {
+  it("shows Room Videos without Room-level evacuation status or video-guide controls", () => {
+    render(<FloorPropertiesPanel {...props({ campus: { id: "campus-1" } })} />);
+
+    expect(screen.queryByTestId("room-emergency-evacuation-section")).toBeNull();
+    expect(screen.queryByTestId("emergency-video-admin-section")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Emergency Evacuation Video Guide" })).toBeNull();
+    expect(screen.queryByLabelText("Enable Emergency Video Guide")).toBeNull();
+    expect(screen.getByTestId("room-information-section")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload Photo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Room Videos" })).toBeInTheDocument();
+  });
+
+  it("trims the optional room description at the editing boundary without editor updates per keystroke", () => {
+    const onTextDraftChange = vi.fn();
+    const onUpdateRoom = vi.fn();
+    const onTextDraftFlush = vi.fn();
+    render(<FloorPropertiesPanel {...props({ onTextDraftChange, onTextDraftFlush, onUpdateRoom })} />);
+    const description = screen.getByTestId("room-description-input") as HTMLTextAreaElement;
+    expect(description.maxLength).toBe(500);
+
+    fireEvent.change(description, { target: { value: "  A quiet study room.  " } });
+    expect(description.value).toBe("  A quiet study room.  ");
+    expect(onUpdateRoom).not.toHaveBeenCalled();
+    fireEvent.blur(description);
+
+    expect(onTextDraftChange).toHaveBeenLastCalledWith(
+      { type: "room", id: "r1", field: "description" }, "A quiet study room.", false,
+    );
+    expect(onTextDraftFlush).toHaveBeenCalled();
+  });
+
+  it("keeps Room Name typing local and flushes only at the editing boundary", () => {
+    const onTextDraftChange = vi.fn();
+    const onTextDraftFlush = vi.fn();
+    const onUpdateRoom = vi.fn();
+    render(<FloorPropertiesPanel {...props({ onTextDraftChange, onTextDraftFlush, onUpdateRoom })} />);
+    const input = screen.getByTestId("room-name-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "HOLDING AREA" } });
+
+    expect(input.value).toBe("HOLDING AREA");
+    expect(onTextDraftChange).toHaveBeenLastCalledWith(
+      { type: "room", id: "r1", field: "name" }, "HOLDING AREA", false,
+    );
+    expect(onUpdateRoom).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(onTextDraftFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps IME composition local until composition ends", () => {
+    const onTextDraftChange = vi.fn();
+    const onUpdateRoom = vi.fn();
+    render(<FloorPropertiesPanel {...props({ onTextDraftChange, onUpdateRoom })} />);
+    const input = screen.getByTestId("room-name-input") as HTMLInputElement;
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "HOLDING" }, isComposing: true });
+    expect(input.value).toBe("HOLDING");
+    expect(onTextDraftChange).toHaveBeenLastCalledWith(
+      { type: "room", id: "r1", field: "name" }, "HOLDING", true,
+    );
+    expect(onUpdateRoom).not.toHaveBeenCalled();
+
+    fireEvent.compositionEnd(input, { data: " AREA", target: { value: "HOLDING AREA" } });
+    expect(input.value).toBe("HOLDING AREA");
+    expect(onTextDraftChange).toHaveBeenLastCalledWith(
+      { type: "room", id: "r1", field: "name" }, "HOLDING AREA", false,
+    );
+    expect(onUpdateRoom).not.toHaveBeenCalled();
+  });
+
   it("keeps common Room controls in one inspector and offers Add to Navigation", () => {
     const onAdd = vi.fn();
     render(<FloorPropertiesPanel {...props({ onAddPhysicalToNavigation: onAdd })} />);
@@ -124,6 +195,9 @@ describe("Room authoring properties", () => {
     expect(screen.queryByTestId("circulation-group-picker")).toBeNull();
     expect(screen.getByTestId("circulation-group-trigger-stairs")).toHaveTextContent("Manage Connections");
     fireEvent.click(screen.getByTestId("circulation-group-trigger-stairs"));
+    const sidePanel = screen.getByTestId("stair-connections-side-panel");
+    expect(sidePanel.parentElement).toBe(document.body);
+    expect(screen.getByTestId("floor-properties-panel").contains(sidePanel)).toBe(false);
     const picker = screen.getByTestId("circulation-group-picker");
     expect(picker).toHaveTextContent("Floor 2");
     expect(picker).toHaveTextContent("Basement");

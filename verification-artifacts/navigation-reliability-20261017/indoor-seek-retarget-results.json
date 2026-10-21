@@ -1,0 +1,248 @@
+{
+  "errors": [],
+  "observations": [
+    {
+      "label": "indoor-seek-next-previous",
+      "samples": [
+        {
+          "tMs": 0,
+          "transform": "translate(552.4023684219907,226)",
+          "progress": "0.5482894736896013",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 50,
+          "transform": "translate(546.9570947775564,226)",
+          "progress": "0.5169947975721632",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 100,
+          "transform": "translate(535.229942105376,226)",
+          "progress": "0.4495973684217016",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 150,
+          "transform": "translate(526.4088923482045,226)",
+          "progress": "0.39890168016209504",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 250,
+          "transform": "translate(523,160)",
+          "progress": "0",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 350,
+          "transform": "translate(523,160)",
+          "progress": "0",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 500,
+          "transform": "translate(523,160)",
+          "progress": "0",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        }
+      ]
+    }
+  ],
+  "startOptions": [
+    "CABA-405\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+  ],
+  "destinationOptions": [
+    "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+  ],
+  "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-405 to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCABA-405 → CABA-403\n\nIndoor route\nSteps\n3\nEdit Route\nStart Navigation\nClear",
+  "initial": {
+    "state": {
+      "transform": "translate(523,201.98322368438107)",
+      "progress": "0.24128289473782227",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "panel": "STEP 2 OF 3\n\nCABA-403\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of CABA-403.\n\nNext: Arrive at CABA-403.\n\nPrevious\nResume\nNext\n1×\nSteps"
+  },
+  "previousEnabledDuringSeek": true,
+  "retargetStart": {
+    "transform": "translate(523,217.62605263251697)",
+    "progress": "0.33118421053170666",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "rapidNextPrevious": [
+    {
+      "tMs": 0,
+      "transform": "translate(552.4023684219907,226)",
+      "progress": "0.5482894736896013",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 50,
+      "transform": "translate(546.9570947775564,226)",
+      "progress": "0.5169947975721632",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 100,
+      "transform": "translate(535.229942105376,226)",
+      "progress": "0.4495973684217016",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 150,
+      "transform": "translate(526.4088923482045,226)",
+      "progress": "0.39890168016209504",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 250,
+      "transform": "translate(523,160)",
+      "progress": "0",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 350,
+      "transform": "translate(523,160)",
+      "progress": "0",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 500,
+      "transform": "translate(523,160)",
+      "progress": "0",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    }
+  ],
+  "pauseDuringSeek": {
+    "beforePause": {
+      "transform": "translate(523,188.64131578947357)",
+      "progress": "0.16460526315789403",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "pausedPosition": {
+      "transform": "translate(523,205.8123684210525)",
+      "progress": "0.26328947368420974",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "afterPauseWait": {
+      "transform": "translate(523,205.8123684210525)",
+      "progress": "0.26328947368420974",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "stable": true
+  },
+  "resumeAfterSeekPause": {
+    "transform": "translate(523,216.81328947359873)",
+    "progress": "0.3265131578942456",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "rendererSwitchStart": {
+    "transform": "translate(547.4815427529699,226)",
+    "progress": "0.5200088663963787",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "renderer3D": {
+    "state": {
+      "transform": null,
+      "progress": null,
+      "markerCount": 0,
+      "routePoints": [],
+      "floor": null
+    },
+    "rendererCount": 0
+  },
+  "renderer2DReturn": {
+    "transform": "translate(557,300)",
+    "progress": "1",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  }
+}

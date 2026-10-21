@@ -3,6 +3,7 @@ import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../../c
 import {
   cleanupDeletedPathwayNavigation,
   convertPathwaysToNavigation,
+  isVisualOnlyPathAttachment,
   joinPathwayVerticesExplicitly,
   pathwayHasLegacyNavigationChain,
   reconcilePathwayNavigation,
@@ -466,6 +467,19 @@ describe("Outdoor Pathway regression safety wall", () => {
     expect(result.campus.navEdges?.map((edge) => edge.id)).toEqual(["legacy-edge"]);
   });
 
+  it("does not promote a visual-only attached line into an Assembly Point navigation connection", () => {
+    const visual = makePath("visual-branch", [{ x: 0, y: 0 }, { x: 100, y: 0 }], undefined, {
+      visualAttachments: [{ pointIndex: 1, targetPathId: "decorative-target", targetSegmentIndex: 0, targetT: 0.5 }],
+    });
+    expect(isVisualOnlyPathAttachment(visual, [], [])).toBe(true);
+
+    const compiled = makePath("compiled-branch", [{ x: 0, y: 0 }, { x: 100, y: 0 }], ["v1", "v2"], {
+      visualAttachments: visual.visualAttachments,
+    });
+    expect(isVisualOnlyPathAttachment(compiled, [], [])).toBe(false);
+    expect(isVisualOnlyPathAttachment({ ...visual, pathNetworkId: "walking-network" }, [], [])).toBe(false);
+  });
+
   it("keeps generated routing edge identity and flags while updating distance from moved endpoints", () => {
     const factory = makeIdFactory();
     const initial = convertPathwaysToNavigation(makeCampus([makePath("p1", [{ x: 0, y: 0 }, { x: 3, y: 4 }])]), ["p1"], factory).campus;
@@ -597,6 +611,36 @@ describe("Outdoor Pathway regression safety wall", () => {
     expect(new Set(value.paths.map((path) => path.id)).size).toBe(value.paths.length);
     expect(new Set((value.navNodes ?? []).map((node) => node.id)).size).toBe(value.navNodes?.length);
     expect(new Set((value.navEdges ?? []).map((edge) => edge.id)).size).toBe(value.navEdges?.length);
+  });
+
+  it("rebuilds an owned crossing on save and hydration without changing path geometry", () => {
+    const factory = makeIdFactory();
+    const initial = convertPathwaysToNavigation(makeCampus([
+      makePath("horizontal", [{ x: 0, y: 50 }, { x: 100, y: 50 }], ["h0", "h1"], { pathNetworkId: "campus-walks" }),
+      makePath("vertical", [{ x: 50, y: 0 }, { x: 50, y: 100 }], ["v0", "v1"], { pathNetworkId: "campus-walks" }),
+    ]), ["horizontal", "vertical"], factory).campus;
+    // Model a legacy snapshot saved before compiler-derived junction metadata
+    // existed; preserve the authored centerlines and their owned base edges.
+    const legacy = {
+      ...initial,
+      navNodes: initial.navNodes?.filter((node) => !node.generatedFromPathIntersections?.length),
+      navEdges: initial.navEdges?.filter((edge) => !edge.generatedFromPathIntersectionSegments?.length),
+    };
+
+    const payload = serializeCampusStructure(legacy);
+    const savedJunctions = payload.navigation_nodes.filter((row) =>
+      Array.isArray(((row.metadata as { ui?: { generatedFromPathIntersections?: unknown[] } }).ui)?.generatedFromPathIntersections),
+    );
+    const hydrated = hydrateCampusStructure(legacy, rowsFromPayload(payload));
+    const twice = hydrateCampusStructure(hydrated, rowsFromPayload(serializeCampusStructure(hydrated)));
+
+    expect(savedJunctions).toHaveLength(1);
+    expect(hydrated.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(1);
+    expect(hydrated.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(4);
+    expect(twice.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(1);
+    expect(twice.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(4);
+    expect(hydrated.paths.map((path) => path.points)).toEqual(legacy.paths.map((path) => path.points));
+    expect(legacy.navNodes?.some((node) => node.generatedFromPathIntersections?.length)).toBe(false);
   });
 
   it("preserves the same first-entry hydrated snapshot as a reopened entry", () => {

@@ -31,6 +31,7 @@ interface MobileBuildingSheetProps {
   showQR: boolean;
   onToggleQR: () => void;
   interactionPaused?: boolean;
+  suspendedForSearch?: boolean;
   onStateChange?: (state: MobileBuildingSheetState) => void;
   onBackToRoutePlanner?: () => void;
 }
@@ -77,6 +78,7 @@ export function MobileBuildingSheet({
   accessibility, showQR, onToggleQR, onStateChange,
   onBackToRoutePlanner,
   interactionPaused = false,
+  suspendedForSearch = false,
 }: MobileBuildingSheetProps) {
   useEscToClose(onClose, !interactionPaused);
   const gestureRef = useRef<{
@@ -227,7 +229,10 @@ export function MobileBuildingSheet({
       data-sheet-state={sheetState}
       data-dragging={isDragging}
       data-interaction-paused={interactionPaused}
-      className="map-layer-building-sheet md:hidden fixed inset-x-3 flex flex-col overflow-hidden rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl will-change-transform transition-[height] duration-[200ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none landscape-minimized"
+      data-suspended-for-search={suspendedForSearch}
+      aria-hidden={suspendedForSearch || undefined}
+      inert={suspendedForSearch ? ("" as never) : undefined}
+      className={`map-layer-building-sheet md:hidden fixed inset-x-3 flex flex-col overflow-hidden rounded-3xl border border-border/80 bg-card/97 shadow-[0_12px_42px_rgba(15,23,42,0.22)] backdrop-blur-2xl will-change-transform transition-[height] duration-[200ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none landscape-minimized ${suspendedForSearch ? "invisible pointer-events-none" : ""}`}
       style={{
         bottom: "calc(4.75rem + env(safe-area-inset-bottom, 0px))",
         height: HEIGHTS[sheetState],
@@ -280,27 +285,34 @@ export function MobileBuildingSheet({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover" style={{ WebkitOverflowScrolling: "touch" }}>
-        {sheetState !== "peek" && (
-          <div data-testid="building-sheet-image" data-building-sheet-image className={`mx-3 shrink-0 overflow-hidden rounded-2xl transition-[height] duration-200 motion-reduce:transition-none ${sheetState === "expanded" ? "h-[160px]" : "h-[96px]"}`}>
-            <BuildingCover imageUrl={selected.image_url} code={selected.code} name={selected.name} className="h-full aspect-auto rounded-2xl" />
-          </div>
-        )}
-
-        <header className={`flex shrink-0 items-start justify-between gap-3 px-4 ${sheetState === "peek" ? "pb-2 pt-1" : sheetState === "default" ? "pb-1 pt-2" : "pb-2 pt-2"}`}>
+        <div
+          data-testid="building-information-scroll"
+          role="region"
+          aria-label={`${selected.name} building information`}
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y scrollbar-show-on-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
+        <header className={`sticky top-0 z-10 flex shrink-0 items-start justify-between gap-3 bg-card/95 px-4 backdrop-blur-xl ${sheetState === "peek" ? "pb-2 pt-1" : sheetState === "default" ? "pb-1 pt-2" : "pb-2 pt-2"}`}>
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex min-w-0 items-center gap-2">
               <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-extrabold text-primary">{selected.code}</span>
               <span className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground">{selected.category?.replace(/[_-]+/g, " ") || "Campus building"}</span>
               {floorPlanCount > 0 && <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground">{floorPlanCount}F</span>}
             </div>
-            <h2 className="line-clamp-2 pr-1 text-[15px] font-extrabold leading-[1.1] tracking-tight text-foreground">{selected.name}</h2>
+            <h2 className="break-words pr-1 text-[15px] font-extrabold leading-[1.1] tracking-tight text-foreground">{selected.name}</h2>
           </div>
         </header>
 
+        {sheetState !== "peek" && (
+          <div data-testid="building-sheet-image" data-building-sheet-image className={`mx-3 mt-2 shrink-0 overflow-hidden rounded-2xl transition-[height] duration-200 motion-reduce:transition-none ${sheetState === "expanded" ? "h-[160px]" : "h-[96px]"}`}>
+            <BuildingCover imageUrl={selected.image_url} code={selected.code} name={selected.name} className="h-full aspect-auto rounded-2xl" />
+          </div>
+        )}
+
         {sheetState === "default" && (
-          <div className="shrink-0 px-4 pb-1">
-            <BuildingDetailsSections building={selected} facilities={facilities} accessibility={accessibility} floorCount={floorPlanCount} variant="compact" />
+          <div className="px-4 pb-4 pt-3">
+            <BuildingDetailsSections building={selected} facilities={facilities} accessibility={accessibility} floorCount={floorPlanCount} variant="full" />
           </div>
         )}
 
@@ -317,7 +329,7 @@ export function MobileBuildingSheet({
           </div>
         )}
       </div>
-      <div className={`z-10 shrink-0 border-t border-border/50 bg-card/95 px-3 pt-2 backdrop-blur-xl ${sheetState === "peek" ? "pb-3" : "pb-[max(.5rem,env(safe-area-inset-bottom,0px))]"}`}>
+      <div data-testid="building-sheet-actions" className={`z-10 shrink-0 border-t border-border/50 bg-card/95 px-3 pt-2 backdrop-blur-xl ${sheetState === "peek" ? "pb-3" : "pb-[max(.5rem,env(safe-area-inset-bottom,0px))]"}`}>
         <BuildingDetailsActions
           building={selected}
           campusId={campusId}

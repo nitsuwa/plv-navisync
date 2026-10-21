@@ -17,11 +17,12 @@ export function PublicLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { isStudent, loading: authLoading } = useStudentAuth();
+  const isMapPage = pathname === "/map";
   const isStudentEventsDashboard = pathname === "/student/events";
   const isEventEditor = /^\/student\/events\/[^/]+\/edit\/?$/.test(pathname);
 
   useEffect(() => {
-    if (!isEventEditor) return;
+    if (!isEventEditor && !isMapPage) return;
     const previousBodyOverflow = document.body.style.overflow;
     const previousRootOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
@@ -30,7 +31,7 @@ export function PublicLayout() {
       document.body.style.overflow = previousBodyOverflow;
       document.documentElement.style.overflow = previousRootOverflow;
     };
-  }, [isEventEditor]);
+  }, [isEventEditor, isMapPage]);
 
   useEffect(() => {
     if (authLoading || !isStudent || pathname !== "/") return;
@@ -69,10 +70,13 @@ export function PublicLayout() {
   }
 
   const showFooter    = pathname === "/" || pathname === "/home";
-  const isMapPage     = pathname === "/map";
 
   return (
-    <div className={cn("flex flex-col w-full max-w-full", isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-clip", !isMapPage && "app-page-bg")}>
+    <div className={cn(
+      "flex w-full max-w-full flex-col",
+      isMapPage ? "student-map-app-shell overflow-hidden overscroll-none" : isEventEditor ? "h-[100dvh] overflow-hidden" : "min-h-screen overflow-x-clip",
+      !isMapPage && "app-page-bg",
+    )}>
       {/* Skip-to-content link for keyboard and screen reader users */}
       <a
         href="#main-content"
@@ -93,7 +97,7 @@ export function PublicLayout() {
         id="main-content"
         className={cn(
           "relative z-[1] w-full max-w-full",
-          isMapPage || isEventEditor ? "min-h-0 overflow-hidden flex-1" : isStudentEventsDashboard ? "overflow-x-clip" : "overflow-x-hidden",
+          isMapPage || isEventEditor ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "overflow-x-hidden",
           !isMapPage && !isEventEditor && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
         )}
       >
@@ -102,7 +106,7 @@ export function PublicLayout() {
           initial={false}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.12 }}
-          className="h-full"
+          className={cn("h-full", (isMapPage || isEventEditor) && "min-h-0 flex-1")}
         >
           <Outlet />
         </motion.div>

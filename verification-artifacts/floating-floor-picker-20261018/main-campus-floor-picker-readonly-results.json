@@ -1,0 +1,220 @@
+{
+  "source": "read-only published MAIN CAMPUS; all non-read-only Supabase mutations blocked",
+  "checks": [
+    {
+      "stage": "indoor-standard-390",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · G/FCABA·Ground Floor",
+      "pickerRect": {
+        "x": 247.609375,
+        "y": 64,
+        "width": 134.390625,
+        "height": 44,
+        "top": 64,
+        "right": 382,
+        "bottom": 108,
+        "left": 247.609375
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "documentWidth": 390,
+      "viewportWidth": 390,
+      "routePanelVisible": false
+    },
+    {
+      "stage": "route-planner-standard-390",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · G/FCABA·Ground Floor",
+      "pickerRect": {
+        "x": 191.609375,
+        "y": 8,
+        "width": 134.390625,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 191.609375
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "documentWidth": 390,
+      "viewportWidth": 390,
+      "routePanelVisible": true
+    },
+    {
+      "stage": "route-planner-accessible-390",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · G/FCABA·Ground Floor",
+      "pickerRect": {
+        "x": 191.609375,
+        "y": 8,
+        "width": 134.390625,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 191.609375
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "documentWidth": 390,
+      "viewportWidth": 390,
+      "routePanelVisible": true
+    },
+    {
+      "stage": "route-planner-sos-390",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · G/FCABA·Ground Floor",
+      "pickerRect": {
+        "x": 191.609375,
+        "y": 8,
+        "width": 134.390625,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 191.609375
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "documentWidth": 390,
+      "viewportWidth": 390,
+      "routePanelVisible": true
+    },
+    {
+      "stage": "floor-menu-open-390",
+      "optionCount": 6,
+      "options": [
+        "G/FGround Floor",
+        "2FFloor 2",
+        "3FFloor 3",
+        "4FFloor 4",
+        "5FFloor 5",
+        "6FFloor 6"
+      ]
+    },
+    {
+      "stage": "selected-another-floor-390",
+      "targetLabel": "2F Floor 2",
+      "pickerLabel": "CABA · 2FCABA·Floor 2"
+    },
+    {
+      "stage": "after-selecting-floor-in-sos-planner-390",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · 2FCABA·Floor 2",
+      "pickerRect": {
+        "x": 197.671875,
+        "y": 8,
+        "width": 128.328125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.671875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "documentWidth": 390,
+      "viewportWidth": 390,
+      "routePanelVisible": true
+    },
+    {
+      "stage": "route-planner-sos-1440",
+      "pickerCount": 1,
+      "inlineCount": 0,
+      "accountOwned": true,
+      "inRoutePanel": false,
+      "label": "CABA · 2FCABA·Floor 2",
+      "pickerRect": {
+        "x": 1064,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1424,
+        "bottom": 117,
+        "left": 1064
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "documentWidth": 1440,
+      "viewportWidth": 1440,
+      "routePanelVisible": true
+    }
+  ],
+  "screenshots": [
+    "main-campus-caba-floor-390.png",
+    "main-campus-caba-route-planner-1440.png"
+  ],
+  "errors": [],
+  "mainCampus": {
+    "campus": "MAIN CAMPUS - PLV",
+    "campusId": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb",
+    "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+    "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+    "floors": 6
+  }
+}

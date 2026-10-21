@@ -1,0 +1,94 @@
+{
+  "isolation": "TEST ONLY saved local campus; real FloorEditor + properties controls; remote writes blocked",
+  "target": {
+    "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+    "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+    "floor": "Floor 6",
+    "floorId": "c6a8cedf-d462-4abc-aa68-f5465b2e158e",
+    "room": "CABA LECTURE HALL",
+    "roomId": "ffe40872-45b8-4ca2-a148-61e6c7d00b40",
+    "initialSmartMultiExit": false
+  },
+  "browserErrors": [],
+  "smartMultiExitInitiallyOff": true,
+  "candidates": "emergency-route-picker-A",
+  "candidateCount": 2,
+  "candidateLabels": [
+    "Room door 1 → Exterior Stair 2Destination: TEST ONLY - Admin Main Assembly Point A · 273 mConnected · emergency-use review requiredTake the stairs to Left Stair",
+    "Room door 2 → Exterior Stair 1Destination: TEST ONLY - Admin Main Assembly Point A · 305 mConnected · emergency-use review requiredTake the stairs to Right Stair"
+  ],
+  "routePreview": "Preview Route Room door 1 → Exterior Stair 2 Destination: TEST ONLY - Admin Main Assembly Point A · 273 m · 5 floor transitions Start from Door Walk 12m to Waypoint Walk 73m to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Take the stairs to Left Stair Left Stair · Floor 5 · emergency-use review required Left Stair · Floor 6 · emergency-use review required Left Stair · Floor 4 · emergency-use review required Left Stair · Floor 3 · emergency-use review required Left Stair · Floor 2 · emergency-use review required Left Stair · Ground Floor · emergency-use review required",
+  "mobileLayout": {
+    "viewportWidth": 390,
+    "sectionWidth": 223,
+    "sectionClientWidth": 223,
+    "sectionScrollWidth": 223,
+    "pickerWidth": 201
+  },
+  "reviewRequired": true,
+  "smartMultiExitRemainedOff": true,
+  "savedRouteConfigurationBeforeUiSave": {
+    "enabled": false,
+    "routes": [
+      {
+        "id": "e8c65d31-3df9-4be5-a208-cb3be25800fd::exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "doorId": "e8c65d31-3df9-4be5-a208-cb3be25800fd",
+        "exitId": "exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "destinationNodeId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+        "label": "Left Exit",
+        "approved": false
+      }
+    ]
+  },
+  "mobileSaveControl": {
+    "visible": true,
+    "ariaLabel": "Save floor draft",
+    "boundingBox": {
+      "x": 384,
+      "y": 2,
+      "width": 44,
+      "height": 44,
+      "top": 2,
+      "right": 428,
+      "bottom": 46,
+      "left": 384
+    }
+  },
+  "toolbarMetrics": {
+    "right": {
+      "rect": {
+        "x": 16,
+        "y": 6,
+        "width": 462,
+        "height": 36,
+        "top": 6,
+        "right": 478,
+        "bottom": 42,
+        "left": 16
+      },
+      "clientWidth": 462,
+      "scrollWidth": 462,
+      "scrollLeft": 0,
+      "overflowX": "auto"
+    },
+    "shell": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 380,
+        "height": 96,
+        "top": 0,
+        "right": 380,
+        "bottom": 96,
+        "left": 0
+      },
+      "clientWidth": 380,
+      "scrollWidth": 478
+    },
+    "bodyWidth": 380,
+    "documentWidth": 380
+  },
+  "screenshots": [
+    "mobile-toolbar-geometry.png"
+  ]
+}

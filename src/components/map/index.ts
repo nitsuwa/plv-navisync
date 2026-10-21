@@ -16,4 +16,5 @@ export { ActiveEventsList } from "./ActiveEventsList";
 export { StudentMapControls, StudentMapModeToggle, type StudentMapControlsProps } from "./StudentMapControls";
 export { StudentFloorPicker, type StudentFloorOption } from "./StudentFloorPicker";
 export { StudentSelectedPlaceCard } from "./StudentSelectedPlaceCard";
+export { DiscoverTourPanel, type DiscoverTourBuilding, type DiscoverTourView } from "./DiscoverTourPanel";
 export { CampusPlaceDetails } from "./CampusPlaceDetails";

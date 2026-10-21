@@ -1,0 +1,67 @@
+{
+  "fixture": "TEST ONLY FloorPropertiesPanel; Vite started with Supabase URL and keys blank",
+  "backendWrites": "none; Room Videos feature is disabled before backend requests",
+  "browserViewports": [
+    {
+      "width": 360,
+      "height": 800,
+      "viewportWidth": 360,
+      "documentWidth": 360,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "viewportWidth": 390,
+      "documentWidth": 390,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "viewportWidth": 1440,
+      "documentWidth": 1440,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "viewportWidth": 360,
+      "documentWidth": 360,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "viewportWidth": 390,
+      "documentWidth": 390,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "viewportWidth": 1440,
+      "documentWidth": 1440,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    }
+  ],
+  "emergencyStatus": "Emergency route unavailable\n\nEast Door has no traversable Walking Network link. Assign a Primary Assembly Point to this building.\n\nInspect East Door",
+  "inspectedDoor": "TEST ONLY selected: test-door-1",
+  "blockedUploadControlCount": 0,
+  "pageErrors": [],
+  "backendRequests": [],
+  "screenshots": [
+    "room-videos-setup-required-360.png",
+    "room-videos-setup-required-390.png",
+    "room-videos-setup-required-1440.png",
+    "emergency-route-diagnostics-360.png",
+    "emergency-route-diagnostics-390.png",
+    "emergency-route-diagnostics-1440.png"
+  ]
+}

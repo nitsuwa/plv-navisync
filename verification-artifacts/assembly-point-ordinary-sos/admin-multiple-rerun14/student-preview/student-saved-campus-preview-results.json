@@ -1,0 +1,51 @@
+{
+  "isolation": "TEST ONLY saved local Admin draft served as a browser-local published-like snapshot; all writes blocked",
+  "source": {
+    "campusId": "90000000-0000-4000-8000-000000000198",
+    "campusName": "TEST ONLY - Isolated Assembly Point Editor",
+    "code": "PLV-EDITOR-TEST",
+    "assemblyPoints": [
+      {
+        "id": "496134cb-08c2-48f7-994e-bbddfbc3b88b",
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "navNodeId": "61b46c2b-3cba-44a6-a81b-00bc48f28ff7",
+        "assignments": 2,
+        "review": "approved"
+      },
+      {
+        "id": "5f2e6370-8e1a-47f3-b2b4-72c2a97f568f",
+        "name": "TEST ONLY - East Gathering Area",
+        "navNodeId": "99748238-3644-4e6d-b497-feb263084e58",
+        "assignments": 2,
+        "review": "approved"
+      },
+      {
+        "id": "7aee14de-b359-416a-86c0-36d4c976b370",
+        "name": "TEST ONLY - Secondary Open Space",
+        "navNodeId": "2c7f6cf7-b6a9-455b-b901-043b0f867e8f",
+        "assignments": 2,
+        "review": "approved"
+      }
+    ]
+  },
+  "browserErrors": [],
+  "screenshots": [
+    "saved-draft-caba-ordinary-sos-review-gate-1440.png"
+  ],
+  "roomRoute": {
+    "selectedRoom": "CABA LECTURE HALL",
+    "status": "review-required",
+    "statusText": "Evacuation route needs review Destination · TEST ONLY - Admin Main Assembly Point A Follow posted evacuation instructions.",
+    "primaryDestinationShown": true,
+    "findRouteEnabled": true,
+    "preview": {
+      "status": "review-required",
+      "statusText": "Evacuation route needs review Destination · TEST ONLY - Admin Main Assembly Point A Follow posted evacuation instructions.",
+      "destinationShown": true,
+      "startButtonCount": 1,
+      "startDisabled": true
+    },
+    "noRouteApprovalInSavedDraft": true,
+    "expectation": "assigned approved Primary is named in preview; Start remains disabled until an approved room evacuation route exists"
+  }
+}

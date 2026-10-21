@@ -94,6 +94,7 @@ export function exteriorEmergencyStairRouteReadiness(
   stair: Pick<ExteriorEmergencyStair, "id" | "state" | "servedFloorIds" | "emergencySafe" | "outdoorNodeId">,
   nodes: NavigationNode[] = [],
   edges: NavigationEdge[] = [],
+  startFloorId?: string,
 ): ExteriorEmergencyStairRouteReadiness {
   const edgeAllows = (edge: NavigationEdge, fromNodeId: string, toNodeId: string) =>
     (edge.startNodeId === fromNodeId && edge.endNodeId === toNodeId)
@@ -101,9 +102,32 @@ export function exteriorEmergencyStairRouteReadiness(
   const structural = exteriorEmergencyStairReadiness(building, stair);
   if (!structural.ready) return structural;
   const floors = building.floors ?? [];
-  const servedFloors = floors
+  const allServedFloors = floors
     .filter((floor) => stair.servedFloorIds?.includes(floor.id))
     .sort((a, b) => floors.indexOf(a) - floors.indexOf(b));
+  const groundIndex = allServedFloors.findIndex((floor) => floor.number === 1 || /ground/i.test(floor.label ?? ""));
+  if (groundIndex < 0) return { ready: false, issue: "Exterior Emergency Stair has no Ground Floor discharge." };
+  const originFloorIndex = startFloorId ? floors.findIndex((floor) => floor.id === startFloorId) : -1;
+  if (startFloorId && originFloorIndex < 0) return { ready: false, issue: "The selected Floor is not part of this Building." };
+  const servedStartIndex = startFloorId
+    ? allServedFloors.findIndex((floor) => floor.id === startFloorId)
+    : allServedFloors.length - 1;
+  // If the origin floor is not itself served, retain the highest real served
+  // landing below it. The route search must then prove an authored, eligible
+  // indoor descent to that landing; no connection to another floor is made up.
+  const startIndex = startFloorId && servedStartIndex < 0
+    ? allServedFloors.reduce((best, floor, index) => floors.indexOf(floor) <= originFloorIndex ? index : best, -1)
+    : servedStartIndex;
+  if (startIndex < 0) return { ready: false, issue: "The Exterior Emergency Stair has no served landing at or below this Floor." };
+  if (startFloorId && originFloorIndex < groundIndex) {
+    return { ready: false, issue: "The selected Floor is below the Exterior Emergency Stair discharge." };
+  }
+  // A route from one floor only depends on that floor and its descending
+  // continuation to Ground. A disconnected landing on an unrelated upper
+  // floor must not hide an otherwise complete route from a lower served floor.
+  const servedFloors = startFloorId
+    ? allServedFloors.slice(groundIndex, startIndex + 1)
+    : allServedFloors;
   const occurrenceNodeIds: Record<string, string> = {};
   const occurrenceNodes = new Map<string, NavigationNode>();
   for (const floor of servedFloors) {
@@ -144,7 +168,7 @@ export function exteriorEmergencyStairRouteReadiness(
     }
   }
 
-  const groundFloor = servedFloors.find((floor) => floor.number === 1 || /ground/i.test(floor.label ?? ""));
+  const groundFloor = allServedFloors[groundIndex];
   const groundNode = groundFloor ? occurrenceNodes.get(groundFloor.id) : undefined;
   const outdoorNode = stair.outdoorNodeId
     ? nodes.find((candidate) => candidate.id === stair.outdoorNodeId && !candidate.floorId)

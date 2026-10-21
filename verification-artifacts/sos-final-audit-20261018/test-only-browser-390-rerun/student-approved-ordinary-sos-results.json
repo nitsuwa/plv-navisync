@@ -1,0 +1,250 @@
+{
+  "localDraft": {
+    "publishStatus": "draft",
+    "lifecycleStatus": "draft",
+    "visibleToStudents": false,
+    "preview": "browser-local published-like snapshot only"
+  },
+  "isolation": "TEST ONLY exact saved local Admin campus served as browser-local published-like snapshot; remote writes blocked",
+  "source": {
+    "campusId": "90000000-0000-4000-8000-000000000198",
+    "campusName": "TEST ONLY - Isolated Assembly Point Editor",
+    "pointCount": 3,
+    "room": "CABA LECTURE HALL",
+    "smartMultiExit": false,
+    "approvedRouteCount": 0,
+    "primaryName": "TEST ONLY - Admin Main Assembly Point A",
+    "primaryNodeId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+    "approvedRouteDestination": "fccd345a-eaeb-4148-8735-d742b2fb61a8"
+  },
+  "browserErrors": [
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "blockedWrites": [
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/get_published_room_videos_for_room"
+    }
+  ],
+  "screenshots": [
+    "student-automatic-sos-route-preview-390.png",
+    "student-automatic-sos-active-2d-390.png",
+    "student-automatic-sos-active-3d-390.png",
+    "student-automatic-sos-arrival-2d-390.png",
+    "student-automatic-sos-arrival-3d-390.png"
+  ],
+  "progression": [
+    {
+      "iteration": 1,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 2,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 3,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 6",
+      "step": "STEP 3 OF 11",
+      "instruction": "Take the Left Stair down to Floor 5."
+    },
+    {
+      "iteration": 4,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 5,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 6,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 5",
+      "step": "STEP 4 OF 11",
+      "instruction": "Take the Left Stair down to Floor 4."
+    },
+    {
+      "iteration": 7,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 8,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 9,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 4",
+      "step": "STEP 5 OF 11",
+      "instruction": "Take the Left Stair down to Floor 3."
+    },
+    {
+      "iteration": 10,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 3",
+      "step": "STEP 6 OF 11",
+      "instruction": "Take the Left Stair down to Floor 2."
+    },
+    {
+      "iteration": 11,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 3",
+      "step": "STEP 6 OF 11",
+      "instruction": "Take the Left Stair down to Floor 2."
+    },
+    {
+      "iteration": 12,
+      "phase": "navigating",
+      "floor": "Choose floor. Current floor: Floor 2",
+      "step": "STEP 7 OF 11",
+      "instruction": "Take the Left Stair down to Ground Floor."
+    },
+    {
+      "iteration": 13,
+      "phase": "navigating",
+      "floor": null,
+      "step": "STEP 10 OF 11",
+      "instruction": "Follow the path toward TEST ONLY - Admin Main Assembly Point A."
+    },
+    {
+      "iteration": 14,
+      "phase": "arrived",
+      "floor": null,
+      "step": null,
+      "instruction": null
+    }
+  ],
+  "safetySetup": {
+    "note": "TEST ONLY in-memory simulation of authorized stair designation and current Assembly Point review; no source file, production data, or remote service was changed",
+    "stairCountMarkedForTest": 12,
+    "assemblyPointValidation": {
+      "connection": "connected",
+      "readiness": "approved",
+      "reviewReasons": [],
+      "reasons": [],
+      "fingerprint": "b9b755f1"
+    },
+    "candidateCount": 2,
+    "eligibleCandidateCount": 2,
+    "candidates": [
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "complete": true,
+        "stairReviewRequired": false,
+        "assemblyPointReviewRequired": false,
+        "distanceM": 273
+      },
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1",
+        "destination": "TEST ONLY - Admin Main Assembly Point A",
+        "complete": true,
+        "stairReviewRequired": false,
+        "assemblyPointReviewRequired": false,
+        "distanceM": 305
+      }
+    ],
+    "automaticRoutes": [
+      {
+        "id": "e8c65d31-3df9-4be5-a208-cb3be25800fd::exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "exitId": "exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1",
+        "kind": "exterior_stair",
+        "destinationNodeId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+        "distanceM": 273
+      },
+      {
+        "id": "7ea80284-8929-4ed5-a0cc-0466dfe3a806::exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433",
+        "exitId": "exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433",
+        "kind": "exterior_stair",
+        "destinationNodeId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+        "distanceM": 305
+      }
+    ]
+  },
+  "planner": {
+    "status": "not-calculated",
+    "text": "Destination · TEST ONLY - Admin Main Assembly Point A",
+    "primaryShown": true,
+    "findEnabled": true
+  },
+  "routePreview": {
+    "destinationShown": true,
+    "routeAOnly": true,
+    "routeTabCount": 0,
+    "routeBVisible": false,
+    "startCount": 1,
+    "startDisabled": false
+  },
+  "active2d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "active3d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 0,
+    "markerProgress": []
+  },
+  "active2dReturn": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "rendererRoundTripPreserved": true,
+  "arrival": {
+    "phase": "arrived",
+    "floor": null,
+    "step": null,
+    "instruction": null,
+    "panelText": "",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ],
+    "title": "Arrived at TEST ONLY - Admin Main Assembly Point A",
+    "text": "Arrived at TEST ONLY - Admin Main Assembly Point A Follow campus personnel's instructions. Previous step Restart Route Edit Route Done"
+  },
+  "arrivalReached": true,
+  "arrival3d": {
+    "phase": "arrived",
+    "pointVisible": true,
+    "pointName": "TEST ONLY - Admin Main Assembly Point A",
+    "pointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+    "currentPositionMarkerCount": 0
+  }
+}

@@ -1,0 +1,15 @@
+{
+    "exitCode":  1,
+    "totalDiagnostics":  1036,
+    "relevantDiagnostics":  8,
+    "relevant":  [
+                     "src/pages/CampusMapPage.tsx(235,90): error TS2304: Cannot find name \u0027isCampusGate\u0027.",
+                     "src/pages/CampusMapPage.tsx(5260,77): error TS2345: Argument of type \u0027NavigationPhase\u0027 is not assignable to parameter of type \u0027\"destination-indoor\" | \"origin-indoor\" | \"outdoor\"\u0027.",
+                     "src/pages/CampusMapPage.tsx(6827,25): error TS2339: Property \u0027entrances\u0027 does not exist on type \u0027Campus\u0027.",
+                     "src/pages/CampusMapPage.tsx(6827,42): error TS7006: Parameter \u0027entrance\u0027 implicitly has an \u0027any\u0027 type.",
+                     "src/pages/CampusMapPage.tsx(6828,20): error TS2339: Property \u0027entrances\u0027 does not exist on type \u0027Campus\u0027.",
+                     "src/pages/CampusMapPage.tsx(6954,54): error TS2339: Property \u0027floors\u0027 does not exist on type \u0027Building\u0027.",
+                     "src/pages/CampusMapPage.tsx(6986,121): error TS2339: Property \u0027floors\u0027 does not exist on type \u0027Building\u0027.",
+                     "src/pages/CampusMapPage.tsx(8441,32): error TS2339: Property \u0027label\u0027 does not exist on type \u0027never\u0027."
+                 ]
+}

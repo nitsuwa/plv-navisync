@@ -77,6 +77,21 @@ function mockFloorSvgViewport(svg: SVGSVGElement, width = 600, height = 450) {
   });
 }
 
+function worldPointToClient(svg: SVGSVGElement, point: { x: number; y: number }) {
+  const camera = svg.querySelector(":scope > g[transform]") ?? svg.querySelector("g[transform]");
+  const match = camera?.getAttribute("transform")?.match(/translate\((-?[\d.]+),?\s*(-?[\d.]+)\)\s*scale\(([\d.]+)\)/);
+  if (!match) throw new Error("Floor camera transform is unavailable");
+  return { clientX: Number(match[1]) + Number(match[3]) * point.x, clientY: Number(match[2]) + Number(match[3]) * point.y };
+}
+
+function marqueeWorldRect(svg: SVGSVGElement, start: { x: number; y: number }, end: { x: number; y: number }, modifiers: Record<string, boolean> = {}) {
+  const startClient = worldPointToClient(svg, start);
+  const endClient = worldPointToClient(svg, end);
+  fireEvent.mouseDown(svg, { button: 0, ...startClient, bubbles: true, ...modifiers });
+  fireEvent.mouseMove(window, { ...endClient, bubbles: true });
+  fireEvent.mouseUp(window, { button: 0, ...endClient, bubbles: true });
+}
+
 async function flushFloorFrame() {
   await act(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -127,6 +142,91 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(Number(outline?.getAttribute("x"))).toBeGreaterThan(0);
     expect(Number(outline?.getAttribute("y"))).toBeGreaterThan(0);
     expect(physicalFurniture && overlayLayer && Boolean(physicalFurniture.compareDocumentPosition(overlayLayer) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("previews Room Name immediately, flushes it into Save, and groups the edit into one undo/redo action", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [
+      { id: "room-draft", name: "Storage", type: "classroom", x: 25, y: 30, w: 120, h: 70, floorId: "f1", buildingId: "b1" },
+      { id: "room-unchanged", name: "Office", type: "office", x: 190, y: 30, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+    ];
+    let latestCampus = campus;
+    const updates: Campus[] = [];
+    const onSave = vi.fn(async (candidate: Campus) => candidate);
+
+    function StatefulFloorEditor() {
+      const [currentCampus, setCurrentCampus] = useState(campus);
+      return <FloorEditor
+        campus={currentCampus}
+        buildingId="b1"
+        floorId="f1"
+        initialSelection={{ type: "room", id: "room-draft" }}
+        onBack={() => {}}
+        onSwitchFloor={() => {}}
+        onUpdate={(next) => { latestCampus = next; updates.push(next); setCurrentCampus(next); }}
+        onSave={onSave}
+      />;
+    }
+
+    const { container } = render(<StatefulFloorEditor />);
+    const nameInput = screen.getByTestId("room-name-input") as HTMLInputElement;
+    const selectedLabel = container.querySelector('[data-testid="room-label-overlay"][data-room-id="room-draft"]')!;
+    const unchangedLabel = container.querySelector('[data-testid="room-label-overlay"][data-room-id="room-unchanged"]')!;
+
+    fireEvent.change(nameInput, { target: { value: "SPEECH AND COMMUNICATION LABORATORY" } });
+    fireEvent.change(nameInput, { target: { value: "HOLDING AREA" } });
+    expect(nameInput.value).toBe("HOLDING AREA");
+    expect(selectedLabel.textContent).toContain("HOLDING AREA");
+    expect(unchangedLabel.textContent).toContain("Office");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.click(container.querySelector('[data-tutorial="floor-save"]')!);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0].buildings[0].floors[0].rooms.find((room) => room.id === "room-draft")?.name)
+      .toBe("HOLDING AREA");
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms.find((room) => room.id === "room-draft")?.name)
+      .toBe("HOLDING AREA"));
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+
+    fireEvent.change(nameInput, { target: { value: "HOLDING AREA 2" } });
+    fireEvent.blur(nameInput);
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms.find((room) => room.id === "room-draft")?.name)
+      .toBe("HOLDING AREA 2"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms.find((room) => room.id === "room-draft")?.name)
+      .toBe("HOLDING AREA"));
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms.find((room) => room.id === "room-draft")?.name)
+      .toBe("HOLDING AREA 2"));
+  });
+
+  it("flushes a Room Name draft before selecting a different room", async () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [
+      { id: "room-before-switch", name: "Storage", type: "classroom", x: 25, y: 30, w: 120, h: 70, floorId: "f1", buildingId: "b1" },
+      { id: "room-after-switch", name: "Office", type: "office", x: 190, y: 30, w: 100, h: 70, floorId: "f1", buildingId: "b1" },
+    ];
+    let latestCampus = campus;
+    function StatefulFloorEditor() {
+      const [currentCampus, setCurrentCampus] = useState(campus);
+      return <FloorEditor campus={currentCampus} buildingId="b1" floorId="f1"
+        initialSelection={{ type: "room", id: "room-before-switch" }} onBack={() => {}} onSwitchFloor={() => {}}
+        onUpdate={(next) => { latestCampus = next; setCurrentCampus(next); }} />;
+    }
+    const { container } = render(<StatefulFloorEditor />);
+    const nameInput = screen.getByTestId("room-name-input") as HTMLInputElement;
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+
+    fireEvent.change(nameInput, { target: { value: "HOLDING AREA" } });
+    expect(latestCampus.buildings[0].floors[0].rooms[0].name).toBe("Storage");
+    const otherRoom = container.querySelector('[data-layer-key="room:room-after-switch"]')!;
+    const point = worldPointToClient(svg, { x: 240, y: 65 });
+    fireEvent.mouseDown(otherRoom, { ...point, button: 0, bubbles: true });
+    fireEvent.mouseUp(window, { ...point, button: 0, bubbles: true });
+
+    await waitFor(() => expect(latestCampus.buildings[0].floors[0].rooms[0].name).toBe("HOLDING AREA"));
+    expect(screen.getByTestId("room-name-input")).toHaveValue("Office");
   });
 
   it("renders the complete long Room name with a dynamically tall Editor label", () => {
@@ -778,6 +878,107 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="floor-marquee-selection"]')?.getAttribute("visibility")).toBe("hidden");
   });
 
+  it("marquee-selects orange Walking Network waypoints by center in world space", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [
+      { id: "orange-node-a", name: "Path Junction", type: "hallway", x: 240, y: 180, buildingId: "b1", floorId: "f1", pathJunction: true, accessible: true, color: "#d97706" },
+      { id: "orange-node-b", name: "Path Junction", type: "hallway", x: 280, y: 180, buildingId: "b1", floorId: "f1", pathJunction: true, accessible: true, color: "#d97706" },
+      { id: "outside-node", name: "Path Junction", type: "hallway", x: 340, y: 180, buildingId: "b1", floorId: "f1", pathJunction: true, accessible: true, color: "#d97706" },
+    ];
+    campus.navEdges = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(container.querySelector('[data-nav-node-id="orange-node-a"]')).toBeTruthy());
+
+    // Reverse-direction box; both node centers are inside while their visible
+    // glyphs extend beyond the narrow box. The third center is outside.
+    marqueeWorldRect(svg, { x: 282, y: 182 }, { x: 238, y: 178 });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-nav-node-id="orange-node-a"] [data-testid="nav-node-selected"]')).toBeTruthy();
+      expect(container.querySelector('[data-nav-node-id="orange-node-b"] [data-testid="nav-node-selected"]')).toBeTruthy();
+    });
+    expect(container.querySelector('[data-nav-node-id="outside-node"] [data-testid="nav-node-selected"]')).toBeNull();
+  });
+
+  it("Shift adds and Ctrl toggles waypoint marquee selection while Space-drag remains camera-only", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [
+      { id: "waypoint-one", name: "Waypoint 1", type: "hallway", x: 160, y: 130, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "waypoint-two", name: "Waypoint 2", type: "hallway", x: 250, y: 130, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [];
+    const { container } = render(<FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={() => {}} />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(container.querySelector('[data-nav-node-id="waypoint-one"]')).toBeTruthy());
+    marqueeWorldRect(svg, { x: 150, y: 120 }, { x: 170, y: 140 });
+    marqueeWorldRect(svg, { x: 240, y: 120 }, { x: 260, y: 140 }, { shiftKey: true });
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="nav-node-selected"]')).toHaveLength(2));
+    marqueeWorldRect(svg, { x: 240, y: 120 }, { x: 260, y: 140 }, { ctrlKey: true });
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="nav-node-selected"]')).toHaveLength(1));
+    expect(container.querySelector('[data-nav-node-id="waypoint-one"] [data-testid="nav-node-selected"]')).toBeTruthy();
+    expect(container.querySelector('[data-nav-node-id="waypoint-two"] [data-testid="nav-node-selected"]')).toBeNull();
+
+    const cameraBefore = svg.querySelector(":scope > g[transform]")?.getAttribute("transform");
+    const waypointBeforePan = container.querySelector('[data-nav-node-id="waypoint-one"] circle')?.getAttribute("cx");
+    fireEvent.keyDown(window, { key: " ", code: "Space" });
+    const start = worldPointToClient(svg, { x: 320, y: 300 });
+    const end = worldPointToClient(svg, { x: 380, y: 340 });
+    fireEvent.mouseDown(svg, { button: 0, ...start, bubbles: true });
+    fireEvent.mouseMove(window, { ...end, bubbles: true });
+    fireEvent.mouseUp(window, { button: 0, ...end, bubbles: true });
+    fireEvent.keyUp(window, { key: " ", code: "Space" });
+    expect(container.querySelectorAll('[data-testid="nav-node-selected"]')).toHaveLength(1);
+    expect(container.querySelector('[data-nav-node-id="waypoint-one"]')?.querySelector('[data-testid="nav-node-hit"]')).toBeTruthy();
+    expect(container.querySelector('[data-nav-node-id="waypoint-one"] circle')?.getAttribute("cx")).toBe(waypointBeforePan);
+    expect(svg.querySelector(":scope > g[transform]")?.getAttribute("transform")).not.toBe(cameraBefore);
+
+    // Hit-testing remains correct after the camera transform changes.
+    marqueeWorldRect(svg, { x: 240, y: 120 }, { x: 260, y: 140 });
+    await waitFor(() => {
+      expect(container.querySelector('[data-nav-node-id="waypoint-two"] [data-testid="nav-node-selected"]')).toBeTruthy();
+      expect(container.querySelector('[data-nav-node-id="waypoint-one"] [data-testid="nav-node-selected"]')).toBeNull();
+    });
+  });
+
+  it("moves marquee-selected Walking Network waypoints together in one undo step", async () => {
+    const campus = makeCampus();
+    campus.navNodes = [
+      { id: "move-waypoint-a", name: "Waypoint A", type: "hallway", x: 220, y: 180, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+      { id: "move-waypoint-b", name: "Waypoint B", type: "hallway", x: 280, y: 180, buildingId: "b1", floorId: "f1", accessible: true, color: "#16a34a" },
+    ];
+    campus.navEdges = [{ id: "move-edge", startNodeId: "move-waypoint-a", endNodeId: "move-waypoint-b", distance: 60, bidirectional: true, accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 2 }];
+    let latestCampus = campus;
+    function StatefulFloorEditor() {
+      const [currentCampus, setCurrentCampus] = useState(campus);
+      return <FloorEditor campus={currentCampus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => { latestCampus = next; setCurrentCampus(next); }} />;
+    }
+    const { container } = render(<StatefulFloorEditor />);
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigation" }));
+    await waitFor(() => expect(container.querySelector('[data-nav-node-id="move-waypoint-a"]')).toBeTruthy());
+    marqueeWorldRect(svg, { x: 205, y: 165 }, { x: 295, y: 195 });
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="nav-node-selected"]')).toHaveLength(2));
+
+    const dragStart = worldPointToClient(svg, { x: 220, y: 180 });
+    const dragEnd = worldPointToClient(svg, { x: 240, y: 190 });
+    fireEvent.mouseDown(container.querySelector('[data-nav-node-id="move-waypoint-a"]')!, { button: 0, ...dragStart, bubbles: true });
+    fireEvent.mouseMove(svg, { ...dragEnd, bubbles: true });
+    fireEvent.mouseUp(svg, { button: 0, ...dragEnd, bubbles: true });
+    await waitFor(() => expect(latestCampus.navNodes?.find((node) => node.id === "move-waypoint-a")).toMatchObject({ x: 240, y: 190 }));
+    expect(latestCampus.navNodes?.find((node) => node.id === "move-waypoint-b")).toMatchObject({ x: 300, y: 190 });
+    expect(latestCampus.navEdges?.find((edge) => edge.id === "move-edge")?.startNodeId).toBe("move-waypoint-a");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(latestCampus.navNodes?.find((node) => node.id === "move-waypoint-a")).toMatchObject({ x: 220, y: 180 }));
+    expect(latestCampus.navNodes?.find((node) => node.id === "move-waypoint-b")).toMatchObject({ x: 280, y: 180 });
+  });
+
   it("draws a Room marquee in the interaction layer and commits only on release", () => {
     const updates: Campus[] = [];
     const { container } = render(<FloorEditor campus={makeCampus()} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />);
@@ -1005,6 +1206,69 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates[0].buildings[0].floors[0].doors?.[0]).toMatchObject({ wallId: "wall-vertical", x: 300, y: 160 });
   });
 
+  it("resizes an attached Door by redrawing its wall-local leaf and arc without scaling the symbol", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [{ id: "door-resize-wall", x1: 80, y1: 100, x2: 500, y2: 100, thickness: 8, color: "#334155" }];
+    floor.doors = [{ id: "door-resize", x: 200, y: 100, width: 32, offset: 120 / 420, wallId: "door-resize-wall", direction: "left", hinge: "left", swingSide: "a", color: "#92400e" }];
+    const updates: Campus[] = [];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "door", id: "door-resize" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    const handle = container.querySelector('[data-layer-key="door:door-resize"] [data-testid="opening-resize-handle"][data-opening-part="resize-handle-end"]')!;
+    const start = worldPointToClient(svg, { x: 216, y: 100 });
+    const end = worldPointToClient(svg, { x: 236, y: 100 });
+    fireEvent.mouseDown(handle, { ...start, button: 0, bubbles: true });
+    fireEvent.mouseMove(svg, { ...end, bubbles: true });
+    await flushFloorFrame();
+
+    const preview = container.querySelector('[data-testid="floor-imperative-preview-items"] [data-layer-key="door:door-resize"]') as SVGGElement;
+    expect(preview).toBeTruthy();
+    expect(preview.getAttribute("transform")).toContain("translate(208, 100) rotate(0)");
+    expect(preview.getAttribute("transform")).not.toContain("scale(");
+    expect(preview.querySelector('[data-opening-part="door-hinge"]')).toHaveAttribute("cx", "-24");
+    expect(preview.querySelector('[data-opening-part="door-leaf"]')).toHaveAttribute("y2", "-48");
+    expect(preview.querySelector('[data-opening-part="door-swing-arc"]')?.getAttribute("d")).toContain("A 48 48");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { ...end, button: 0, bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].doors?.[0]).toMatchObject({ id: "door-resize", wallId: "door-resize-wall", width: 48, hinge: "left", swingSide: "a" });
+  });
+
+  it("resizes an attached Window along the host wall while keeping its visual thickness fixed", async () => {
+    const campus = makeCampus();
+    const floor = campus.buildings[0].floors[0];
+    floor.walls = [{ id: "window-resize-wall", x1: 80, y1: 120, x2: 500, y2: 120, thickness: 8, color: "#334155" }];
+    floor.windows = [{ id: "window-resize", x: 200, y: 120, width: 28, height: 8, offset: 120 / 420, wallId: "window-resize-wall", color: "#0284c7" }];
+    const updates: Campus[] = [];
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" initialSelection={{ type: "window", id: "window-resize" }} onBack={() => {}} onSwitchFloor={() => {}} onUpdate={(next) => updates.push(next)} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
+    mockFloorSvgViewport(svg);
+    const handle = container.querySelector('[data-layer-key="window:window-resize"] [data-testid="opening-resize-handle"][data-opening-part="resize-handle-end"]')!;
+    const start = worldPointToClient(svg, { x: 214, y: 120 });
+    const end = worldPointToClient(svg, { x: 230, y: 120 });
+    fireEvent.mouseDown(handle, { ...start, button: 0, bubbles: true });
+    fireEvent.mouseMove(svg, { ...end, bubbles: true });
+    await flushFloorFrame();
+
+    const preview = container.querySelector('[data-testid="floor-imperative-preview-items"] [data-layer-key="window:window-resize"]') as SVGGElement;
+    expect(preview).toBeTruthy();
+    expect(preview.getAttribute("transform")).toContain("translate(208, 120) rotate(0)");
+    expect(preview.getAttribute("transform")).not.toContain("scale(");
+    expect(preview.querySelector('[data-opening-part="window-glazing-upper"]')).toHaveAttribute("x2", "22");
+    expect(preview.querySelector('[data-opening-part="window-glazing-upper"]')).toHaveAttribute("y1", "-6");
+    expect(updates).toHaveLength(0);
+
+    fireEvent.mouseUp(svg, { ...end, button: 0, bubbles: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].buildings[0].floors[0].windows?.[0]).toMatchObject({ id: "window-resize", wallId: "window-resize-wall", width: 44, height: 8 });
+  });
+
   it("moves the read-only navigation anchor and connected edge with a dragged Door", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
@@ -1041,7 +1305,7 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(updates[0].navNodes?.find((node) => node.id === "other-node")).toMatchObject({ x: 450, y: 240 });
   });
 
-  it("moves the Door direction badge with the same transient owner transform", async () => {
+  it("moves the Door direction badge with its wall-relative transient translation", async () => {
     const campus = makeCampus();
     const floor = campus.buildings[0].floors[0];
     campus.buildings[0].entrances = [{
@@ -1062,7 +1326,6 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450")!;
     mockFloorSvgViewport(svg);
     const door = container.querySelector('[data-layer-key="door:door-arrow"]')!;
-    const authoredDoorTransform = door.getAttribute("transform") ?? "";
     fireEvent.mouseDown(door, { clientX: 200, clientY: 100, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 260, clientY: 100, bubbles: true });
 
@@ -1072,12 +1335,10 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
       const previewDoor = container.querySelector('[data-testid="floor-interaction-items"] [data-layer-key="door:door-arrow"]');
       expect(originalBadge?.getAttribute("visibility")).toBe("hidden");
       expect(previewBadge).toBeTruthy();
-      const doorPreviewTransform = previewDoor?.getAttribute("transform") ?? "";
-      const sharedTransientTransform = authoredDoorTransform
-        ? doorPreviewTransform.slice(0, -authoredDoorTransform.length).trim()
-        : doorPreviewTransform;
-      expect(sharedTransientTransform).not.toBe("");
-      expect(previewBadge?.getAttribute("transform")).toBe(sharedTransientTransform);
+      expect(previewDoor?.getAttribute("transform")).toContain("translate(260, 100) rotate(0)");
+      const badgeTranslation = previewBadge?.getAttribute("transform")?.match(/translate\(([-\d.]+) ([-\d.]+)\)/);
+      expect(Number(badgeTranslation?.[1])).toBeCloseTo(60, 0);
+      expect(Number(badgeTranslation?.[2])).toBeCloseTo(0, 3);
       expect(previewBadge?.querySelector('[data-testid="entrance-direction-badge"]')).toBeTruthy();
     });
     expect(updates).toHaveLength(0);
@@ -1411,6 +1672,42 @@ describe("FloorEditor render (regression: LandPlot runtime crash)", () => {
     expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="room-a"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="room-b"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="room-selection-overlay"][data-room-id="library"]')).toBeNull();
+  });
+
+  it("duplicates a Room description while clearing its identity-scoped photo reference", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].rooms = [{
+      id: "room-source",
+      name: "Study Room",
+      type: "classroom",
+      x: 80,
+      y: 72,
+      w: 120,
+      h: 80,
+      floorId: "f1",
+      buildingId: "b1",
+      description: "A quiet place for focused study.",
+      roomPhotoPath: "c1/b1/f1/room-source/photo.webp",
+    }];
+    const onUpdate = vi.fn();
+    const { container } = render(
+      <FloorEditor campus={campus} buildingId="b1" floorId="f1" onBack={() => {}} onSwitchFloor={() => {}} onUpdate={onUpdate} />,
+    );
+    const svg = Array.from(container.querySelectorAll("svg")).find((candidate) => candidate.getAttribute("viewBox") === "0 0 600 450");
+    const source = container.querySelector('[data-layer-key="room:room-source"]');
+    expect(svg).toBeTruthy();
+    expect(source).toBeTruthy();
+    mockFloorSvgViewport(svg!);
+
+    fireEvent.contextMenu(source!, { clientX: 160, clientY: 112, bubbles: true });
+    const duplicateActions = screen.getAllByRole("button", { name: "Duplicate Room Only" });
+    fireEvent.click(duplicateActions.find((button) => !button.hasAttribute("data-testid"))!);
+
+    const updatedCampus = onUpdate.mock.calls.at(-1)?.[0] as Campus | undefined;
+    const duplicatedRoom = updatedCampus?.buildings[0].floors[0].rooms.find((room) => room.id !== "room-source");
+    expect(duplicatedRoom).toMatchObject({ description: "A quiet place for focused study." });
+    expect(duplicatedRoom?.id).not.toBe("room-source");
+    expect(duplicatedRoom?.roomPhotoPath).toBeUndefined();
   });
 
   it("blocks shrinking a parent Room when that would leave its existing child outside", async () => {
@@ -2209,7 +2506,7 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
 
   it("keeps Save and Publish in the same shrink-0 group so a wrapped row never splits them", () => {
     renderEditor();
-    const save = screen.getByRole("button", { name: /^Save$/i });
+    const save = screen.getByRole("button", { name: /^Save floor draft$/i });
     const publish = screen.getByRole("button", { name: /^Publish$/i });
     const lifecycleGroup = screen.getByTestId("floor-toolbar-lifecycle");
     expect(save.closest('[data-testid="floor-toolbar-lifecycle"]')).toBe(lifecycleGroup);
@@ -2235,7 +2532,7 @@ describe("FloorEditor top toolbar (B6 manual-QA: deterministic responsive groupi
     expect(screen.getByTestId("floor-toolbar-center")).toBeTruthy();
     expect(screen.getByTestId("floor-nav-toolbar")).toBeTruthy();
     expect(screen.getByTestId("issues-toolbar")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Save$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Save floor draft$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Publish$/i })).toBeTruthy();
   });
 });

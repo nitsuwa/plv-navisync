@@ -448,7 +448,7 @@ const FurnitureVisual = memo(function FurnitureVisual({ item }: { item: FloorFur
 });
 
 const RoomLabelVisual = memo(function RoomLabelVisual({ room, hovered, highlighted }: Pick<RoomVisualProps, "room" | "hovered" | "highlighted">) {
-  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} studentSelected={highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 0.78} />;
+  return <FloorRoomLabelArtwork room={room} emphasized={hovered || highlighted} studentSelected={highlighted} opacity={highlighted ? 1 : hovered ? 0.95 : 1} />;
 });
 export interface ReadonlyFloorPlanSceneProps {
   floor: FloorPlan;

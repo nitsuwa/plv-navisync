@@ -183,6 +183,7 @@ describe("ReadonlyFloorPlanScene", () => {
 
     expect(screen.getByTestId("room-custom-shape")).toHaveAttribute("fill", "#d9e7f5");
     expect(screen.getByTestId("room-label-overlay").textContent).toContain("Fluid Mechanics Laboratory");
+    expect(screen.getByTestId("room-label-overlay")).toHaveStyle({ opacity: "1" });
     expect(screen.getByTestId("readonly-wall").querySelectorAll("line")).toHaveLength(2);
     expect(screen.getAllByTestId("readonly-door-leaf")).toHaveLength(2);
     expect(screen.getByTestId("readonly-window").querySelector("[data-testid='readonly-window-glazing']")).toBeInTheDocument();

@@ -1,0 +1,13 @@
+﻿{
+    "baseline":  "verification-artifacts/assembly-point-connectivity-final-20261018/typescript-current.txt",
+    "current":  "verification-artifacts/room-video-admin-polish-20261018/typescript-current.txt",
+    "baselineDiagnostics":  1029,
+    "currentDiagnostics":  1029,
+    "newDiagnosticIdentities":  0,
+    "newTouchedFileDiagnostics":  [
+
+                                  ],
+    "newSamples":  [
+
+                   ]
+}

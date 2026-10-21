@@ -1,0 +1,10 @@
+{
+  "fixtureBytes": 223833,
+  "videoHasControls": true,
+  "controlsList": null,
+  "nativeOverflowVisible": true,
+  "menuOpenedBy": "Chromium native controls overflow button",
+  "downloadMenu": "Download item was displayed but disabled for the Playwright-intercepted media response; no download was attempted in this probe.",
+  "screenshot": "home-showcase-video-native-menu-1440.png",
+  "productionWrites": 0
+}

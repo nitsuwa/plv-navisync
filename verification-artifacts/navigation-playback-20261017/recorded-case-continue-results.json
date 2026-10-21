@@ -1,0 +1,50 @@
+{
+  "fixture": "read-only published route: Campus Gate to BUSINESS OFFICE SIMULATION ROOM",
+  "errors": [],
+  "checks": {
+    "routePreview": true,
+    "previewText": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from Campus Gate to BUSINESS OFFICE SIMULATION ROOM.\n\nRoute preview\n\nSTANDARD ROUTE\n\nCampus Gate → BUSINESS OFFICE SIMULATION ROOM\n\nIndoor + outdoor\n1 building entry\nSteps\n5\nEdit Route\nStart Navigation\nClear",
+    "initial": {
+      "step": "Step 1 of 5",
+      "instruction": "Start at Campus Gate.",
+      "text": "GUIDED NAVIGATION\n\nStep 1 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nStart at Campus Gate.\n\nPause\n1×\nExpand"
+    },
+    "incorrectAlreadyAtEntrance": false,
+    "firstStepIsMeaningful": true,
+    "beforeContinue": {
+      "step": "Step 3 of 5",
+      "instruction": true,
+      "text": "GUIDED NAVIGATION\n\nStep 3 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nEnter CABA building.\n\nYou’re at the CABA entrance. Tap Enter CABA on the map or press Continue.\n\nContinue\n1×\nExpand"
+    },
+    "afterContinue": {
+      "changed": true,
+      "step": "Step 4 of 5",
+      "instruction": "GUIDED NAVIGATION\n\nStep 4 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.\n\nPause\n1×\nExpand",
+      "text": "GUIDED NAVIGATION\n\nStep 4 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.\n\nPause\n1×\nExpand"
+    },
+    "pausedAfterContinue": true,
+    "progressMarker2d": [
+      {
+        "progress": 0.011587476400193005,
+        "transform": "translate(560,451.6454295154608)",
+        "visible": true
+      }
+    ],
+    "renderer3d": {
+      "isThreeD": true,
+      "routeCard": "GUIDED NAVIGATION\n\nStep 4 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.\n\nResume\n1×\nExpand",
+      "canvasCount": 1
+    },
+    "rendererRoundTrip": {
+      "step": "Step 4 of 5",
+      "markers": [
+        {
+          "progress": 0,
+          "transform": "translate(560,460)",
+          "visible": true
+        }
+      ]
+    },
+    "stepPreservedAcrossRenderers": true
+  }
+}

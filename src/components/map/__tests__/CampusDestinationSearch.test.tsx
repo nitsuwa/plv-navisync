@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import type { FormEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { SearchResult } from "../../../hooks/useCampusSearch";
 import { CampusDestinationSearch } from "../CampusDestinationSearch";
@@ -93,7 +94,14 @@ describe("CampusDestinationSearch", () => {
     expect(onMapWheel).not.toHaveBeenCalled();
   });
 
-  it("marks duplicate endpoints unavailable and skips them on Enter", () => {
+  it("expands map-header search results to the usable mobile width while retaining a desktop dropdown", () => {
+    render(<CampusDestinationSearch {...props({ mapHeaderSafeZone: true })} />);
+    const panel = screen.getByTestId("map-search-results-panel");
+    expect(panel).toHaveClass("absolute", "w-[calc(100vw-1.5rem)]", "md:static", "md:w-full");
+    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toBeInTheDocument();
+  });
+
+  it("marks duplicate endpoints unavailable and never selects a result for plain Enter", () => {
     const onSelect = vi.fn();
     render(<CampusDestinationSearch {...props({
       query: "Room 205",
@@ -104,7 +112,56 @@ describe("CampusDestinationSearch", () => {
     const duplicate = screen.getByRole("option", { name: /Room 205, Room, Science Hall · Floor 2, Already selected as start/ });
     expect(duplicate).toBeDisabled();
     expect(duplicate).toHaveAttribute("aria-disabled", "true");
-    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search campus destinations" }), { key: "Enter" });
+    const input = screen.getByRole("searchbox", { name: "Search campus destinations" });
+    const enter = createEvent.keyDown(input, { key: "Enter" });
+    fireEvent(input, enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps Enter as query confirmation until a result is explicitly highlighted", () => {
+    const onSelect = vi.fn();
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <CampusDestinationSearch {...props({ query: "science", onSelect })} />
+      </form>,
+    );
+
+    const input = screen.getByRole("searchbox", { name: "Search campus destinations" });
+    const enter = createEvent.keyDown(input, { key: "Enter" });
+    fireEvent(input, enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    const resultOptions = screen.getAllByRole("option");
+    expect(resultOptions[0]).toBeVisible();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const firstOption = screen.getAllByRole("option")[0];
+    expect(firstOption).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveAttribute("aria-activedescendant", firstOption.id);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith(building);
+  });
+
+  it("skips unavailable results during keyboard navigation and Escape closes the list", () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(<CampusDestinationSearch {...props({
+      getDisabledReason: (candidate) => candidate.id === "b1" ? "Already selected" : undefined,
+      onSelect,
+    })} />);
+    const input = screen.getByRole("searchbox", { name: "Search campus destinations" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const roomOption = screen.getByRole("option", { name: /Room 205/i });
+    expect(roomOption).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith(room);
+
+    const onBlur = vi.fn();
+    rerender(<CampusDestinationSearch {...props({ onBlur })} />);
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search campus destinations" }), { key: "Escape" });
+    expect(onBlur).toHaveBeenCalledOnce();
   });
 });

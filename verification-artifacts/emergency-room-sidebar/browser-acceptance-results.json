@@ -1,0 +1,60 @@
+{
+  "fixture": "TEST ONLY local FloorPropertiesPanel harness; no campus writes",
+  "storageAdapter": "request interception only; table returns no rows and private bucket reports not found",
+  "productionWrites": "none",
+  "requests": [
+    {
+      "method": "GET",
+      "url": "/rest/v1/emergency_evacuation_videos",
+      "adapter": "TEST ONLY empty metadata table"
+    },
+    {
+      "method": "POST",
+      "url": "/storage/v1/object/list/emergency-evacuation-videos",
+      "adapter": "TEST ONLY missing private bucket"
+    }
+  ],
+  "routeFailure": {
+    "summary": "Assign one Primary Assembly Point to this Building.\n\nInspect Connections",
+    "routePickerVisible": false,
+    "issueDetailsInitiallyCollapsed": true,
+    "selectedDoor": "TEST ONLY selected: test-door-1",
+    "doorDetail": "Connection details\n\nEast Door: The Door is linked to the Room, but has no traversable emergency-safe Walking Network connection.\n\nAssign one Primary Assembly Point to this Building."
+  },
+  "viewports": [
+    {
+      "width": 360,
+      "height": 800,
+      "viewportWidth": 360,
+      "documentWidth": 360,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "viewportWidth": 390,
+      "documentWidth": 390,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "viewportWidth": 1440,
+      "documentWidth": 1440,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    }
+  ],
+  "browserErrors": [],
+  "screenshots": [
+    "room-properties-invalid-360.png",
+    "room-properties-invalid-390.png",
+    "room-properties-invalid-1440.png",
+    "room-properties-connection-details-390.png",
+    "room-properties-video-storage-setup-390.png"
+  ],
+  "videoSetupNotice": "Video storage setup is required before uploads can begin.\n\n20261014090000_emergency_evacuation_video_guides.sql\n\nApply it in the Supabase SQL Editor.\n\nCheck setup again",
+  "uploadDisabled": true
+}

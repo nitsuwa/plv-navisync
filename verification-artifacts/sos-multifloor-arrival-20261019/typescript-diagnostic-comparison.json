@@ -1,0 +1,16 @@
+﻿{
+    "baseline":  "verification-artifacts/assembly-point-connectivity-final-20261018/typescript-current.txt",
+    "current":  "verification-artifacts/sos-multifloor-arrival-20261019/typescript-current.txt",
+    "baselineDiagnosticIdentities":  516,
+    "currentDiagnosticIdentities":  517,
+    "newDiagnosticIdentities":  3,
+    "resolvedDiagnosticIdentities":  2,
+    "newTouchedFileDiagnostics":  [
+
+                                  ],
+    "newSamples":  [
+                       "src/lib/__tests__/smartMultiExitEvacuation.workflow.integration.test.tsx TS18048 \u0027selected.contextLegs.length\u0027 is possibly \u0027undefined\u0027.",
+                       "src/services/database.ts TS2352 Conversion of type \u0027({ action: string; actor_id: string | null; campus_id: string | null; created_at: string; entity_id: string | null; entity_type: string | null; id: string; metadata: Json; } | { ...; } | ... 28 more ... | { ...; })[]\u0027 to type \u0027T[]\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first.",
+                       "src/services/database.ts TS2352 Conversion of type \u0027{ action: string; actor_id: string | null; campus_id: string | null; created_at: string; entity_id: string | null; entity_type: string | null; id: string; metadata: Json; } | { ...; } | ... 28 more ... | { ...; }\u0027 to type \u0027T\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first."
+                   ]
+}

@@ -1,0 +1,150 @@
+{
+  "rooms": [
+    {
+      "roomId": "06b705cc-c62e-4ffa-b3ca-7d2d8e35fdbe",
+      "name": "ASSEMBLY HALL",
+      "building": "COLLEGE OF EDUCATION BUILDING",
+      "buildingId": "1218c2f6-c4dd-4888-9f87-84dc67b1055d",
+      "floorId": "e0e416c6-a2a7-4967-994f-b965e2e2ad78",
+      "floorNumber": 1,
+      "floorLabel": "Ground Floor",
+      "doorCount": 2,
+      "connectedDoors": 2,
+      "candidateCount": 1,
+      "approvedRouteCount": 1,
+      "exits": [
+        {
+          "label": "Main Exit",
+          "doorId": "15323180-9592-4c17-85d8-4ca436498d38",
+          "exitId": "exterior-stair:2ea6a933-3738-4579-81c3-4cb5e0dfcb03"
+        }
+      ],
+      "fingerprint": "[[\"15323180-9592-4c17-85d8-4ca436498d38::exterior-stair:2ea6a933-3738-4579-81c3-4cb5e0dfcb03\",\"15323180-9592-4c17-85d8-4ca436498d38\",\"exterior-stair:2ea6a933-3738-4579-81c3-4cb5e0dfcb03\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"dce3314195eb6967\"]]",
+      "fingerprintValid": true
+    },
+    {
+      "roomId": "ffe40872-45b8-4ca2-a148-61e6c7d00b40",
+      "name": "CABA LECTURE HALL",
+      "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+      "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+      "floorId": "c6a8cedf-d462-4abc-aa68-f5465b2e158e",
+      "floorNumber": 6,
+      "floorLabel": "Floor 6",
+      "doorCount": 2,
+      "connectedDoors": 2,
+      "candidateCount": 2,
+      "approvedRouteCount": 2,
+      "exits": [
+        {
+          "label": "Left Exit",
+          "doorId": "7ea80284-8929-4ed5-a0cc-0466dfe3a806",
+          "exitId": "exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433"
+        },
+        {
+          "label": "Right Exit",
+          "doorId": "e8c65d31-3df9-4be5-a208-cb3be25800fd",
+          "exitId": "exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1"
+        }
+      ],
+      "fingerprint": "[[\"7ea80284-8929-4ed5-a0cc-0466dfe3a806::exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433\",\"7ea80284-8929-4ed5-a0cc-0466dfe3a806\",\"exterior-stair:6cd731bb-b237-494f-9cd9-43a226d2d433\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"14cb37f23a726db8\"],[\"e8c65d31-3df9-4be5-a208-cb3be25800fd::exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1\",\"e8c65d31-3df9-4be5-a208-cb3be25800fd\",\"exterior-stair:1678649f-4b19-4e5f-b08a-e0091f3070a1\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"65a0a34cfe685f8c\"]]",
+      "fingerprintValid": true
+    },
+    {
+      "roomId": "981e67f8-a1c9-4f47-9d42-923ffd67327b",
+      "name": "CEIT LECTURE HALL",
+      "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+      "buildingId": "e23793a1-fb00-4641-807f-bb4bcf5cbb1b",
+      "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+      "floorNumber": 6,
+      "floorLabel": "Floor 6",
+      "doorCount": 2,
+      "connectedDoors": 2,
+      "candidateCount": 2,
+      "approvedRouteCount": 2,
+      "exits": [
+        {
+          "label": "Left Exit",
+          "doorId": "c621e0d9-48ff-4e27-834c-fc1a29e2db98",
+          "exitId": "exterior-stair:10d27fcb-ec8b-4a9d-848d-4f135f7febe6"
+        },
+        {
+          "label": "Right Exit",
+          "doorId": "c7d840e4-60e3-4f9c-ada1-232cd472f988",
+          "exitId": "exterior-stair:2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d"
+        }
+      ],
+      "fingerprint": "[[\"c621e0d9-48ff-4e27-834c-fc1a29e2db98::exterior-stair:10d27fcb-ec8b-4a9d-848d-4f135f7febe6\",\"c621e0d9-48ff-4e27-834c-fc1a29e2db98\",\"exterior-stair:10d27fcb-ec8b-4a9d-848d-4f135f7febe6\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"9fe0d9a099e9dbfc\"],[\"c7d840e4-60e3-4f9c-ada1-232cd472f988::exterior-stair:2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d\",\"c7d840e4-60e3-4f9c-ada1-232cd472f988\",\"exterior-stair:2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"1827a7ee040ac8b5\"]]",
+      "fingerprintValid": true
+    },
+    {
+      "roomId": "802cf5ba-ab3e-4e8c-b996-11140a8b0a0f",
+      "name": "PLV AUDITORIUM",
+      "building": "STUDENT CENTER BUILDING",
+      "buildingId": "ce5404c9-1f44-4f59-88be-2a90630b8c87",
+      "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+      "floorNumber": 6,
+      "floorLabel": "Floor 5",
+      "doorCount": 3,
+      "connectedDoors": 2,
+      "candidateCount": 2,
+      "approvedRouteCount": 2,
+      "exits": [
+        {
+          "label": "Left Exit",
+          "doorId": "75d6da16-dd46-4f3b-807e-c1ad3c2cd66e",
+          "exitId": "exterior-stair:341a95e8-3c94-4446-a432-1e1562de603f"
+        },
+        {
+          "label": "Right Exit",
+          "doorId": "57eb24e7-24c5-4175-9573-e83c9ce69a18",
+          "exitId": "exterior-stair:d1bd3cb6-a722-4f68-928a-ea7228ec0cbf"
+        }
+      ],
+      "fingerprint": "[[\"75d6da16-dd46-4f3b-807e-c1ad3c2cd66e::exterior-stair:341a95e8-3c94-4446-a432-1e1562de603f\",\"75d6da16-dd46-4f3b-807e-c1ad3c2cd66e\",\"exterior-stair:341a95e8-3c94-4446-a432-1e1562de603f\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"1883dc40d59047cd\"],[\"57eb24e7-24c5-4175-9573-e83c9ce69a18::exterior-stair:d1bd3cb6-a722-4f68-928a-ea7228ec0cbf\",\"57eb24e7-24c5-4175-9573-e83c9ce69a18\",\"exterior-stair:d1bd3cb6-a722-4f68-928a-ea7228ec0cbf\",\"a5eb9c61-fa48-48de-bfd1-f1d7b2198078\",\"941bc07e63b9407e\"]]",
+      "fingerprintValid": true
+    }
+  ],
+  "errors": [
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "[campusService] list published campus version status failed {code: , message: TypeError: Failed to fetch, details: TypeError: Failed to fetch\n    at fetchCallImpl (h….0.0.1:5173/src/services/campusService.ts:354:27), hint: }",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+    "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector"
+  ],
+  "dom": {
+    "childCount": 2,
+    "canvas": 0,
+    "svg": 17,
+    "buttons": [
+      "Choose floor. Current floor: Floor 6",
+      "Watch evacuation video",
+      "Collapse route preview",
+      "Both Routes",
+      "Left Exit",
+      "Right Exit",
+      "Left Exit\nStart at Room door 2 · Exit at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 1",
+      "Right Exit\nStart at Room door 1 · Exit at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 2",
+      "Edit Route",
+      "Clear route",
+      "Switch to 3D view",
+      "Campus visitor — user menu",
+      "Choose floor. Current floor: Floor 6",
+      "Back to campus map",
+      "Directions",
+      "Open event map"
+    ],
+    "texts": "TEST ONLY · Isolated published snapshot\nA\nLeft Exit\nA\nRight Exit\nELECTRICAL ROOM\nSTORAGE ROOM\nMPH 6A\nCABA LECTURE HALL\nCOMFORT ROOM\nMPH 6B\nA\nStairs Down · Floor 5\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA LECTURE HALL to COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 1.\n\nRoute preview\n\nCABA LECTURE HALL → COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 1\n\nWatch video\nBoth Routes\nLeft Exit\nRight Exit\n\nAdmin-reviewed evacuation routes\n\nAPPROVED EVACUATION OPTIONS\n\nBoth verified routes are shown on the map. Choose one to review its steps and preview the route.\n\nLeft Exit\nStart at Room door 2 · Exit at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 1\nRight Exit\nStart at Room door 1 · Exit at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> Campus Gate · Exterior Stair 2\n\nThis is an on-screen route demonstration, not a determination that an exit is safe or available. Follow campus emergency personnel and posted safety instructions.\n\nEdit Route\nChoose an exit above to preview\nClear\nCABA\n·\nFloor 6\nEvent map"
+  }
+}

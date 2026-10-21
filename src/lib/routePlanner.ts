@@ -94,6 +94,8 @@ export interface CampusNavNode {
   name?: string;
   buildingId?: string;
   gateId?: string;
+  /** Stable identity for a first-class Emergency Assembly Point destination. */
+  assemblyPointId?: string;
   floorId?: string;
   entranceId?: string;
   roomId?: string;
@@ -285,6 +287,14 @@ export interface PlannedRoute {
   /** If the destination is a room, the room to auto-open (floor plan) */
   destinationRoom?: { buildingId: string; floorNumber: number; roomId: string };
   emergencyDestinationLabel?: string;
+  /** Stable identity for an approved SOS Assembly Point destination. */
+  emergencyAssemblyPointId?: string;
+  /** True only when Campus Gate is used because the building has no Assembly Point assignment. */
+  emergencyDestinationFallback?: boolean;
+  /** Stable authored graph identity for route comparison and playback switching. */
+  routeId?: string;
+  authoredGraphNodeIds?: string[];
+  authoredGraphEdgeIds?: string[];
 }
 
 /** Adapt an already selected authored path without recalculating it. Emergency
@@ -296,7 +306,17 @@ export function plannedRouteFromAuthoredPath(
   fromLabel: string,
   toLabel: string,
 ): PlannedRoute | null {
-  return toPlannedRoute(path, "emergency", fromLabel, toLabel, undefined, graph.navNodes ?? [], edges, graph);
+  const route = toPlannedRoute(path, "emergency", fromLabel, toLabel, undefined, graph.navNodes ?? [], edges, graph);
+  if (route?.contextLegs?.length) {
+    // Emergency candidate discovery joins several independently searched
+    // graph legs (indoor approach, egress handoff, and outdoor continuation).
+    // The source GraphPath step list can therefore describe only the first
+    // search leg. Build student steps from the already selected context path
+    // so the final outdoor movement and Assembly Point belong to the same
+    // canonical itinerary as the rendered route.
+    route.steps = authoredEmergencyContextSteps(route, fromLabel, toLabel);
+  }
+  return route;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -312,11 +332,19 @@ function extractDistanceM(instruction: string): number | undefined {
  */
 function classifyStep(instruction: string): RouteStepIcon {
   const lower = instruction.toLowerCase();
+  // "Already at Primary Entrance" describes a zero-length graph leg, not an
+  // instruction to enter a building. Combined routes add an explicit
+  // direction-aware handoff below when this row sits on a real context edge.
+  if (/^\s*already at\b/i.test(instruction)) return "info";
   if (/arrive|reached/i.test(lower)) return "arrive";
-  if (/elevator/i.test(lower)) return "elevator";
+  if (/^\s*(?:enter|exit)\b/i.test(instruction)) return "enter";
+  if (/^\s*start\b/i.test(instruction)) return "start";
+  // Classify by the action being taken, before considering destination words.
+  // Otherwise "Walk 21m to Primary Entrance" becomes an `enter` row and the
+  // guided playback cursor has no walking step to advance over.
+  if (/^\s*(?:walk|go to|head|follow|continue)\b/i.test(instruction)) return "walk";
+  if (/elevator|lift/i.test(lower)) return "elevator";
   if (/stairs|staircase/i.test(lower)) return "stairs";
-  if (/enter|entrance/i.test(lower)) return "enter";
-  if (/walk|go to|head|toward/i.test(lower)) return "walk";
   return "info";
 }
 
@@ -352,10 +380,17 @@ export function stepsFromCombined(
   const steps: RouteStep[] = [];
   steps.push({ id: "c-start", icon: "start", instruction: `Start from ${fromCode}` });
   let idx = 0;
-  for (const seg of segments) {
+  for (const [segmentIndex, seg] of segments.entries()) {
+    const next = segments[segmentIndex + 1];
     for (const s of seg.steps) {
-      const icon = classifyStep(s);
-      steps.push({ id: `c-${idx}`, icon, instruction: s, distanceM: extractDistanceM(s) });
+      const alreadyAt = s.match(/^\s*already at\s+(.+?)[.!?]*\s*$/i)?.[1]?.trim();
+      const instruction = alreadyAt && next && seg.isIndoor !== next.isIndoor
+        ? seg.isIndoor
+          ? `Exit via ${alreadyAt} to Campus.`
+          : `Enter via ${alreadyAt}.`
+        : s;
+      const icon = classifyStep(instruction);
+      steps.push({ id: `c-${idx}`, icon, instruction, distanceM: extractDistanceM(instruction) });
       idx += 1;
     }
   }
@@ -473,6 +508,9 @@ function toPlannedRoute(
     toCode,
     transitions: path.steps.filter((step) => /^Take the (stairs|elevator)/i.test(step)),
     transitionDetails: contexts?.transitionDetails,
+    routeId: `authored:${path.nodeIds.join(">")}`,
+    authoredGraphNodeIds: [...path.nodeIds],
+    authoredGraphEdgeIds: (path.edgeTraversals ?? []).flatMap((traversal) => traversal.edgeId ? [traversal.edgeId] : []),
   };
 }
 
@@ -715,6 +753,7 @@ export function planAuthoredDestinationRoute(
   mode: RouteMode,
   graph?: CampusNavGraph | null,
   preference: StandardRoutePreference = "best",
+  blockedEdgeIds?: ReadonlySet<string>,
 ): PlannedRoute | null {
   const campusGraph = resolveCampusGraph(graph, mode);
   if (!campusGraph || (from.type !== "campus_place" && !from.buildingId) || (to.type !== "campus_place" && !to.buildingId)) return null;
@@ -791,7 +830,7 @@ export function planAuthoredDestinationRoute(
           toNode.id,
           accessibleOnly,
           mode === "emergency",
-          { useDerivedTransitions: false, ...routePreferenceOptions(mode, preference) },
+          { useDerivedTransitions: false, blockedEdgeIds, ...routePreferenceOptions(mode, preference) },
         );
         if (candidatePath && (!best || candidatePath.distanceM < best.path.distanceM)) {
           best = { fromNode, toNode, path: candidatePath };
@@ -844,6 +883,126 @@ export function planAuthoredDestinationRoute(
   }
   if (!hasNavigableRoute(planned)) return null;
   return planned;
+}
+
+/**
+ * Return the best authored route and, when the graph contains a meaningful
+ * alternative, the next distinct route. Searches are bounded to at most 16
+ * edge-exclusion probes along the best path and run only on explicit Find
+ * Route actions. No synthetic connections or geometry are introduced.
+ */
+export function planAuthoredDestinationRoutes(
+  from: Destination,
+  to: Destination,
+  mode: RouteMode,
+  graph?: CampusNavGraph | null,
+  preference: StandardRoutePreference = "best",
+  limit = 2,
+): PlannedRoute[] {
+  const first = planAuthoredDestinationRoute(from, to, mode, graph, preference);
+  if (!first || limit <= 1 || !first.authoredGraphEdgeIds?.length) return first ? [first] : [];
+
+  const uniqueEdgeIds = [...new Set(first.authoredGraphEdgeIds)];
+  const probeLimit = 16;
+  const probeIds = uniqueEdgeIds.length <= probeLimit
+    ? uniqueEdgeIds
+    : Array.from({ length: probeLimit }, (_, index) => uniqueEdgeIds[Math.round(index * (uniqueEdgeIds.length - 1) / (probeLimit - 1))]);
+  const candidates = new Map<string, PlannedRoute>();
+  for (const edgeId of probeIds) {
+    const candidate = planAuthoredDestinationRoute(from, to, mode, graph, preference, new Set([edgeId]));
+    if (!candidate?.routeId || candidate.routeId === first.routeId) continue;
+    candidates.set(candidate.routeId, candidate);
+  }
+
+  const firstEdges = new Set(first.authoredGraphEdgeIds);
+  const distinct = [...candidates.values()]
+    .filter((candidate) => (candidate.authoredGraphEdgeIds?.length ?? 0) > 0
+      && isMeaningfulAuthoredRouteAlternative(first, candidate, firstEdges))
+    .sort((left, right) => left.dist - right.dist || (left.routeId ?? "").localeCompare(right.routeId ?? ""));
+
+  return [first, ...distinct.slice(0, Math.max(0, limit - 1))];
+}
+
+/**
+ * Route discovery can encounter parallel authored edges or duplicated graph
+ * nodes that render the same corridor. Edge IDs alone are not enough to call
+ * those alternatives. Compare the actual ordered map geometry, while keeping
+ * a different authored vertical connector meaningful when its physical shaft
+ * identity is available.
+ */
+function isMeaningfulAuthoredRouteAlternative(
+  first: PlannedRoute,
+  candidate: PlannedRoute,
+  firstEdges: ReadonlySet<string>,
+): boolean {
+  const geometry = (route: PlannedRoute) => {
+    const legs: RouteContextLeg[] = route.contextLegs?.length
+      ? route.contextLegs
+      : [{ kind: "campus", distanceM: 0, waypoints: route.campusPoints?.length ? route.campusPoints : route.points }];
+    return legs.map((leg) => {
+      const coordinates = normalizeAlternativePolyline(leg.waypoints);
+      return `${leg.kind}:${leg.buildingId ?? ""}:${leg.floorId ?? leg.floorNumber ?? ""}:${coordinates}`;
+    }).join("|");
+  };
+  const firstGeometry = geometry(first);
+  const candidateGeometry = geometry(candidate);
+  if (firstGeometry !== candidateGeometry) return true;
+
+  const normalizedGraphEdges = (route: PlannedRoute) => {
+    const nodeIds = route.authoredGraphNodeIds ?? [];
+    return nodeIds.slice(1).map((toNodeId, index) => [nodeIds[index], toNodeId].sort().join("<->")).sort().join("|");
+  };
+  const sameNormalizedEdges = normalizedGraphEdges(first) === normalizedGraphEdges(candidate);
+  const candidateEdges = new Set(candidate.authoredGraphEdgeIds ?? []);
+  const sameEdgeIds = firstEdges.size === candidateEdges.size && [...firstEdges].every((edgeId) => candidateEdges.has(edgeId));
+
+  const physicalConnectors = (route: PlannedRoute) => (route.contextHandoffs ?? [])
+    .filter((handoff) => handoff.kind === "stairs" || handoff.kind === "elevator")
+    .map((handoff) => {
+      const detail = handoff.detail;
+      return [
+        handoff.kind,
+        handoff.buildingId ?? detail?.buildingId ?? "",
+        detail?.transitionSharedId ?? "",
+        detail?.exteriorEmergencyStairId ?? "",
+        detail?.fromFloorId ?? "",
+        detail?.toFloorId ?? "",
+      ].join(":");
+    }).join("|");
+  return !sameNormalizedEdges && !sameEdgeIds
+    && physicalConnectors(first) !== physicalConnectors(candidate);
+}
+
+/** Remove micro-connectors and collinear node splits before comparing paths.
+ * A few map units are below a meaningful corridor/entrance distinction, but
+ * larger authored bends remain in the signature. */
+function normalizeAlternativePolyline(points: readonly Pt[]): string {
+  const tolerance = 2.5;
+  const compact: Pt[] = [];
+  for (const point of points) {
+    const previous = compact.at(-1);
+    if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) > tolerance) compact.push(point);
+  }
+  const simplified: Pt[] = [];
+  for (const point of compact) {
+    while (simplified.length >= 2) {
+      const a = simplified[simplified.length - 2];
+      const b = simplified[simplified.length - 1];
+      const dx = point.x - a.x;
+      const dy = point.y - a.y;
+      const length = Math.hypot(dx, dy);
+      if (length <= tolerance) {
+        simplified.pop();
+        continue;
+      }
+      const projection = ((b.x - a.x) * dx + (b.y - a.y) * dy) / length;
+      const crossTrack = Math.abs(dx * (a.y - b.y) - (a.x - b.x) * dy) / length;
+      if (projection >= -tolerance && projection <= length + tolerance && crossTrack <= tolerance) simplified.pop();
+      else break;
+    }
+    simplified.push(point);
+  }
+  return simplified.map((point) => `${Math.round(point.x / tolerance)},${Math.round(point.y / tolerance)}`).join(";");
 }
 
 /**
@@ -1281,6 +1440,95 @@ function destinationBuildingCode(destination: Destination): string {
 function routePlaceLabel(label: string, fallback: string): string {
   const place = label.trim() || fallback;
   return /^(the|a|an)\s/i.test(place) ? place : `the ${place}`;
+}
+
+function authoredEmergencyContextSteps(route: PlannedRoute, fromLabel: string, toLabel: string): RouteStep[] {
+  const legs = route.contextLegs ?? [];
+  if (legs.length === 0) return route.steps;
+  const handoffs = route.contextHandoffs ?? [];
+  const geometryLength = (points: readonly Pt[]) => points.slice(1).reduce((sum, point, index) => {
+    const previous = points[index]!;
+    return sum + Math.hypot(point.x - previous.x, point.y - previous.y);
+  }, 0);
+  const floorLabel = (leg: RouteContextLeg | undefined) => !leg
+    ? "the connected Floor"
+    : leg.floorLabel || (leg.floorNumber === undefined ? "the connected Floor" : leg.floorNumber === 1 ? "Ground Floor" : `Floor ${leg.floorNumber}`);
+  const steps: RouteStep[] = [];
+  const originalStart = route.steps.find((step) => step.icon === "start");
+  steps.push({
+    ...(originalStart ?? { icon: "start" as const, instruction: `Start at ${fromLabel}.` }),
+    id: "emergency-context-start",
+    contextLegIndex: 0,
+  });
+
+  legs.forEach((leg, legIndex) => {
+    const handoffEntry = handoffs.flatMap((handoff, handoffIndex) =>
+      handoff.fromContextLegIndex === legIndex && handoff.toContextLegIndex === legIndex + 1
+        ? [{ handoff, handoffIndex }]
+        : [],
+    )[0];
+    const handoff = handoffEntry?.handoff;
+    if (geometryLength(leg.waypoints) > 0.1 || leg.distanceM > 0.1) {
+      const instruction = leg.kind === "floor"
+        ? handoff?.kind === "stairs" || handoff?.kind === "elevator"
+          ? `Follow the indoor path to ${routePlaceLabel(handoff.label, handoff.kind === "elevator" ? "elevator" : "stairs")}.`
+          : handoff?.kind === "exit_building"
+            ? `Follow the indoor path to ${routePlaceLabel(handoff.label, "the building exit")}.`
+            : handoff?.kind === "enter_building"
+              ? `Follow the indoor path to ${routePlaceLabel(handoff.label, "the building entrance")}.`
+              : `Follow the indoor path through ${floorLabel(leg)}.`
+        : handoff?.kind === "enter_building"
+          ? `Follow the campus path to the entrance of ${handoff.buildingName || handoff.buildingCode || "the building"}.`
+          : `Follow the campus path to ${toLabel}.`;
+      steps.push({
+        id: `emergency-context-walk-${legIndex}`,
+        icon: "walk",
+        instruction,
+        distanceM: leg.distanceM,
+        contextLegIndex: legIndex,
+      });
+    }
+    if (!handoff || handoffEntry === undefined) return;
+
+    if (handoff.kind === "stairs" || handoff.kind === "elevator") {
+      const targetFloor = legs[handoff.toContextLegIndex];
+      const sourceNumber = leg.floorNumber;
+      const targetNumber = targetFloor?.floorNumber;
+      const direction = sourceNumber !== undefined && targetNumber !== undefined && sourceNumber !== targetNumber
+        ? targetNumber < sourceNumber ? "down" : "up"
+        : undefined;
+      const connector = routePlaceLabel(handoff.detail?.label || handoff.label, handoff.kind === "elevator" ? "elevator" : "stairs");
+      const instruction = handoff.kind === "elevator"
+        ? `Take ${connector} to ${floorLabel(targetFloor)}.`
+        : `Take ${connector}${direction ? ` ${direction}` : ""} to ${floorLabel(targetFloor)}.`;
+      steps.push({
+        id: `emergency-context-handoff-${handoffEntry.handoffIndex}`,
+        icon: handoff.kind,
+        instruction,
+        contextLegIndex: legIndex,
+        contextHandoffIndex: handoffEntry.handoffIndex,
+      });
+      return;
+    }
+
+    const isExit = handoff.kind === "exit_building";
+    const buildingName = handoff.buildingName || handoff.buildingCode || "the building";
+    steps.push({
+      id: `emergency-context-handoff-${handoffEntry.handoffIndex}`,
+      icon: "enter",
+      instruction: isExit ? `Exit via ${handoff.label || "the emergency exit"} to Campus.` : `Enter ${buildingName} building.`,
+      contextLegIndex: legIndex,
+      contextHandoffIndex: handoffEntry.handoffIndex,
+    });
+  });
+
+  steps.push({
+    id: "emergency-context-arrive",
+    icon: "arrive",
+    instruction: `Arrive at ${route.emergencyDestinationLabel?.trim() || toLabel}.`,
+    contextLegIndex: legs.length - 1,
+  });
+  return steps;
 }
 
 function destinationFloorId(

@@ -445,12 +445,19 @@ export function createCampusClone(
       stairId: nn.stairId ? stairMap.get(nn.stairId) ?? nn.stairId : undefined,
       exteriorEmergencyStairId: nn.exteriorEmergencyStairId ? exteriorStairMap.get(nn.exteriorEmergencyStairId) ?? nn.exteriorEmergencyStairId : undefined,
       gateId: nn.gateId ? markerMap.get(nn.gateId) ?? nn.gateId : undefined,
+      assemblyPointId: nn.assemblyPointId ? assemMap.get(nn.assemblyPointId) ?? nn.assemblyPointId : undefined,
       elevatorId: nn.elevatorId ? elevatorMap.get(nn.elevatorId) ?? nn.elevatorId : undefined,
       rampId: nn.rampId ? rampMap.get(nn.rampId) ?? nn.rampId : undefined,
       generatedFromPathVertices: nn.generatedFromPathVertices?.map((ref) => ({
         ...ref,
         pathId: pathMap.get(ref.pathId) ?? fpMap.get(ref.pathId) ?? ref.pathId,
         vertexId: vertexMap.get(ref.vertexId) ?? ref.vertexId,
+      })),
+      generatedFromPathIntersections: nn.generatedFromPathIntersections?.map((ref) => ({
+        ...ref,
+        pathId: pathMap.get(ref.pathId) ?? fpMap.get(ref.pathId) ?? ref.pathId,
+        startVertexId: vertexMap.get(ref.startVertexId) ?? ref.startVertexId,
+        endVertexId: vertexMap.get(ref.endVertexId) ?? ref.endVertexId,
       })),
     })),
     navEdges: (source.navEdges ?? []).map((e) => ({
@@ -459,6 +466,12 @@ export function createCampusClone(
       startNodeId: nodeMap.get(e.startNodeId) ?? e.startNodeId,
       endNodeId: nodeMap.get(e.endNodeId) ?? e.endNodeId,
       generatedFromPathIds: e.generatedFromPathIds?.map((pathId) => pathMap.get(pathId) ?? fpMap.get(pathId) ?? pathId),
+      generatedFromPathIntersectionSegments: e.generatedFromPathIntersectionSegments?.map((ref) => ({
+        ...ref,
+        pathId: pathMap.get(ref.pathId) ?? fpMap.get(ref.pathId) ?? ref.pathId,
+        startVertexId: vertexMap.get(ref.startVertexId) ?? ref.startVertexId,
+        endVertexId: vertexMap.get(ref.endVertexId) ?? ref.endVertexId,
+      })),
       pathJunctionId: e.pathJunctionId ? nodeMap.get(e.pathJunctionId) ?? e.pathJunctionId : undefined,
       pathJunctionIds: e.pathJunctionIds?.map((junctionId) => nodeMap.get(junctionId) ?? junctionId),
     })),
@@ -476,7 +489,28 @@ export function createCampusClone(
     assemblyPoints: (source.assemblyPoints ?? []).map((ap) => ({
       ...structuredClone(ap),
       id: assemMap.get(ap.id)!,
+      campusId: cloneId,
       navNodeId: ap.navNodeId ? nodeMap.get(ap.navNodeId) ?? ap.navNodeId : undefined,
+      connectionOrigin: ap.connectionOrigin?.kind === "split-edge"
+        ? { ...ap.connectionOrigin, originalEdge: {
+            ...ap.connectionOrigin.originalEdge,
+            startNodeId: nodeMap.get(ap.connectionOrigin.originalEdge.startNodeId) ?? ap.connectionOrigin.originalEdge.startNodeId,
+            endNodeId: nodeMap.get(ap.connectionOrigin.originalEdge.endNodeId) ?? ap.connectionOrigin.originalEdge.endNodeId,
+          }, splitEdges: ap.connectionOrigin.splitEdges?.map((edge) => ({
+            ...edge,
+            id: edgeMap.get(edge.id) ?? edge.id,
+            startNodeId: nodeMap.get(edge.startNodeId) ?? edge.startNodeId,
+            endNodeId: nodeMap.get(edge.endNodeId) ?? edge.endNodeId,
+          })) }
+        : ap.connectionOrigin?.kind === "path-vertex"
+          ? { ...ap.connectionOrigin, pathId: pathMap.get(ap.connectionOrigin.pathId) ?? ap.connectionOrigin.pathId,
+              vertexId: vertexMap.get(ap.connectionOrigin.vertexId) ?? ap.connectionOrigin.vertexId }
+          : ap.connectionOrigin,
+      buildingAssignments: ap.buildingAssignments?.map((assignment) => ({
+        ...assignment,
+        buildingId: bldMap.get(assignment.buildingId) ?? assignment.buildingId,
+      })),
+      safetyReview: { status: "draft" },
     })),
     eventOverlays: (source.eventOverlays ?? []).map((eo) => ({
       ...structuredClone(eo),

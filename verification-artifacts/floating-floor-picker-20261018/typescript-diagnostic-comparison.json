@@ -1,0 +1,18 @@
+{
+  "baseline": "verification-artifacts/navigation-reliability-20261017/tsc-final-20261017.txt",
+  "current": "verification-artifacts/floating-floor-picker-20261018/typescript-current.txt",
+  "baselineDiagnostics": 1035,
+  "currentDiagnostics": 1029,
+  "newDiagnosticIdentities": 2,
+  "resolvedDiagnosticIdentities": 4,
+  "newSamples": [
+    "src/services/database.ts TS2352 Conversion of type '({ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 29 more ... | { ...' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+    "src/services/database.ts TS2352 Conversion of type '{ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 29 more ... | { ....' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
+  ],
+  "resolvedSamples": [
+    "src/components/map-builder/CampusEditor.tsx TS18048 'generatedRef' is possibly 'undefined'.",
+    "src/components/map-builder/__tests__/TestNavigationPanel.roomRouting.test.ts TS2741 Property 'color' is missing in type '{ id: string; name: string; type: \"assembly\"; x: number; y: number; accessible: true; emergencySafe: true; campusId: string; assemblyPointId: string; }' but required in type 'NavigationNode'.",
+    "src/services/database.ts TS2352 Conversion of type '({ action: string; created_at: string; id: string; new_status: string | null; note: string | null; old_status: string | null; performed_by: string; report_id: string; } | { id: string; campus_id: string; ... 17 more ...; updated_at: string; } | ... 28 more ... | { ...; })[]' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+    "src/services/database.ts TS2352 Conversion of type '{ action: string; created_at: string; id: string; new_status: string | null; note: string | null; old_status: string | null; performed_by: string; report_id: string; } | { id: string; campus_id: string; ... 17 more ...; updated_at: string; } | ... 28 more ... | { ...; }' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
+  ]
+}

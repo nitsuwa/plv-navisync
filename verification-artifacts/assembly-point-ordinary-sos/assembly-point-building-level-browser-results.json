@@ -1,0 +1,1000 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "test-fixture",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {},
+  "browserErrors": [],
+  "screenshots": [
+    "assembly-point-building-level-sos-390.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "fixtureSummary": {
+    "testOnly": true,
+    "source": "read-only published MAIN CAMPUS - PLV snapshot; edits and synthetic review stay local to this test",
+    "point": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "name": "TEST ONLY - Main Assembly Point A",
+      "navNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+      "x": 146,
+      "y": 380,
+      "connection": "connected",
+      "review": "approved",
+      "incidentEdges": 3,
+      "assignedBuildings": 4,
+      "placementModel": "placed directly on an existing authored outdoor waypoint"
+    },
+    "rooms": [
+      {
+        "name": "PLV AUDITORIUM",
+        "building": "STUDENT CENTER BUILDING",
+        "displayFloor": "Floor 5",
+        "internalFloor": 6,
+        "assignedDoorCount": 3,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "disconnected",
+            "routeCount": 0
+          },
+          {
+            "label": "Room door 3",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "smartMultiExitEnabled": true,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 5,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 5,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 4.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 3.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 2.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Ground Floor.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "arrive",
+              "instruction": "Arrive at STUDENT CENTER BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 5
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 180,
+                "y": 301
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 5,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 293,
+                "y": 263
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CABA LECTURE HALL",
+        "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "smartMultiExitEnabled": true,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 2,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 11,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Right Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 391,
+                "y": 360
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 1014,
+                "y": 229
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 146,
+                "y": 462
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ASSEMBLY HALL",
+        "building": "COLLEGE OF EDUCATION BUILDING",
+        "displayFloor": "Ground Floor",
+        "internalFloor": 1,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 1
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 1
+          }
+        ],
+        "routeCount": 1,
+        "smartMultiExitEnabled": false,
+        "distinctPhysicalExits": 1,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 1,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF EDUCATION BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 1
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 409,
+                "y": 739
+              },
+              "end": {
+                "x": 564,
+                "y": 6
+              }
+            },
+            {
+              "index": 1,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 1201,
+                "y": 370
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CEIT LECTURE HALL",
+        "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "smartMultiExitEnabled": true,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 15,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 13,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Left Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 139,
+                "y": 360
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 867,
+                "y": 463
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "buildingSearchOptions": [
+    "Campus GateLandmarkCampus Gate",
+    "CANTEENBuildingCANTEEN",
+    "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATIONBuildingCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+    "BUSINESS OFFICE SIMULATION ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "CABA-101RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "CABA-102RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "CABA-103RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "CABA-104RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "GRADUATE STUDIES OFFICERoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "SIMULATION ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor",
+    "BIOLOGY LABORATORYRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "CABA FACULTY ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "CABA-201RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "CHEMISTRY LABORATORYRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "PHYSICS LABORATORYRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "STORAGE ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 2",
+    "CABA COMLABRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "CABA LIBRARYRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "COLLAB ROOM 3ARoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "COLLAB ROOM 3BRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "COLLAB ROOM 3CRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "JOURNAL ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "LECTURE ROOM 3ARoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "LECTURE ROOM 3BRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "STUDY ROOMRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 3",
+    "CABA-401RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-402RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-403RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-404RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-405RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-406RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-407RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CONFERENCE ROOM 401RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "GRADUATE STUDIES OFFICE CopyRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4",
+    "CABA-501RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-502RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-503RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-504RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-505RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-506RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-507RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA-508RoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 5",
+    "CABA LECTURE HALLRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 6",
+    "MPH 6ARoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 6",
+    "MPH 6BRoomCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 6",
+    "COLLEGE OF EDUCATION BUILDINGBuildingCOLLEGE OF EDUCATION BUILDING",
+    "ASSEMBLY HALLRoomCOLLEGE OF EDUCATION BUILDING · Ground Floor",
+    "ELECTRICAL ROOM 1RoomCOLLEGE OF EDUCATION BUILDING · Ground Floor",
+    "AVRRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "CHAIRPERSONS COEDRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "CONSULTATION ROOM BRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "DEAN'S OFFICERoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "ELECTRICAL ROOM 2RoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "FACULTY ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "MAINTENANCE ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "OFFICE OF THE COMMUNITY ENGAGEMENT & EXTENSION SERVICESRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "SERVER ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "SIMULATION PRE-SCHOOLRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "STORAGE ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 2",
+    "COED 301RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 302RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 303RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 304RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 305RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 306RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "EDTECH LAB ARoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "EDUCATION GALLERYRoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "ELECTRICAL ROOM 3RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "GARDEN ATRIUM RoomCOLLEGE OF EDUCATION BUILDING · Floor 3",
+    "COED 303RoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "COED OFFICERoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "EDTECH LAB BRoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "ELECTRICAL ROOM 4RoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "FUNCTION ROOM 1RoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "FUNCTION ROOM 2RoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "LIBRARY ARCHIVESRoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "READING AREARoomCOLLEGE OF EDUCATION BUILDING · Floor 4",
+    "COED 501RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "COED 502RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "COED 503RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "COED 504RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "COED 505RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "COED 506RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "ELECTRICAL ROOM 5RoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "GSORoomCOLLEGE OF EDUCATION BUILDING · Floor 5",
+    "ELECTRICAL ROOM 6RoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "FACULTY - ADMIN WELLNESS LOUNGERoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "LECTURE ROOM 6ARoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "LECTURE ROOM 6BRoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "LECTURE ROOM 6CRoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "LECTURE ROOM 6DRoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "PRAYER ROOMRoomCOLLEGE OF EDUCATION BUILDING · Floor 6",
+    "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGYBuildingCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+    "CEIT MAINTENANCE ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "ELECTRICAL ENGINEERING LABORATORYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "ELECTRONICS ENGINEERING LABORATORYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "FLUID MECHANICS LABORATORYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "MATERIALS TESTING LABORATORYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "MECHANICAL ENGINEERING LABORATORYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "TESTING LABORATORY STORAGERoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Ground Floor",
+    "COMPUTER LABORATORY 201RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "COMPUTER LABORATORY 202RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "COMPUTER LABORATORY 203RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "COMPUTER LABORATORY 204RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "DEAN'S OFFICERoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "DRAWING ROOM (201)RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "DRAWING ROOM (202)RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "ENGINEERING FACULTY ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "INFORMATION TECHNOLOGY OFFICERoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 2",
+    "CEIT LIBRARYRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "COLLAB ROOM 3DRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "COLLAB ROOM 3ERoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "COLLAB ROOM 3FRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "COLLAB ROOM 3GRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "GSORoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "LECTURE ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "QUALITY ASSURANCERoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "QUIET STUDY ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "STUDY ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 3",
+    "ENVIRONMENTAL ENGINEERING LABRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "HIRAYA FUTURES LABRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "ICT LABRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "INDUSTRIAL, INSTRUMENTATION AND AUTOMATION LABRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "INNOVATION HUB OFFICE RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "POWER TRANSMISSION LAB RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "PUBLICATION AND RESEARCH MATERIALSRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "VISITOR'S LOUNGE CONFERENCE ROOMRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 4",
+    "CEIT-501RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-502RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-503RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-504RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-505RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-506RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-507RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-508RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-509RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT-510RoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 5",
+    "CEIT LECTURE HALLRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 6",
+    "MPH 6CRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 6",
+    "MPH 6DRoomCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Floor 6",
+    "STUDENT CENTER BUILDINGBuildingSTUDENT CENTER BUILDING",
+    "COPYSHOP RoomSTUDENT CENTER BUILDING · Ground Floor",
+    "ELECTRICAL ROOM RoomSTUDENT CENTER BUILDING · Ground Floor",
+    "GUARD STATIONRoomSTUDENT CENTER BUILDING · Ground Floor",
+    "INCIDENT COMMAND SERVICE OFFICERoomSTUDENT CENTER BUILDING · Ground Floor",
+    "MEDICAL AND DENTAL CLINICRoomSTUDENT CENTER BUILDING · Ground Floor",
+    "NATIONAL SERVICE TRAINING PROGRAM OFFICERoomSTUDENT CENTER BUILDING · Ground Floor",
+    "OFFICE OF THE STUDENT AFFAIRSRoomSTUDENT CENTER BUILDING · Ground Floor",
+    "PANDAYAN BOOKSHOPRoomSTUDENT CENTER BUILDING · Ground Floor",
+    "STORAGERoomSTUDENT CENTER BUILDING · Ground Floor",
+    "STUDENT SUPREME COUNCILRoomSTUDENT CENTER BUILDING · Ground Floor",
+    "VISITOR'S LOUNGERoomSTUDENT CENTER BUILDING · Ground Floor",
+    "ADMINISTRATION OFFICERoomSTUDENT CENTER BUILDING · Floor 2",
+    "ADMISSION AND SCHOLARSHIP OFFICERoomSTUDENT CENTER BUILDING · Floor 2",
+    "CASHIERRoomSTUDENT CENTER BUILDING · Floor 2",
+    "CASHIER FILESRoomSTUDENT CENTER BUILDING · Floor 2",
+    "CENTRAL SERVICE OFFICERoomSTUDENT CENTER BUILDING · Floor 2",
+    "CONFERENCE ROOMRoomSTUDENT CENTER BUILDING · Floor 2",
+    "ELECTRICAL ROOM RoomSTUDENT CENTER BUILDING · Floor 2",
+    "FACULTY AND STAFF LOUNGERoomSTUDENT CENTER BUILDING · Floor 2",
+    "GUIDANCE OFFICERoomSTUDENT CENTER BUILDING · Floor 2",
+    "OFFICE OF THE UNIVERSITY REGISTRARRoomSTUDENT CENTER BUILDING · Floor 2",
+    "PUBLICATION AND PRINTING OFFICERoomSTUDENT CENTER BUILDING · Floor 2",
+    "REGISTRAR STORAGERoomSTUDENT CENTER BUILDING · Floor 2",
+    "SERVER ROOMRoomSTUDENT CENTER BUILDING · Floor 2",
+    "UNIVERSITY RESEARCH CENTERRoomSTUDENT CENTER BUILDING · Floor 2",
+    "(RECEIVING)RoomSTUDENT CENTER BUILDING · Floor 3",
+    "ACCOUNTANT / DISBURSEMENT OFFICER / PAYROLL OFFICERRoomSTUDENT CENTER BUILDING · Floor 3",
+    "ACCREDITATION OFFICERoomSTUDENT CENTER BUILDING · Floor 3",
+    "CONFERENCERoomSTUDENT CENTER BUILDING · Floor 3",
+    "ELECTRICAL ROOM RoomSTUDENT CENTER BUILDING · Floor 3",
+    "LECTURE ROOM 301RoomSTUDENT CENTER BUILDING · Floor 3",
+    "LECTURE ROOM 302RoomSTUDENT CENTER BUILDING · Floor 3",
+    "LECTURE ROOM 303RoomSTUDENT CENTER BUILDING · Floor 3",
+    "OFFICE OF THE UNIVERSITY PRESIDENTRoomSTUDENT CENTER BUILDING · Floor 3",
+    "STORAGERoomSTUDENT CENTER BUILDING · Floor 3",
+    "STORAGE ROOMRoomSTUDENT CENTER BUILDING · Floor 3",
+    "VP FOR ACADEMIC AFFAIRSRoomSTUDENT CENTER BUILDING · Floor 3",
+    "VP FOR ADMINISTRATION AND FINANCERoomSTUDENT CENTER BUILDING · Floor 3",
+    "VP FOR STUDENT SERVICES, RESEARCH AND EXTENSION, PLANNING AND DEVELOPMENTRoomSTUDENT CENTER BUILDING · Floor 3",
+    "ELECTRICAL ROOM RoomSTUDENT CENTER BUILDING · Floor 4",
+    "LECTURE ROOM 401RoomSTUDENT CENTER BUILDING · Floor 4",
+    "LECTURE ROOM 402RoomSTUDENT CENTER BUILDING · Floor 4",
+    "LECTURE ROOM 403RoomSTUDENT CENTER BUILDING · Floor 4",
+    "LIBRARYRoomSTUDENT CENTER BUILDING · Floor 4",
+    "LIBRARY STORAGERoomSTUDENT CENTER BUILDING · Floor 4",
+    "MAINTENANCE RM.RoomSTUDENT CENTER BUILDING · Floor 4",
+    "SPEECH LABORATORYRoomSTUDENT CENTER BUILDING · Floor 4",
+    "STORAGERoomSTUDENT CENTER BUILDING · Floor 4",
+    "DRESSING ROOMS AND MAKEUP AREARoomSTUDENT CENTER BUILDING · Floor 5",
+    "ELECTRICAL ROOM RoomSTUDENT CENTER BUILDING · Floor 5",
+    "HOLDING AREARoomSTUDENT CENTER BUILDING · Floor 5",
+    "PLV AUDITORIUMRoomSTUDENT CENTER BUILDING · Floor 5",
+    "STORAGERoomSTUDENT CENTER BUILDING · Floor 5"
+  ],
+  "buildingLevel": {
+    "statusState": "review-required",
+    "statusText": "Evacuation route needs review Destination · TEST ONLY - Main Assembly Point A Follow posted evacuation instructions.",
+    "destinationAssignedPrimary": true,
+    "findRouteEnabled": true,
+    "documentWidth": {
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    "previewStatus": "review-required",
+    "previewStartVisible": true,
+    "previewStartDisabled": true
+  }
+}

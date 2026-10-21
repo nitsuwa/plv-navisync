@@ -1,0 +1,367 @@
+{
+  "environment": "TEST ONLY local Room Properties harness with intercepted Supabase calls; no production or Storage writes",
+  "routeAdapter": "https://test-room-video.supabase.co",
+  "viewports": [
+    {
+      "width": 320,
+      "height": 568,
+      "viewportWidth": 320,
+      "documentWidth": 320,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 360,
+      "height": 640,
+      "viewportWidth": 360,
+      "documentWidth": 360,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "viewportWidth": 390,
+      "documentWidth": 390,
+      "panelWidth": 256,
+      "noHorizontalOverflow": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "viewportWidth": 1440,
+      "documentWidth": 1440,
+      "dialogWidth": 1152,
+      "noHorizontalOverflow": true
+    }
+  ],
+  "screenshots": [
+    "room-properties-320-light.png",
+    "room-video-inline-390-dark.png",
+    "room-video-expanded-390-dark.png",
+    "room-video-published-390-dark.png",
+    "room-video-draft-390-dark.png",
+    "room-video-expanded-1440-light.png"
+  ],
+  "checks": {
+    "roomEmergencyStatusOmitted": true,
+    "emergencyVideoGuideRetained": true,
+    "draftStateShown": true,
+    "inlinePlayerUses16x9": true,
+    "pausedPlayerHasSinglePlayControl": true,
+    "noDuplicateCenterPlayOverlay": true,
+    "inlineSeekingWorks": true,
+    "inlineVolumeWorks": true,
+    "onlyOneVideoInstanceInDialog": true,
+    "expandedPlayerUses16x9": true,
+    "expandedCloseStopsPlayback": true,
+    "focusReturnsToExpandAction": true,
+    "escapeClosesExpandedPreview": true,
+    "escapeReturnsFocusToExpandAction": true,
+    "secondaryActionsInMenu": true,
+    "removeRequiresConfirmation": true,
+    "removeCancelPreservesRecord": true,
+    "testOnlyPublishAction": true,
+    "publishedVideoPreviewLoads": true,
+    "testOnlyUnpublishAction": true,
+    "draftVideoPreviewLoads": true,
+    "desktopDialogIsLarge": true,
+    "noBrowserErrors": true,
+    "noUnexpectedRequests": true,
+    "noProductionStorageWrites": true
+  },
+  "adapterRequests": [
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/is_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/list/emergency-evacuation-videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/is_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/list/emergency-evacuation-videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "action": "Test-only publish",
+      "status": "published"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/rpc/is_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/list/emergency-evacuation-videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/room_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4"
+    }
+  ],
+  "unexpectedRequests": [],
+  "mediaResponses": [
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "status": 206,
+      "contentType": "video/mp4"
+    }
+  ],
+  "mediaRequestFailures": [
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "mediaState": {
+    "src": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+    "currentSrc": "https://test-room-video.supabase.co/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/room-welcome.mp4?token=TEST_ONLY",
+    "readyState": 4,
+    "networkState": 1,
+    "error": null,
+    "duration": 25,
+    "videoWidth": 1920,
+    "videoHeight": 1080
+  },
+  "pageErrors": []
+}

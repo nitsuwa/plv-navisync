@@ -1,0 +1,17 @@
+{
+    "baseline":  "verification-artifacts/camera-stability-20261021/typescript-current-resumed.txt",
+    "current":  "verification-artifacts/camera-stability-20261021/tsc-pause-resume.txt",
+    "baselineDiagnostics":  1025,
+    "currentDiagnostics":  1025,
+    "newDiagnosticIdentities":  0,
+    "resolvedDiagnosticIdentities":  0,
+    "newTouchedFileDiagnostics":  [
+
+                                  ],
+    "newSamples":  [
+
+                   ],
+    "resolvedSamples":  [
+
+                        ]
+}

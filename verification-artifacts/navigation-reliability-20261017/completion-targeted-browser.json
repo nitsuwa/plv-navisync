@@ -1,0 +1,681 @@
+{
+  "errors": [],
+  "cases": [
+    {
+      "name": "campus-gate-business-office-standard",
+      "mode": "Standard",
+      "start": "Campus Gate",
+      "destination": "BUSINESS OFFICE SIMULATION ROOM",
+      "startOptions": [
+        "Campus Gate\nLANDMARK\nCampus Gate"
+      ],
+      "destinationOptions": [
+        "BUSINESS OFFICE SIMULATION ROOM\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor"
+      ],
+      "alternativeSelectorVisible": true,
+      "choices": [
+        {
+          "text": "Route A",
+          "id": "automatic-route-choice-route-a",
+          "pressed": "true"
+        },
+        {
+          "text": "Route B",
+          "id": "automatic-route-choice-route-b",
+          "pressed": "false"
+        }
+      ],
+      "routeA": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from Campus Gate to BUSINESS OFFICE SIMULATION ROOM.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCampus Gate → BUSINESS OFFICE SIMULATION ROOM\n\nIndoor + outdoor\n1 building entry\nSteps\n5\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "1",
+          "indoorGeometry": [
+            "560,460 560,230 523,230 485,230 459,230 365,230 331,230 293,230 211,230 139,230 139,300"
+          ]
+        }
+      },
+      "routeB": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from Campus Gate to BUSINESS OFFICE SIMULATION ROOM.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCampus Gate → BUSINESS OFFICE SIMULATION ROOM\n\nIndoor + outdoor\n1 building entry\nSteps\n5\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "selected": "true",
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "1",
+          "indoorGeometry": [
+            "560,460 560,230 523,230 485,230 459,230 365,230 365,300 288,370 211,300 211,230 139,230 139,300"
+          ]
+        }
+      },
+      "routeGeometryChanged": false,
+      "indoorGeometryChanged": true,
+      "initialNavigation": {
+        "visibleRouteLines": [
+          {
+            "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+            "stroke": "rgb(30, 64, 175)",
+            "width": "6px"
+          }
+        ],
+        "markerCount": 1,
+        "routeSteps": [],
+        "activeInstruction": null,
+        "stepCounter": null,
+        "floor": null
+      },
+      "expandButtons": [
+        {
+          "text": "Expand",
+          "aria": "Expand route panel",
+          "disabled": false,
+          "rect": [
+            358.8125,
+            833,
+            62.1875,
+            40
+          ]
+        }
+      ],
+      "expandedNavigationVisible": true,
+      "exploreRouteSwitch": {
+        "priorProgress": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [
+            "1\nStart at Campus Gate.",
+            "2\nFollow the campus path to the entrance of CABA building.\nCURRENT\nInspected context",
+            "3\nEnter CABA building.",
+            "4\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.",
+            "5\nArrive at BUSINESS OFFICE SIMULATION ROOM."
+          ],
+          "activeInstruction": null,
+          "stepCounter": "Standard routeCampus Gate → BUSINESS OFFICE SIMULATION ROOMCampusFOLLOWEXPLOREIndoor + outdoor1 building entryMove the map or select a step.1Start at Campus Gate.2Follow the campus path to the entrance of CABA building.CurrentInspected context3Enter CABA building.4Follow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.5Arrive at BUSINESS OFFICE SIMULATION ROOM.",
+          "floor": null
+        },
+        "afterSwitch": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "previewVisible": true,
+        "startAvailable": true,
+        "selected": "true"
+      },
+      "alternativeRestart": {
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [],
+          "activeInstruction": "Follow the campus path to the entrance of CABA building.",
+          "stepCounter": "Step 2 of 5BUSINESS OFFICE SIMULATION ROOMFOLLOWEXPLOREFollow the campus path to the entrance of CABA building.Next: Enter CABA building.PreviousPauseNext1×Steps",
+          "floor": null
+        },
+        "routeBSelected": "true",
+        "exploreControl": false,
+        "followControl": true
+      }
+    },
+    {
+      "name": "campus-gate-business-office-accessible",
+      "mode": "Accessible",
+      "start": "Campus Gate",
+      "destination": "BUSINESS OFFICE SIMULATION ROOM",
+      "startOptions": [
+        "Campus Gate\nLANDMARK\nCampus Gate"
+      ],
+      "destinationOptions": [
+        "BUSINESS OFFICE SIMULATION ROOM\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Ground Floor"
+      ],
+      "alternativeSelectorVisible": true,
+      "choices": [
+        {
+          "text": "Route A",
+          "id": "automatic-route-choice-route-a",
+          "pressed": "true"
+        },
+        {
+          "text": "Route B",
+          "id": "automatic-route-choice-route-b",
+          "pressed": "false"
+        }
+      ],
+      "routeA": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from Campus Gate to BUSINESS OFFICE SIMULATION ROOM.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nACCESSIBLE ROUTE\n\nCampus Gate → BUSINESS OFFICE SIMULATION ROOM\n\nIndoor + outdoor\n1 building entry\nAccessible\nSteps\n5\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "1",
+          "indoorGeometry": [
+            "560,460 560,230 523,230 485,230 459,230 365,230 331,230 293,230 211,230 139,230 139,300"
+          ]
+        }
+      },
+      "routeB": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from Campus Gate to BUSINESS OFFICE SIMULATION ROOM.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nACCESSIBLE ROUTE\n\nCampus Gate → BUSINESS OFFICE SIMULATION ROOM\n\nIndoor + outdoor\n1 building entry\nAccessible\nSteps\n5\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "selected": "true",
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "1",
+          "indoorGeometry": [
+            "560,460 560,230 523,230 485,230 459,230 365,230 365,300 288,370 211,300 211,230 139,230 139,300"
+          ]
+        }
+      },
+      "routeGeometryChanged": false,
+      "indoorGeometryChanged": true,
+      "initialNavigation": {
+        "visibleRouteLines": [
+          {
+            "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+            "stroke": "rgb(22, 163, 74)",
+            "width": "6px"
+          }
+        ],
+        "markerCount": 1,
+        "routeSteps": [],
+        "activeInstruction": null,
+        "stepCounter": null,
+        "floor": null
+      },
+      "expandButtons": [
+        {
+          "text": "Expand",
+          "aria": "Expand route panel",
+          "disabled": false,
+          "rect": [
+            358.8125,
+            833,
+            62.1875,
+            40
+          ]
+        }
+      ],
+      "expandedNavigationVisible": true,
+      "exploreRouteSwitch": {
+        "priorProgress": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [
+            "1\nStart at Campus Gate.",
+            "2\nFollow the campus path to the entrance of CABA building.\nCURRENT\nInspected context",
+            "3\nEnter CABA building.",
+            "4\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.",
+            "5\nArrive at BUSINESS OFFICE SIMULATION ROOM."
+          ],
+          "activeInstruction": null,
+          "stepCounter": "Accessible routeCampus Gate → BUSINESS OFFICE SIMULATION ROOMCampusFOLLOWEXPLOREIndoor + outdoor1 building entryAccessibleMove the map or select a step.1Start at Campus Gate.2Follow the campus path to the entrance of CABA building.CurrentInspected context3Enter CABA building.4Follow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.5Arrive at BUSINESS OFFICE SIMULATION ROOM.",
+          "floor": null
+        },
+        "afterSwitch": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "previewVisible": true,
+        "startAvailable": true,
+        "selected": "true"
+      },
+      "alternativeRestart": {
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "107,380 146,380 214,380 214,440 293,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [],
+          "activeInstruction": "Follow the campus path to the entrance of CABA building.",
+          "stepCounter": "Step 2 of 5BUSINESS OFFICE SIMULATION ROOMFOLLOWEXPLOREFollow the campus path to the entrance of CABA building.Next: Enter CABA building.PreviousPauseNext1×Steps",
+          "floor": null
+        },
+        "routeBSelected": "true",
+        "exploreControl": false,
+        "followControl": true
+      }
+    },
+    {
+      "name": "canteen-caba-standard-repeat",
+      "mode": "Standard",
+      "start": "CANTEEN",
+      "destination": "CABA-403",
+      "startOptions": [
+        "CANTEEN\nBUILDING\nCANTEEN"
+      ],
+      "destinationOptions": [
+        "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+      ],
+      "alternativeSelectorVisible": true,
+      "choices": [
+        {
+          "text": "Route A",
+          "id": "automatic-route-choice-route-a",
+          "pressed": "true"
+        },
+        {
+          "text": "Route B",
+          "id": "automatic-route-choice-route-b",
+          "pressed": "false"
+        }
+      ],
+      "routeA": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nSteps\n7\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "4",
+          "indoorGeometry": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ]
+        }
+      },
+      "routeB": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nStairs\n1 building entry\nGround Floor → Floor 4\nSteps\n11\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "selected": "true",
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "4",
+          "indoorGeometry": [
+            "960,160 959,226 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ]
+        }
+      },
+      "routeGeometryChanged": false,
+      "indoorGeometryChanged": true,
+      "initialNavigation": {
+        "visibleRouteLines": [
+          {
+            "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+            "stroke": "rgb(30, 64, 175)",
+            "width": "6px"
+          }
+        ],
+        "markerCount": 1,
+        "routeSteps": [],
+        "activeInstruction": null,
+        "stepCounter": null,
+        "floor": null
+      },
+      "expandButtons": [
+        {
+          "text": "Expand",
+          "aria": "Expand route panel",
+          "disabled": false,
+          "rect": [
+            358.8125,
+            833,
+            62.1875,
+            40
+          ]
+        }
+      ],
+      "expandedNavigationVisible": true,
+      "exploreRouteSwitch": {
+        "priorProgress": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [
+            "1\nStart at the entrance of CAN building.",
+            "2\nFollow the campus path to the entrance of CABA building.\nCURRENT\nInspected context",
+            "3\nEnter CABA building.",
+            "4\nFollow the indoor path to the Elevator 1.",
+            "5\nTake the Elevator 1 to Floor 4.",
+            "6\nFollow the indoor path to the door of CABA-403.",
+            "7\nArrive at CABA-403."
+          ],
+          "activeInstruction": null,
+          "stepCounter": "Standard routeCANTEEN → CABA-403CampusFOLLOWEXPLOREIndoor + outdoorElevator1 building entryGround Floor → Floor 4Move the map or select a step.1Start at the entrance of CAN building.2Follow the campus path to the entrance of CABA building.CurrentInspected context3Enter CABA building.4Follow the indoor path to the Elevator 1.5Take the Elevator 1 to Floor 4.6Follow the indoor path to the door of CABA-403.7Arrive at CABA-403.",
+          "floor": null
+        },
+        "afterSwitch": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "previewVisible": true,
+        "startAvailable": true,
+        "selected": "true"
+      },
+      "alternativeRestart": {
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(30, 64, 175)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [],
+          "activeInstruction": "Follow the campus path to the entrance of CABA building.",
+          "stepCounter": "Step 2 of 11CABA-403FOLLOWEXPLOREFollow the campus path to the entrance of CABA building.Next: Enter CABA building.PreviousPauseNext1×Steps",
+          "floor": null
+        },
+        "routeBSelected": "true",
+        "exploreControl": false,
+        "followControl": true
+      }
+    },
+    {
+      "name": "canteen-caba-accessible-repeat",
+      "mode": "Accessible",
+      "start": "CANTEEN",
+      "destination": "CABA-403",
+      "startOptions": [
+        "CANTEEN\nBUILDING\nCANTEEN"
+      ],
+      "destinationOptions": [
+        "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+      ],
+      "alternativeSelectorVisible": true,
+      "choices": [
+        {
+          "text": "Route A",
+          "id": "automatic-route-choice-route-a",
+          "pressed": "true"
+        },
+        {
+          "text": "Route B",
+          "id": "automatic-route-choice-route-b",
+          "pressed": "false"
+        }
+      ],
+      "routeA": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nACCESSIBLE ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nAccessible\nSteps\n7\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "4",
+          "indoorGeometry": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ]
+        }
+      },
+      "routeB": {
+        "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nACCESSIBLE ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nAccessible\nSteps\n7\nEdit Route\nStart Navigation\nClear",
+        "geometry": [
+          "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+        ],
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "selected": "true",
+        "indoor": {
+          "enterMarkerCount": 1,
+          "floor": "4",
+          "indoorGeometry": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 523,226 485,226 403,226 403,300"
+          ]
+        }
+      },
+      "routeGeometryChanged": false,
+      "indoorGeometryChanged": true,
+      "initialNavigation": {
+        "visibleRouteLines": [
+          {
+            "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+            "stroke": "rgb(22, 163, 74)",
+            "width": "6px"
+          }
+        ],
+        "markerCount": 1,
+        "routeSteps": [],
+        "activeInstruction": null,
+        "stepCounter": null,
+        "floor": null
+      },
+      "expandButtons": [
+        {
+          "text": "Expand",
+          "aria": "Expand route panel",
+          "disabled": false,
+          "rect": [
+            358.8125,
+            833,
+            62.1875,
+            40
+          ]
+        }
+      ],
+      "expandedNavigationVisible": true,
+      "exploreRouteSwitch": {
+        "priorProgress": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [
+            "1\nStart at the entrance of CAN building.",
+            "2\nFollow the campus path to the entrance of CABA building.\nCURRENT\nInspected context",
+            "3\nEnter CABA building.",
+            "4\nFollow the indoor path to the Elevator 1.",
+            "5\nTake the Elevator 1 to Floor 4.",
+            "6\nFollow the indoor path to the door of CABA-403.",
+            "7\nArrive at CABA-403."
+          ],
+          "activeInstruction": null,
+          "stepCounter": "Accessible routeCANTEEN → CABA-403CampusFOLLOWEXPLOREIndoor + outdoorElevator1 building entryGround Floor → Floor 4AccessibleMove the map or select a step.1Start at the entrance of CAN building.2Follow the campus path to the entrance of CABA building.CurrentInspected context3Enter CABA building.4Follow the indoor path to the Elevator 1.5Take the Elevator 1 to Floor 4.6Follow the indoor path to the door of CABA-403.7Arrive at CABA-403.",
+          "floor": null
+        },
+        "afterSwitch": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 0,
+          "routeSteps": [],
+          "activeInstruction": null,
+          "stepCounter": null,
+          "floor": null
+        },
+        "previewVisible": true,
+        "startAvailable": true,
+        "selected": "true"
+      },
+      "alternativeRestart": {
+        "state": {
+          "visibleRouteLines": [
+            {
+              "points": "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672",
+              "stroke": "rgb(22, 163, 74)",
+              "width": "6px"
+            }
+          ],
+          "markerCount": 1,
+          "routeSteps": [],
+          "activeInstruction": "Follow the campus path to the entrance of CABA building.",
+          "stepCounter": "Step 2 of 7CABA-403FOLLOWEXPLOREFollow the campus path to the entrance of CABA building.Next: Enter CABA building.PreviousPauseNext1×Steps",
+          "floor": null
+        },
+        "routeBSelected": "true",
+        "exploreControl": false,
+        "followControl": true
+      }
+    }
+  ]
+}

@@ -8,7 +8,7 @@ export type CampusStatus = "active" | "hidden" | "archived";
 export type PublishStatus = "draft" | "published";
 
 /** Tools available on the campus canvas */
-export type SimpleTool = "select" | "marker" | "gate" | "decor" | "building" | "path" | "connect" | "erase" | "room" | "pan" | "wall" | "door" | "open-passage" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure" | "exterior-zone" | "entrance-steps" | "entrance-ramp";
+export type SimpleTool = "select" | "marker" | "gate" | "assembly-point" | "decor" | "building" | "path" | "connect" | "erase" | "room" | "pan" | "wall" | "door" | "open-passage" | "window" | "stairs" | "elevator" | "ramp" | "furniture" | "text" | "measure" | "exterior-zone" | "entrance-steps" | "entrance-ramp";
 
 /** Layer modes for the editor */
 export type EditorLayer = "campus" | "navigation" | "accessibility" | "emergency" | "events";
@@ -426,6 +426,8 @@ export interface FloorRoom {
   visible?: boolean;
   locked?: boolean;
   description?: string;
+  /** Private Storage object path for the single optional published Room photo. */
+  roomPhotoPath?: string;
   accessibility?: boolean;
   /** Parent floor ID this room belongs to */
   floorId: string;
@@ -447,6 +449,46 @@ export interface FloorRoom {
   accessDoorIds?: string[];
   /** How this room is accessed from the navigation graph */
   accessType?: "door" | "access_point";
+  /** Optional, explicitly reviewed room-level evacuation alternatives. Legacy
+   * rooms omit this field and keep the existing emergency routing behavior. */
+  emergencyEvacuation?: RoomEmergencyEvacuationConfiguration;
+}
+
+export interface RoomEmergencyEvacuationRouteAssignment {
+  /** Stable local assignment key derived from the selected door and egress. */
+  id: string;
+  doorId: string;
+  /** Stable authored physical egress identity (Entrance or Exterior Stair). */
+  exitId: string;
+  /** Final navigation node selected by the complete route. */
+  destinationNodeId: string;
+  /** Student-facing route label; never used as the routing identity. */
+  label: string;
+  /** Explicit Admin review gate. Connectivity alone is not safety approval. */
+  approved: boolean;
+  /** Signature of the exact graph path reviewed by the Admin. */
+  approvedRouteSignature?: string;
+  approvedAt?: string;
+}
+
+export interface RoomEmergencyEvacuationConfiguration {
+  enabled: boolean;
+  routes: RoomEmergencyEvacuationRouteAssignment[];
+  /** Optional video metadata only; file bytes live in durable Storage. */
+  videoGuide?: {
+    enabled: boolean;
+    /** Stable metadata-row identity; media bytes remain in the private bucket. */
+    videoId?: string;
+    /** @deprecated Kept to round-trip legacy snapshots. New media uses videoId. */
+    storagePath?: string;
+    title?: string;
+    /** @deprecated Kept to round-trip legacy snapshots. New captions use video metadata. */
+    captionsPath?: string;
+    reviewStatus?: "draft" | "approved" | "needs_review";
+    reviewedRouteFingerprint?: string;
+    /** @deprecated Older draft shape. */
+    reviewedRouteSignature?: string;
+  };
 }
 
 export interface FloorPlan {
@@ -746,6 +788,8 @@ export interface CampusPath {
   width: number;
   /** Optional editor grouping identity for joined physical Pathway networks. */
   pathNetworkId?: string;
+  /** Optional authored level/elevation discriminator for mapped overpasses or split-level paths. */
+  elevation?: number | string;
   /** Shared-coordinate junction keys intentionally disconnected for this path. */
   disconnectedJunctionKeys?: string[];
   /**
@@ -768,6 +812,19 @@ export interface CampusPathAttachment {
   /** Target segment and normalized position, when attached to a segment. */
   targetSegmentIndex?: number;
   targetT?: number;
+}
+
+/** Provenance for a compiler-derived crossing inside an authored Pathway segment. */
+export interface GeneratedPathIntersectionRef {
+  pathId: string;
+  startVertexId: string;
+  endVertexId: string;
+}
+
+/** Provenance for an edge segment emitted around a derived Pathway crossing. */
+export interface GeneratedPathIntersectionEdgeRef extends GeneratedPathIntersectionRef {
+  fromJunctionKey: string;
+  toJunctionKey: string;
 }
 
 // ── Navigation Node (Waypoint) ──────────────────────────────────────────────
@@ -800,6 +857,8 @@ export interface NavigationNode {
   exteriorEmergencyStairId?: string;
   /** Canonical Campus Gate owner, when this node is a generated gate anchor. */
   gateId?: string;
+  /** Canonical Emergency Assembly Point owner for its linked outdoor waypoint. */
+  assemblyPointId?: string;
   /** Explicit provenance for navigation derived from physical exterior approach objects. */
   derivedOwnerType?: "exterior_zone" | "entrance_steps" | "entrance_ramp" | "entrance_threshold";
   derivedOwnerId?: string;
@@ -808,6 +867,8 @@ export interface NavigationNode {
   rampId?: string;
   /** Explicit provenance for pathway-generated vertices. Manual/linked nodes omit this. */
   generatedFromPathVertices?: { pathId: string; vertexId: string }[];
+  /** Compiler-owned same-network Pathway crossings. These are rebuilt from geometry and network identity. */
+  generatedFromPathIntersections?: GeneratedPathIntersectionRef[];
   /** Optional physical host for an authored Walking Point placed on an
    * Exterior Zone. This is ordinary node metadata (not a derived node) and
    * lets the zone lifecycle suspend/clean only its own points explicitly. */
@@ -855,6 +916,8 @@ export interface NavigationEdge {
   width: number;
   /** Pathway IDs that explicitly generated this edge. Manual edges omit this. */
   generatedFromPathIds?: string[];
+  /** Compiler-owned split segments around a derived crossing; source Pathway geometry remains unchanged. */
+  generatedFromPathIntersectionSegments?: GeneratedPathIntersectionEdgeRef[];
   /** Explicit provenance for navigation derived from physical exterior approach objects. */
   derivedOwnerType?: "exterior_zone" | "entrance_steps" | "entrance_ramp" | "entrance_threshold";
   derivedOwnerId?: string;
@@ -911,14 +974,34 @@ export interface AssemblyPoint {
   name: string;
   x: number;
   y: number;
+  /** Explicit campus-level default inherited by buildings without a valid Primary override. */
+  campusWidePrimary?: boolean;
   /** Campus ID this assembly point belongs to */
   campusId?: string;
-  /** Optional navigation node ID — links assembly point to the campus nav graph */
+  /** Linked outdoor navigation waypoint. The Assembly Point owns this anchor. */
   navNodeId?: string;
+  /** Internal provenance used to undo an explicit graph insertion safely. */
+  connectionOrigin?:
+    | { kind: "reused-node"; previousType: NavigationNodeType; previousName: string }
+    | { kind: "split-edge"; originalEdge: NavigationEdge; splitEdges?: NavigationEdge[] }
+    | { kind: "path-vertex"; pathId: string; vertexId: string };
   /** Capacity estimate */
   capacity?: number;
   /** Whether this assembly point is accessible */
   accessible?: boolean;
+  /** Building assignments are authored emergency-plan policy, not inferred. */
+  buildingAssignments?: Array<{
+    buildingId: string;
+    designation: "primary" | "alternate";
+  }>;
+  /** Review is current only while its fingerprint matches the linked graph. */
+  safetyReview?: {
+    status: "draft" | "approved";
+    approvedAt?: string;
+    approvedBy?: string;
+    approvedByRole?: "admin" | "super_admin";
+    fingerprint?: string;
+  };
 }
 
 // ── Event Overlay ───────────────────────────────────────────────────────────
@@ -1085,6 +1168,8 @@ export interface CampusSettings {
   emergency: boolean;
   eventLayer: boolean;
   gps: boolean;
+  /** SOS destination selection. Missing in legacy snapshots means Fixed Primary. */
+  emergencyDestinationPolicy?: "fixed_primary" | "nearest_eligible";
 }
 
 // ── Rubber-band selection state ─────────────────────────────────────────────
@@ -1114,6 +1199,7 @@ export type CampusSelection =
   | { type: "entrance"; id: string; buildingId: string }
   | { type: "marker"; id: string }
   | { type: "gate"; id: string }
+  | { type: "assemblyPoint"; id: string }
   | { type: "path"; id: string }
   | { type: "route"; id: string }
   | { type: "navNode"; id: string }

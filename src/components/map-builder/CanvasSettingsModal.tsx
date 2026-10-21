@@ -241,6 +241,16 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   // Keep the legacy local name as an alias for existing preview/reset paths.
   const canvasColor = groundColor;
   const [defaultZoom, setDefaultZoom] = useState(campus.defaultZoom ?? 1);
+  // Keep non-default legacy policies available under authorized campus-wide
+  // settings, outside the ordinary Assembly Point properties workflow.
+  const [emergencyDestinationPolicy, setEmergencyDestinationPolicy] = useState<"fixed_primary" | "nearest_eligible">(
+    campus.settings?.emergencyDestinationPolicy ?? "fixed_primary",
+  );
+  const designatedCampusPrimary = (campus.assemblyPoints ?? []).filter((point) => point.campusWidePrimary === true);
+  const [campusWidePrimaryAssemblyPointId, setCampusWidePrimaryAssemblyPointId] = useState(
+    designatedCampusPrimary.length === 1 ? designatedCampusPrimary[0].id : "",
+  );
+  const [campusPrimaryTouched, setCampusPrimaryTouched] = useState(false);
 
   // ── Resize confirmation state ──
   const [showResizeConfirm, setShowResizeConfirm] = useState(false);
@@ -271,6 +281,10 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
     setGroundColor(appearance.color);
     setGroundTexture(appearance.texture);
     setDefaultZoom(campus.defaultZoom ?? 1);
+    setEmergencyDestinationPolicy(campus.settings?.emergencyDestinationPolicy ?? "fixed_primary");
+    const campusPrimaries = (campus.assemblyPoints ?? []).filter((point) => point.campusWidePrimary === true);
+    setCampusWidePrimaryAssemblyPointId(campusPrimaries.length === 1 ? campusPrimaries[0].id : "");
+    setCampusPrimaryTouched(false);
     setShowResizeConfirm(false);
     setPendingChanges(null);
     setHasChanges(false);
@@ -291,6 +305,9 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
   const willClip = impact.buildingsOutside > 0 || impact.markersOutside > 0 || impact.pathsOutside > 0 || impact.nodesOutside > 0 || impact.decorOutside > 0;
   const clippedCount = impact.buildingsOutside + impact.markersOutside + impact.pathsOutside + impact.nodesOutside + impact.decorOutside;
   const fittedCanvas = useMemo(() => fitCampusCanvas(campus), [campus]);
+  const destinationPolicyChanged = emergencyDestinationPolicy !== (campus.settings?.emergencyDestinationPolicy ?? "fixed_primary");
+  const campusPrimaryChanged = campusPrimaryTouched
+    && campusWidePrimaryAssemblyPointId !== (designatedCampusPrimary.length === 1 ? designatedCampusPrimary[0].id : "");
 
   const buildUpdates = useCallback((): Partial<Campus> => ({
     canvasW: Math.max(100, Math.min(5000, canvasW)),
@@ -301,7 +318,22 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
     // Preserve this legacy field for older snapshots/readers.
     canvasColor: groundColor || undefined,
     defaultZoom,
-  }), [canvasW, canvasH, groundMaterial, groundColor, groundTexture, defaultZoom]);
+    ...(campusPrimaryChanged ? {
+      assemblyPoints: (campus.assemblyPoints ?? []).map((point) => ({
+        ...point,
+        campusWidePrimary: point.id === campusWidePrimaryAssemblyPointId || undefined,
+      })),
+    } : {}),
+    ...(destinationPolicyChanged ? {
+      settings: {
+        accessibility: campus.settings?.accessibility ?? true,
+        emergency: campus.settings?.emergency ?? true,
+        eventLayer: campus.settings?.eventLayer ?? true,
+        gps: campus.settings?.gps ?? true,
+        emergencyDestinationPolicy,
+      },
+    } : {}),
+  }), [campus, campus.settings, canvasW, canvasH, groundMaterial, groundColor, groundTexture, defaultZoom, destinationPolicyChanged, emergencyDestinationPolicy, campusPrimaryChanged, campusWidePrimaryAssemblyPointId]);
 
   // ── Apply preset ──
   const applyPreset = useCallback((w: number, h: number) => {
@@ -385,6 +417,7 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
     canvasW !== campus.canvasW || canvasH !== campus.canvasH ? "Canvas dimensions" : null,
     groundMaterial !== campusGroundAppearance(campus).material || groundColor !== campusGroundAppearance(campus).color || groundTexture !== campusGroundAppearance(campus).texture ? "Canvas appearance" : null,
     defaultZoom !== (campus.defaultZoom ?? 1) ? "Default zoom" : null,
+    destinationPolicyChanged ? "SOS destination policy" : null,
   ].filter(Boolean);
 
   return (
@@ -623,6 +656,41 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
 
             <div className="h-px bg-border" />
 
+            <div className="rounded-xl border border-border bg-muted/20 p-3" data-testid="campus-wide-primary-assembly-setting">
+              <label htmlFor="canvas-settings-campus-primary-assembly" className="block text-xs font-extrabold text-foreground">Campus-wide Primary Assembly Point</label>
+              <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Buildings without a valid building-level Primary inherit this destination. Existing building assignments stay in place.</p>
+              <select id="canvas-settings-campus-primary-assembly" data-testid="canvas-settings-campus-primary-assembly"
+                value={campusWidePrimaryAssemblyPointId}
+                onChange={(event) => {
+                  setCampusWidePrimaryAssemblyPointId(event.target.value);
+                  setCampusPrimaryTouched(true);
+                  markChanged();
+                }}
+                className="mt-2 h-10 w-full rounded-xl border border-border bg-input-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <option value="">No campus-wide Primary</option>
+                {[...(campus.assemblyPoints ?? [])].sort((left, right) => left.name.localeCompare(right.name)).map((point) => (
+                  <option key={point.id} value={point.id}>{point.name || "Emergency Assembly Point"}</option>
+                ))}
+              </select>
+              {designatedCampusPrimary.length > 1 && <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300" role="status">More than one campus-wide Primary is currently designated. Choose one to resolve the conflict.</p>}
+            </div>
+
+            {/* Advanced campus-wide SOS policy remains available to authorized maintainers. */}
+            <div className="rounded-xl border border-border bg-muted/20 p-3" data-testid="advanced-sos-destination-policy">
+              <label htmlFor="canvas-settings-sos-policy" className="block text-xs font-extrabold text-foreground">SOS destination policy</label>
+              <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Fixed Primary uses each building's assigned Primary. Nearest Eligible selects the closest assigned, reachable destination.</p>
+              <select id="canvas-settings-sos-policy" data-testid="canvas-settings-sos-policy"
+                value={emergencyDestinationPolicy}
+                onChange={(event) => {
+                  setEmergencyDestinationPolicy(event.target.value as "fixed_primary" | "nearest_eligible");
+                  markChanged();
+                }}
+                className="mt-2 h-10 w-full rounded-xl border border-border bg-input-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <option value="fixed_primary">Fixed Primary</option>
+                <option value="nearest_eligible">Nearest Eligible</option>
+              </select>
+            </div>
+
             {/* ── Appearance section ── */}
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -714,6 +782,7 @@ export function CanvasSettingsModal({ open, campus, onSave, onClose }: CanvasSet
                 setGroundColor(appearance.color);
                 setGroundTexture(appearance.texture);
                 setDefaultZoom(campus.defaultZoom ?? 1);
+                setEmergencyDestinationPolicy(campus.settings?.emergencyDestinationPolicy ?? "fixed_primary");
                 setHasChanges(false);
                 setValidationError(null);
               }}

@@ -1,0 +1,1172 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "test-fixture",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {},
+  "browserErrors": [],
+  "screenshots": [
+    "assembly-point-browser-failure.png",
+    "assembly-point-caba-both-routes-desktop-1440.png",
+    "assembly-point-caba-arrival-mobile-390.png",
+    "assembly-point-caba-arrival-outdoor-2d-mobile-360.png",
+    "assembly-point-caba-arrival-outdoor-3d-mobile-390.png",
+    "assembly-point-caba-arrival-desktop-1440.png",
+    "assembly-point-caba-arrival-final-mobile-390.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "fixtureSummary": {
+    "testOnly": true,
+    "source": "read-only published MAIN CAMPUS - PLV snapshot; edits and synthetic review stay local to this test",
+    "point": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "name": "TEST ONLY - Main Assembly Point A",
+      "navNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+      "x": 146,
+      "y": 380,
+      "connection": "connected",
+      "review": "approved",
+      "incidentEdges": 3,
+      "assignedBuildings": 4,
+      "placementModel": "placed directly on an existing authored outdoor waypoint"
+    },
+    "rooms": [
+      {
+        "name": "PLV AUDITORIUM",
+        "building": "STUDENT CENTER BUILDING",
+        "displayFloor": "Floor 5",
+        "internalFloor": 6,
+        "assignedDoorCount": 3,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "disconnected",
+            "routeCount": 0
+          },
+          {
+            "label": "Room door 3",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 5,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 5,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 4.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 3.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 2.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Ground Floor.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "arrive",
+              "instruction": "Arrive at STUDENT CENTER BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 5
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 180,
+                "y": 301
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 5,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 293,
+                "y": 263
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CABA LECTURE HALL",
+        "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 2,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 11,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Right Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Right Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 391,
+                "y": 360
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 960,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 960,
+                "y": 160
+              },
+              "end": {
+                "x": 1014,
+                "y": 229
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 146,
+                "y": 462
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ASSEMBLY HALL",
+        "building": "COLLEGE OF EDUCATION BUILDING",
+        "displayFloor": "Ground Floor",
+        "internalFloor": 1,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 1
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 1
+          }
+        ],
+        "routeCount": 1,
+        "distinctPhysicalExits": 1,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 1,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 1.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 1 to Campus.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF EDUCATION BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 1",
+              "contextLegIndex": 1
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 409,
+                "y": 739
+              },
+              "end": {
+                "x": 564,
+                "y": 6
+              }
+            },
+            {
+              "index": 1,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 1201,
+                "y": 370
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CEIT LECTURE HALL",
+        "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 15,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 13,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 6,
+          "finalWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "assemblyWaypoint": {
+            "x": 146,
+            "y": 380
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "info",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the path toward Left Stair.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 5.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 4.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 3.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Floor 2.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "stairs",
+              "instruction": "Take the Left Stair down to Ground Floor.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the path toward Exterior Stair 2.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 9,
+              "icon": "walk",
+              "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 6
+            },
+            {
+              "index": 10,
+              "icon": "arrive",
+              "instruction": "Arrive at COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+              "contextLegIndex": 6
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 139,
+                "y": 360
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 60,
+                "y": 160
+              }
+            },
+            {
+              "index": 5,
+              "kind": "floor",
+              "segmentIndex": 5,
+              "start": {
+                "x": 60,
+                "y": 160
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 6,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 867,
+                "y": 463
+              },
+              "end": {
+                "x": 146,
+                "y": 380
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "playback": {
+    "scenario": "CABA LECTURE HALL Route B active playback on the isolated assigned/approved test Assembly Point snapshot",
+    "routeBWasSelectable": true,
+    "startedRoutePreview": true,
+    "initialStep": "STEP 3 OF 11 · APPROVED\n\nTEST ONLY - Main Assembly Point A\n\nFOLLOW\nEXPLORE\n\nTake the Left Stair down to Floor 5.\n\nTap the Left Stair or press Continue.\n\nNext: Take the Left Stair down to Floor 4.",
+    "playbackSpeed": null,
+    "manualAdvanceCount": 0,
+    "transitionContinueCount": 2,
+    "instructionsObserved": [
+      "Take the Left Stair down to Floor 5.",
+      "Take the Left Stair down to Floor 4.",
+      "Take the Left Stair down to Floor 3.",
+      "Take the Left Stair down to Floor 2.",
+      "Take the Left Stair down to Ground Floor.",
+      "Exit via Exterior Stair 2 to Campus."
+    ],
+    "observedStepSequence": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "sampledStepSequence": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      9
+    ],
+    "noSkippedOrRepeatedObservedSteps": true,
+    "visitedFloorLabels": [
+      "Floor 6",
+      "Floor 5",
+      "Floor 4",
+      "Floor 3",
+      "Floor 2",
+      "Ground Floor"
+    ],
+    "arrivalReached": true,
+    "arrivalNameVisible": true,
+    "routeArrivalCardVisible": true,
+    "arrivalTitle": "Arrived at TEST ONLY - Main Assembly Point A",
+    "arrivalText": "Arrived at TEST ONLY - Main Assembly Point A\n\nFollow campus personnel's instructions.\n\nRestart Route\nEdit Route\nDone\nReturn to Both Routes",
+    "finalAssemblyMarker": {
+      "visible": true,
+      "rect": {
+        "x": 175,
+        "y": 147,
+        "width": 41,
+        "height": 17
+      },
+      "center": {
+        "x": 195,
+        "y": 155
+      },
+      "text": "TEST ONLY - Main Assembly Point ADesignated emergency gathering locationTEST ONLY - Main Assembly Point A — Designated emergency gathering location",
+      "plannerOverlap": false,
+      "cameraTransform": "translate(521.0471794871794 -756.4759352463942) scale(1.0887179487179488)",
+      "screenAnchor": {
+        "x": 195,
+        "y": 154
+      },
+      "markerWorldAnchor": "translate(146,380)",
+      "svgViewBox": "0 0 1360 960",
+      "svgRect": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 779
+      }
+    },
+    "playbackStopped": true,
+    "finalMapState": {
+      "routePhase": "arrived",
+      "routeCollapsed": "false",
+      "arrivalCameraActive": "true",
+      "arrivalCameraContext": "campus",
+      "arrivalCameraX": "146",
+      "arrivalCameraY": "380"
+    },
+    "finalView": "Skip to main content\nPLV NaviSync\nSMART CAMPUS NAVIGATOR\nHome\nMap\nSC\n5F\nSTUDENT CENTER BUILDING\nCABA\n6F\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION\nCAN\n1F\nCANTEEN\nCOED\n6F\nCOLLEGE OF EDUCATION BUILDING\nCEIT\n6F\nCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY\nA\nRoute A\nA\nRoute B\nCampus Gate\nTEST ONLY - Main Assembly Point A\nDesignated emergency gathering location\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA LECTURE HALL to TEST ONLY - Main Assembly Point A.\n\nArrival\n\nBoth Routes\nRoute A\nRoute B\n\nArrived at TEST ONLY - Main Assembly Point A\n\nFollow campus personnel's instructions.\n\nRestart Route\nEdit Route\nDone\nReturn to Both Routes\nEvent map"
+  },
+  "desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "scrollWidth": 1440
+    },
+    "bothRoutesVisible": true,
+    "testDestinationVisible": true
+  },
+  "responsiveMeasurements": [
+    {
+      "width": 360,
+      "height": 800,
+      "scrollWidth": 360
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390
+    },
+    {
+      "width": 430,
+      "height": 932,
+      "scrollWidth": 430
+    },
+    {
+      "width": 768,
+      "height": 1024,
+      "scrollWidth": 768
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "scrollWidth": 1280
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "scrollWidth": 1920
+    }
+  ],
+  "arrivalAtMoment": {
+    "title": "Arrived at TEST ONLY - Main Assembly Point A",
+    "currentInstruction": null,
+    "visibleText": "Arrived at TEST ONLY - Main Assembly Point A\n\nFollow campus personnel's instructions.\n\nRestart Route\nEdit Route\nDone\nReturn to Both Routes",
+    "planner": {
+      "exists": true,
+      "rect": {
+        "x": 8,
+        "y": 266.25,
+        "width": 374,
+        "height": 501.75
+      },
+      "display": "flex",
+      "visibility": "visible",
+      "opacity": "1",
+      "suspended": "false"
+    },
+    "collapsedCard": false,
+    "mapState": {
+      "routePhase": "arrived",
+      "routeCollapsed": "false",
+      "arrivalCameraActive": "true",
+      "arrivalCameraContext": "campus",
+      "arrivalCameraX": "146",
+      "arrivalCameraY": "380"
+    }
+  },
+  "arrivalText": "Skip to main content\nSC\n5F\nSTUDENT CENTER BUILDING\nCABA\n6F\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION\nCAN\n1F\nCANTEEN\nCOED\n6F\nCOLLEGE OF EDUCATION BUILDING\nCEIT\n6F\nCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY\nA\nRoute A\nA\nRoute B\nTEST ONLY - Main Assembly Point A\nDesignated emergency gathering location\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA LECTURE HALL to TEST ONLY - Main Assembly Point A.\n\nArrival\n\nBoth Routes\nRoute A\nRoute B\n\nArrived at TEST ONLY - Main Assembly Point A\n\nFollow campus personnel's instructions.\n\nRestart Route\nEdit Route\nDone\nReturn to Both Routes\nST\nEvent map\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in",
+  "outdoor2d": {
+    "marker": {
+      "visible": true,
+      "rect": {
+        "x": 175,
+        "y": 147,
+        "width": 41,
+        "height": 17
+      },
+      "center": {
+        "x": 195,
+        "y": 155
+      },
+      "text": "TEST ONLY - Main Assembly Point ADesignated emergency gathering locationTEST ONLY - Main Assembly Point A — Designated emergency gathering location",
+      "plannerOverlap": false,
+      "cameraTransform": "translate(521.0471794871794 -756.4759352463942) scale(1.0887179487179488)",
+      "screenAnchor": {
+        "x": 195,
+        "y": 154
+      },
+      "markerWorldAnchor": "translate(146,380)",
+      "svgViewBox": "0 0 1360 960",
+      "svgRect": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 779
+      }
+    },
+    "routeLinePresent": true,
+    "routePhase": "arrived"
+  },
+  "routeOverlayEvidence": {
+    "routePolylineCount": 0,
+    "routeEndpoint": null,
+    "allRouteLines": [
+      {
+        "endpoints": [
+          {
+            "x": 146,
+            "y": 462
+          },
+          {
+            "x": 146,
+            "y": 380
+          }
+        ],
+        "screenEnd": {
+          "x": 194.99999972651983,
+          "y": 153.56057131991668
+        },
+        "assemblyMatch": true
+      },
+      {
+        "endpoints": [
+          {
+            "x": 147,
+            "y": 923
+          },
+          {
+            "x": 146,
+            "y": 380
+          }
+        ],
+        "screenEnd": {
+          "x": 194.99999972651983,
+          "y": 153.56057131991668
+        },
+        "assemblyMatch": true
+      }
+    ],
+    "linesEndingAtAssemblyPoint": 2,
+    "markerId": "90000000-0000-4000-8000-000000000101",
+    "markerScreen": {
+      "x": 194.99999972651986,
+      "y": 153.56057131991662
+    },
+    "markerAnchor": "translate(146,380)",
+    "approvedOverviewCount": 1
+  },
+  "afterPanZoom": {
+    "markerAnchor": "translate(146,380)",
+    "endpoint": null,
+    "projectedEnd": null,
+    "markerRect": {
+      "x": 171.1345672607422,
+      "y": 145.2021942138672,
+      "width": 47.93928527832031,
+      "height": 19.8824462890625
+    },
+    "matchingRouteCount": 2,
+    "routeEndpointScreenDeltas": [
+      {
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "dx": 0,
+        "dy": 0
+      }
+    ]
+  },
+  "outdoor3d": {
+    "canvasVisible": true,
+    "markerLabelPresent": true,
+    "marker": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "rect": {
+        "x": 139,
+        "y": 148,
+        "width": 112,
+        "height": 81
+      },
+      "canvas": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 779
+      },
+      "panel": {
+        "x": 8,
+        "y": 266,
+        "width": 374,
+        "height": 502
+      },
+      "panelOverlap": false,
+      "overlayElements": [
+        {
+          "selector": "route-planner-dialog",
+          "left": 8,
+          "top": 266.25,
+          "width": 374,
+          "height": 501.75
+        }
+      ],
+      "safeFocusRect": {
+        "left": 12,
+        "top": 12,
+        "width": 366,
+        "height": 242.25
+      },
+      "safeFocusCenter": {
+        "x": 195,
+        "y": 133.125
+      }
+    },
+    "routePhase": "arrived"
+  },
+  "rendererRoundTrip": {
+    "routePhase": "arrived",
+    "markerVisible": true,
+    "arrivalCameraActive": "true"
+  },
+  "desktopArrival": {
+    "viewport": 1440,
+    "routePhase": "arrived",
+    "documentWidth": 1440
+  },
+  "domObservedStepHistory": [
+    {
+      "step": 3,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Floor 6",
+      "instruction": "Take the Left Stair down to Floor 5.",
+      "signature": "3|Choose floor. Current floor: Floor 6|Take the Left Stair down to Floor 5."
+    },
+    {
+      "step": 4,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Floor 5",
+      "instruction": "Take the Left Stair down to Floor 4.",
+      "signature": "4|Choose floor. Current floor: Floor 5|Take the Left Stair down to Floor 4."
+    },
+    {
+      "step": 5,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Floor 4",
+      "instruction": "Take the Left Stair down to Floor 3.",
+      "signature": "5|Choose floor. Current floor: Floor 4|Take the Left Stair down to Floor 3."
+    },
+    {
+      "step": 6,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Floor 3",
+      "instruction": "Take the Left Stair down to Floor 2.",
+      "signature": "6|Choose floor. Current floor: Floor 3|Take the Left Stair down to Floor 2."
+    },
+    {
+      "step": 7,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Floor 2",
+      "instruction": "Take the Left Stair down to Ground Floor.",
+      "signature": "7|Choose floor. Current floor: Floor 2|Take the Left Stair down to Ground Floor."
+    },
+    {
+      "step": 8,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Ground Floor",
+      "instruction": "Follow the path toward Exterior Stair 2.",
+      "signature": "8|Choose floor. Current floor: Ground Floor|Follow the path toward Exterior Stair 2."
+    },
+    {
+      "step": 9,
+      "total": 11,
+      "floor": "Choose floor. Current floor: Ground Floor",
+      "instruction": "Exit via Exterior Stair 2 to Campus.",
+      "signature": "9|Choose floor. Current floor: Ground Floor|Exit via Exterior Stair 2 to Campus."
+    },
+    {
+      "step": 10,
+      "total": 11,
+      "floor": "",
+      "instruction": "Follow the path toward TEST ONLY - Main Assembly Point A.",
+      "signature": "10||Follow the path toward TEST ONLY - Main Assembly Point A."
+    },
+    {
+      "step": 11,
+      "total": 11,
+      "floor": "",
+      "instruction": "Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2",
+      "signature": "11||Arrive at COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2"
+    }
+  ]
+}

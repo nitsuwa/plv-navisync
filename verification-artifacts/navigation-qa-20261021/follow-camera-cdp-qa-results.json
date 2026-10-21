@@ -1,0 +1,130 @@
+{
+  "route": "SOS · COED 306 → Emergency Assembly Point · MAIN CAMPUS",
+  "preview": {
+    "state": "compact",
+    "panel": {
+      "x": 8,
+      "y": 523.0022583007812,
+      "width": 374,
+      "height": 244.99774169921875,
+      "bottom": 768,
+      "right": 382
+    },
+    "summaryText": "SOS · EMERGENCY ROUTE\n\nFrom COED 306\n\nEmergency Assembly Point\n\nStart Navigation",
+    "summary": {
+      "x": 9,
+      "y": 603.97607421875,
+      "width": 372,
+      "height": 162.98577880859375,
+      "bottom": 766.9618530273438,
+      "right": 381
+    },
+    "start": {
+      "x": 21,
+      "y": 698.445556640625,
+      "width": 348,
+      "height": 41.5250244140625,
+      "bottom": 739.9705810546875,
+      "right": 369
+    },
+    "startVisible": true,
+    "mode": null,
+    "alternatives": null,
+    "body": "Skip to main content\nEXIT\nSTAIR EXIT\nCOED 302\nELECTRICAL ROOM 3\nEDUCATION GALLERY\nCOED 306\nCOED 301\nCOED 305\nGARDEN ATRIUM\nCOMFORT ROOM\nCOED 303\nCOED 304\nEDTECH LAB A\nA\nView Floor 2\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from COED 306 to Emergency Assembly Point.\n\nRoute preview\n\nExpand\n\nSOS · EMERGENCY ROUTE\n\nFrom COED 306\n\nEmergency Assembly Point\n\nStart Navigation\nCOED · 3F\nST\nEvent map\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in"
+  },
+  "expanded": {
+    "state": "expanded",
+    "panel": {
+      "top": 440.9498291015625,
+      "bottom": 762.0501708984375,
+      "height": 321.100341796875
+    },
+    "footer": {
+      "top": 704.1468505859375,
+      "bottom": 761.1728515625,
+      "height": 57.0260009765625
+    },
+    "steps": {
+      "top": 512.890380859375,
+      "bottom": 704.1468505859375,
+      "height": 191.2564697265625
+    },
+    "buttons": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from COED 306 to Emergency Assembly Point.\n\nRoute preview\n\nEMERGENCY ROUTE\n\nFrom COED 306\n\nEmergency Assembly Point\n\nFOLLOW\nEXPLORE\nSteps\n6\nEdit Route\nStart\nClose Preview"
+  },
+  "dragSnaps": {
+    "afterUpDrag": "expanded",
+    "afterDownDrag": "compact"
+  },
+  "viewport320": {
+    "viewport": [
+      320,
+      568
+    ],
+    "state": "compact",
+    "panel": {
+      "top": 256,
+      "bottom": 492,
+      "left": 8,
+      "right": 312,
+      "height": 236
+    },
+    "start": {
+      "top": 425,
+      "bottom": 465,
+      "left": 21,
+      "right": 299,
+      "height": 40
+    },
+    "safeBottom": 65,
+    "body": "Skip to main content\nEXIT\nSTAIR EXIT\nCOED 302\nELECTRICAL ROOM 3\nEDUCATION GALLERY\nCOED 306\nCOED 301\nCOED 305\nGARDEN ATRIUM\nCOMFORT ROOM\nCOED 303\nCOED 304\nEDTECH LAB A\nA\nView Floor 2\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from COED 306 to Emergency Assembly Point.\n\nRoute preview\n\nExpand\n\nSOS · EMERGENCY ROUTE\n\nFrom COED 306\n\nEmergency Assembly Point\n\nStart Navigation\nCOED · 3F\nST\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in"
+  },
+  "playing": {
+    "dock": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+    "followSelected": true,
+    "exploreSelected": false,
+    "routeText": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+    "canvas": [
+      {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 779
+        },
+        "keys": []
+      }
+    ],
+    "surface": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 779,
+      "top": 0,
+      "right": 390,
+      "bottom": 779,
+      "left": 0
+    }
+  },
+  "pan": {
+    "paused": true,
+    "followSelected": true,
+    "action": "Resume"
+  },
+  "contextMenu": {
+    "defaultPrevented": true,
+    "rightButtonDragging": null
+  },
+  "rotateWhilePaused": {
+    "paused": true,
+    "followSelected": true,
+    "contextMenuPrevented": true
+  },
+  "resume": {
+    "routeText": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Exterior Stair 1.\n\nPause\n1×\nExpand",
+    "inspectionPaused": false,
+    "returning": false,
+    "followSelected": true,
+    "pausedAction": "Pause",
+    "error": null
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "route": "SOS Â· CABA-201 â†’ Emergency Assembly Point Â· MAIN CAMPUS",
+  "preview": {
+    "state": "compact",
+    "panel": {
+      "x": 8,
+      "y": 270.0187683105469,
+      "width": 374,
+      "height": 497.9812316894531,
+      "bottom": 768,
+      "right": 382
+    },
+    "summaryText": "SOS · EMERGENCY ROUTE\n\nFrom CABA-201\n\nEmergency Assembly Point\n\nRoute A\nExterior Stair 1\nRoute B\nExterior Stair 2\nStart Navigation",
+    "summary": {
+      "x": 9,
+      "y": 414.95361328125,
+      "width": 372,
+      "height": 351.188232421875,
+      "bottom": 766.141845703125,
+      "right": 381
+    },
+    "start": {
+      "x": 21,
+      "y": 663.9442138671875,
+      "width": 348,
+      "height": 74.3255615234375,
+      "bottom": 738.269775390625,
+      "right": 369
+    },
+    "startVisible": true,
+    "mode": null,
+    "alternatives": null,
+    "body": "Skip to main content\nPHYSICS LABORATORY\nCHEMISTRY LABORATORY\nSTORAGE RM.\nCABA FACULTY ROOM\nELECTRICAL ROOM\nBIOLOGY LABORATORY\nSTORAGE ROOM\nCABA-201\nCOMFORT ROOM\nA\nView Ground Floor\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-201 to Emergency Assembly Point.\n\nRoute preview\n\nExpand\n\nSOS · EMERGENCY ROUTE\n\nFrom CABA-201\n\nEmergency Assembly Point\n\nRoute A\nExterior Stair 1\nRoute B\nExterior Stair 2\nStart Navigation\nCABA · 2F\nST\nEvent map\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in"
+  },
+  "expanded": {
+    "state": "expanded",
+    "panel": {
+      "top": 383.5665283203125,
+      "bottom": 768,
+      "height": 384.4334716796875
+    },
+    "footer": {
+      "top": 708.158935546875,
+      "bottom": 767.09326171875,
+      "height": 58.934326171875
+    },
+    "steps": {
+      "top": 457.91448974609375,
+      "bottom": 708.158935546875,
+      "height": 250.24444580078125
+    },
+    "buttons": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-201 to Emergency Assembly Point.\n\nRoute preview\n\nRoute A\nRoute B\n\nEMERGENCY ROUTE\n\nFrom CABA-201\n\nEmergency Assembly Point\n\nFOLLOW\nEXPLORE\nSteps\n6\nEdit Route\nStart\nClose Preview"
+  },
+  "dragSnaps": {
+    "afterUpDrag": "expanded",
+    "afterDownDrag": "compact"
+  },
+  "viewport320": {
+    "viewport": [
+      320,
+      568
+    ],
+    "state": "compact",
+    "panel": {
+      "top": 224,
+      "bottom": 492,
+      "left": 8,
+      "right": 312,
+      "height": 268
+    },
+    "start": {
+      "top": 436,
+      "bottom": 476,
+      "left": 21,
+      "right": 299,
+      "height": 40
+    },
+    "safeBottom": 65,
+    "body": "ontent\nPHYSICS LABORATORY\nCHEMISTRY LABORATORY\nSTORAGE RM.\nCABA FACULTY ROOM\nELECTRICAL ROOM\nBIOLOGY LABORATORY\nSTORAGE ROOM\nCABA-201\nCOMFORT ROOM\nA\nView Ground Floor\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-201 to Emergency Assembly Point.\n\nRoute preview\n\nExpand\n\nSOS · EMERGENCY ROUTE\n\nFrom CABA-201\n\nEmergency Assembly Point\n\nRoute A\nExterior Stair 1\nRoute B\nExterior Stair 2\nStart Navigation\nCABA · 2F\nST\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in"
+  },
+  "playing": {
+    "dock": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+    "followSelected": true,
+    "exploreSelected": false,
+    "routeText": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+    "canvas": [
+      {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 779
+        },
+        "keys": []
+      }
+    ],
+    "surface": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 779,
+      "top": 0,
+      "right": 390,
+      "bottom": 779,
+      "left": 0
+    }
+  },
+  "pan": {
+    "paused": true,
+    "followSelected": true,
+    "action": "Resume"
+  },
+  "contextMenu": {
+    "defaultPrevented": true,
+    "rightButtonDragging": null
+  },
+  "rotateWhilePaused": {
+    "paused": true,
+    "followSelected": true,
+    "contextMenuPrevented": true
+  },
+  "resume": {
+    "routeText": "GUIDED NAVIGATION\n\nStep 1 of 6 · Emergency Assembly Point\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the Right Stair.\n\nPause\n1×\nExpand",
+    "inspectionPaused": false,
+    "returning": false,
+    "followSelected": true,
+    "pausedAction": "Pause",
+    "error": null
+  },
+  "outdoorArrows": {
+    "samples": 49,
+    "changingArrowPhases": 1,
+    "outdoorFrameCaptured": true,
+    "laterFrameCaptured": true,
+    "handoffs": [
+      "Continue to Ground Floor",
+      "Continue Outside"
+    ],
+    "arrivalObserved": true
+  }
+}

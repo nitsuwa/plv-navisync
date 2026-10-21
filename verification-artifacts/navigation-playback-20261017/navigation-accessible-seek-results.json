@@ -1,0 +1,90 @@
+{
+  "fixture": "read-only published campus; remote writes blocked",
+  "screenshots": [
+    "accessible-route-preview-current.png",
+    "accessible-reverse-seek-2d.png",
+    "accessible-forward-seek-2d.png",
+    "accessible-rapid-retarget-paused.png"
+  ],
+  "errors": [],
+  "checks": {
+    "accessibleModeSelected": true,
+    "previewLabel": true,
+    "initial": {
+      "step": "Step 3 of 5",
+      "progress": "1",
+      "transform": "translate(240,672)",
+      "visible": true
+    },
+    "previousEnabled": true,
+    "reverseSeek": {
+      "samples": 69,
+      "uniquePositions": 9,
+      "startProgress": 1,
+      "endProgress": 0,
+      "moved": true,
+      "samplesVisible": true,
+      "finalStep": "Step 2 of 5",
+      "direction": "reverse"
+    },
+    "pausedAfterPrevious": true,
+    "afterPrevious": {
+      "step": "Step 2 of 5",
+      "progress": "0",
+      "transform": "translate(107,380)",
+      "visible": true
+    },
+    "nextEnabled": true,
+    "forwardSeek": {
+      "samples": 70,
+      "uniquePositions": 10,
+      "startProgress": 0.007166666667494104,
+      "endProgress": 1,
+      "moved": true,
+      "samplesVisible": true,
+      "finalStep": "Step 3 of 5",
+      "direction": "forward"
+    },
+    "nextPausedAtTransition": true,
+    "pausedAfterNext": true,
+    "afterNext": {
+      "step": "Step 3 of 5",
+      "progress": "1",
+      "transform": "translate(240,672)",
+      "visible": true
+    },
+    "errors": [],
+    "pauseDuringSeek": {
+      "resumeAvailable": true,
+      "heldPosition": true,
+      "before": {
+        "step": "Step 2 of 5",
+        "progress": "0.9743888888884753",
+        "transform": "translate(257.05651448158125,672.1421376206798)",
+        "visible": true
+      },
+      "atClick": {
+        "step": "Step 2 of 5",
+        "progress": "0.79105555555514",
+        "transform": "translate(360,653.8462960073166)",
+        "visible": true
+      },
+      "after": {
+        "step": "Step 2 of 5",
+        "progress": "0.79105555555514",
+        "transform": "translate(360,653.8462960073166)",
+        "visible": true
+      }
+    },
+    "rapidRetarget": {
+      "final": {
+        "step": "Step 2 of 5",
+        "progress": "0",
+        "transform": "translate(107,380)",
+        "visible": true
+      },
+      "paused": true
+    },
+    "remoteWritesBlocked": true
+  }
+}

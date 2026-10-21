@@ -87,6 +87,11 @@ export interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+type StudentAuthValue = Pick<AuthState, "profile" | "loading" | "isAdmin" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signingOut" | "signOut">;
+type AuthBootstrapValue = Pick<AuthState, "status" | "error" | "retryBootstrap">;
+const StudentAuthContext = createContext<StudentAuthValue | null>(null);
+const AuthBootstrapContext = createContext<AuthBootstrapValue | null>(null);
+const AuthIdentityContext = createContext<string | null>(null);
 const PROFILE_RETRY_MESSAGE = "NaviSync could not verify your login/profile right now. Check your connection and retry; the saved login has not been cleared.";
 const AUTH_REVALIDATION_COALESCE_MS = 60_000;
 const SIGN_OUT_TIMEOUT_MS = 2_500;
@@ -439,8 +444,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session, profile: activeProfile, status, recoveryState, loading: status === "initializing" || status === "error", error, signingOut,
     isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut,
   }), [session, activeProfile, status, recoveryState, error, signingOut, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, retryBootstrap, signOut]);
+  const studentValue = useMemo<StudentAuthValue>(() => ({
+    profile: activeProfile,
+    loading: status === "initializing" || status === "error",
+    isAdmin,
+    isStudent,
+    isStudentOrg,
+    username,
+    role,
+    refreshProfile,
+    applyProfileUpdate,
+    signingOut,
+    signOut,
+  }), [activeProfile, status, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signingOut, signOut]);
+  const bootstrapValue = useMemo<AuthBootstrapValue>(
+    () => ({ status, error, retryBootstrap }),
+    [status, error, retryBootstrap],
+  );
+  const activeUserId = session?.user.id ?? null;
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <AuthIdentityContext.Provider value={activeUserId}>
+        <AuthBootstrapContext.Provider value={bootstrapValue}>
+          <StudentAuthContext.Provider value={studentValue}>{children}</StudentAuthContext.Provider>
+        </AuthBootstrapContext.Provider>
+      </AuthIdentityContext.Provider>
+    </AuthContext.Provider>
+  );
 }
 
 /** Backwards-compatible provider name used by older tests and integrations. */
@@ -471,9 +502,33 @@ export function useAuth(): AuthState {
   return useContext(AuthContext) ?? EMPTY_AUTH_STATE;
 }
 
-/** Drop-in compatibility hook for existing student UI. */
-export type StudentAuthState = Pick<AuthState, "profile" | "loading" | "isAdmin" | "isStudent" | "isStudentOrg" | "username" | "role" | "refreshProfile" | "applyProfileUpdate" | "signingOut" | "signOut">;
-export function useStudentAuth(): StudentAuthState {
-  const { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signingOut, signOut } = useAuth();
-  return { profile, loading, isAdmin, isStudent, isStudentOrg, username, role, refreshProfile, applyProfileUpdate, signingOut, signOut };
+/** Stable bootstrap state for the app shell; token rotation does not change it. */
+export function useAuthBootstrap(): AuthBootstrapValue {
+  return useContext(AuthBootstrapContext) ?? EMPTY_AUTH_BOOTSTRAP;
 }
+
+/** Stable account identity for data scoping; access-token changes do not change it. */
+export function useAuthUserId(): string | null {
+  return useContext(AuthIdentityContext);
+}
+
+/** Drop-in compatibility hook for existing student UI. */
+export type StudentAuthState = StudentAuthValue;
+export function useStudentAuth(): StudentAuthState {
+  return useContext(StudentAuthContext) ?? EMPTY_STUDENT_AUTH_STATE;
+}
+
+const EMPTY_AUTH_BOOTSTRAP: AuthBootstrapValue = { status: "initializing", error: null, retryBootstrap: async () => {} };
+const EMPTY_STUDENT_AUTH_STATE: StudentAuthValue = {
+  profile: null,
+  loading: true,
+  isAdmin: false,
+  isStudent: false,
+  isStudentOrg: false,
+  username: "",
+  role: "faculty",
+  refreshProfile: async () => {},
+  applyProfileUpdate: () => {},
+  signingOut: false,
+  signOut: async () => {},
+};

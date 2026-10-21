@@ -1,0 +1,2307 @@
+{
+  "publishedSnapshot": {
+    "id": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb",
+    "name": "MAIN CAMPUS - PLV",
+    "code": "MAIN",
+    "assemblyPointCount": 1,
+    "assemblyPoints": [
+      {
+        "id": "475dd4c4-c99c-484e-9aab-811d0c5af00d",
+        "name": "Emergency Assembly Point",
+        "navNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+        "reviewStatus": "approved",
+        "assignments": [
+          {
+            "buildingId": "ce5404c9-1f44-4f59-88be-2a90630b8c87",
+            "building": "STUDENT CENTER BUILDING",
+            "designation": "primary"
+          },
+          {
+            "buildingId": "3181f9f5-895f-47ae-99d6-6fcd15263d53",
+            "building": "CANTEEN",
+            "designation": "primary"
+          },
+          {
+            "buildingId": "1218c2f6-c4dd-4888-9f87-84dc67b1055d",
+            "building": "COLLEGE OF EDUCATION BUILDING",
+            "designation": "primary"
+          },
+          {
+            "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+            "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+            "designation": "primary"
+          }
+        ]
+      }
+    ]
+  },
+  "buildings": [
+    {
+      "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+      "buildingCode": "CABA",
+      "room": "CABA-201",
+      "floor": {
+        "id": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+        "number": 2,
+        "label": "Floor 2"
+      },
+      "ordinaryStairs": [
+        {
+          "floor": "Ground Floor",
+          "id": "7c32d8ef-624c-4720-8708-6298cfb68bc0",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "f6667468-9ebb-46f1-9f3c-f483026853a0",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "db24d52c-1457-485f-a5b5-d89df4fc977e",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "e544a56a-2aa2-410a-bc8e-44b0804a6087",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "06a37ec2-ed12-415b-9f43-54fdc896d0ca",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "d274be75-6a2e-4f83-bae2-5355e431bae6",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "43bf1513-8995-4415-95c5-ff41f04d9495",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "6b125c9f-c506-40e5-a005-d7d4a94443ca",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "6d42e804-f785-4cd0-9021-007e180414df",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "a98911c2-4c8e-496e-aa78-aede55b345dc",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "0a3c5bd7-a418-4eac-85f7-39412f95ee49",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "a0321988-79c7-4f59-9c25-c001beb816e1",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "4de5be40-364c-4618-a432-672fb7187c27",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "5e2f66b7-a6c1-41f7-aaff-6889626b8544",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        }
+      ],
+      "exteriorEmergencyStairs": [
+        {
+          "id": "6cd731bb-b237-494f-9cd9-43a226d2d433",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "29938739-2688-4436-836e-ddbf5e89cd27"
+          ],
+          "state": "open"
+        },
+        {
+          "id": "1678649f-4b19-4e5f-b08a-e0091f3070a1",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "29938739-2688-4436-836e-ddbf5e89cd27"
+          ],
+          "state": "open"
+        }
+      ],
+      "doorReadiness": [
+        {
+          "label": "Room door 1",
+          "state": "route_needs_review",
+          "routeCount": 0
+        },
+        {
+          "label": "Room door 2",
+          "state": "route_needs_review",
+          "routeCount": 0
+        }
+      ],
+      "graphCandidates": [
+        {
+          "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 1",
+          "assemblyPoint": "Emergency Assembly Point",
+          "completeAssemblyRoute": false,
+          "emergencyUseReviewRequired": true,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "floorNumber": 2,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "856f19c1-868c-47ba-8617-9c16d5a81097",
+              "name": "Door",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "doorId": "b09839c1-3ce6-4f7f-b22c-d2feb89e90ce",
+              "type": "hallway"
+            },
+            {
+              "id": "49f46155-f3a3-44b9-a1b6-9395586e50e5",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "bb4cbb08-9d28-499b-9f90-091434e4f026",
+              "name": "Right Stair",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "stairId": "d274be75-6a2e-4f83-bae2-5355e431bae6",
+              "type": "stair"
+            },
+            {
+              "id": "d25b298d-3299-4301-bdd2-a276d71d5e5c",
+              "name": "Right Stair",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "stairId": "e544a56a-2aa2-410a-bc8e-44b0804a6087",
+              "type": "stair"
+            },
+            {
+              "id": "54aede8a-f98c-4875-90e2-0986610dc14c",
+              "name": "Waypoint",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "type": "hallway"
+            },
+            {
+              "id": "8224dc17-64b8-4485-8332-d1690ae98db6",
+              "name": "Exterior Stair 1",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "stairId": "f6667468-9ebb-46f1-9f3c-f483026853a0",
+              "exteriorEmergencyStairId": "6cd731bb-b237-494f-9cd9-43a226d2d433",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "7a4fb53d-7952-43c7-81fd-1d381ce251d0",
+              "name": "Exterior Stair 1",
+              "exteriorEmergencyStairId": "6cd731bb-b237-494f-9cd9-43a226d2d433",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "b8fc251e-1366-4bbc-bed2-1b86f12959b7",
+              "name": "Path Junction",
+              "type": "outdoor"
+            },
+            {
+              "id": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "name": "Emergency Assembly Point",
+              "type": "assembly"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "6ec6a029-12cf-4a45-9f59-134ff0217ae8",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "7a4fb53d-7952-43c7-81fd-1d381ce251d0",
+              "endNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+            },
+            {
+              "id": "209e96a0-b04a-4642-9305-8325339f29de",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "endNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25"
+            },
+            {
+              "id": "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "5f935a79-edc0-4fa3-911b-e1175574acb4",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "918f87b9-706b-48c9-ba35-76821d842bff",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "b879c587-1f81-4435-82ad-bd0b493c0621",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "6637bb51-20af-42cd-8e8b-aea4ac530cb6",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "endNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507"
+            }
+          ]
+        },
+        {
+          "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 2",
+          "assemblyPoint": "Emergency Assembly Point",
+          "completeAssemblyRoute": false,
+          "emergencyUseReviewRequired": true,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "floorNumber": 2,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "e713fa55-8200-4f17-91a5-d56207de4120",
+              "name": "Door",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "doorId": "30f4358f-edc7-4767-8284-f9d47b3a9a28",
+              "type": "hallway"
+            },
+            {
+              "id": "bde35bba-0722-4f78-a7c6-86abfb4abb89",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "efb73ff3-e297-4acb-926e-0f88f458070c",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "fd5c47df-ca52-4ee3-a5ea-9a6d117befe6",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "e8c0511d-3014-4945-af82-4ff52696d23e",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "ee197107-e67f-47e2-9340-4954cef369e9",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "6820ac38-2a13-4c4b-b915-25278f7e8704",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "cde037b1-4843-4ffc-9826-bdc28a60d595",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "0ad0b33c-d5ea-431a-a930-879c341294d7",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "e6b755b9-41cc-4a78-b803-900d2bc3c833",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "373197b9-6e8f-43d9-b2e6-a5baa9e6ba6c",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "52ac0eba-f454-45be-9ee5-9d5cdfebf5fb",
+              "name": "Waypoint",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "type": "hallway"
+            },
+            {
+              "id": "adc3baa3-c559-4cd6-aff2-459beb983f9b",
+              "name": "Left Stair",
+              "floorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+              "stairId": "06a37ec2-ed12-415b-9f43-54fdc896d0ca",
+              "type": "stair"
+            },
+            {
+              "id": "930d33dd-797e-4151-aa11-86e495f27c25",
+              "name": "Left Stair",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "stairId": "db24d52c-1457-485f-a5b5-d89df4fc977e",
+              "type": "stair"
+            },
+            {
+              "id": "acb46d6c-5883-42d7-8dd1-0a7896b24505",
+              "name": "Waypoint",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "type": "hallway"
+            },
+            {
+              "id": "097b0ff0-b141-42e0-89cd-7d14d4448015",
+              "name": "Exterior Stair 2",
+              "floorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+              "stairId": "7c32d8ef-624c-4720-8708-6298cfb68bc0",
+              "exteriorEmergencyStairId": "1678649f-4b19-4e5f-b08a-e0091f3070a1",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "d9fe6d3a-e477-4780-af79-5357ad73aa71",
+              "name": "Exterior Stair 2",
+              "exteriorEmergencyStairId": "1678649f-4b19-4e5f-b08a-e0091f3070a1",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "2e8d6afc-2257-4a34-a81a-5fc48fee5a9d",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "9de2980f-124d-4b54-ac4e-bd3bb4e3867a",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "7e09329d-0795-4698-b8b0-02937e90a6df",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "9159b1c7-6468-4d56-847a-35dbd2309409",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "b8fc251e-1366-4bbc-bed2-1b86f12959b7",
+              "name": "Path Junction",
+              "type": "outdoor"
+            },
+            {
+              "id": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "name": "Emergency Assembly Point",
+              "type": "assembly"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "9f042f9b-cbc9-4c5d-be6c-e3cf398f1555",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "d9fe6d3a-e477-4780-af79-5357ad73aa71",
+              "endNodeId": "2e8d6afc-2257-4a34-a81a-5fc48fee5a9d"
+            },
+            {
+              "id": "fed662bd-be9b-4591-972b-1c964b0a36cf",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "2e8d6afc-2257-4a34-a81a-5fc48fee5a9d",
+              "endNodeId": "9de2980f-124d-4b54-ac4e-bd3bb4e3867a"
+            },
+            {
+              "id": "9146af36-8580-4a00-8733-2894b242a75a",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9de2980f-124d-4b54-ac4e-bd3bb4e3867a",
+              "endNodeId": "7e09329d-0795-4698-b8b0-02937e90a6df"
+            },
+            {
+              "id": "04380a4b-2db9-4d66-bcfd-5bbef62c8416",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "7e09329d-0795-4698-b8b0-02937e90a6df",
+              "endNodeId": "9159b1c7-6468-4d56-847a-35dbd2309409"
+            },
+            {
+              "id": "c1d18fb3-ad86-4430-8aa9-e053a54ffde1",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9159b1c7-6468-4d56-847a-35dbd2309409",
+              "endNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596"
+            },
+            {
+              "id": "918f87b9-706b-48c9-ba35-76821d842bff",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "b879c587-1f81-4435-82ad-bd0b493c0621",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "6637bb51-20af-42cd-8e8b-aea4ac530cb6",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "endNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507"
+            }
+          ]
+        }
+      ],
+      "studentEligibleCompleteRoutes": []
+    },
+    {
+      "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+      "buildingCode": "CEIT",
+      "room": "CEIT LECTURE HALL",
+      "floor": {
+        "id": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+        "number": 6,
+        "label": "Floor 6"
+      },
+      "ordinaryStairs": [
+        {
+          "floor": "Ground Floor",
+          "id": "0a254810-7044-4c67-b6bc-fdf01dd52142",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "3925a29f-d372-4760-8321-c2010d175268",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "9c8aff0c-5526-4368-b955-6040e204a6f2",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "ef30edbc-14c5-4432-9306-1d6456d23022",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "7a94a22d-545e-4c60-b549-737397a0c2cc",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "967a1123-46d8-4839-897b-ce0f2b698084",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "72d44025-bb0d-46b1-8047-bb190492c418",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "7e4e3313-4ff3-4c7d-bd24-d581404f6364",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "0fb7d85e-a8b1-4cf3-bdb8-8dde4a092ef0",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "1c9b7f0e-8d3d-426b-b34a-580d32f53f2e",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "29173e6c-6070-44b3-99a0-00812ebc4301",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "bf6e6bb7-f654-4bd7-9320-9ea1287b31f0",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "2d6b6c3a-2ec2-4f07-a0c3-dcbb33d7ea10",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "b9437d04-eb20-4b00-96f5-c49d4aae2d96",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        }
+      ],
+      "exteriorEmergencyStairs": [
+        {
+          "id": "2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "b50f219c-a94a-4586-852b-abf4dce88cf1"
+          ],
+          "state": "open"
+        },
+        {
+          "id": "10d27fcb-ec8b-4a9d-848d-4f135f7febe6",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "b50f219c-a94a-4586-852b-abf4dce88cf1"
+          ],
+          "state": "open"
+        }
+      ],
+      "doorReadiness": [
+        {
+          "label": "Room door 1",
+          "state": "connected_without_route",
+          "routeCount": 0
+        },
+        {
+          "label": "Room door 2",
+          "state": "connected_without_route",
+          "routeCount": 0
+        }
+      ],
+      "graphCandidates": [
+        {
+          "exit": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY � Exterior Emergency Stair -> Campus Gate � building-exit preview only � Exterior Stair 2",
+          "assemblyPoint": null,
+          "completeAssemblyRoute": false,
+          "emergencyUseReviewRequired": true,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "floorNumber": 6,
+              "floorLabel": "Floor 6"
+            },
+            {
+              "floorId": "a510a2a8-9435-4554-a8ea-acab7e06bd5b",
+              "floorNumber": 5,
+              "floorLabel": "Floor 5"
+            },
+            {
+              "floorId": "8f860dd1-870c-4195-96dd-c3b67076a7c2",
+              "floorNumber": 4,
+              "floorLabel": "Floor 4"
+            },
+            {
+              "floorId": "8c02d01f-0d8b-4ca5-a9bf-eba3c8701a9a",
+              "floorNumber": 3,
+              "floorLabel": "Floor 3"
+            },
+            {
+              "floorId": "7f0b920c-68bc-4c4d-895b-4053ab192d0e",
+              "floorNumber": 2,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "edc41350-9831-4f7f-8bd0-0ed2d85ad6cc",
+              "name": "Door",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "doorId": "c621e0d9-48ff-4e27-834c-fc1a29e2db98",
+              "type": "hallway"
+            },
+            {
+              "id": "3dfdfffc-1c99-462e-964b-69d9d00a7d26",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "4d236a97-fed5-400a-ba56-abf353067dfa",
+              "name": "Left Stair",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "stairId": "2d6b6c3a-2ec2-4f07-a0c3-dcbb33d7ea10",
+              "type": "stair"
+            },
+            {
+              "id": "6b12aaec-e71a-4a21-8183-d4d80bbf7950",
+              "name": "Left Stair",
+              "floorId": "a510a2a8-9435-4554-a8ea-acab7e06bd5b",
+              "stairId": "29173e6c-6070-44b3-99a0-00812ebc4301",
+              "type": "stair"
+            },
+            {
+              "id": "a8933fe3-0b9a-410d-bda0-4232a7ac39a3",
+              "name": "Left Stair",
+              "floorId": "8f860dd1-870c-4195-96dd-c3b67076a7c2",
+              "stairId": "1c9b7f0e-8d3d-426b-b34a-580d32f53f2e",
+              "type": "stair"
+            },
+            {
+              "id": "1cc54e3a-e265-441c-bd4c-b62f62f2db75",
+              "name": "Left Stair",
+              "floorId": "8c02d01f-0d8b-4ca5-a9bf-eba3c8701a9a",
+              "stairId": "72d44025-bb0d-46b1-8047-bb190492c418",
+              "type": "stair"
+            },
+            {
+              "id": "6f655c55-0de3-4321-a250-07b2e7253d8f",
+              "name": "Left Stair",
+              "floorId": "7f0b920c-68bc-4c4d-895b-4053ab192d0e",
+              "stairId": "7a94a22d-545e-4c60-b549-737397a0c2cc",
+              "type": "stair"
+            },
+            {
+              "id": "409af690-d96a-43d1-aae5-e3c8df87db0a",
+              "name": "Left Stair",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "stairId": "0a254810-7044-4c67-b6bc-fdf01dd52142",
+              "type": "stair"
+            },
+            {
+              "id": "0c716c18-b4d3-430a-8b41-b0f51d79848f",
+              "name": "Waypoint",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "type": "hallway"
+            },
+            {
+              "id": "b6aee48c-bef5-4976-b292-623b5054951f",
+              "name": "Waypoint",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "type": "hallway"
+            },
+            {
+              "id": "be553f47-9b16-4013-b9d9-0cdae704f2bb",
+              "name": "Exterior Stair 2",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "stairId": "9c8aff0c-5526-4368-b955-6040e204a6f2",
+              "exteriorEmergencyStairId": "10d27fcb-ec8b-4a9d-848d-4f135f7febe6",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "ff7ba7bf-79c5-49cd-8298-23af055b20af",
+              "name": "Exterior Stair 2",
+              "exteriorEmergencyStairId": "10d27fcb-ec8b-4a9d-848d-4f135f7febe6",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "e6d2df74-5825-4aa8-812f-875ffc936f17",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "26205de2-85b1-4b82-92ba-e6c8e61817d0",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "f558fe63-69f9-400c-802c-b6e0e2021c5e",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "a5cfcb28-35d2-4a57-bc9e-3ef09de40e65",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "3f034315-cf3b-4c4c-b9a1-bdccb5840b97",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "99748238-3644-4e6d-b497-feb263084e58",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "dd7cdc89-9202-4fae-bd8f-72daa0d5ad14",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "a5eb9c61-fa48-48de-bfd1-f1d7b2198078",
+              "name": "Campus Gate",
+              "type": "outdoor"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "5ea8e07f-bf1c-4b36-966d-f2bbce951825",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "ff7ba7bf-79c5-49cd-8298-23af055b20af",
+              "endNodeId": "e6d2df74-5825-4aa8-812f-875ffc936f17"
+            },
+            {
+              "id": "77048df6-ca3e-45e4-be65-1b89e483767f",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "e6d2df74-5825-4aa8-812f-875ffc936f17",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "cb5effb9-6d3f-4db3-b4c3-f14b1b6bb463",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "bdf92e14-c76f-44fb-a906-adcfacda0f0d",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "endNodeId": "31765c03-38b3-4679-8415-a2ae272aee20"
+            },
+            {
+              "id": "458a0018-21f3-4233-adda-7cb954f56893",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "f558fe63-69f9-400c-802c-b6e0e2021c5e",
+              "endNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782"
+            },
+            {
+              "id": "48f40353-b3e7-4923-ac9e-0d2f816deffd",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "a5cfcb28-35d2-4a57-bc9e-3ef09de40e65",
+              "endNodeId": "f558fe63-69f9-400c-802c-b6e0e2021c5e"
+            },
+            {
+              "id": "d90ab26b-64f1-4841-9014-a421ad735b97",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "3f034315-cf3b-4c4c-b9a1-bdccb5840b97",
+              "endNodeId": "a5cfcb28-35d2-4a57-bc9e-3ef09de40e65"
+            },
+            {
+              "id": "f6d7d841-075b-4ab0-b5b2-1904a10b7e10",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "99748238-3644-4e6d-b497-feb263084e58",
+              "endNodeId": "3f034315-cf3b-4c4c-b9a1-bdccb5840b97"
+            },
+            {
+              "id": "a1ab1626-8788-48c7-8f82-213a1648fd2d",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "dd7cdc89-9202-4fae-bd8f-72daa0d5ad14",
+              "endNodeId": "99748238-3644-4e6d-b497-feb263084e58"
+            },
+            {
+              "id": "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+              "endNodeId": "dd7cdc89-9202-4fae-bd8f-72daa0d5ad14"
+            },
+            {
+              "id": "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "209e96a0-b04a-4642-9305-8325339f29de",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "endNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25"
+            },
+            {
+              "id": "67e0cf5f-3215-42cd-8d10-116cdcb925ee",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "a5eb9c61-fa48-48de-bfd1-f1d7b2198078",
+              "endNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+            }
+          ]
+        },
+        {
+          "exit": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY � Exterior Emergency Stair -> Campus Gate � building-exit preview only � Exterior Stair 1",
+          "assemblyPoint": null,
+          "completeAssemblyRoute": false,
+          "emergencyUseReviewRequired": true,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "floorNumber": 6,
+              "floorLabel": "Floor 6"
+            },
+            {
+              "floorId": "a510a2a8-9435-4554-a8ea-acab7e06bd5b",
+              "floorNumber": 5,
+              "floorLabel": "Floor 5"
+            },
+            {
+              "floorId": "8f860dd1-870c-4195-96dd-c3b67076a7c2",
+              "floorNumber": 4,
+              "floorLabel": "Floor 4"
+            },
+            {
+              "floorId": "8c02d01f-0d8b-4ca5-a9bf-eba3c8701a9a",
+              "floorNumber": 3,
+              "floorLabel": "Floor 3"
+            },
+            {
+              "floorId": "7f0b920c-68bc-4c4d-895b-4053ab192d0e",
+              "floorNumber": 2,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "f6d6e15c-d720-43b1-aaaf-f532e7f7fba4",
+              "name": "Door",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "doorId": "c7d840e4-60e3-4f9c-ada1-232cd472f988",
+              "type": "hallway"
+            },
+            {
+              "id": "b8fd589c-de7c-4f63-a38f-2e1415e5cb08",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "4890bc45-2f6b-4bec-af3e-b5277e6fc111",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "dab46c1b-cf31-417c-a49a-e3364ab19aca",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "56a3c68c-d3aa-4392-beab-0a335cda6c41",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "108cc964-32d0-4f52-abc0-dc2c48be3b0a",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "179267d8-a904-41c5-b7a4-03b1b36fc49c",
+              "name": "Waypoint",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "type": "hallway"
+            },
+            {
+              "id": "ff270ca8-8c51-4e25-9e7e-a2ed513ab9a2",
+              "name": "Right Stair",
+              "floorId": "76d92e4d-0e3b-4b1b-b818-4aa916ad85e4",
+              "stairId": "b9437d04-eb20-4b00-96f5-c49d4aae2d96",
+              "type": "stair"
+            },
+            {
+              "id": "eb94e031-d066-4b41-b0df-8dd95d2d53f4",
+              "name": "Right Stair",
+              "floorId": "a510a2a8-9435-4554-a8ea-acab7e06bd5b",
+              "stairId": "bf6e6bb7-f654-4bd7-9320-9ea1287b31f0",
+              "type": "stair"
+            },
+            {
+              "id": "4ab8223b-80c6-4119-9422-3db548f5f698",
+              "name": "Right Stair",
+              "floorId": "8f860dd1-870c-4195-96dd-c3b67076a7c2",
+              "stairId": "0fb7d85e-a8b1-4cf3-bdb8-8dde4a092ef0",
+              "type": "stair"
+            },
+            {
+              "id": "62da033a-dc81-46dc-837d-801634aec453",
+              "name": "Right Stair",
+              "floorId": "8c02d01f-0d8b-4ca5-a9bf-eba3c8701a9a",
+              "stairId": "7e4e3313-4ff3-4c7d-bd24-d581404f6364",
+              "type": "stair"
+            },
+            {
+              "id": "393b2f08-8e69-42f1-b65f-b8c18cd5dd3a",
+              "name": "Right Stair",
+              "floorId": "7f0b920c-68bc-4c4d-895b-4053ab192d0e",
+              "stairId": "967a1123-46d8-4839-897b-ce0f2b698084",
+              "type": "stair"
+            },
+            {
+              "id": "46ddfc69-28c6-42c4-969b-3fabdfb386c8",
+              "name": "Right Stair",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "stairId": "3925a29f-d372-4760-8321-c2010d175268",
+              "type": "stair"
+            },
+            {
+              "id": "f5fe3947-1c3a-47c7-ac97-51c495d5d035",
+              "name": "Waypoint",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "type": "hallway"
+            },
+            {
+              "id": "3325a707-003d-415b-bdd7-d846a545ffa4",
+              "name": "Exterior Stair 1",
+              "floorId": "b50f219c-a94a-4586-852b-abf4dce88cf1",
+              "stairId": "ef30edbc-14c5-4432-9306-1d6456d23022",
+              "exteriorEmergencyStairId": "2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "235a4d0e-65bf-4509-80d0-044430a19d52",
+              "name": "Exterior Stair 1",
+              "exteriorEmergencyStairId": "2fd68a31-e3f1-4d6b-8ef1-5cc83ef18e0d",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "5e33045c-53ff-4ec0-abb6-c61d66588dfa",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "69f4eeee-3806-4716-a1fb-d81c3ac8542f",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "7ff257f3-8a4d-4817-ae6d-0ffcfa253bfb",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "dc803357-c659-45be-8f29-849ed866b6d9",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "d2448fd8-732d-49aa-98f9-50fdf7e018bf",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "923134da-b59c-473e-b58e-082479d37f9e",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "a5eb9c61-fa48-48de-bfd1-f1d7b2198078",
+              "name": "Campus Gate",
+              "type": "outdoor"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "5027c520-ac6f-4c79-9e12-1b8943ff7e36",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "235a4d0e-65bf-4509-80d0-044430a19d52",
+              "endNodeId": "5e33045c-53ff-4ec0-abb6-c61d66588dfa"
+            },
+            {
+              "id": "d3dfd08e-56bf-403f-9ac0-f7b139685ac8",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "69f4eeee-3806-4716-a1fb-d81c3ac8542f",
+              "endNodeId": "5e33045c-53ff-4ec0-abb6-c61d66588dfa"
+            },
+            {
+              "id": "8f92f051-2ea5-42c4-95e6-5be415bddfdc",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "7ff257f3-8a4d-4817-ae6d-0ffcfa253bfb",
+              "endNodeId": "69f4eeee-3806-4716-a1fb-d81c3ac8542f"
+            },
+            {
+              "id": "599cc096-2dbf-4d23-be3b-b74e0eeeae00",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "dc803357-c659-45be-8f29-849ed866b6d9",
+              "endNodeId": "7ff257f3-8a4d-4817-ae6d-0ffcfa253bfb"
+            },
+            {
+              "id": "6ff76e04-3f5f-4998-99b1-4633816df4e1",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "d2448fd8-732d-49aa-98f9-50fdf7e018bf",
+              "endNodeId": "dc803357-c659-45be-8f29-849ed866b6d9"
+            },
+            {
+              "id": "18893db4-5d0b-4fd6-9ef3-f2ee59bfeb68",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "923134da-b59c-473e-b58e-082479d37f9e",
+              "endNodeId": "d2448fd8-732d-49aa-98f9-50fdf7e018bf"
+            },
+            {
+              "id": "bdc49195-90bb-416e-ab72-b4f14e52a417",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "923134da-b59c-473e-b58e-082479d37f9e"
+            },
+            {
+              "id": "5f935a79-edc0-4fa3-911b-e1175574acb4",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "209e96a0-b04a-4642-9305-8325339f29de",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+              "endNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25"
+            },
+            {
+              "id": "67e0cf5f-3215-42cd-8d10-116cdcb925ee",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "a5eb9c61-fa48-48de-bfd1-f1d7b2198078",
+              "endNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+            }
+          ]
+        }
+      ],
+      "studentEligibleCompleteRoutes": []
+    },
+    {
+      "building": "COLLEGE OF EDUCATION BUILDING",
+      "buildingCode": "COED",
+      "room": "LECTURE ROOM 6C",
+      "floor": {
+        "id": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+        "number": 7,
+        "label": "Floor 6"
+      },
+      "ordinaryStairs": [
+        {
+          "floor": "Ground Floor",
+          "id": "93306559-4983-4ef4-b5a1-015bbb3e0424",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "c03b5223-1a45-4111-b4e2-46b569a5651c",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "3e21b186-8df6-4e71-8ee3-19e8ba97fdeb",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "dce55156-e683-46e8-9325-4cd7ce58d171",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "502c3205-bd7b-4889-b1de-1fc9529e91d1",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "2f92ae6f-a717-43eb-b5d5-11fab5c9f132",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "ec1028f9-41c4-4ff9-b468-3daaaab05778",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "61543fa9-8036-479d-b5f1-99f05516f04c",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "53b0177b-b516-4b05-9a33-e4ddc1247247",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "84ad46e2-cb70-455a-b0af-ae9555e947b1",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "53280913-5a5a-43a0-b7a5-c043fd67fc27",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 6",
+          "id": "e60de897-5da8-4773-ac81-0c9c635f2767",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "state": null
+        }
+      ],
+      "exteriorEmergencyStairs": [
+        {
+          "id": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+          "label": "Exterior Stair 1",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "e0e416c6-a2a7-4967-994f-b965e2e2ad78",
+            "3c3f6640-263c-44bc-9ef4-e63de9248baa",
+            "df8f4bea-ff72-45c6-a90c-314b956b535a",
+            "9922ed88-4f2d-4f01-af9a-c1e14c7592ed",
+            "ec1ae8cc-0de0-4e2a-9523-c676759a6a0c",
+            "c659781d-9962-43d6-8969-68c7ceed3b9f"
+          ],
+          "state": "open"
+        }
+      ],
+      "doorReadiness": [
+        {
+          "label": "Room door 1",
+          "state": "route_ready",
+          "routeCount": 1
+        },
+        {
+          "label": "Room door 2",
+          "state": "route_ready",
+          "routeCount": 1
+        }
+      ],
+      "graphCandidates": [
+        {
+          "exit": "COLLEGE OF EDUCATION BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 1",
+          "assemblyPoint": "Emergency Assembly Point",
+          "completeAssemblyRoute": true,
+          "emergencyUseReviewRequired": false,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "floorNumber": 7,
+              "floorLabel": "Floor 6"
+            },
+            {
+              "floorId": "ec1ae8cc-0de0-4e2a-9523-c676759a6a0c",
+              "floorNumber": 6,
+              "floorLabel": "Floor 5"
+            },
+            {
+              "floorId": "9922ed88-4f2d-4f01-af9a-c1e14c7592ed",
+              "floorNumber": 5,
+              "floorLabel": "Floor 4"
+            },
+            {
+              "floorId": "df8f4bea-ff72-45c6-a90c-314b956b535a",
+              "floorNumber": 4,
+              "floorLabel": "Floor 3"
+            },
+            {
+              "floorId": "3c3f6640-263c-44bc-9ef4-e63de9248baa",
+              "floorNumber": 3,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "e0e416c6-a2a7-4967-994f-b965e2e2ad78",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "741fed05-56ba-41df-a9de-4a234f8a50a6",
+              "name": "Door",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "doorId": "5e2b6e36-a804-4654-9ca3-0c132e38a9a1",
+              "type": "hallway"
+            },
+            {
+              "id": "d119e810-9b4e-48d4-be72-09410790f1ba",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "0385964e-1325-439a-819a-17199d5dab1b",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "b0528110-c8f0-4d54-ae48-4c60ed60bca8",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "a76cf38b-7a9f-4a1e-b6cd-5e2d96d74150",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "fe2c00fb-a101-4c60-9d78-70532773a829",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "40b2ca6c-3fff-4a6a-842d-c6c960641f64",
+              "name": "Waypoint",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "type": "hallway"
+            },
+            {
+              "id": "da3ca736-352e-454e-a229-b0e7c1090914",
+              "name": "Exterior Stair 1",
+              "floorId": "c659781d-9962-43d6-8969-68c7ceed3b9f",
+              "stairId": "e60de897-5da8-4773-ac81-0c9c635f2767",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "7ffa6283-59c8-4e24-9d34-b99438bfcc43",
+              "name": "Exterior Stair 1",
+              "floorId": "ec1ae8cc-0de0-4e2a-9523-c676759a6a0c",
+              "stairId": "84ad46e2-cb70-455a-b0af-ae9555e947b1",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "a0f70bc5-4dff-478b-b8ca-e66884273971",
+              "name": "Exterior Stair 1",
+              "floorId": "9922ed88-4f2d-4f01-af9a-c1e14c7592ed",
+              "stairId": "61543fa9-8036-479d-b5f1-99f05516f04c",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "819ac73f-0d92-4d1d-a3cd-2abb1afd449f",
+              "name": "Exterior Stair 1",
+              "floorId": "df8f4bea-ff72-45c6-a90c-314b956b535a",
+              "stairId": "2f92ae6f-a717-43eb-b5d5-11fab5c9f132",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "69824772-4d51-4280-9c6a-9c0f84e4fb6a",
+              "name": "Exterior Stair 1",
+              "floorId": "3c3f6640-263c-44bc-9ef4-e63de9248baa",
+              "stairId": "dce55156-e683-46e8-9325-4cd7ce58d171",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "144c6eca-8b5c-4221-b9af-35c596463c64",
+              "name": "Exterior Stair 1",
+              "floorId": "e0e416c6-a2a7-4967-994f-b965e2e2ad78",
+              "stairId": "93306559-4983-4ef4-b5a1-015bbb3e0424",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "1c61e242-356b-4a21-b1e5-a28f53db80a9",
+              "name": "Exterior Stair 1",
+              "exteriorEmergencyStairId": "2ea6a933-3738-4579-81c3-4cb5e0dfcb03",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "e6d2df74-5825-4aa8-812f-875ffc936f17",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "26205de2-85b1-4b82-92ba-e6c8e61817d0",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "43194a5b-386d-4a26-904a-dc56189b9982",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "name": "Emergency Assembly Point",
+              "type": "assembly"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "fb7c8689-2cb1-4abf-9988-82de83f18c5f",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "1c61e242-356b-4a21-b1e5-a28f53db80a9",
+              "endNodeId": "e6d2df74-5825-4aa8-812f-875ffc936f17"
+            },
+            {
+              "id": "77048df6-ca3e-45e4-be65-1b89e483767f",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "e6d2df74-5825-4aa8-812f-875ffc936f17",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "cb5effb9-6d3f-4db3-b4c3-f14b1b6bb463",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "bdf92e14-c76f-44fb-a906-adcfacda0f0d",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "endNodeId": "31765c03-38b3-4679-8415-a2ae272aee20"
+            },
+            {
+              "id": "b932df42-931b-4d99-9a44-bfa9a6a1c291",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "43194a5b-386d-4a26-904a-dc56189b9982",
+              "endNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782"
+            },
+            {
+              "id": "a857f85e-6372-4d51-92dd-bb51060d17fc",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "endNodeId": "43194a5b-386d-4a26-904a-dc56189b9982"
+            },
+            {
+              "id": "6637bb51-20af-42cd-8e8b-aea4ac530cb6",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "endNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507"
+            }
+          ]
+        }
+      ],
+      "studentEligibleCompleteRoutes": [
+        {
+          "exit": "COLLEGE OF EDUCATION BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 1",
+          "destination": "Emergency Assembly Point"
+        }
+      ]
+    },
+    {
+      "building": "STUDENT CENTER BUILDING",
+      "buildingCode": "SC",
+      "room": "PLV AUDITORIUM",
+      "floor": {
+        "id": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+        "number": 6,
+        "label": "Floor 5"
+      },
+      "ordinaryStairs": [
+        {
+          "floor": "Ground Floor",
+          "id": "0e3b4057-de54-4d71-a6bc-d3d746d73e53",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "ec21d51b-928d-4563-ac53-bb9e0c976fc0",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "8fdedab5-4436-440e-be08-b497664c8ecd",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Ground Floor",
+          "id": "5536cdcb-2743-43bb-b377-8d32c041f40d",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "6c1a056f-cf0e-450e-b890-3a7e591d11f3",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "f63a9e5f-34a7-4dd3-9498-9c698f110c1f",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "45be7887-66d3-416f-93c5-37705141d064",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 2",
+          "id": "6e9db1a9-71d2-421f-be1c-c714748d2f0b",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "14703bd1-d145-4d32-9c3e-dfdfca98ba95",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "a3597d1c-e540-406d-9f02-0bdb3268659d",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "573ffe68-5eb9-4ac2-b930-b96317519501",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 3",
+          "id": "5f8ae48d-a7ee-44d4-ae62-133424c05e57",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "dca3bdc6-22a3-45d8-bd9d-448ec9374e23",
+          "label": "Left Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "fd9a97ed-903a-42d1-b327-05559986e224",
+          "label": "Right Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "eb4a3089-7b60-4409-8ba7-b5272734f0dd",
+          "label": "Upper Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "6c965ecb-8cbd-48bd-9b8c-8fd7657e3a7c",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 4",
+          "id": "e9191e15-f86c-4a0c-a0ee-2e01f7161cb0",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "3411e2fa-c78f-4ad0-8283-3aded43d4194",
+          "label": "Upper Stair",
+          "emergencySafe": null,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "56d341d5-78fb-4fa0-9bea-2eac461f7aec",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "state": null
+        },
+        {
+          "floor": "Floor 5",
+          "id": "a7f60429-c3c0-4171-95f4-a0026298c3ea",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "state": null
+        }
+      ],
+      "exteriorEmergencyStairs": [
+        {
+          "id": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+          "label": "Emergency Stair 1",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "69d0dd61-43aa-47a3-8902-59b7cd979668",
+            "d380c353-5757-4c31-94ca-72249243b4ca",
+            "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+            "1834010b-d600-4a82-a5f6-cb426da3bffe",
+            "ff264ada-6de2-4699-b505-351bfb3a12e8"
+          ],
+          "state": "open"
+        },
+        {
+          "id": "341a95e8-3c94-4446-a432-1e1562de603f",
+          "label": "Exterior Stair 2",
+          "emergencySafe": true,
+          "servedFloorIds": [
+            "69d0dd61-43aa-47a3-8902-59b7cd979668",
+            "d380c353-5757-4c31-94ca-72249243b4ca",
+            "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+            "1834010b-d600-4a82-a5f6-cb426da3bffe",
+            "ff264ada-6de2-4699-b505-351bfb3a12e8"
+          ],
+          "state": "open"
+        }
+      ],
+      "doorReadiness": [
+        {
+          "label": "Room door 1",
+          "state": "route_ready",
+          "routeCount": 2
+        },
+        {
+          "label": "Room door 2",
+          "state": "disconnected",
+          "routeCount": 0
+        },
+        {
+          "label": "Room door 3",
+          "state": "route_ready",
+          "routeCount": 2
+        }
+      ],
+      "graphCandidates": [
+        {
+          "exit": "STUDENT CENTER BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 2",
+          "assemblyPoint": "Emergency Assembly Point",
+          "completeAssemblyRoute": true,
+          "emergencyUseReviewRequired": false,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "floorNumber": 6,
+              "floorLabel": "Floor 5"
+            },
+            {
+              "floorId": "1834010b-d600-4a82-a5f6-cb426da3bffe",
+              "floorNumber": 5,
+              "floorLabel": "Floor 4"
+            },
+            {
+              "floorId": "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+              "floorNumber": 4,
+              "floorLabel": "Floor 3"
+            },
+            {
+              "floorId": "d380c353-5757-4c31-94ca-72249243b4ca",
+              "floorNumber": 3,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "69d0dd61-43aa-47a3-8902-59b7cd979668",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "632d8f90-d012-4063-893d-2f40eb1a7353",
+              "name": "Door",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "doorId": "75d6da16-dd46-4f3b-807e-c1ad3c2cd66e",
+              "type": "hallway"
+            },
+            {
+              "id": "5cea2d23-d6b5-4b67-b597-a9f48f571a11",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "2d4b997c-c8e9-468f-8f86-888bf5e90264",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "5e43f026-0dcf-4e4c-9047-1ec83ff3a679",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "d44ee49c-56e7-461e-ac5f-f335a1781071",
+              "name": "Exterior Stair 2",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "stairId": "a7f60429-c3c0-4171-95f4-a0026298c3ea",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "1f26f990-eb48-4572-9c7a-75dd639a833c",
+              "name": "Exterior Stair 2",
+              "floorId": "1834010b-d600-4a82-a5f6-cb426da3bffe",
+              "stairId": "e9191e15-f86c-4a0c-a0ee-2e01f7161cb0",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "b361c347-66a1-423f-82f0-905195841e62",
+              "name": "Exterior Stair 2",
+              "floorId": "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+              "stairId": "5f8ae48d-a7ee-44d4-ae62-133424c05e57",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "a6866dcf-616f-483c-b12c-902ff7a802df",
+              "name": "Exterior Stair 2",
+              "floorId": "d380c353-5757-4c31-94ca-72249243b4ca",
+              "stairId": "45be7887-66d3-416f-93c5-37705141d064",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "e669ecfe-42ff-48b6-9271-e24e3c2f38dd",
+              "name": "Exterior Stair 2",
+              "floorId": "69d0dd61-43aa-47a3-8902-59b7cd979668",
+              "stairId": "ec21d51b-928d-4563-ac53-bb9e0c976fc0",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "f5110543-adb7-4afe-841b-6038d9bfd3a3",
+              "name": "Exterior Stair 2",
+              "exteriorEmergencyStairId": "341a95e8-3c94-4446-a432-1e1562de603f",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "b8fc251e-1366-4bbc-bed2-1b86f12959b7",
+              "name": "Path Junction",
+              "type": "outdoor"
+            },
+            {
+              "id": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "name": "Emergency Assembly Point",
+              "type": "assembly"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "b28b65eb-4160-4157-83eb-6dc987e1cef4",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "f5110543-adb7-4afe-841b-6038d9bfd3a3",
+              "endNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25"
+            },
+            {
+              "id": "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "5f935a79-edc0-4fa3-911b-e1175574acb4",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+            },
+            {
+              "id": "918f87b9-706b-48c9-ba35-76821d842bff",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "caddb3d7-42e5-4172-bbf7-8fecdb802596",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "b879c587-1f81-4435-82ad-bd0b493c0621",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "endNodeId": "b8fc251e-1366-4bbc-bed2-1b86f12959b7"
+            },
+            {
+              "id": "6637bb51-20af-42cd-8e8b-aea4ac530cb6",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "endNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507"
+            }
+          ]
+        },
+        {
+          "exit": "STUDENT CENTER BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Emergency Stair 1",
+          "assemblyPoint": "Emergency Assembly Point",
+          "completeAssemblyRoute": true,
+          "emergencyUseReviewRequired": false,
+          "reason": null,
+          "indoorSegments": [
+            {
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "floorNumber": 6,
+              "floorLabel": "Floor 5"
+            },
+            {
+              "floorId": "1834010b-d600-4a82-a5f6-cb426da3bffe",
+              "floorNumber": 5,
+              "floorLabel": "Floor 4"
+            },
+            {
+              "floorId": "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+              "floorNumber": 4,
+              "floorLabel": "Floor 3"
+            },
+            {
+              "floorId": "d380c353-5757-4c31-94ca-72249243b4ca",
+              "floorNumber": 3,
+              "floorLabel": "Floor 2"
+            },
+            {
+              "floorId": "69d0dd61-43aa-47a3-8902-59b7cd979668",
+              "floorNumber": 1,
+              "floorLabel": "Ground Floor"
+            }
+          ],
+          "routeNodes": [
+            {
+              "id": "350b577f-fdc6-4902-81be-c5df0d54513c",
+              "name": "Door",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "doorId": "57eb24e7-24c5-4175-9573-e83c9ce69a18",
+              "type": "hallway"
+            },
+            {
+              "id": "f27c4f0e-03e1-4714-8736-ab02e3ae1251",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "987b19b7-7fa8-4b78-94fc-68d1678fe788",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "21e4168d-6d42-4bd0-8058-c98c6f57915a",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "5c87a211-5e12-41f5-aced-b6a587d85d93",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "8049ad7b-a43b-4fbf-b630-e1e4619070e3",
+              "name": "Waypoint",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "type": "hallway"
+            },
+            {
+              "id": "0b0ec7b5-c508-41e9-a1ae-bd15fffa2316",
+              "name": "Emergency Stair 1",
+              "floorId": "ff264ada-6de2-4699-b505-351bfb3a12e8",
+              "stairId": "56d341d5-78fb-4fa0-9bea-2eac461f7aec",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "f534a734-84a5-41ab-8cf2-9af55c48469a",
+              "name": "Emergency Stair 1",
+              "floorId": "1834010b-d600-4a82-a5f6-cb426da3bffe",
+              "stairId": "6c965ecb-8cbd-48bd-9b8c-8fd7657e3a7c",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "989ef872-b2b6-404f-9d98-7f6b0cdef1b3",
+              "name": "Emergency Stair 1",
+              "floorId": "9891a258-a52d-48d4-9825-d8f9cdcde37f",
+              "stairId": "573ffe68-5eb9-4ac2-b930-b96317519501",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "bcbcaa4f-013d-4e17-b668-bbc491e62d76",
+              "name": "Emergency Stair 1",
+              "floorId": "d380c353-5757-4c31-94ca-72249243b4ca",
+              "stairId": "6e9db1a9-71d2-421f-be1c-c714748d2f0b",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "3917c885-526c-4224-a24b-8c5a79f71462",
+              "name": "Emergency Stair 1",
+              "floorId": "69d0dd61-43aa-47a3-8902-59b7cd979668",
+              "stairId": "0e3b4057-de54-4d71-a6bc-d3d746d73e53",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "13432d77-2642-41c7-894f-20723da48bc8",
+              "name": "Emergency Stair 1",
+              "exteriorEmergencyStairId": "d1bd3cb6-a722-4f68-928a-ea7228ec0cbf",
+              "type": "stair",
+              "emergencyStair": true
+            },
+            {
+              "id": "3345bb5d-14f4-4e59-bb14-d75830a18869",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "26205de2-85b1-4b82-92ba-e6c8e61817d0",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "43194a5b-386d-4a26-904a-dc56189b9982",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "name": "Walking Point",
+              "type": "outdoor"
+            },
+            {
+              "id": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "name": "Emergency Assembly Point",
+              "type": "assembly"
+            }
+          ],
+          "routeEdges": [
+            {
+              "id": "c8d25762-fab6-4b65-a027-e94a7e8b5d53",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "13432d77-2642-41c7-894f-20723da48bc8",
+              "endNodeId": "3345bb5d-14f4-4e59-bb14-d75830a18869"
+            },
+            {
+              "id": "2884a1cd-96a8-4c69-a0a0-5cda10d301d4",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "3345bb5d-14f4-4e59-bb14-d75830a18869",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "cb5effb9-6d3f-4db3-b4c3-f14b1b6bb463",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "31765c03-38b3-4679-8415-a2ae272aee20",
+              "endNodeId": "26205de2-85b1-4b82-92ba-e6c8e61817d0"
+            },
+            {
+              "id": "bdf92e14-c76f-44fb-a906-adcfacda0f0d",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782",
+              "endNodeId": "31765c03-38b3-4679-8415-a2ae272aee20"
+            },
+            {
+              "id": "b932df42-931b-4d99-9a44-bfa9a6a1c291",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "43194a5b-386d-4a26-904a-dc56189b9982",
+              "endNodeId": "82619789-047c-4e4d-88bb-5bc1bf488782"
+            },
+            {
+              "id": "a857f85e-6372-4d51-92dd-bb51060d17fc",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507",
+              "endNodeId": "43194a5b-386d-4a26-904a-dc56189b9982"
+            },
+            {
+              "id": "6637bb51-20af-42cd-8e8b-aea4ac530cb6",
+              "type": "walkway",
+              "emergencySafe": true,
+              "closed": false,
+              "startNodeId": "4c11b9a5-5ba7-4ab2-affe-4e8b7f90e523",
+              "endNodeId": "9fd33b55-8038-403e-9a7a-0342c74cd507"
+            }
+          ]
+        }
+      ],
+      "studentEligibleCompleteRoutes": [
+        {
+          "exit": "STUDENT CENTER BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Exterior Stair 2",
+          "destination": "Emergency Assembly Point"
+        },
+        {
+          "exit": "STUDENT CENTER BUILDING � Exterior Emergency Stair -> Emergency Assembly Point � Emergency Stair 1",
+          "destination": "Emergency Assembly Point"
+        }
+      ]
+    }
+  ]
+}

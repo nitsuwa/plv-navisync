@@ -1,19 +1,25 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeElements } from "@react-three/fiber";
 import { Html, Line, OrbitControls } from "@react-three/drei";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { DoorOpen, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import * as THREE from "three";
 import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
-import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraFarPlane, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, deriveStudentAuditoriumChairLayoutsForFloor, discoverIndoorCameraDirection, exteriorEmergencyStairOpenings, INDOOR_FLOOR_CAMERA_DIRECTION, indoorDoorVisualWidth, indoorFloorCameraBounds, indoorFloorCameraDirectionForViewport, indoorFloorCameraFarPlane, indoorFloorCameraFitPadding, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
 import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
-import type { Pt } from "../../lib/routePlanner";
+import type { Pt, RouteMode } from "../../lib/routePlanner";
+import type { StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
+import { groupStudentRouteExploreTransitions } from "../../lib/studentRouteFlow";
+import { student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
+import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
-import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
-import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
+import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
+import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dIndoorArrivalCameraDirection, student3dIndoorFollowCameraOffset, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
+import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
 import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
 import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
 import type { Event3DEditing } from "../../lib/event3dEditing";
@@ -29,11 +35,20 @@ declare module "react" {
 interface FloorViewport { width: number; height: number; offsetX: number; offsetY: number }
 interface IndoorFloor3DRendererProps {
   floor: FloorPlan;
+  routeMode?: RouteMode;
+  routeColor?: string;
+  animateRouteArrows?: boolean;
   hasLowerServedFloor?: boolean;
   floorLabel: string;
   darkMode?: boolean;
   viewport: FloorViewport;
   routePoints?: readonly Pt[];
+  emergencyRouteSegments?: readonly { id: string; label: string; points: readonly Pt[]; color: string }[];
+  emergencyRouteOverview?: boolean;
+  routePreviewFocusKey?: string;
+  /** Use the closer, more top-down floor framing shown by Discover PLV. */
+  discoverCamera?: boolean;
+  activeEmergencyRouteId?: string | null;
   walkProgress?: number;
   walkProgressRef?: MutableRefObject<number>;
   showStartMarker?: boolean;
@@ -47,6 +62,8 @@ interface IndoorFloor3DRendererProps {
   focusRoomId?: string | null;
   focusNonce?: number;
   arrivalFocusKey?: string;
+  arrivalFocusPoint?: Pt | null;
+  arrivalApproachPoint?: Pt | null;
   routeInspectionFocusPoint?: Pt | null;
   routeInspectionFocusKey?: string;
   destinationRoomId?: string | null;
@@ -57,13 +74,19 @@ interface IndoorFloor3DRendererProps {
   previewCamera?: Event3DCameraRequest;
   previewCameraSession?: Event3DCameraSession;
   eventMarker?: { point: Pt; label: string } | null;
-  activeTransition?: { point: Pt; label: string; onActivate?: () => void } | null;
-  exploreTransitionCues?: readonly { id: string; point: Pt; label: string; onActivate: () => void }[];
+  activeTransition?: { point: Pt; label: string; displayLabel?: string; onActivate?: () => void } | null;
+  exploreTransitionCues?: readonly StudentRouteExploreTransitionMarker[];
   followMode?: boolean;
   followPlaying?: boolean;
   freeLook?: boolean;
   recenterNonce?: number;
+  recenterFollowOffset?: Student3dCameraOffset | null;
+  onRecenterComplete?: (nonce: number) => void;
   reducedMotion?: boolean;
+  onCameraPoseChange?: (pose: Student3dCameraPose) => void;
+  cameraPoseRestore?: Student3dCameraPose | null;
+  cameraPoseRestoreNonce?: number;
+  onCameraPoseRestoreComplete?: (nonce: number) => void;
   onRoomClick?: (roomId: string) => void;
   onIntentionalPan?: () => void;
   onFallback?: () => void;
@@ -76,8 +99,22 @@ type StairVisualItem = Pick<FloorStairs, "id" | "x" | "y" | "width" | "height" |
 type RampVisualItem = { x: number; y: number; width: number; height: number; rotation?: number; visible?: boolean; slope?: "gentle" | "medium" | "steep"; handrails?: boolean; direction?: "up" | "down" | "both" | "forward" | "reverse"; layout?: "straight" | "l_turn_left" | "l_turn_right" };
 
 const FLOOR_SCALE = 0.025;
+const STUDENT_ROUTE_RIBBON_WIDTH = 0.12;
 const WALL_HEIGHT = 2.9;
 const FLOOR_SURFACE_Y = 0.012;
+const INDOOR_FOCUS_OVERLAYS = ".map-layer-building-sheet, .student-map-utility-stack, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-testid='student-map-action-row'], [data-testid='discover-tour-panel'], [data-map-search-header='true']";
+
+function indoorSafeFocusRect(canvas: HTMLElement) {
+  const canvasRect = canvas.getBoundingClientRect();
+  const surface = canvas.closest<HTMLElement>("[data-testid='student-map-surface']");
+  const overlayRects = surface ? Array.from(surface.querySelectorAll<HTMLElement>(INDOOR_FOCUS_OVERLAYS)).filter((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  }).map((element) => element.getBoundingClientRect()) : [];
+  return { canvasRect, safeRect: student3dSafeFocusRect(canvasRect, overlayRects) };
+}
+
 const EMPTY_FLOOR_ROUTE: readonly Pt[] = Object.freeze([]);
 const EMPTY_POLYGONS: readonly Pt[][] = Object.freeze([]);
 const EMPTY_STRING_SET: ReadonlySet<string> = new Set();
@@ -194,23 +231,57 @@ function VoidGuardrail({ polygon, viewport }: { polygon: readonly Pt[]; viewport
   </group>;
 }
 
-function routeRibbon(points: readonly Pt[], viewport: FloorViewport, fullWidth = 0.17, elevations?: readonly number[]) {
+function routeRibbon(points: readonly Pt[], viewport: FloorViewport, fullWidth = STUDENT_ROUTE_RIBBON_WIDTH, elevations?: readonly number[]) {
   const geometry = new THREE.BufferGeometry();
   if (points.length < 2) return geometry;
   const positions: number[] = [];
   const indices: number[] = [];
   const half = fullWidth / 2;
-  const mapped = points.map((point, index) => pointToWorld(point, viewport, 0.075 + (elevations?.[index] ?? 0)));
+  const mapped = points
+    .map((point, index) => pointToWorld(point, viewport, 0.075 + (elevations?.[index] ?? 0)))
+    // Authored paths sometimes repeat a doorway/landing point. A zero-length
+    // segment makes the join normal undefined and creates a blue spike.
+    .filter((point, index, all) => index === 0 || Math.hypot(point[0] - all[index - 1][0], point[2] - all[index - 1][2]) > 1e-4);
+  if (mapped.length < 2) return geometry;
   for (let index = 0; index < mapped.length; index += 1) {
+    const current = mapped[index];
     const before = mapped[Math.max(0, index - 1)];
     const after = mapped[Math.min(mapped.length - 1, index + 1)];
-    const dx = after[0] - before[0];
-    const dz = after[2] - before[2];
-    const length = Math.max(1e-5, Math.hypot(dx, dz));
-    const nx = -dz / length;
-    const nz = dx / length;
-    positions.push(mapped[index][0] + nx * half, mapped[index][1], mapped[index][2] + nz * half);
-    positions.push(mapped[index][0] - nx * half, mapped[index][1], mapped[index][2] - nz * half);
+    const incomingX = current[0] - before[0];
+    const incomingZ = current[2] - before[2];
+    const outgoingX = after[0] - current[0];
+    const outgoingZ = after[2] - current[2];
+    const incomingLength = Math.max(1e-5, Math.hypot(incomingX, incomingZ));
+    const outgoingLength = Math.max(1e-5, Math.hypot(outgoingX, outgoingZ));
+    const outgoingNx = -outgoingZ / outgoingLength;
+    const outgoingNz = outgoingX / outgoingLength;
+    let nx = index > 0 ? -incomingZ / incomingLength : outgoingNx;
+    let nz = index > 0 ? incomingX / incomingLength : outgoingNz;
+    if (index > 0 && index < mapped.length - 1) {
+      const incomingNx = -incomingZ / incomingLength;
+      const incomingNz = incomingX / incomingLength;
+      const miterX = incomingNx + outgoingNx;
+      const miterZ = incomingNz + outgoingNz;
+      const miterLength = Math.hypot(miterX, miterZ);
+      if (miterLength > 1e-4) {
+        const unitX = miterX / miterLength;
+        const unitZ = miterZ / miterLength;
+        const miterDot = unitX * outgoingNx + unitZ * outgoingNz;
+        const miterScale = Math.min(2.2, 1 / Math.max(0.45, miterDot));
+        nx = unitX * miterScale;
+        nz = unitZ * miterScale;
+      } else {
+        // A near-reversal has no stable bisector. Use the outgoing normal and
+        // keep the authored corner instead of producing a long miter spike.
+        nx = outgoingNx;
+        nz = outgoingNz;
+      }
+    } else if (index === mapped.length - 1) {
+      nx = -incomingZ / incomingLength;
+      nz = incomingX / incomingLength;
+    }
+    positions.push(current[0] + nx * half, current[1], current[2] + nz * half);
+    positions.push(current[0] - nx * half, current[1], current[2] - nz * half);
     if (index < mapped.length - 1) {
       const start = index * 2;
       indices.push(start, start + 1, start + 2, start + 1, start + 3, start + 2);
@@ -396,13 +467,14 @@ function Wall({ id, segment, viewport, registry, darkMode }: {
 }
 const MemoWall = memo(Wall);
 
-function IndoorWallOcclusionController({ registry, viewport, route, progressRef, focusPoint, followMode }: {
+function IndoorWallOcclusionController({ registry, viewport, route, progressRef, focusPoint, followMode, focusOpacity = 0.5 }: {
   registry: WallOcclusionRegistry;
   viewport: FloorViewport;
   route: readonly Pt[];
   progressRef?: MutableRefObject<number>;
   focusPoint: Pt | null;
   followMode?: boolean;
+  focusOpacity?: number;
 }) {
   const { invalidate } = useThree();
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
@@ -427,7 +499,7 @@ function IndoorWallOcclusionController({ registry, viewport, route, progressRef,
           );
           // Preserve the room boundary while revealing the selected route point.
           // Very low opacity made several unrelated walls appear to vanish at once.
-          const nextOpacity = occludesFocus ? 0.5 : 1;
+          const nextOpacity = occludesFocus ? focusOpacity : 1;
           if (entry.targetOpacity !== nextOpacity) {
             entry.targetOpacity = nextOpacity;
             animating.current.add(entry);
@@ -470,12 +542,13 @@ function IndoorWallOcclusionController({ registry, viewport, route, progressRef,
   return null;
 }
 
-function IndoorRouteArrows({ arrows, points, viewport, ramps, reducedMotion = false }: {
+function IndoorRouteArrows({ arrows, points, viewport, ramps, reducedMotion = false, animate = true }: {
   arrows: ReturnType<typeof routeArrowPlacements>;
   points: readonly Pt[];
   viewport: FloorViewport;
   ramps: readonly RampVisualItem[];
   reducedMotion?: boolean;
+  animate?: boolean;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const sampler = useMemo(() => createRouteWorldSampler(points, FLOOR_SCALE), [points]);
@@ -506,7 +579,7 @@ function IndoorRouteArrows({ arrows, points, viewport, ramps, reducedMotion = fa
   }, [arrows, ramps, viewport]);
   useFrame((_, delta) => {
     const mesh = meshRef.current;
-    if (!mesh || reducedMotion || arrows.length === 0) return;
+    if (!mesh || reducedMotion || !animate || arrows.length === 0) return;
     const usable = sampler.totalLength - 1.8;
     if (usable <= 0) return;
     elapsedRef.current += Math.min(delta, 0.05);
@@ -730,6 +803,87 @@ function Furniture({ item, viewport }: { item: FloorPlan["furniture"][number]; v
 const MemoFurniture = memo(Furniture);
 
 type FurnitureInstanceBox = { position: [number, number, number]; rotation: number; scale: [number, number, number] };
+
+/** One merged, low-poly armchair shared by every authored auditorium seat. */
+function createAuditoriumChairGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const addBox = (size: [number, number, number], position: [number, number, number], tilt = 0) => {
+    const geometry = new THREE.BoxGeometry(...size);
+    if (tilt) geometry.rotateX(tilt);
+    geometry.translate(...position);
+    parts.push(geometry);
+  };
+  // Normalized X/Z dimensions let the same compact shape scale to each authored
+  // seat footprint. The back is slightly reclined and the side rails double as
+  // simple armrests and supports.
+  addBox([0.82, 0.09, 0.72], [0, 0.43, 0]);
+  addBox([0.82, 0.41, 0.09], [0, 0.69, -0.34], -0.08);
+  for (const side of [-1, 1]) {
+    addBox([0.1, 0.085, 0.78], [side * 0.45, 0.62, 0]);
+    addBox([0.055, 0.62, 0.055], [side * 0.45, 0.31, 0]);
+  }
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((part) => part.dispose());
+  if (!merged) throw new Error("Unable to create auditorium chair geometry");
+  merged.computeVertexNormals();
+  return merged;
+}
+
+/** Static furniture is represented by one shared geometry, one material and
+ * one instanced draw call. Pan/zoom only moves this parent group; transforms
+ * are rebuilt only when the authored furniture array changes. */
+const StudentAuditoriumChairLayer = memo(function StudentAuditoriumChairLayer({ chairs, viewport }: {
+  chairs: ReturnType<typeof deriveStudentAuditoriumChairLayoutsForFloor>;
+  viewport: FloorViewport;
+}) {
+  if (chairs.length === 0) return null;
+  return <StudentAuditoriumChairInstances chairs={chairs} viewport={viewport} />;
+});
+
+function StudentAuditoriumChairInstances({ chairs, viewport }: {
+  chairs: ReturnType<typeof deriveStudentAuditoriumChairLayoutsForFloor>;
+  viewport: FloorViewport;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const invalidate = useThree((state) => state.invalidate);
+  const geometry = useMemo(createAuditoriumChairGeometry, []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.86, metalness: 0.02 }), []);
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh || chairs.length === 0) return;
+    const object = new THREE.Object3D();
+    const color = new THREE.Color();
+    chairs.forEach((chair, index) => {
+      const chairWidth = Math.max(0.24, Math.min(0.58, chair.width * FLOOR_SCALE));
+      const chairDepth = Math.max(0.24, Math.min(0.58, chair.height * FLOOR_SCALE));
+      // Use the same floor-to-world transform as Furniture/RoomFloor. Floor
+      // canvas Y maps to positive world Z in this renderer; negating Y here
+      // mirrored the complete auditorium seating block across the floor.
+      object.position.set(...pointToWorld({ x: chair.x, y: chair.y }, viewport, FLOOR_SURFACE_Y));
+      object.rotation.set(0, -(chair.rotation || 0) * Math.PI / 180, 0);
+      object.scale.set(chair.flipX ? -chairWidth : chairWidth, 1, chair.flipY ? -chairDepth : chairDepth);
+      object.updateMatrix();
+      mesh.setMatrixAt(index, object.matrix);
+      mesh.setColorAt(index, color.set(chair.color));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    // The indoor Canvas is demand-rendered when static. Mutating instance
+    // buffers does not itself schedule a frame after a floor/data update.
+    invalidate();
+  }, [chairs, invalidate, viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+
+  return <group name="student-auditorium-armchairs">
+    <instancedMesh name="student-auditorium-chair-instances" ref={meshRef} key={chairs.length} args={[geometry, material, chairs.length]} castShadow={false} receiveShadow={false} frustumCulled dispose={null} />
+  </group>;
+}
 
 /** Batched, visual-only canteen furniture derived from the authored floor items. */
 function StudentCanteenDiningFurnitureLayer({ items, viewport }: { items: readonly FloorFurniture[]; viewport: FloorViewport }) {
@@ -1216,28 +1370,76 @@ function FloorPath({ path, viewport, darkMode }: { path: FloorPlan["paths"][numb
 }
 const MemoFloorPath = memo(FloorPath);
 
-function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: () => boolean }) {
+function FloorScene(props: IndoorFloor3DRendererProps & {
+  shouldSuppressClick: () => boolean;
+  auditoriumChairLayouts: ReturnType<typeof deriveStudentAuditoriumChairLayoutsForFloor>;
+}) {
   const { floor, viewport } = props;
   const controls = useRef<any>(null);
   const wallRegistry = useRef(new Map<string, WallOcclusionEntry>());
   const humanMarkerRef = useRef<THREE.Group>(null);
   const routeSamplePointRef = useRef<Pt>({ x: 0, y: 0 });
   const followTargetScratch = useRef(new THREE.Vector3());
-  const followOffsetScratch = useRef(new THREE.Vector3());
   const recenteringRef = useRef(false);
   const recenterFrameRef = useRef(0);
   const selectionTweenRef = useRef<{ startPosition: THREE.Vector3; endPosition: THREE.Vector3; startTarget: THREE.Vector3; endTarget: THREE.Vector3; startedAt: number; duration: number } | null>(null);
+  const pendingRecenterNonceRef = useRef<number | null>(null);
   const selectionFocusLockRef = useRef(false);
   const lastRoomFocusKeyRef = useRef("");
   const lastRouteInspectionFocusKeyRef = useRef("");
   const dampingBeforeRecenterRef = useRef<boolean | null>(null);
+  const lastCameraPoseRestoreNonceRef = useRef(0);
   const followCameraStateRef = useRef({ freeLook: Boolean(props.freeLook) });
+  const followCameraContextRef = useRef<{ floorId: string; route: readonly Pt[]; viewportKey: string; width: number; height: number } | null>(null);
+  const previousFollowPlayingRef = useRef(Boolean(props.followPlaying));
   const { camera, invalidate, size } = useThree();
+  const exploreTransitionChoices = useMemo(
+    () => (props.exploreTransitionCues ?? []).flatMap((marker) => marker.choices),
+    [props.exploreTransitionCues],
+  );
+  const initialExploreGroups = useMemo(
+    () => groupStudentRouteExploreTransitions(exploreTransitionChoices, 0),
+    [exploreTransitionChoices],
+  );
+  const [screenExploreTransitionGroups, setScreenExploreTransitionGroups] = useState(initialExploreGroups);
+  const exploreGroupSourceRef = useRef(exploreTransitionChoices);
+  const exploreGroupSignatureRef = useRef(initialExploreGroups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|"));
+  useFrame(({ camera: frameCamera, size: frameSize }) => {
+    if (exploreTransitionChoices.length === 0) {
+      if (exploreGroupSourceRef.current !== exploreTransitionChoices || exploreGroupSignatureRef.current) {
+        exploreGroupSourceRef.current = exploreTransitionChoices;
+        exploreGroupSignatureRef.current = "";
+        setScreenExploreTransitionGroups([]);
+      }
+      return;
+    }
+    const projectedPoints = new Map<string, Pt>();
+    for (const choice of exploreTransitionChoices) {
+      const projected = new THREE.Vector3(...pointToWorld(choice.point, viewport, 0.44)).project(frameCamera);
+      projectedPoints.set(choice.id, {
+        x: (projected.x * 0.5 + 0.5) * frameSize.width,
+        y: (-projected.y * 0.5 + 0.5) * frameSize.height,
+      });
+    }
+    const groups = groupStudentRouteExploreTransitions(
+      exploreTransitionChoices,
+      164,
+      (choice) => projectedPoints.get(choice.id) ?? choice.point,
+    );
+    const signature = groups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|");
+    if (exploreGroupSourceRef.current !== exploreTransitionChoices || exploreGroupSignatureRef.current !== signature) {
+      exploreGroupSourceRef.current = exploreTransitionChoices;
+      exploreGroupSignatureRef.current = signature;
+      setScreenExploreTransitionGroups(groups);
+    }
+  });
+  useEffect(() => { invalidate(); }, [exploreTransitionChoices, invalidate]);
   useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const cancelRecenterTween = useCallback(() => {
     if (recenterFrameRef.current) cancelAnimationFrame(recenterFrameRef.current);
     recenterFrameRef.current = 0;
     selectionTweenRef.current = null;
+    pendingRecenterNonceRef.current = null;
     selectionFocusLockRef.current = false;
     recenteringRef.current = false;
     if (controls.current && dampingBeforeRecenterRef.current !== null) {
@@ -1247,40 +1449,93 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     invalidate();
   }, [invalidate]);
   useEffect(() => {
+    const wasPlaying = previousFollowPlayingRef.current;
+    previousFollowPlayingRef.current = Boolean(props.followPlaying);
+    if (wasPlaying && !props.followPlaying) cancelRecenterTween();
+  }, [cancelRecenterTween, props.followPlaying]);
+  useEffect(() => {
     const instance = controls.current;
     if (!instance) return;
-    configureStudent3dInputMappings(instance);
+    const updateInputMappings = () => configureStudent3dInputMappings(instance);
+    updateInputMappings();
+    window.addEventListener("resize", updateInputMappings);
     const cancelOnInput = () => cancelRecenterTween();
     const resetOnLifecycle = () => cancelRecenterTween();
+    const handleContextMenu = (event: MouseEvent) => {
+      const surface = (instance.domElement as HTMLElement).closest<HTMLElement>("[data-testid='student-indoor-3d-renderer']");
+      const isRotationDrag = shouldPreventStudent3dContextMenu(event.button, surface?.dataset.rightButtonDragging === "true");
+      if (isRotationDrag && surface) {
+        event.preventDefault();
+        delete surface.dataset.rightButtonDragging;
+      }
+      // OrbitControls prevents every canvas context menu internally. Stop that
+      // listener so ordinary right-click menus remain available when no drag ran.
+      event.stopImmediatePropagation();
+    };
     instance.addEventListener("start", cancelOnInput);
+    (instance.domElement as HTMLElement).addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("blur", resetOnLifecycle);
     document.addEventListener("visibilitychange", resetOnLifecycle);
     (instance.domElement as HTMLElement).addEventListener("pointercancel", resetOnLifecycle);
     return () => {
       instance.removeEventListener("start", cancelOnInput);
+      window.removeEventListener("resize", updateInputMappings);
+      (instance.domElement as HTMLElement).removeEventListener("contextmenu", handleContextMenu, true);
       window.removeEventListener("blur", resetOnLifecycle);
       document.removeEventListener("visibilitychange", resetOnLifecycle);
       (instance.domElement as HTMLElement).removeEventListener("pointercancel", resetOnLifecycle);
     };
   }, [cancelRecenterTween]);
+  useEffect(() => {
+    const instance = controls.current;
+    if (!instance || !props.onCameraPoseChange) return;
+    const publishPose = () => props.onCameraPoseChange?.({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [instance.target.x, instance.target.y, instance.target.z],
+    });
+    instance.addEventListener("change", publishPose);
+    publishPose();
+    return () => instance.removeEventListener("change", publishPose);
+  }, [camera, props.onCameraPoseChange]);
   const center = useMemo(() => pointToWorld({ x: viewport.width / 2 - viewport.offsetX, y: viewport.height / 2 - viewport.offsetY }, viewport), [viewport]);
+  const floorFocusBounds = useMemo(() => indoorFloorCameraBounds(floor, {
+    x: -viewport.offsetX,
+    y: -viewport.offsetY,
+    width: viewport.width,
+    height: viewport.height,
+  }), [floor, viewport]);
+  const floorContentCenter = useMemo(() => pointToWorld({
+    x: floorFocusBounds.x + floorFocusBounds.width / 2,
+    y: floorFocusBounds.y + floorFocusBounds.height / 2,
+  }, viewport), [floorFocusBounds, viewport]);
   const route = props.routePoints ?? EMPTY_FLOOR_ROUTE;
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
+  const routeForFrame = useMemo(() => props.emergencyRouteOverview && props.emergencyRouteSegments?.length
+    ? props.emergencyRouteSegments.flatMap((segment) => segment.points)
+    : route, [props.emergencyRouteOverview, props.emergencyRouteSegments, route]);
   const frameCenter = useMemo(() => {
-    if (props.followMode || route.length < 2) return center;
-    const bounds = route.reduce((result, point) => ({
+    if (props.followMode || routeForFrame.length < 2) return floorContentCenter;
+    const bounds = routeForFrame.reduce((result, point) => ({
       minX: Math.min(result.minX, point.x),
       minY: Math.min(result.minY, point.y),
       maxX: Math.max(result.maxX, point.x),
       maxY: Math.max(result.maxY, point.y),
     }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
     return pointToWorld({ x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 }, viewport);
-  }, [center, props.followMode, route, viewport]);
+  }, [floorContentCenter, props.followMode, routeForFrame, viewport]);
   const routeArrows = useMemo(() => routeArrowPlacements(route, { worldScale: FLOOR_SCALE }), [route]);
   const ramps = useMemo(() => [...(floor.ramps ?? []), ...(floor.entranceRamps ?? [])] as RampVisualItem[], [floor.entranceRamps, floor.ramps]);
   const routeElevations = useMemo(() => route.map((point) => rampHeightAt(point, ramps)), [ramps, route]);
-  const routeGeometry = useMemo(() => routeRibbon(route, viewport, 0.17, routeElevations), [route, routeElevations, viewport]);
+  const routeGeometry = useMemo(() => routeRibbon(route, viewport, STUDENT_ROUTE_RIBBON_WIDTH, routeElevations), [route, routeElevations, viewport]);
   useEffect(() => () => routeGeometry.dispose(), [routeGeometry]);
+  const emergencyRouteModels = useMemo(() => (props.emergencyRouteOverview ? props.emergencyRouteSegments ?? [] : [])
+    .filter((segment) => segment.points.length > 1)
+    .map((segment) => ({
+      ...segment,
+      geometry: routeRibbon(segment.points, viewport, STUDENT_ROUTE_RIBBON_WIDTH, segment.points.map((point) => rampHeightAt(point, ramps))),
+      arrows: routeArrowPlacements(segment.points, { worldScale: FLOOR_SCALE }),
+    })), [props.emergencyRouteOverview, props.emergencyRouteSegments, ramps, viewport]);
+  useEffect(() => () => emergencyRouteModels.forEach((model) => model.geometry.dispose()), [emergencyRouteModels]);
   const emergencyAccessOpenings = useMemo(
     () => exteriorEmergencyStairOpenings(floor.walls ?? [], floor.doors ?? [], floor.stairs ?? [], floor.canvasW ?? 600, floor.canvasH ?? 450),
     [floor.canvasH, floor.canvasW, floor.doors, floor.stairs, floor.walls],
@@ -1343,13 +1598,102 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     ? sampleRoute(visualWalkProgress, routeSamplePointRef.current)
     : props.walkProgress === undefined ? null : sampleRoute(props.walkProgress, routeSamplePointRef.current);
   const humanRampHeight = humanPoint ? rampHeightAt(humanPoint, ramps) : 0;
-  const cutawayFocus = humanPoint ?? route.at(-1) ?? null;
-  const routeBounds = useMemo(() => route.length > 1 ? route.reduce((bounds, point) => ({
+    const cutawayFocus = props.arrivalFocusPoint ?? humanPoint ?? route.at(-1) ?? null;
+  const routeBounds = useMemo(() => routeForFrame.length > 1 ? routeForFrame.reduce((bounds, point) => ({
     minX: Math.min(bounds.minX, point.x),
     minY: Math.min(bounds.minY, point.y),
     maxX: Math.max(bounds.maxX, point.x),
     maxY: Math.max(bounds.maxY, point.y),
-  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }) : null, [route]);
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }) : null, [routeForFrame]);
+  const [routePreviewSafeDepth, setRoutePreviewSafeDepth] = useState(0);
+  const routePreviewSafeDepthKeyRef = useRef({ key: "", expanded: false });
+  useEffect(() => {
+    const focusKey = props.routePreviewFocusKey;
+    if (!focusKey || !routeBounds || routeForFrame.length < 2 || !controls.current) {
+      routePreviewSafeDepthKeyRef.current = { key: "", expanded: false };
+      setRoutePreviewSafeDepth(0);
+      return;
+    }
+    const layoutKey = `${focusKey}:${Math.round(size.width)}x${Math.round(size.height)}`;
+    if (routePreviewSafeDepthKeyRef.current.key !== layoutKey) {
+      routePreviewSafeDepthKeyRef.current = { key: layoutKey, expanded: false };
+    }
+    const focusState = routePreviewSafeDepthKeyRef.current;
+    const canvas = controls.current.domElement as HTMLElement;
+    const surface = canvas.closest<HTMLElement>("[data-testid='student-map-surface']");
+    const panel = surface?.querySelector<HTMLElement>("[data-testid='route-planner-dialog']") ?? null;
+    const mobile = canvas.getBoundingClientRect().width < 768;
+    let frame = 0;
+    let disposed = false;
+    let mutationObserver: MutationObserver | null = null;
+
+    const fitRouteDepth = () => {
+      const { canvasRect, safeRect } = indoorSafeFocusRect(canvas);
+      if (canvasRect.height <= 0 || safeRect.width <= 0 || safeRect.height <= 0) return;
+      const distance = student3dFocusDistanceForViewport(
+        Math.max(0.8, (routeBounds.maxX - routeBounds.minX) * FLOOR_SCALE),
+        Math.max(0.8, (routeBounds.maxY - routeBounds.minY) * FLOOR_SCALE),
+        2.9,
+        (camera as THREE.PerspectiveCamera).fov ?? 42,
+        canvasRect.height,
+        safeRect.width,
+        safeRect.height,
+        { padding: 1.25, min: 5.5, max: 20 },
+      );
+      // FloorScene's route pose uses [0.78, 1.18, 0.86] times halfDepth.
+      const nextHalfDepth = distance / Math.hypot(0.78, 1.18, 0.86);
+      setRoutePreviewSafeDepth((current) => Math.abs(current - nextHalfDepth) < 0.05 ? current : nextHalfDepth);
+    };
+
+    const scheduleFit = (expandedPass: boolean) => {
+      if (disposed) return;
+      if (frame) cancelAnimationFrame(frame);
+      let previous = "";
+      let stableFrames = 0;
+      let count = 0;
+      const measure = () => {
+        if (disposed) return;
+        const canvasRect = canvas.getBoundingClientRect();
+        const panelRect = panel?.getBoundingClientRect();
+        const signature = [canvasRect.width, canvasRect.height, panelRect?.top, panelRect?.height]
+          .map((value) => Number(value ?? 0).toFixed(1)).join(":");
+        stableFrames = signature === previous ? stableFrames + 1 : 0;
+        previous = signature;
+        count += 1;
+        const expanded = !mobile || !panel || panel.getAttribute("data-mobile-sheet-state") === "expanded";
+        if (stableFrames >= 4 && (!expandedPass || expanded)) {
+          frame = 0;
+          fitRouteDepth();
+          if (expandedPass || expanded) {
+            focusState.expanded = true;
+            mutationObserver?.disconnect();
+          }
+          return;
+        }
+        if (count >= 180) {
+          frame = 0;
+          fitRouteDepth();
+          return;
+        }
+        frame = requestAnimationFrame(measure);
+      };
+      frame = requestAnimationFrame(measure);
+    };
+
+    const initiallyExpanded = !mobile || !panel || panel.getAttribute("data-mobile-sheet-state") === "expanded";
+    scheduleFit(initiallyExpanded);
+    if (mobile && panel && !focusState.expanded) {
+      mutationObserver = new MutationObserver(() => {
+        if (panel.getAttribute("data-mobile-sheet-state") === "expanded" && !focusState.expanded) scheduleFit(true);
+      });
+      mutationObserver.observe(panel, { attributes: true, attributeFilter: ["data-mobile-sheet-state"] });
+    }
+    return () => {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      mutationObserver?.disconnect();
+    };
+  }, [camera, props.routePreviewFocusKey, routeBounds, routeForFrame.length, size.height, size.width]);
   const routeFitDepth = routeBounds && !props.followMode
     ? Math.max(
       (routeBounds.maxX - routeBounds.minX) * FLOOR_SCALE / Math.max(0.35, size.width / Math.max(1, size.height)),
@@ -1371,22 +1715,30 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       minZ: Math.min(first[2], second[2]) - padding,
       maxZ: Math.max(first[2], second[2]) + padding,
     };
-  }, [viewport.height, viewport.offsetX, viewport.offsetY, viewport.width, props.previewCamera?.maxHeight]);
+  }, [viewport.height, viewport.offsetX, viewport.offsetY, viewport.width]);
+  const routePreviewCameraBoundsRef = useRef<Student3dCameraTargetBounds | null>(null);
   useEffect(() => {
     const instance = controls.current;
     if (!instance) return;
-    const keepTargetAboveFloor = () => clampStudent3dCameraTarget(instance, cameraTargetBounds);
+    const keepTargetAboveFloor = () => clampStudent3dCameraTarget(instance, routePreviewCameraBoundsRef.current ?? cameraTargetBounds);
     instance.addEventListener("change", keepTargetAboveFloor);
     keepTargetAboveFloor();
     return () => instance.removeEventListener("change", keepTargetAboveFloor);
   }, [cameraTargetBounds]);
+  const cameraDirection = props.discoverCamera
+    ? discoverIndoorCameraDirection(size.width / Math.max(1, size.height))
+    : INDOOR_FLOOR_CAMERA_DIRECTION;
   const floorCameraDepth = indoorFloorCameraHalfDepth(
-    viewport.width,
-    viewport.height,
+    floorFocusBounds.width,
+    floorFocusBounds.height,
     size.width / Math.max(1, size.height),
     FLOOR_SCALE,
+    42,
+    cameraDirection,
   );
-  const halfDepth = Math.max(floorCameraDepth, routeFitDepth);
+  const halfDepth = props.routePreviewFocusKey && routeFitDepth > 0
+    ? Math.max(4.5, routeFitDepth, routePreviewSafeDepth)
+    : Math.max(floorCameraDepth, routeFitDepth);
   const recenterContextRef = useRef({ center, frameCenter, halfDepth, humanPoint: null as Pt | null, viewport, followMode: false, reducedMotion: false });
   recenterContextRef.current = { center, frameCenter, halfDepth, humanPoint, viewport, followMode: Boolean(props.followMode), reducedMotion: Boolean(props.reducedMotion) };
   const followResumeContextRef = useRef({
@@ -1422,18 +1774,133 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     const followPoint = props.followMode && !props.freeLook && props.humanVisible && progress !== undefined
       ? sampleRoute(progress, routeSamplePointRef.current)
       : null;
-    const nextTarget = followPoint
+    // A manual pan during Follow switches the renderer to free-look. Keep the
+    // camera exactly where the user placed it instead of fitting the floor as
+    // an incidental effect of the playback-state update.
+    if (props.followMode && props.freeLook && props.humanVisible) return;
+    const attachedFollow = Boolean(props.followMode && !props.freeLook && followPoint);
+    const viewportKey = `${viewport.width}:${viewport.height}:${viewport.offsetX}:${viewport.offsetY}`;
+    const previousFollowContext = followCameraContextRef.current;
+    if (attachedFollow && previousFollowContext
+      && previousFollowContext.floorId === floor.id
+      && previousFollowContext.route === route
+      && previousFollowContext.viewportKey === viewportKey
+      && previousFollowContext.width === size.width
+      && previousFollowContext.height === size.height) {
+      // The route cursor advances independently through its progress ref.
+      // Reframing here on every React snapshot would erase the student's orbit.
+      return;
+    }
+    followCameraContextRef.current = attachedFollow
+      ? { floorId: floor.id, route, viewportKey, width: size.width, height: size.height }
+      : null;
+    let nextTarget = followPoint
       ? new THREE.Vector3(...pointToWorld(followPoint, viewport, 0.15 + rampHeightAt(followPoint, ramps)))
       : new THREE.Vector3(...frameCenter);
+    const safeFocus = !followPoint && controls.current
+      ? indoorSafeFocusRect(controls.current.domElement as HTMLElement)
+      : null;
+    const safeAspect = safeFocus
+      ? safeFocus.safeRect.width / Math.max(1, safeFocus.safeRect.height)
+      : size.width / Math.max(1, size.height);
+    const allowResponsiveIndoorFit = Boolean(safeFocus)
+      && !props.followMode
+      && !props.humanVisible
+      && !props.discoverCamera
+      && !props.routePreviewFocusKey
+      && !props.arrivalFocusKey
+      && !props.emergencyRouteOverview
+      && route.length === 0;
+    const fitBoundsWidth = safeFocus
+      ? floorFocusBounds.width * safeFocus.canvasRect.width / Math.max(1, safeFocus.safeRect.width)
+      : floorFocusBounds.width;
+    const fitBoundsHeight = safeFocus
+      ? floorFocusBounds.height * safeFocus.canvasRect.height / Math.max(1, safeFocus.safeRect.height)
+      : floorFocusBounds.height;
+    const fitDirection = allowResponsiveIndoorFit
+      ? indoorFloorCameraDirectionForViewport(fitBoundsWidth, fitBoundsHeight, safeAspect)
+      : cameraDirection;
+    const fitPadding = allowResponsiveIndoorFit ? indoorFloorCameraFitPadding(safeAspect) : 1.08;
+    const focusDepth = safeFocus && !props.routePreviewFocusKey
+      ? indoorFloorCameraHalfDepth(
+        fitBoundsWidth,
+        fitBoundsHeight,
+        safeAspect,
+        FLOOR_SCALE,
+        42,
+        fitDirection,
+        fitPadding,
+      )
+      : halfDepth;
+    // Discover enters on the actual floor instead of a room target. A modest
+    // tighter fit uses the mobile canvas more effectively while the authored
+    // bounds and safety margin still keep the complete floor in view.
+    const portraitDiscoverCamera = size.width / Math.max(1, size.height) < 0.82;
+    // Portrait framing turns the authored long axis upright. Keep a little
+    // more breathing room than the landscape showcase angle so doors, stairs,
+    // and their labels remain inside the narrow screen edges.
+    const discoverFitScale = props.discoverCamera && !props.focusRoomId
+      ? portraitDiscoverCamera ? 0.92 : 0.82
+      : 1;
+    const cameraOffset = new THREE.Vector3(
+      focusDepth * fitDirection[0] * discoverFitScale,
+      focusDepth * fitDirection[1] * discoverFitScale,
+      focusDepth * fitDirection[2] * discoverFitScale,
+    );
+    if (!followPoint && controls.current) {
+      const { canvasRect, safeRect } = safeFocus ?? indoorSafeFocusRect(controls.current.domElement as HTMLElement);
+      const safeCenterX = safeRect.left + safeRect.width / 2;
+      const safeCenterY = safeRect.top + safeRect.height / 2;
+      const cameraDistance = cameraOffset.length();
+      const verticalSpan = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? 42) / 2);
+      const worldPerPixel = verticalSpan / Math.max(1, canvasRect.height);
+      const viewDirection = cameraOffset.clone().negate().normalize();
+      const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
+      const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+      const target = nextTarget.clone().addScaledVector(right, -(safeCenterX - (canvasRect.left + canvasRect.width / 2)) * worldPerPixel);
+      const verticalOffset = (safeCenterY - (canvasRect.top + canvasRect.height / 2)) * worldPerPixel;
+      if (size.width < 768) {
+        const groundScreenUp = new THREE.Vector3(screenUp.x, 0, screenUp.z);
+        const groundProjection = groundScreenUp.length();
+        if (groundProjection > 0.15) {
+          groundScreenUp.multiplyScalar(1 / groundProjection);
+          target.addScaledVector(groundScreenUp, verticalOffset / groundProjection);
+        }
+      } else target.addScaledVector(screenUp, verticalOffset);
+      nextTarget = target;
+    }
+    if (props.routePreviewFocusKey) {
+      routePreviewCameraBoundsRef.current = {
+        ...cameraTargetBounds,
+        minX: Math.min(cameraTargetBounds.minX, nextTarget.x - 0.5),
+        maxX: Math.max(cameraTargetBounds.maxX, nextTarget.x + 0.5),
+        minY: Math.min(cameraTargetBounds.minY, nextTarget.y),
+        maxY: Math.max(cameraTargetBounds.maxY, nextTarget.y),
+        minZ: Math.min(cameraTargetBounds.minZ, nextTarget.z - 0.5),
+        maxZ: Math.max(cameraTargetBounds.maxZ, nextTarget.z + 0.5),
+      };
+    } else routePreviewCameraBoundsRef.current = null;
     controls.current?.target.copy(nextTarget);
     if (followPoint) {
       const distance = Math.max(8, Math.min(14, halfDepth * 0.62));
-      camera.position.copy(nextTarget).add(new THREE.Vector3(distance * 0.46, distance * 0.7, distance * 0.54));
-    } else camera.position.set(frameCenter[0] + halfDepth * 0.78, halfDepth * 1.18, frameCenter[2] + halfDepth * 0.86);
+      const followProgress = Math.max(0, Math.min(1, progress ?? 0));
+      const directionStart = followProgress >= 0.94
+        ? sampleRoute(Math.max(0, followProgress - 0.06), { x: 0, y: 0 })
+        : followPoint;
+      const directionEnd = followProgress >= 0.94
+        ? followPoint
+        : sampleRoute(Math.min(1, followProgress + 0.06), { x: 0, y: 0 });
+      const routeOffset = route.length > 1 && directionStart && directionEnd
+        ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, distance)
+        : null;
+      camera.position.copy(nextTarget).add(routeOffset
+        ? new THREE.Vector3(routeOffset.x, routeOffset.y, routeOffset.z)
+        : new THREE.Vector3(distance * 0.46, distance * 0.7, distance * 0.54));
+    } else camera.position.copy(nextTarget).add(cameraOffset);
     camera.lookAt(nextTarget);
     camera.updateProjectionMatrix();
     invalidate();
-  }, [camera, floor.id, frameCenter, halfDepth, invalidate, props.arrivalFocusKey, props.followMode, props.freeLook, props.humanVisible, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, viewport]);
+  }, [camera, cameraDirection, cameraTargetBounds, floor.id, floorFocusBounds, frameCenter, halfDepth, invalidate, props.arrivalFocusKey, props.discoverCamera, props.focusRoomId, props.followMode, props.freeLook, props.humanVisible, props.routePreviewFocusKey, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, size.width, viewport]);
 
   useEffect(() => {
     // Follow takes camera ownership back when the canonical session is
@@ -1461,7 +1928,9 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
 
     const target = new THREE.Vector3(...pointToWorld(point, context.viewport, 0.15 + rampHeightAt(point, context.ramps)));
     const distance = Math.max(8, Math.min(14, context.halfDepth * 0.62));
-    const endPosition = target.clone().add(new THREE.Vector3(distance * 0.46, distance * 0.7, distance * 0.54));
+    const currentOffset = camera.position.clone().sub(controls.current.target);
+    const fallbackOffset = new THREE.Vector3(distance * 0.46, distance * 0.7, distance * 0.54);
+    const endPosition = target.clone().add(currentOffset.length() >= 4 ? currentOffset : fallbackOffset);
     if (context.reducedMotion) {
       controls.current.target.copy(target);
       camera.position.copy(endPosition);
@@ -1492,7 +1961,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     if (humanMarkerRef.current) {
       if (props.humanVisible && livePoint) {
         humanMarkerRef.current.visible = true;
-        humanMarkerRef.current.position.set(...pointToWorld(livePoint, viewport, 0.18 + rampHeightAt(livePoint, ramps)));
+        humanMarkerRef.current.position.set(...pointToWorld(livePoint, viewport, 0.1 + rampHeightAt(livePoint, ramps)));
       } else humanMarkerRef.current.visible = false;
     }
     if (selectionTweenRef.current) {
@@ -1516,7 +1985,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     }
     if (props.arrivalFocusKey) return;
     if (selectionFocusLockRef.current && !(props.followMode && !props.freeLook)) return;
-    if (!props.followMode || props.freeLook || recenteringRef.current || !livePoint) return;
+    if (!props.followMode || !props.followPlaying || props.freeLook || recenteringRef.current || !livePoint) return;
     const safeDelta = Math.min(delta, 0.05);
     const controlsTarget = controls.current?.target as THREE.Vector3 | undefined;
     if (!controlsTarget) return;
@@ -1525,17 +1994,21 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     // tracking in one coherent camera update instead of resetting distance on
     // every frame.
     followTargetScratch.current.set(...pointToWorld(livePoint, viewport, 0.15 + rampHeightAt(livePoint, ramps)));
-    followOffsetScratch.current.copy(camera.position).sub(controlsTarget);
-    controlsTarget.lerp(followTargetScratch.current, props.reducedMotion ? 1 : 1 - Math.exp(-safeDelta * 4.5));
-    camera.position.copy(controlsTarget).add(followOffsetScratch.current);
+    translateStudent3dFollowCamera(
+      camera.position,
+      controlsTarget,
+      followTargetScratch.current,
+      props.reducedMotion ? 1 : 1 - Math.exp(-safeDelta * 4.5),
+    );
     camera.lookAt(controlsTarget);
   });
 
-  const lastRecenterNonce = useRef(props.recenterNonce ?? 0);
+  const lastRecenterNonce = useRef(0);
   useEffect(() => {
     const nonce = props.recenterNonce ?? 0;
-    if (nonce <= lastRecenterNonce.current || !controls.current) return;
-    lastRecenterNonce.current = nonce;
+    const requestedNonce = student3dCameraRecenterNonceToHandle(nonce, lastRecenterNonce.current);
+    if (requestedNonce === null || !controls.current) return;
+    lastRecenterNonce.current = requestedNonce;
     if (props.arrivalFocusKey) return;
     cancelRecenterTween();
     const context = recenterContextRef.current;
@@ -1555,14 +2028,44 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     const destination = new THREE.Vector3(...focus);
     const startPosition = camera.position.clone();
     const startTarget = controls.current.target.clone();
-    const endPosition = destination.clone().add(new THREE.Vector3(context.halfDepth * 0.65, context.halfDepth * 0.95, context.halfDepth * 0.72));
+    const controlsInstance = controls.current;
+    const currentOffset = camera.position.clone().sub(startTarget);
+    const currentContextIsFollow = Boolean(followCameraContextRef.current
+      && followCameraContextRef.current.floorId === floor.id
+      && followCameraContextRef.current.route === route);
+    const followProgress = Math.max(0, Math.min(1, liveProgress ?? 0));
+    const directionStart = followProgress >= 0.94
+      ? sampleRoute(Math.max(0, followProgress - 0.06), { x: 0, y: 0 })
+      : liveFollowPoint;
+    const directionEnd = followProgress >= 0.94
+      ? liveFollowPoint
+      : sampleRoute(Math.min(1, followProgress + 0.06), { x: 0, y: 0 });
+    const followDistance = Math.max(8, Math.min(14, context.halfDepth * 0.62));
+    const defaultFollowOffset = (directionStart && directionEnd && route.length > 1
+      ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, followDistance)
+      : null) ?? { x: followDistance * 0.46, y: followDistance * 0.7, z: followDistance * 0.54 };
+    const safeFollowOffset = context.followMode && liveFollowPoint
+      ? student3dFollowCameraOffsetForRecovery(
+        props.recenterFollowOffset,
+        [currentOffset.x, currentOffset.y, currentOffset.z],
+        [defaultFollowOffset.x, defaultFollowOffset.y, defaultFollowOffset.z],
+        controlsInstance?.minDistance ?? 4,
+        controlsInstance?.maxDistance ?? Math.max(18, context.halfDepth * 2.7),
+        currentContextIsFollow && currentOffset.length() >= 4,
+      )
+      : null;
+    const endPosition = destination.clone().add(safeFollowOffset
+      ? new THREE.Vector3(...safeFollowOffset)
+      : new THREE.Vector3(context.halfDepth * 0.65, context.halfDepth * 0.95, context.halfDepth * 0.72));
     if (context.reducedMotion) {
       camera.position.copy(endPosition);
       controls.current.target.copy(destination);
       camera.lookAt(destination);
       cancelRecenterTween();
+      if (context.followMode && liveFollowPoint) props.onRecenterComplete?.(requestedNonce);
       return;
     }
+    if (context.followMode && liveFollowPoint) pendingRecenterNonceRef.current = requestedNonce;
     dampingBeforeRecenterRef.current = Boolean(controls.current.enableDamping);
     controls.current.enableDamping = false;
     const startTime = performance.now();
@@ -1574,17 +2077,35 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       camera.lookAt(controls.current?.target ?? destination);
       invalidate();
       if (t < 1) recenterFrameRef.current = requestAnimationFrame(tick);
-      else cancelRecenterTween();
+      else {
+        recenterFrameRef.current = 0;
+        selectionTweenRef.current = null;
+        recenteringRef.current = false;
+        if (controls.current && dampingBeforeRecenterRef.current !== null) {
+          controls.current.enableDamping = dampingBeforeRecenterRef.current;
+          dampingBeforeRecenterRef.current = null;
+        }
+        const completedNonce = pendingRecenterNonceRef.current;
+        pendingRecenterNonceRef.current = null;
+        if (completedNonce !== null) props.onRecenterComplete?.(completedNonce);
+      }
     };
     recenterFrameRef.current = requestAnimationFrame(tick);
     return cancelRecenterTween;
-  }, [camera, cancelRecenterTween, invalidate, props.arrivalFocusKey, props.recenterNonce, props.walkProgress, props.walkProgressRef, ramps, sampleRoute]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.onRecenterComplete, props.recenterFollowOffset, props.recenterNonce, props.walkProgress, props.walkProgressRef, ramps, route, sampleRoute]);
 
   useEffect(() => {
     if (!props.arrivalFocusKey && props.followMode && !props.freeLook) {
       selectionTweenRef.current = null;
       selectionFocusLockRef.current = false;
       lastRoomFocusKeyRef.current = "";
+      return;
+    }
+    if (props.routePreviewFocusKey) {
+      // The route preview owns this camera; a selected origin room must not
+      // recenter the scene over the route bounds after the sheet is measured.
+      lastRoomFocusKeyRef.current = "";
+      selectionFocusLockRef.current = false;
       return;
     }
     if (!props.arrivalFocusKey && props.routeInspectionFocusPoint && props.routeInspectionFocusKey) return;
@@ -1604,19 +2125,11 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       maxX: Math.max(value.maxX, point.x), maxY: Math.max(value.maxY, point.y),
     }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
     const centerPoint = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
-    const target = new THREE.Vector3(...pointToWorld(centerPoint, viewport, FLOOR_SURFACE_Y + 0.16));
+    const targetPoint = props.arrivalFocusKey && props.arrivalFocusPoint ? props.arrivalFocusPoint : centerPoint;
+    const target = new THREE.Vector3(...pointToWorld(targetPoint, viewport, FLOOR_SURFACE_Y + 0.16));
     const canvas = controls.current.domElement as HTMLElement;
-    const canvasRect = canvas.getBoundingClientRect();
-    const surface = canvas.closest<HTMLElement>("[data-testid='student-map-surface']");
-    const overlayRects = surface ? Array.from(surface.querySelectorAll<HTMLElement>(
-      ".map-layer-building-sheet, .student-map-utility-stack, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-map-search-header='true']",
-    )).filter((element) => {
-      const style = getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
-    }).map((element) => element.getBoundingClientRect()) : [];
+    const { canvasRect, safeRect } = indoorSafeFocusRect(canvas);
     const mobileFocus = size.width < 768;
-    const safeRect = student3dSafeFocusRect(canvasRect, overlayRects);
     const safeCenter = { x: safeRect.left + safeRect.width / 2, y: safeRect.top + safeRect.height / 2 };
     const contextPadding = mobileFocus ? 2.1 : 1.1;
     const width = Math.max(0.6, (bounds.maxX - bounds.minX) * FLOOR_SCALE + contextPadding);
@@ -1625,17 +2138,27 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     // Keep desktop's established pose. Mobile uses a more oblique architectural
     // angle, so room walls and the doorway read instead of collapsing into a
     // nearly top-down roof/floor view.
-    const offsetDirection = mobileFocus
-      ? new THREE.Vector3(0.38, 0.82, 0.43).normalize()
-      : new THREE.Vector3(0.22, 0.95, 0.2).normalize();
+    const arrivalDirection = props.arrivalFocusKey
+      ? student3dIndoorArrivalCameraDirection(props.arrivalApproachPoint && props.arrivalFocusPoint
+        ? [props.arrivalApproachPoint, props.arrivalFocusPoint]
+        : route)
+      : null;
+    const offsetDirection = arrivalDirection
+      ? new THREE.Vector3(arrivalDirection.x, arrivalDirection.y, arrivalDirection.z).normalize()
+      : mobileFocus
+        ? new THREE.Vector3(0.38, 0.82, 0.43).normalize()
+        : new THREE.Vector3(0.22, 0.95, 0.2).normalize();
     const viewDirection = offsetDirection.clone().negate();
     const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
     const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
-    const distanceOptions = { padding: mobileFocus ? 1.4 : 1.4, min: 12.5, max: mobileFocus ? 42 : 21 };
+    const distanceOptions = props.arrivalFocusKey
+      ? { padding: 1.25, min: 7.5, max: mobileFocus ? 42 : 21 }
+      : { padding: 1.4, min: 12.5, max: mobileFocus ? 42 : 21 };
     let distance: number;
-    if (mobileFocus) {
-      // Project the authored room bounds into the intended oblique camera's
-      // screen plane, then fit that complete outline into the exposed map crop.
+    if (mobileFocus || arrivalDirection) {
+      // Project the authored room bounds into the intended camera's screen
+      // plane, then fit that complete outline into the exposed map crop. Arrival
+      // uses the route approach direction on desktop and mobile alike.
       const projectedWidth = Math.abs(right.x) * width + Math.abs(right.z) * depth;
       const projectedHeight = Math.abs(screenUp.x) * width + Math.abs(screenUp.z) * depth + Math.abs(screenUp.y) * 3.1;
       distance = student3dFocusDistanceForViewport(
@@ -1696,7 +2219,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       duration: 360,
     };
     invalidate();
-  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, selectionRoom, size.height, size.width, viewport]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalApproachPoint, props.arrivalFocusKey, props.arrivalFocusPoint, props.focusNonce, props.focusRoomId, props.followMode, props.freeLook, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, props.routePreviewFocusKey, route, selectionRoom, size.height, size.width, viewport]);
 
   useEffect(() => {
     if (props.arrivalFocusKey || props.followMode && !props.freeLook) {
@@ -1737,6 +2260,21 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
     invalidate();
   }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, viewport]);
 
+  useEffect(() => {
+    const nonce = props.cameraPoseRestoreNonce ?? 0;
+    const pose = props.cameraPoseRestore;
+    const instance = controls.current;
+    if (!pose || !instance || nonce <= lastCameraPoseRestoreNonceRef.current) return;
+    lastCameraPoseRestoreNonceRef.current = nonce;
+    cancelRecenterTween();
+    instance.target.set(...pose.target);
+    camera.position.set(...pose.position);
+    camera.lookAt(instance.target);
+    instance.update();
+    invalidate();
+    props.onCameraPoseRestoreComplete?.(nonce);
+  }, [camera, cancelRecenterTween, invalidate, props.cameraPoseRestore, props.cameraPoseRestoreNonce, props.onCameraPoseRestoreComplete]);
+
   const baseRegions = regions.length ? regions : [{ x: 0, y: 0, width: floor.canvasW ?? 600, height: floor.canvasH ?? 450 }];
   const visibleRoute = route.length > 1;
   return <>
@@ -1770,7 +2308,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
           {zone.type !== "entrance_landing" && [-1, 1].map((side) => <mesh key={side} position={[side * sizeX * FLOOR_SCALE * 0.48, 0.48, 0]}><boxGeometry args={[0.035, 0.08, sizeZ * FLOOR_SCALE]} /><meshStandardMaterial color="#8e999a" metalness={0.35} /></mesh>)}
         </group>;
       })}
-      <IndoorWallOcclusionController registry={wallRegistry} viewport={viewport} route={route} progressRef={props.walkProgressRef} focusPoint={cutawayFocus} followMode={props.followMode && props.humanVisible} />
+      <IndoorWallOcclusionController registry={wallRegistry} viewport={viewport} route={route} progressRef={props.walkProgressRef} focusPoint={cutawayFocus} followMode={props.followMode && props.humanVisible} focusOpacity={props.arrivalFocusKey ? 0.34 : 0.5} />
       {wallSegments.map((segment, index) => {
         const id = `wall-${segment.sourceIds.join("-")}-${index}`;
         return <MemoWall key={id} id={id} segment={segment} viewport={viewport} registry={wallRegistry} darkMode={props.darkMode} />;
@@ -1798,49 +2336,76 @@ function FloorScene(props: IndoorFloor3DRendererProps & { shouldSuppressClick: (
       {floor.furniture?.filter((item) => shouldRenderIndoorLandmarkFurniture(item)
         && !(props.showDiningFurniture && shouldRenderStudentCanteenDiningFurniture(item)))
         .map((item) => <MemoFurniture key={`furniture-${item.id}`} item={item} viewport={viewport} />)}
+      {props.auditoriumChairLayouts.length ? <StudentAuditoriumChairLayer chairs={props.auditoriumChairLayouts} viewport={viewport} /> : null}
       {props.showDiningFurniture && floor.furniture?.length ? <StudentCanteenDiningFurnitureLayer items={floor.furniture} viewport={viewport} /> : null}
       <Event3DSceneLayout furniture={props.eventFurniture} labels={props.eventLabels} editing={props.eventEditing} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
       {props.eventMarker && <Html position={pointToWorld(props.eventMarker.point, viewport, 0.3)} center distanceFactor={9} zIndexRange={[90, 0]}>
         <div className="rounded-xl border border-orange-200 bg-white/95 px-2 py-1.5 text-[10px] font-extrabold text-orange-800 shadow-lg">◉ {props.eventMarker.label}</div>
       </Html>}
-      {visibleRoute && <mesh geometry={routeGeometry} renderOrder={10}>
-        <meshStandardMaterial color="#1769e0" emissive="#0b4eb3" emissiveIntensity={0.17} side={THREE.DoubleSide} />
+      {visibleRoute && !props.emergencyRouteOverview && <mesh geometry={routeGeometry} renderOrder={10}>
+        <meshStandardMaterial color={props.emergencyRouteSegments?.find((segment) => segment.id === props.activeEmergencyRouteId)?.color
+          ?? props.routeColor
+          ?? (props.routeMode === "emergency" ? "#dc2626" : props.routeMode === "accessible" ? "#16a34a" : "#1769e0")}
+          emissive={props.routeMode === "emergency" ? "#7f1d1d" : props.routeMode === "accessible" ? "#14532d" : "#0b4eb3"}
+          emissiveIntensity={0.17} side={THREE.DoubleSide} />
       </mesh>}
-      {visibleRoute && <IndoorRouteArrows arrows={routeArrows} points={route} viewport={viewport} ramps={ramps} reducedMotion={props.reducedMotion} />}
+      {visibleRoute && !props.emergencyRouteOverview && <IndoorRouteArrows arrows={routeArrows} points={route} viewport={viewport} ramps={ramps} reducedMotion={props.reducedMotion} animate={props.animateRouteArrows} />}
+      {emergencyRouteModels.map((model) => <Fragment key={`emergency-route-${model.id}`}>
+        <mesh geometry={model.geometry} renderOrder={11}>
+          <meshStandardMaterial color={model.color} emissive={model.color} emissiveIntensity={0.12} transparent opacity={props.emergencyRouteOverview ? 0.96 : 0.34} side={THREE.DoubleSide} />
+        </mesh>
+        <IndoorRouteArrows arrows={model.arrows} points={model.points} viewport={viewport} ramps={ramps} reducedMotion />
+        <Html position={pointToWorld(model.points[0], viewport, 0.24 + rampHeightAt(model.points[0], ramps))} center distanceFactor={10} zIndexRange={[90, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+          <span className="rounded-full border border-white/80 px-2 py-1 text-[10px] font-extrabold text-white shadow" style={{ backgroundColor: model.color }}>{model.label}</span>
+        </Html>
+      </Fragment>)}
       {props.showStartMarker && route[0] && <group position={pointToWorld(route[0], viewport, 0.1 + rampHeightAt(route[0], ramps))}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.12, 0.16, 24]} /><meshBasicMaterial color="#1769e0" side={THREE.DoubleSide} /></mesh>
-        <Html position={[0, 0.01, 0]} center distanceFactor={9}><span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-blue-700 text-xs font-black text-white shadow-lg">A</span></Html>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.11, 0.15, 24]} /><meshBasicMaterial color="#1769e0" side={THREE.DoubleSide} /></mesh>
+        <Html position={[0, 0.01, 0]} center occlude zIndexRange={[76, 0]}><span data-testid="student-indoor-3d-route-start-pin" className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-blue-700 text-[10px] font-black text-white shadow-md">A</span></Html>
       </group>}
       {props.showDestinationMarker && route.at(-1) && <group position={pointToWorld(route.at(-1)!, viewport, 0.1 + rampHeightAt(route.at(-1)!, ramps))}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.12, 0.16, 24]} /><meshBasicMaterial color="#e44646" transparent opacity={0.62} side={THREE.DoubleSide} /></mesh>
-        <Html position={[0, 0.01, 0]} center distanceFactor={9} zIndexRange={[85, 0]}><span className="student-destination-pin block -translate-y-full drop-shadow-md"><MapPin className="h-8 w-8 fill-rose-600 stroke-white stroke-[2.25]" /></span></Html>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.11, 0.15, 24]} /><meshBasicMaterial color="#c83c51" transparent opacity={0.72} side={THREE.DoubleSide} /></mesh>
+        <Html position={[0, 0.01, 0]} center occlude zIndexRange={[85, 0]}><span data-testid="student-indoor-3d-route-destination-pin" className="student-destination-pin block -translate-y-full drop-shadow-sm"><MapPin className="h-6 w-6 fill-rose-600 stroke-white stroke-[2.25]" /></span></Html>
       </group>}
-      {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, 0.18 + humanRampHeight) : [0, FLOOR_SURFACE_Y, 0]}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]}><circleGeometry args={[0.28, 24]} /><meshBasicMaterial color="#ffffff" /></mesh>
-        <mesh position={[0, 0.1, 0]}><cylinderGeometry args={[0.14, 0.2, 0.18, 16]} /><meshStandardMaterial color="#0b58c4" roughness={0.4} /></mesh>
-        <mesh position={[0, 0.27, 0]}><sphereGeometry args={[0.09, 12, 10]} /><meshStandardMaterial color="#e9f2ff" /></mesh>
+      {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, 0.1 + humanRampHeight) : [0, FLOOR_SURFACE_Y, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={20}><circleGeometry args={[0.23, 24]} /><meshBasicMaterial color="#0f172a" depthWrite={false} /></mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0]} renderOrder={21}><circleGeometry args={[0.19, 24]} /><meshBasicMaterial color="#ffffff" depthWrite={false} /></mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.016, 0]} renderOrder={22}><circleGeometry args={[0.15, 24]} /><meshBasicMaterial color="#0f766e" depthWrite={false} /></mesh>
+        <mesh position={[0, 0.065, 0]} renderOrder={23}><cylinderGeometry args={[0.105, 0.13, 0.1, 16]} /><meshStandardMaterial color="#0f766e" roughness={0.55} /></mesh>
+        <mesh position={[0, 0.15, 0]} renderOrder={24}><sphereGeometry args={[0.045, 12, 8]} /><meshStandardMaterial color="#f8fafc" roughness={0.5} /></mesh>
       </group>}
       {props.activeTransition && activeTransitionPoint && <Html position={pointToWorld(activeTransitionPoint, viewport, 0.42)} center zIndexRange={[100, 0]}>
-        <button type="button" onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) props.activeTransition?.onActivate?.(); }} style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }} className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border px-3 py-2 text-center text-[12px] font-extrabold shadow-lg whitespace-normal focus-visible:outline-none focus-visible:ring-2 ${activeExitDoor?.isEmergencyExit ? "border-red-300 bg-red-700 text-white ring-red-300 hover:bg-red-800" : "border-blue-200 bg-white/95 text-blue-800 hover:bg-blue-50 focus-visible:ring-blue-500"}`}>{activeExitDoor?.isEmergencyExit ? "Emergency Exit" : props.activeTransition.label}</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) props.activeTransition?.onActivate?.(); }} style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }} className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border px-3 py-2 text-center text-[12px] font-extrabold shadow-lg whitespace-normal focus-visible:outline-none focus-visible:ring-2 ${activeExitDoor?.isEmergencyExit ? "border-red-300 bg-red-700 text-white ring-red-300 hover:bg-red-800" : "border-blue-200 bg-white/95 text-blue-800 hover:bg-blue-50 focus-visible:ring-blue-500"}`}>{activeExitDoor?.isEmergencyExit ? "Emergency Exit" : props.activeTransition.displayLabel ?? props.activeTransition.label}</button>
       </Html>}
-      {props.exploreTransitionCues?.map((cue) => <Html key={`explore-${cue.id}`} position={pointToWorld(cue.point, viewport, 0.44)} center zIndexRange={[100, 0]}>
-        <button
-          type="button"
-          data-testid="indoor-explore-transition-cue"
-          aria-label={cue.label}
-          title={cue.label}
-          onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) cue.onActivate(); }}
-          style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-blue-200 bg-white/95 px-3 py-2 text-center text-[12px] font-extrabold text-blue-800 shadow-lg whitespace-normal hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-        >{cue.label}</button>
-      </Html>)}
+      {screenExploreTransitionGroups.map((cue) => cue.choices.length > 1
+        ? <group key={`explore-${cue.id}`} position={pointToWorld(cue.point, viewport, 0.16)}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.17, 0.22, 24]} /><meshBasicMaterial color="#1769e0" transparent opacity={0.8} side={THREE.DoubleSide} /></mesh>
+          <Html position={[0, 0.3, 0]} center zIndexRange={[120, 0]}>
+            <StudentExploreTransitionChoiceControl
+              kind={cue.kind}
+              choices={cue.choices}
+              testId="indoor-explore-transition-choice-marker"
+              canOpen={() => !props.shouldSuppressClick()}
+            />
+          </Html>
+        </group>
+        : <Html key={`explore-${cue.id}`} position={pointToWorld(cue.point, viewport, 0.44)} center zIndexRange={[100, 0]}>
+          <button
+            type="button"
+            data-testid="indoor-explore-transition-cue"
+            aria-label={cue.label}
+            title={cue.label}
+            onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) cue.onActivate(); }}
+            style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-blue-200 bg-white/95 px-3 py-2 text-center text-[12px] font-extrabold text-blue-800 shadow-lg whitespace-normal hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >{cue.displayLabel ?? cue.label}</button>
+        </Html>)}
       {floor.labels?.filter((label) => label.visible !== false).map((label) => <Html key={`label-${label.id}`} position={pointToWorld({ x: label.x, y: label.y }, viewport, 0.025)} center distanceFactor={12} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
         <span className="text-[9px] font-semibold text-slate-500">{label.text}</span>
       </Html>)}
     </group>
     <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.2} maxPolarAngle={Math.PI / 3}
-      enableRotate enablePan={!props.followMode || props.freeLook} enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
-    <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
+      enableRotate enablePan enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
   </>;
 }
 
@@ -1849,11 +2414,22 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
   const invalidateRef = useRef<(() => void) | null>(null);
   const interactionSurfaceRef = useRef<HTMLDivElement>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pointerStartsRef = useRef(new Map<number, { x: number; y: number; button: number; pointerType: string }>());
+  const touchGestureStartRef = useRef<readonly [Student3dTouchPoint, Student3dTouchPoint] | null>(null);
   const dragStartedRef = useRef(false);
+  const followPanReportedRef = useRef(false);
+  const auditoriumChairLayouts = useMemo(
+    () => deriveStudentAuditoriumChairLayoutsForFloor(props.floor),
+    [props.floor.furniture, props.floor.rooms],
+  );
   useEffect(() => {
     const resetGesture = () => {
       pointersRef.current.clear();
+      pointerStartsRef.current.clear();
+      touchGestureStartRef.current = null;
       dragStartedRef.current = false;
+      followPanReportedRef.current = false;
+      if (interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.rightButtonDragging;
       if (interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.dragging;
     };
     const updateVisibility = () => {
@@ -1872,36 +2448,78 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
     };
   }, []);
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const alreadyActive = pointersRef.current.size > 0;
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (event.pointerType === "touch" && alreadyActive) dragStartedRef.current = true;
-    else if (!alreadyActive) dragStartedRef.current = false;
+    if ((event.target as Element).closest("[data-no-drag],button,input,[role='button']")) return;
+    if (pointersRef.current.size === 0) {
+      dragStartedRef.current = false;
+      followPanReportedRef.current = false;
+    }
+    if (event.pointerType === "mouse" && event.button === 2) {
+      delete event.currentTarget.dataset.rightButtonDragging;
+    }
+    const point = { x: event.clientX, y: event.clientY };
+    pointersRef.current.set(event.pointerId, point);
+    pointerStartsRef.current.set(event.pointerId, { ...point, button: event.button, pointerType: event.pointerType });
+    if (event.pointerType === "touch" && pointersRef.current.size === 2) {
+      const pair = [...pointersRef.current.values()];
+      touchGestureStartRef.current = [pair[0], pair[1]];
+    }
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragStartedRef.current) return;
-    const start = pointersRef.current.get(event.pointerId);
-    if (!start || !crossedStudent3dDragThreshold(start, { x: event.clientX, y: event.clientY })) return;
-    // A drag in attached Follow is an orbit gesture. Panning is disabled on
-    // OrbitControls and must not detach the camera or pause playback.
+    const start = pointerStartsRef.current.get(event.pointerId);
+    if (!start) return;
+    const point = { x: event.clientX, y: event.clientY };
+    pointersRef.current.set(event.pointerId, point);
+    let gesture: ReturnType<typeof student3dCameraGesture> = "none";
+    if (event.pointerType === "touch" && pointersRef.current.size >= 2 && touchGestureStartRef.current) {
+      const pair = [...pointersRef.current.values()].slice(0, 2);
+      const motion = student3dTouchGestureMotion(touchGestureStartRef.current, [pair[0], pair[1]]);
+      gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointersRef.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance });
+    } else {
+      const movement = Math.hypot(point.x - start.x, point.y - start.y);
+      gesture = student3dCameraGesture({ pointerType: start.pointerType, button: start.button, pointerCount: 1, movement });
+    }
+    if (gesture === "none") return;
     dragStartedRef.current = true;
-    if (event.pointerType === "mouse" && (!props.followMode || props.freeLook || Boolean(event.buttons & 2))) {
+    if (event.pointerType === "mouse" && gesture === "orbit" && Boolean(event.buttons & 2)) {
+      event.currentTarget.dataset.rightButtonDragging = "true";
+    }
+    if (event.pointerType === "mouse" && (gesture === "pan" || gesture === "orbit")) {
       event.currentTarget.dataset.dragging = "true";
+    }
+    if (shouldPauseFollowForManualCameraGesture(Boolean(props.followMode), gesture === "pan") && !followPanReportedRef.current) {
+      followPanReportedRef.current = true;
+      props.onIntentionalPan?.();
     }
   };
   const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     pointersRef.current.delete(event.pointerId);
-    if (pointersRef.current.size === 0 && interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.dragging;
-    if (event.type === "pointercancel" && pointersRef.current.size === 0) dragStartedRef.current = false;
+    pointerStartsRef.current.delete(event.pointerId);
+    if (pointersRef.current.size < 2) touchGestureStartRef.current = null;
+    if (pointersRef.current.size === 0) {
+      if (interactionSurfaceRef.current) delete interactionSurfaceRef.current.dataset.dragging;
+      if (event.type === "pointercancel") {
+        dragStartedRef.current = false;
+        followPanReportedRef.current = false;
+      } else if (dragStartedRef.current) window.setTimeout(() => {
+        dragStartedRef.current = false;
+        followPanReportedRef.current = false;
+      }, 0);
+    }
   };
-  return <div ref={interactionSurfaceRef} data-testid="student-indoor-3d-renderer" className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => event.preventDefault()} onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {
+  return <div ref={interactionSurfaceRef} data-testid="student-indoor-3d-renderer" data-auditorium-chair-count={auditoriumChairLayouts.length} className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => {
+    if (shouldPreventStudent3dContextMenu(event.nativeEvent.button, event.currentTarget.dataset.rightButtonDragging === "true")) {
+      event.preventDefault();
+      if (event.currentTarget.dataset.rightButtonDragging) delete event.currentTarget.dataset.rightButtonDragging;
+    }
+  }} onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {
     if (!dragStartedRef.current) return;
     event.preventDefault(); event.stopPropagation(); dragStartedRef.current = false;
   }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}>
     <IndoorSceneBoundary onError={props.onFallback}>
-      <Canvas eventSource={interactionSurfaceRef as unknown as MutableRefObject<HTMLElement>} camera={{ position: [0, 14, 13], fov: 42, near: 0.1, far: 100 }} dpr={[1, 1.25]} frameloop={!visible ? "never" : (props.followPlaying || (Boolean(props.routePoints?.length && props.routePoints.length > 1) && !props.reducedMotion)) ? "always" : "demand"}
+      <Canvas className="absolute inset-0" eventSource={interactionSurfaceRef as unknown as MutableRefObject<HTMLElement>} camera={{ position: [0, 14, 13], fov: 42, near: 0.1, far: 100 }} dpr={[1, 1.25]} frameloop={!visible ? "never" : (props.followPlaying || (props.animateRouteArrows && !props.reducedMotion)) ? "always" : "demand"}
         onCreated={({ invalidate }) => { invalidateRef.current = invalidate; }}
         gl={{ antialias: false, powerPreference: "low-power", alpha: false, stencil: false }}>
-        <Suspense fallback={null}><FloorScene {...props} shouldSuppressClick={() => dragStartedRef.current} /></Suspense>
+        <Suspense fallback={null}><FloorScene {...props} auditoriumChairLayouts={auditoriumChairLayouts} shouldSuppressClick={() => dragStartedRef.current} /></Suspense>
       </Canvas>
     </IndoorSceneBoundary>
     <div className="sr-only" aria-label={`${props.floorLabel} in 3D view`}>

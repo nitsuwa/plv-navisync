@@ -428,6 +428,10 @@ export function validateNavigationGraph(campus: Campus): NavGraphReadinessResult
     if (
       node.type === "outdoor"
       || node.type === "entrance"
+      // Emergency Assembly Points are authored campus destinations. Their
+      // canonical graph anchors intentionally have no Building/Floor owner,
+      // just like the outdoor Walking Network they join.
+      || (node.type === "assembly" && Boolean(node.assemblyPointId) && !node.floorId && !node.buildingId)
       || (node.exteriorEmergencyStairId && !node.floorId)
       // The outer side of a derived Ramp/Steps/Veranda approach is expressed
       // in campus coordinates by design, so it intentionally has no floorId.

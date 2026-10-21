@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { createPortal } from "react-dom";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   Save, Globe, CheckCircle2, AlertTriangle, X, RotateCcw,
   Upload, RefreshCw, Copy, FileDown, Loader2, EyeOff, Archive,
@@ -29,6 +30,8 @@ export interface ActionProgressDialogProps {
   errorTitleOverride?: string;
   errorMessageOverride?: string;
   progressMessage?: string;
+  /** Use a marquee indicator instead of an illustrative progress fill. */
+  indeterminateProgress?: boolean;
   failureItems?: Array<{ id: string; name: string; reason: string }>;
   retryLabel?: string;
   /** Called when the dialog closes */
@@ -57,21 +60,13 @@ interface ActionConfig {
 const ACTION_CONFIGS: Record<ActionType, ActionConfig> = {
   saving: {
     icon: Save,
-    title: "Saving Campus Map",
-    loadingMessage: "Please wait while your campus map and recent changes are being securely saved.",
+    title: "Saving changes",
+    loadingMessage: "Keeping your campus map up to date.",
     successTitle: "Campus Map Saved",
     successMessage: 'Your latest changes have been successfully saved.',
     errorTitle: "Unable to Save Campus Map",
     errorMessage: "An error occurred while saving your project. Please check your connection and try again.",
-    statusMessages: [
-      "Saving building layouts...",
-      "Updating floor plans...",
-      "Validating map data...",
-      "Processing navigation paths...",
-      "Organizing campus information...",
-      "Finalizing project...",
-      "Almost done...",
-    ],
+    statusMessages: ["Saving map data…"],
   },
   publishing: {
     icon: Globe,
@@ -239,6 +234,7 @@ export function ActionProgressDialog({
   errorTitleOverride,
   errorMessageOverride,
   progressMessage,
+  indeterminateProgress = false,
   failureItems,
   retryLabel = "Retry",
 }: ActionProgressDialogProps) {
@@ -248,16 +244,24 @@ export function ActionProgressDialog({
   const [showFailures, setShowFailures] = useState(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   // Rotate through status messages every 2s during loading
   useEffect(() => {
-    if (state !== "loading") return;
+    if (state !== "loading" || action === "saving") {
+      setMessageIndex(0);
+      return;
+    }
     setMessageIndex(0);
     const interval = setInterval(() => {
       setMessageIndex((prev) => (prev + 1) % cfg.statusMessages.length);
     }, 2000);
     return () => clearInterval(interval);
-  }, [state, cfg.statusMessages.length]);
+  }, [state, action, cfg.statusMessages.length]);
 
   useEffect(() => {
     if (state !== "error") setShowFailures(false);
@@ -278,48 +282,163 @@ export function ActionProgressDialog({
     onRetry?.();
   }, [onRetry]);
 
+  // Keep the modal genuinely modal for pointer, keyboard, and assistive-tech
+  // users. A body portal clears editor stacking contexts; inert siblings and a
+  // focus trap prevent access to the editor behind it while persistence runs.
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const inertSiblings = [...document.body.children]
+      .filter((element): element is HTMLElement => element instanceof HTMLElement && element !== overlay)
+      .map((element) => ({ element, wasInert: element.inert }));
+    inertSiblings.forEach(({ element }) => { element.inert = true; });
+
+    const focusInitialTarget = () => dialogRef.current?.focus({ preventScroll: true });
+    focusInitialTarget();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const eventTarget = event.target instanceof Node ? event.target : null;
+      if (!eventTarget || !overlayRef.current?.contains(eventTarget)) {
+        // Preserve browser navigation/window shortcuts while preventing
+        // editor hotkeys, including Ctrl/Cmd+S, from reaching editor listeners.
+        const key = event.key.toLowerCase();
+        const browserShortcut = event.key === "F5"
+          || (event.altKey && ["arrowleft", "arrowright", "f4"].includes(key))
+          || ((event.ctrlKey || event.metaKey) && ["r", "l", "t", "w", "n", "tab", "+", "-", "0"].includes(key));
+        if (event.key === "Escape" && stateRef.current !== "loading") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          onCloseRef.current();
+          return;
+        }
+        event.stopImmediatePropagation();
+        if (!browserShortcut || (event.ctrlKey || event.metaKey) && key === "s") event.preventDefault();
+        if (event.key === "Escape") event.preventDefault();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (stateRef.current !== "loading") onCloseRef.current();
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        const items = focusable
+          ? [...focusable].filter((element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true")
+          : [];
+        if (items.length === 0) {
+          event.preventDefault();
+          dialogRef.current?.focus({ preventScroll: true });
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+
+    const key = event.key.toLowerCase();
+    const browserShortcut = event.key === "F5"
+      || (event.altKey && ["arrowleft", "arrowright", "f4"].includes(key))
+      || ((event.ctrlKey || event.metaKey) && ["r", "l", "t", "w", "n", "tab", "+", "-", "0"].includes(key));
+    const buttonActivation = event.target instanceof HTMLElement
+      && event.target.closest("button:not([disabled])")
+      && (event.key === "Enter" || event.key === " ");
+    event.stopImmediatePropagation();
+    if (buttonActivation) return;
+    if (!browserShortcut || (event.ctrlKey || event.metaKey) && key === "s") event.preventDefault();
+    };
+    const keepFocusInside = (event: FocusEvent) => {
+      if (!overlayRef.current?.contains(event.target as Node)) focusInitialTarget();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("focusin", keepFocusInside, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("focusin", keepFocusInside, true);
+      inertSiblings.forEach(({ element, wasInert }) => { element.inert = wasInert; });
+      if (previousFocus?.isConnected) {
+        const restoreTarget = previousFocus.hasAttribute("disabled")
+          ? previousFocus.closest<HTMLElement>("[data-focus-restore]")
+          : previousFocus;
+        restoreTarget?.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const target = state === "error"
+      ? dialogRef.current?.querySelector<HTMLElement>("button")
+      : dialogRef.current;
+    target?.focus({ preventScroll: true });
+  }, [open, state]);
+
   // Prevent background interaction while loading
-  const captureClicks = useCallback((e: React.MouseEvent) => {
-    if (state === "loading") {
-      e.stopPropagation();
-    }
-  }, [state]);
+  const captureClicks = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  }, []);
 
   const isLoading = state === "loading";
   const isSuccess = state === "success";
   const isError = state === "error";
+  const showIndeterminateProgress = indeterminateProgress ?? action === "saving";
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal((
     <AnimatePresence>
       {open && (
         <motion.div
           key={`progress-${action}-${state}`}
+          ref={overlayRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="fixed inset-0 z-[100] flex items-center justify-center"
+          transition={{ duration: reducedMotion ? 0 : 0.2, ease: "easeOut" }}
+          className="fixed inset-0 map-layer-blocking z-[var(--map-layer-blocking)] flex items-center justify-center overflow-y-auto p-4 [padding-top:max(1rem,env(safe-area-inset-top))] [padding-bottom:max(1rem,env(safe-area-inset-bottom))]"
           role="dialog"
           aria-modal="true"
+          aria-busy={isLoading}
           aria-label={isLoading ? `Performing ${action}` : isSuccess ? `${action} complete` : `${action} failed`}
+          tabIndex={-1}
           style={{
-            background: "rgba(0,0,0,0.06)",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
+            background: "rgba(15,23,42,0.22)",
+            backdropFilter: reducedMotion ? "blur(2px)" : "blur(5px)",
+            WebkitBackdropFilter: reducedMotion ? "blur(2px)" : "blur(5px)",
           }}
+          onPointerDownCapture={(event) => { if (event.target === event.currentTarget) event.stopPropagation(); }}
+          onMouseDownCapture={(event) => { if (event.target === event.currentTarget) event.stopPropagation(); }}
           onClick={captureClicks}
         >
           <motion.div
             key={`card-${state}`}
-            initial={{ opacity: 0, scale: 0.92, y: 16 }}
+            ref={dialogRef}
+            initial={reducedMotion ? false : { opacity: 0, scale: 0.92, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: 16 }}
+            exit={reducedMotion ? undefined : { opacity: 0, scale: 0.92, y: 16 }}
             transition={{
-              type: "spring",
-              duration: 0.45,
-              bounce: 0.2,
+              type: reducedMotion ? "tween" : "spring",
+              duration: reducedMotion ? 0 : 0.45,
+              bounce: reducedMotion ? 0 : 0.2,
             }}
-            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             {/* ── Loading State ── */}
@@ -328,26 +447,16 @@ export function ActionProgressDialog({
                 {/* Animated icon container */}
                 <div className="relative w-14 h-14 mb-5">
                   {/* Pulsing background */}
-                  <motion.div
+                  {!reducedMotion && <motion.div
                     className="absolute inset-0 rounded-2xl bg-primary/10"
-                    animate={{
-                      scale: [1, 1.08, 1],
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                    }}
-                  />
+                    animate={{ scale: [1, 1.08, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                  />}
                   {/* Spinning icon */}
                   <div className="absolute inset-0 flex items-center justify-center">
                     <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{
-                        duration: 1.5,
-                        repeat: Infinity,
-                        ease: "linear",
-                      }}
+                      animate={reducedMotion ? undefined : { rotate: 360 }}
+                      transition={reducedMotion ? undefined : { duration: 1.5, repeat: Infinity, ease: "linear" }}
                     >
                       <ActionIcon className="h-6 w-6 text-primary" />
                     </motion.div>
@@ -371,26 +480,32 @@ export function ActionProgressDialog({
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.2 }}
                       className="text-xs text-muted-foreground font-medium flex items-center gap-2"
+                      role="status"
+                      aria-live="polite"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-pulse" />
-                      {progressMessage ?? cfg.statusMessages[messageIndex]}
+                      {progressMessage ?? (action === "saving" ? "Saving map data…" : cfg.statusMessages[messageIndex])}
                     </motion.span>
                   </AnimatePresence>
                 </div>
 
                 {/* Indeterminate progress bar */}
-                <div className="w-full h-1 rounded-full bg-muted mt-4 overflow-hidden">
-                  <motion.div
-                    className="h-full rounded-full bg-primary"
-                    initial={{ width: "0%" }}
-                    animate={{ width: "90%" }}
-                    transition={{
-                      duration: 8,
-                      ease: "easeInOut",
-                      repeat: Infinity,
-                      repeatType: "reverse",
-                    }}
-                  />
+                <div className="w-full h-1 rounded-full bg-muted mt-4 overflow-hidden" role="progressbar" aria-label="Saving in progress" aria-valuetext="Saving">
+                  {showIndeterminateProgress ? (
+                    <motion.div
+                      className="h-full w-[38%] rounded-full bg-primary"
+                      initial={false}
+                      animate={reducedMotion ? { opacity: [0.55, 1] } : { x: ["-110%", "280%"] }}
+                      transition={reducedMotion ? { duration: 1.4, repeat: Infinity } : { duration: 1.25, ease: "easeInOut", repeat: Infinity }}
+                    />
+                  ) : (
+                    <motion.div
+                      className="h-full rounded-full bg-primary"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "90%" }}
+                      transition={{ duration: 8, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" }}
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -401,16 +516,12 @@ export function ActionProgressDialog({
                 {/* Success icon with expanding ring */}
                 <div className="relative w-14 h-14 mb-5">
                   {/* Expanding ripple */}
-                  <motion.div
+                  {!reducedMotion && <motion.div
                     className="absolute inset-0 rounded-full border-2 border-green-300 dark:border-green-700/40"
                     initial={{ scale: 0.8, opacity: 0.8 }}
                     animate={{ scale: 1.4, opacity: 0 }}
-                    transition={{
-                      duration: 1.2,
-                      repeat: Infinity,
-                      ease: "easeOut",
-                    }}
-                  />
+                    transition={{ duration: 1.2, repeat: Infinity, ease: "easeOut" }}
+                  />}
                   {/* Background circle */}
                   <motion.div
                     className="absolute inset-0 rounded-2xl bg-green-100 dark:bg-green-900/20"
@@ -443,9 +554,9 @@ export function ActionProgressDialog({
                   {successTitleOverride ?? cfg.successTitle}
                 </h2>
                 <p className="text-sm text-muted-foreground leading-relaxed max-w-[280px]" style={{ fontFamily: "var(--font-body)" }}>
-                  {entityName
+                  {successMessageOverride ?? (entityName
                     ? `"${entityName}" — ${cfg.successMessage}`
-                    : successMessageOverride ?? cfg.successMessage}
+                    : cfg.successMessage)}
                 </p>
 
                 {/* Auto-dismiss indicator */}
@@ -551,5 +662,5 @@ export function ActionProgressDialog({
         </motion.div>
       )}
     </AnimatePresence>
-  );
+  ), document.body);
 }

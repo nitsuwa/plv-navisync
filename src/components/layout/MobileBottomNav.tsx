@@ -7,6 +7,7 @@ import { EventUnreadBadge } from "../events/EventUnreadBadge";
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
+  const isMapPage = pathname === "/map";
   const { isStudent, isStudentOrg, profile, loading } = useStudentAuth();
   const { unreadCount } = useStudentOrgEventUpdates(profile?.id, isStudentOrg && !loading);
   const links = isStudent
@@ -22,9 +23,13 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="md:hidden fixed inset-x-0 bottom-0 z-50 border-t border-border/80 bg-card/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+      className={cn(
+        "md:hidden border-t border-border/80 bg-card/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl",
+        isMapPage ? "map-layer-bottom-nav relative w-full shrink-0" : "fixed inset-x-0 bottom-0 z-50",
+      )}
       aria-label="Mobile navigation"
       data-testid="mobile-bottom-navigation"
+      data-layout-mode={isMapPage ? "map-row" : "fixed-overlay"}
     >
       <div className={cn("mx-auto grid min-h-16 max-w-screen-sm gap-1 px-3", links.length === 3 ? "grid-cols-3" : "grid-cols-2")}>
         {links.map(({ label, path, icon: Icon }) => {

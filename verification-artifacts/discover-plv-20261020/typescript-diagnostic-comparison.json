@@ -1,0 +1,17 @@
+﻿{
+    "baseline":  "verification-artifacts/sos-multifloor-arrival-20261019/typescript-current-final.txt",
+    "current":  "verification-artifacts/discover-plv-20261020/typescript-current.txt",
+    "typecheckExit":  1,
+    "baselineDiagnostics":  1029,
+    "currentDiagnostics":  1023,
+    "baselineDiagnosticIdentities":  516,
+    "currentDiagnosticIdentities":  514,
+    "newDiagnosticIdentities":  0,
+    "resolvedDiagnosticIdentities":  2,
+    "newTouchedFileDiagnostics":  [
+
+                                  ],
+    "newSamples":  [
+
+                   ]
+}

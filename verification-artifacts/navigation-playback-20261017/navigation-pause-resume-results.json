@@ -1,0 +1,92 @@
+{
+  "fixture": "read-only published campus; route writes blocked",
+  "checks": {
+    "pause": {
+      "stepUnchanged": true,
+      "progressUnchanged": true,
+      "transformUnchanged": true,
+      "before": {
+        "text": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nResume\n1×\nExpand",
+        "step": "Step 2 of 5",
+        "progress": 0.08572308233641568,
+        "transform": "translate(164.09193000936176,380)",
+        "visible": true
+      },
+      "afterWait": {
+        "text": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nResume\n1×\nExpand",
+        "step": "Step 2 of 5",
+        "progress": 0.08572308233641568,
+        "transform": "translate(164.09193000936176,380)",
+        "visible": true
+      }
+    },
+    "futureEntranceAvailableAtStep2": true,
+    "exploreFutureEntrance": {
+      "stayedOnStep2": false,
+      "floor": "Floor · G/F",
+      "exploreActive": "true",
+      "markerVisibleOnDifferentView": false
+    },
+    "returnToFollow": {
+      "step": "Step 2 of 5",
+      "markerVisible": true,
+      "progress": 0.08572308233641568,
+      "transform": "translate(164.09193000936176,380)",
+      "pausedProgress": 0.08572308233641568,
+      "pausedTransform": "translate(164.09193000936176,380)",
+      "progressUnchanged": true,
+      "cardText": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nResume\n1×\nExpand"
+    },
+    "mobile3DControlAvailable": true,
+    "mobile3DCanvas": true,
+    "resume": {
+      "playbackAdvanced": true,
+      "beforeResume": {
+        "text": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nResume\n1×\nExpand",
+        "step": "Step 2 of 5",
+        "progress": 0.08572308233641568,
+        "transform": "translate(164.09193000936176,380)",
+        "visible": true
+      },
+      "before": {
+        "text": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nPause\n1×\nExpand",
+        "step": "Step 2 of 5",
+        "progress": 0.08572308233641568,
+        "transform": "translate(164.09193000936176,380)",
+        "visible": true
+      },
+      "afterWait": {
+        "text": "GUIDED NAVIGATION\n\nStep 2 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nFollow the campus path to the entrance of CABA building.\n\nPause\n1×\nExpand",
+        "step": "Step 2 of 5",
+        "progress": 0.2172061928219563,
+        "transform": "translate(214,417.66022942951463)",
+        "visible": true
+      }
+    },
+    "instructionListJump": {
+      "step4Selected": true,
+      "paused": true,
+      "before": {
+        "selectedInstruction": "4\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.\nCURRENT\nInspected context",
+        "markerVisible": true,
+        "markerProgress": 0,
+        "markerTransform": "translate(560,460)"
+      },
+      "afterWait": {
+        "selectedInstruction": "4\nFollow the indoor path to the door of BUSINESS OFFICE SIMULATION ROOM.\nCURRENT\nInspected context",
+        "markerProgress": 0,
+        "markerTransform": "translate(560,460)"
+      }
+    },
+    "remoteWritesBlocked": true,
+    "browserErrors": []
+  },
+  "errors": [],
+  "screenshots": [
+    "standard-caba-paused-2d-desktop.png",
+    "standard-caba-explore-future-entrance-2d-mobile-390.png",
+    "standard-caba-navigation-3d-mobile-390.png",
+    "standard-caba-resumed-2d-desktop.png",
+    "standard-caba-step-list-jump-2d-desktop.png"
+  ]
+}

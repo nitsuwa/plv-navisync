@@ -1,0 +1,10 @@
+{
+  "baseline": "verification-artifacts/follow-camera-qa-typescript-20261021.txt",
+  "current": "verification-artifacts/follow-camera-current/typescript-current.txt",
+  "baselineDiagnosticCount": 1022,
+  "currentDiagnosticCount": 1022,
+  "newDiagnosticIdentities": 0,
+  "resolvedDiagnosticIdentities": 0,
+  "newTouchedFileDiagnostics": [],
+  "newSamples": []
+}

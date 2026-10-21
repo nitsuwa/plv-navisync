@@ -1,0 +1,2168 @@
+{
+  "errors": [],
+  "routeSearches": [
+    {
+      "endpoint": "start",
+      "query": "CANTEEN",
+      "options": [
+        "CANTEEN\nBUILDING\nCANTEEN"
+      ]
+    },
+    {
+      "endpoint": "destination",
+      "query": "CABA-403",
+      "options": [
+        "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+      ]
+    }
+  ],
+  "indoorSeekSamples": [
+    {
+      "label": "arrival-to-previous-2d",
+      "samples": [
+        {
+          "tMs": 0,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                211.79998779296875,
+                -79.86177062988281,
+                1525.341064453125,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(557,300)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 50,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                103.65882873535156,
+                309.6616516113281,
+                1525.3411865234375,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(557,275.3512687987916)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 100,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                103.65882873535156,
+                341.6382141113281,
+                1525.3411865234375,
+                695.2236328125
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(557,235.6592700841386)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 150,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                94.50109100341797,
+                341.6382141113281,
+                1525.341064453125,
+                695.2236328125
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(563.1778374030068,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 200,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                94.50109100341797,
+                341.6382141113281,
+                1525.341064453125,
+                695.2236328125
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(563.1778374030068,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 250,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                6.185924053192139,
+                341.6382141113281,
+                1525.3411865234375,
+                695.2236328125
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(622.7555274737019,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 300,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                6.185924053192139,
+                341.6382141113281,
+                1525.3411865234375,
+                695.2236328125
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(622.7555274737019,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 350,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                -229.16429138183594,
+                163.31765747070312,
+                1525.341064453125,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(781.523522332314,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 400,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                -264.466796875,
+                163.31765747070312,
+                1525.3411865234375,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(805.3387215611054,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 450,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                -299.76934814453125,
+                163.31765747070312,
+                1525.341064453125,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(829.1539207898975,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 500,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                -340.89678955078125,
+                163.31765747070312,
+                1525.341064453125,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(856.8986278914389,226)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        },
+        {
+          "tMs": 550,
+          "scenes": [
+            {
+              "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+              "floorNumber": "4",
+              "opacity": "1",
+              "rect": [
+                -351.42352294921875,
+                182.26852416992188,
+                1525.341064453125,
+                695.2235107421875
+              ]
+            }
+          ],
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "sceneOpacity": "1",
+          "routePoints": [
+            "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+          ],
+          "markerTransforms": [
+            "translate(864,213.21568075251906)"
+          ],
+          "markerCount": 1,
+          "indoor3DRendererCount": 0,
+          "canvases": [],
+          "step": null
+        }
+      ]
+    },
+    {
+      "label": "indoor-next-3d",
+      "samples": [
+        {
+          "tMs": 0,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 50,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 100,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 150,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 200,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 250,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 300,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 350,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 400,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 450,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 500,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 550,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        }
+      ]
+    },
+    {
+      "label": "arrival-to-previous-3d",
+      "samples": [
+        {
+          "tMs": 0,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 50,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 100,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 150,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 200,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 250,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 300,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 350,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 400,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 450,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 500,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        },
+        {
+          "tMs": 550,
+          "scenes": [],
+          "floorId": null,
+          "floorNumber": null,
+          "sceneOpacity": null,
+          "routePoints": [],
+          "markerTransforms": [],
+          "markerCount": 0,
+          "indoor3DRendererCount": 1,
+          "canvases": [
+            {
+              "width": 1440,
+              "height": 843,
+              "rect": [
+                0,
+                57,
+                1440,
+                843
+              ],
+              "className": ""
+            }
+          ],
+          "step": null
+        }
+      ]
+    }
+  ],
+  "exploreChecks": [
+    {
+      "step": "6Follow the indoor path to the door of CABA-403.CurrentInspected context",
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "0",
+          "rect": [
+            -250.20001220703125,
+            341.6382141113281,
+            1525.341064453125,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "0",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(864,78)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": []
+    },
+    {
+      "step": "7Arrive at CABA-403.CurrentInspected context",
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -112.34117126464844,
+            341.6382141113281,
+            1525.341064453125,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(557,300)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": []
+    }
+  ],
+  "canteenCaba": {
+    "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nSteps\n7\nEdit Route\nStart Navigation\nClear",
+    "alternatives": 1
+  },
+  "routeA": {
+    "geometry": [
+      "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+    ],
+    "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nSteps\n7\nEdit Route\nStart Navigation\nClear"
+  },
+  "routeAIndoor": {
+    "scenes": [
+      {
+        "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+        "floorNumber": "4",
+        "opacity": "1",
+        "rect": [
+          -250.20001220703125,
+          341.6382141113281,
+          1525.341064453125,
+          695.2236328125
+        ]
+      }
+    ],
+    "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+    "floorNumber": "4",
+    "sceneOpacity": "1",
+    "routePoints": [
+      "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+    ],
+    "markerTransforms": [],
+    "markerCount": 0,
+    "indoor3DRendererCount": 0,
+    "canvases": [],
+    "step": null
+  },
+  "routeAIndoor3DPreview": {
+    "scenes": [],
+    "floorId": null,
+    "floorNumber": null,
+    "sceneOpacity": null,
+    "routePoints": [],
+    "markerTransforms": [],
+    "markerCount": 0,
+    "indoor3DRendererCount": 1,
+    "canvases": [
+      {
+        "width": 1440,
+        "height": 843,
+        "rect": [
+          0,
+          57,
+          1440,
+          843
+        ],
+        "className": ""
+      }
+    ],
+    "step": null
+  },
+  "routeB": {
+    "selected": "true",
+    "geometry": [
+      "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+    ],
+    "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nStairs\n1 building entry\nGround Floor → Floor 4\nSteps\n11\nEdit Route\nStart Navigation\nClear"
+  },
+  "routeBIndoor": {
+    "scenes": [
+      {
+        "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+        "floorNumber": "4",
+        "opacity": "0.929668",
+        "rect": [
+          -438.67059326171875,
+          341.6382141113281,
+          1525.341064453125,
+          695.2236328125
+        ]
+      }
+    ],
+    "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+    "floorNumber": "4",
+    "sceneOpacity": "0.929668",
+    "routePoints": [
+      "960,160 959,226 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+    ],
+    "markerTransforms": [],
+    "markerCount": 0,
+    "indoor3DRendererCount": 0,
+    "canvases": [],
+    "step": null
+  },
+  "routeGeometryChangedOutdoors": false,
+  "routeGeometryChangedIndoors": true,
+  "routeASteps": [],
+  "previousFromArrival": [
+    {
+      "tMs": 0,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            211.79998779296875,
+            -79.86177062988281,
+            1525.341064453125,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(557,300)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 50,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            103.65882873535156,
+            309.6616516113281,
+            1525.3411865234375,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(557,275.3512687987916)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 100,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            103.65882873535156,
+            341.6382141113281,
+            1525.3411865234375,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(557,235.6592700841386)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 150,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            94.50109100341797,
+            341.6382141113281,
+            1525.341064453125,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(563.1778374030068,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 200,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            94.50109100341797,
+            341.6382141113281,
+            1525.341064453125,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(563.1778374030068,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 250,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            6.185924053192139,
+            341.6382141113281,
+            1525.3411865234375,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(622.7555274737019,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 300,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            6.185924053192139,
+            341.6382141113281,
+            1525.3411865234375,
+            695.2236328125
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(622.7555274737019,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 350,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -229.16429138183594,
+            163.31765747070312,
+            1525.341064453125,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(781.523522332314,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 400,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -264.466796875,
+            163.31765747070312,
+            1525.3411865234375,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(805.3387215611054,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 450,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -299.76934814453125,
+            163.31765747070312,
+            1525.341064453125,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(829.1539207898975,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 500,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -340.89678955078125,
+            163.31765747070312,
+            1525.341064453125,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(856.8986278914389,226)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    },
+    {
+      "tMs": 550,
+      "scenes": [
+        {
+          "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+          "floorNumber": "4",
+          "opacity": "1",
+          "rect": [
+            -351.42352294921875,
+            182.26852416992188,
+            1525.341064453125,
+            695.2235107421875
+          ]
+        }
+      ],
+      "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+      "floorNumber": "4",
+      "sceneOpacity": "1",
+      "routePoints": [
+        "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+      ],
+      "markerTransforms": [
+        "translate(864,213.21568075251906)"
+      ],
+      "markerCount": 1,
+      "indoor3DRendererCount": 0,
+      "canvases": [],
+      "step": null
+    }
+  ],
+  "stepSix3D": {
+    "scenes": [],
+    "floorId": null,
+    "floorNumber": null,
+    "sceneOpacity": null,
+    "routePoints": [],
+    "markerTransforms": [],
+    "markerCount": 0,
+    "indoor3DRendererCount": 1,
+    "canvases": [
+      {
+        "width": 1440,
+        "height": 843,
+        "rect": [
+          0,
+          57,
+          1440,
+          843
+        ],
+        "className": ""
+      }
+    ],
+    "step": null
+  },
+  "nextToArrival3D": [
+    {
+      "tMs": 0,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 50,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 100,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 150,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 200,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 250,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 300,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 350,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 400,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 450,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 500,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 550,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    }
+  ],
+  "renderer3D": {
+    "scenes": [],
+    "floorId": null,
+    "floorNumber": null,
+    "sceneOpacity": null,
+    "routePoints": [],
+    "markerTransforms": [],
+    "markerCount": 0,
+    "indoor3DRendererCount": 1,
+    "canvases": [
+      {
+        "width": 1440,
+        "height": 843,
+        "rect": [
+          0,
+          57,
+          1440,
+          843
+        ],
+        "className": ""
+      }
+    ],
+    "step": null
+  },
+  "previousFromArrival3D": [
+    {
+      "tMs": 0,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 50,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 100,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 150,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 200,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 250,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 300,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 350,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 400,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 450,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 500,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    },
+    {
+      "tMs": 550,
+      "scenes": [],
+      "floorId": null,
+      "floorNumber": null,
+      "sceneOpacity": null,
+      "routePoints": [],
+      "markerTransforms": [],
+      "markerCount": 0,
+      "indoor3DRendererCount": 1,
+      "canvases": [
+        {
+          "width": 1440,
+          "height": 843,
+          "rect": [
+            0,
+            57,
+            1440,
+            843
+          ],
+          "className": ""
+        }
+      ],
+      "step": null
+    }
+  ],
+  "renderer2DAfterSwitch": {
+    "scenes": [
+      {
+        "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+        "floorNumber": "4",
+        "opacity": "1",
+        "rect": [
+          -351.42352294921875,
+          341.6382141113281,
+          1525.341064453125,
+          695.2236328125
+        ]
+      }
+    ],
+    "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596",
+    "floorNumber": "4",
+    "sceneOpacity": "1",
+    "routePoints": [
+      "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+    ],
+    "markerTransforms": [
+      "translate(864,78)"
+    ],
+    "markerCount": 1,
+    "indoor3DRendererCount": 0,
+    "canvases": [],
+    "step": null
+  }
+}

@@ -1,6 +1,7 @@
 import { Building2, BriefcaseBusiness, FlaskConical, Landmark, MapPin, Search, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useRef, type ReactNode } from "react";
+import type { KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
 import {
   destinationContextLabel,
@@ -87,6 +88,7 @@ export function CampusDestinationSearch({
 }: CampusDestinationSearchProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
+  const [activeResultKey, setActiveResultKey] = useState<string | null>(null);
   const filteredResults = useMemo(
     () => filterDestinationResults(results, filter),
     [filter, results],
@@ -111,9 +113,47 @@ export function CampusDestinationSearch({
         || a.name.localeCompare(b.name, undefined, { numeric: true })),
     }));
   }, [filteredResults, groupByBuilding, results]);
+  const keyboardResults = useMemo(
+    () => resultGroups.flatMap((group) => group.entries).filter((result) => !getDisabledReason?.(result)),
+    [getDisabledReason, resultGroups],
+  );
+  const activeResult = keyboardResults.find((result) => destinationResultKey(result) === activeResultKey);
+  const keyboardResultKeySignature = keyboardResults.map(destinationResultKey).join("\u0000");
+  const optionId = (result: SearchResult) => `${listId}-option-${encodeURIComponent(destinationResultKey(result))}`;
+
+  useEffect(() => {
+    setActiveResultKey(null);
+  }, [focused, filter, query, keyboardResultKeySignature]);
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!keyboardResults.length) return;
+      const currentIndex = keyboardResults.findIndex((result) => destinationResultKey(result) === activeResultKey);
+      const nextIndex = event.key === "ArrowDown"
+        ? (currentIndex + 1 + keyboardResults.length) % keyboardResults.length
+        : (currentIndex <= 0 ? keyboardResults.length - 1 : currentIndex - 1);
+      setActiveResultKey(destinationResultKey(keyboardResults[nextIndex]));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      // Enter confirms the query by default. Only an explicit arrow-key
+      // highlight turns it into a result selection.
+      event.preventDefault();
+      if (activeResult) onSelect(activeResult);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setActiveResultKey(null);
+      onBlur();
+    }
+  };
 
   return (
-    <div ref={panelRef} className={cn("min-w-0", fillResults && "flex min-h-0 min-w-0 flex-1 flex-col")}>
+    <div ref={panelRef} className={cn("relative min-w-0", fillResults && "flex min-h-0 min-w-0 flex-1 flex-col")}>
       <div className={cn(
         "rounded-[18px] border border-white/50 bg-card/95 backdrop-blur-xl dark:border-white/10",
         compact ? "shadow-[0_6px_18px_rgba(15,23,42,0.14)]" : "rounded-[20px] shadow-[0_10px_30px_rgba(15,23,42,0.14)]",
@@ -136,27 +176,16 @@ export function CampusDestinationSearch({
               aria-label={ariaLabel}
               aria-controls={focused ? listId : undefined}
               aria-expanded={focused}
+              aria-activedescendant={activeResult ? optionId(activeResult) : undefined}
               autoComplete="off"
               autoFocus={autoFocus}
               value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              onFocus={onFocus}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") onBlur();
-                if (event.key === "Enter" && query.trim()) {
-                  const exact = filteredResults.find((result) =>
-                    result.name.trim().toLowerCase() === query.trim().toLowerCase()
-                    || result.code?.trim().toLowerCase() === query.trim().toLowerCase());
-                  const selectableResults = filteredResults.filter((result) => !getDisabledReason?.(result));
-                  const result = exact
-                    ? (getDisabledReason?.(exact) ? undefined : exact)
-                    : selectableResults[0];
-                  if (result) {
-                    event.preventDefault();
-                    onSelect(result);
-                  }
-                }
+              onChange={(event) => {
+                setActiveResultKey(null);
+                onQueryChange(event.target.value);
               }}
+              onFocus={onFocus}
+              onKeyDown={handleSearchKeyDown}
               onBlur={(event) => {
                 if (event.relatedTarget instanceof Node && panelRef.current?.contains(event.relatedTarget)) return;
                 onBlur();
@@ -172,7 +201,10 @@ export function CampusDestinationSearch({
             {query && (
               <button
                 type="button"
-                onClick={onClear}
+                onClick={() => {
+                  setActiveResultKey(null);
+                  onClear();
+                }}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 aria-label={clearAriaLabel}
               >
@@ -187,11 +219,16 @@ export function CampusDestinationSearch({
           {focused && (
             <motion.div
               key="destination-search-results"
+              data-testid={mapHeaderSafeZone ? "map-search-results-panel" : undefined}
               initial={reducedMotion ? false : { opacity: 0, height: 0, y: -4 }}
               animate={{ opacity: 1, height: "auto", y: 0 }}
               exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -3 }}
               transition={{ duration: reducedMotion ? 0.01 : 0.17, ease: "easeOut" }}
-              className={cn("overflow-hidden", fillResults && "flex min-h-0 flex-1 flex-col")}
+              className={cn(
+                "overflow-hidden",
+                fillResults && "flex min-h-0 flex-1 flex-col",
+                mapHeaderSafeZone && "absolute left-0 right-auto top-full z-[70] mt-1.5 w-[calc(100vw-1.5rem)] max-w-none md:static md:mt-1.5 md:w-full",
+              )}
             >
             <div className="mt-1.5 flex shrink-0 gap-1 overflow-x-auto px-0.5 pb-0.5 no-scrollbar" role="group" aria-label="Destination type filters">
               {FILTERS.map((item) => (
@@ -201,7 +238,10 @@ export function CampusDestinationSearch({
                   aria-label={item.ariaLabel}
                   aria-pressed={filter === item.value}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onFilterChange(item.value)}
+                  onClick={() => {
+                    setActiveResultKey(null);
+                    onFilterChange(item.value);
+                  }}
                   className={cn(
                     "shrink-0 rounded-full border text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                     "min-h-9 px-3",
@@ -221,7 +261,7 @@ export function CampusDestinationSearch({
               data-map-layer={mapHeaderSafeZone ? "transient" : undefined}
               aria-label="Campus destination results"
               className={cn(
-                "max-h-[min(22rem,55dvh)] overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl no-scrollbar",
+                "max-h-[min(22rem,55dvh)] overscroll-contain overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl no-scrollbar",
                 dense ? "mt-2" : "mt-1.5",
                 fillResults && "min-h-0 max-h-none flex-1",
               )}
@@ -243,19 +283,22 @@ export function CampusDestinationSearch({
                     {group.entries.map((result) => (
                       (() => {
                         const disabledReason = getDisabledReason?.(result);
+                        const resultKey = destinationResultKey(result);
+                        const isActive = resultKey === activeResultKey && !disabledReason;
                         return (
                           <button
                             key={destinationResultKey(result)}
+                            id={optionId(result)}
                             type="button"
                             role="option"
-                            aria-selected="false"
+                            aria-selected={isActive}
                             aria-disabled={disabledReason ? "true" : undefined}
                             aria-label={`${result.name}, ${destinationKindLabel(result)}${destinationContextLabel(result) ? `, ${destinationContextLabel(result)}` : ""}${disabledReason ? `, ${disabledReason}` : ""}`}
                             disabled={Boolean(disabledReason)}
                             title={disabledReason}
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => onSelect(result)}
-                            className={cn("flex w-full items-center border-b border-border/40 text-left transition-colors last:border-b-0 hover:bg-muted/70 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent", dense ? "min-h-[60px] gap-2.5 px-3.5 py-2.5" : "min-h-16 gap-3 px-3.5 py-2.5")}
+                            onClick={() => { setActiveResultKey(null); onSelect(result); }}
+                            className={cn("flex w-full items-center border-b border-border/40 text-left transition-colors last:border-b-0 hover:bg-muted/70 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent", isActive && "bg-muted/70", dense ? "min-h-[60px] gap-2.5 px-3.5 py-2.5" : "min-h-16 gap-3 px-3.5 py-2.5")}
                           >
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                               {destinationIcon(result)}

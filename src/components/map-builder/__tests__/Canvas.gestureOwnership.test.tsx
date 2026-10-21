@@ -1,6 +1,6 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef, type ComponentProps } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Canvas } from "../Canvas";
 import type { Campus } from "../types";
 
@@ -54,5 +54,18 @@ describe("Canvas imperative guide ownership", () => {
 
     expect(() => rendered.rerender(<Canvas {...canvasProps([])} />)).not.toThrow();
     expect(layer.children).toHaveLength(0);
+  });
+
+  it("lets Assembly Point placement handle clicks over an authored pathway", () => {
+    const onCanvasDown = vi.fn();
+    const rendered = render(<Canvas {...canvasProps([])}
+      campus={{ ...campus, paths: [{ id: "outdoor-path", points: [{ x: 20, y: 40 }, { x: 240, y: 120 }], type: "walkway", color: "#16a34a", width: 8 }] }}
+      tool="assembly-point"
+      onCanvasDown={onCanvasDown}
+    />);
+
+    fireEvent.mouseDown(rendered.getByTestId("campus-path"), { button: 0 });
+
+    expect(onCanvasDown).toHaveBeenCalledOnce();
   });
 });

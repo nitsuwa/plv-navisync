@@ -668,19 +668,26 @@ export function AdminMapBuilderPage() {
         || baselineCampus.canvasConfigured !== campus.canvasConfigured
       ),
     );
+    const destinationPolicy = campus.settings?.emergencyDestinationPolicy ?? "fixed_primary";
+    const baselineDestinationPolicy = baselineCampus?.settings?.emergencyDestinationPolicy ?? "fixed_primary";
+    const destinationPolicyChanged = Boolean(baselineCampus && baselineDestinationPolicy !== destinationPolicy);
     const campusRowAlreadyUpdated = Boolean(
       dimensionsChanged
       && baselineCampus?.databaseUpdatedAt
       && campus.databaseUpdatedAt
       && baselineCampus.databaseUpdatedAt !== campus.databaseUpdatedAt,
     );
-    if (dimensionsChanged && !campusRowAlreadyUpdated) {
-      if (!campus.databaseUpdatedAt) throw new Error("Refresh the campus before saving canvas dimensions.");
-      const updatedMetadata = await campusService.update(campus.id, {
+    const campusRowChanges = {
+      ...(dimensionsChanged && !campusRowAlreadyUpdated ? {
         canvas_width: campus.canvasW,
         canvas_height: campus.canvasH,
         canvas_configured: true,
-      }, campus.databaseUpdatedAt);
+      } : {}),
+      ...(destinationPolicyChanged ? { emergency_destination_policy: destinationPolicy } : {}),
+    };
+    if (Object.keys(campusRowChanges).length > 0) {
+      if (!campus.databaseUpdatedAt) throw new Error("Refresh the campus before saving campus settings.");
+      const updatedMetadata = await campusService.update(campus.id, campusRowChanges, campus.databaseUpdatedAt);
       // Only carry the row's fresh timestamps back into the complete draft.
       // `campusService.update` returns a lightweight Campus-shaped record;
       // spreading its preview collections here could otherwise replace the
@@ -689,9 +696,7 @@ export function AdminMapBuilderPage() {
         ...campus,
         databaseUpdatedAt: updatedMetadata.databaseUpdatedAt ?? campus.databaseUpdatedAt,
         updatedAt: updatedMetadata.updatedAt ?? campus.updatedAt,
-        canvasW: campus.canvasW,
-        canvasH: campus.canvasH,
-        canvasConfigured: true,
+        ...(dimensionsChanged ? { canvasW: campus.canvasW, canvasH: campus.canvasH, canvasConfigured: true } : {}),
       };
     }
     const saved = await campusStructureService.save(structureCandidate);
@@ -756,7 +761,18 @@ export function AdminMapBuilderPage() {
       passed: Math.max(0, total - errors - warnings),
       total,
     });
-    const rows = await refreshCampuses();
+    // Publication is already confirmed by the authoritative version RPC.
+    // A later list refresh is only metadata hydration and must not turn a
+    // completed publication into a retryable failure in the preview dialog.
+    let rows: Campus[] = [];
+    try {
+      rows = await refreshCampuses();
+    } catch (refreshError) {
+      toast.warning("Campus published", {
+        description: "The publication is confirmed, but the campus list could not refresh. Reopen the map to verify its latest status.",
+      });
+      console.warn("[AdminMapBuilderPage] Published campus status refresh failed", refreshError);
+    }
     // `campusService.list()` intentionally returns lightweight card rows. Keep
     // the complete candidate structure mounted after the publish refresh so
     // returning from the preview cannot replace the editor's authored map
@@ -782,7 +798,7 @@ export function AdminMapBuilderPage() {
     clearDraft(refreshed.id);
     setStudentPreviewCampus(refreshed);
     toast.success("Campus Published", { description: `${refreshed.name} is now available to students.` });
-  }, [clearDraft, studentPreviewCampus, refreshCampuses, updateCampus]);
+  }, [clearDraft, studentPreviewCampus, refreshCampuses, updateCampus, toast]);
 
   const closeStudentPreview = useCallback(() => setStudentPreviewCampus(null), []);
 

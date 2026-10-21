@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RouteMapOverlay } from "../RouteMapOverlay";
-import { StudentRouteTransitionMarker } from "../StudentRouteTransitionMarker";
+import { StudentRouteTransitionMarker, studentRouteTransitionViewportFromCamera } from "../StudentRouteTransitionMarker";
 
 describe("StudentRouteTransitionMarker", () => {
   it.each([
@@ -73,5 +73,119 @@ describe("StudentRouteTransitionMarker", () => {
     );
     expect(container.querySelector('[data-testid="test-route-transition-hit-target"]')).toHaveAttribute("r", "22");
     expect(container.querySelector('[data-testid="student-active-transition-marker"] .student-map-screen-marker')).toBeInTheDocument();
+  });
+
+  it("keeps a vertical-run transition marker passive while Resume owns playback", () => {
+    const onActivate = vi.fn();
+    render(
+      <svg>
+        <StudentRouteTransitionMarker
+          x={44}
+          y={60}
+          kind="stairs"
+          label="Take the Right Stair down to Floor 4."
+          onActivate={onActivate}
+          active={false}
+        />
+      </svg>,
+    );
+
+    const marker = screen.getByTestId("test-route-transition-marker");
+    expect(screen.getByTestId("student-route-preview-transition-marker")).toBeInTheDocument();
+    expect(marker).not.toHaveAttribute("role", "button");
+    expect(screen.queryByRole("button", { name: /Continue/ })).not.toBeInTheDocument();
+    fireEvent.click(marker);
+    fireEvent.keyDown(marker, { key: "Enter" });
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a single Explore choice directly actionable without changing playback controls", () => {
+    const onInspectOnly = vi.fn();
+    render(
+      <svg>
+        <StudentRouteTransitionMarker
+          x={44}
+          y={60}
+          kind="stairs"
+          label="Take the Left Stair up to Floor 2."
+          choices={[{
+            id: "left-stair-up-2",
+            kind: "stairs",
+            groupId: "left-stair",
+            label: "Take the Left Stair up to Floor 2.",
+            displayLabel: "Continue Upstairs — Floor 2",
+            point: { x: 44, y: 60 },
+            onActivate: onInspectOnly,
+          }]}
+        />
+      </svg>,
+    );
+
+    const marker = screen.getByTestId("test-route-transition-marker");
+    expect(screen.queryByTestId("student-explore-transition-choice-control")).not.toBeInTheDocument();
+    fireEvent.click(marker);
+    expect(onInspectOnly).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps screen-sized transition labels inside a narrow viewport after pan, zoom, and floor offsets", () => {
+    const viewport = studentRouteTransitionViewportFromCamera({
+      // A 1020-unit authored floor rendered into a 320px mobile map uses
+      // about 3.2 viewBox units per CSS pixel. This is the scale the previous
+      // viewBox-only clamp missed when compensating for camera zoom.
+      width: 1020,
+      height: 460,
+      zoom: 1.25,
+      center: { x: 510, y: 230 },
+      pan: { x: -500, y: -20 },
+      contentOffset: { x: -10, y: 0 },
+      screenSpaceScale: 3.2,
+    });
+    const { container } = render(
+      <svg>
+        <StudentRouteTransitionMarker
+          x={100}
+          y={80}
+          kind="stairs"
+          label="Take the Left Stair down to Floor 3."
+          displayLabel="Go down to Floor 3"
+          zoom={1.25}
+          viewport={viewport}
+        />
+      </svg>,
+    );
+
+    const label = screen.getByTestId("transition-label-pill");
+    const [labelShiftX, labelShiftY] = (label.getAttribute("transform")?.match(/translate\(([-\d.]+)\s+([-\d.]+)/) ?? []).slice(1).map(Number);
+    const labelRect = label.querySelector("rect")!;
+    const labelRectX = Number(labelRect.getAttribute("x"));
+    const labelRectY = Number(labelRect.getAttribute("y"));
+    const labelRectWidth = Number(labelRect.getAttribute("width"));
+    const labelRectHeight = Number(labelRect.getAttribute("height"));
+    const screenScale = viewport.screenSpaceScale!;
+    const renderedLeft = viewport.pan!.x + 100 * 1.25 + (labelShiftX + labelRectX) * screenScale;
+    const renderedRight = renderedLeft + labelRectWidth * screenScale;
+    const renderedTop = viewport.pan!.y + 80 * 1.25 + (labelShiftY + labelRectY) * screenScale;
+    const renderedBottom = renderedTop + labelRectHeight * screenScale;
+    expect(renderedLeft).toBeCloseTo(8 * screenScale);
+    expect(renderedRight).toBeLessThanOrEqual(viewport.width - 8 * screenScale);
+    expect(renderedTop).toBeGreaterThanOrEqual(8 * screenScale);
+    expect(renderedBottom).toBeLessThanOrEqual(viewport.height - 8 * screenScale);
+    expect(container.querySelector("[data-testid='transition-label-pill']")).toBeInTheDocument();
+  });
+
+  it("shows the authored next landing and direction on a stair cue", () => {
+    render(
+      <svg>
+        <StudentRouteTransitionMarker
+          x={40}
+          y={50}
+          kind="stairs"
+          label="Take the Main Stair to Floor 3."
+          displayLabel="Continue Upstairs — Floor 3"
+          onActivate={() => {}}
+        />
+      </svg>,
+    );
+    expect(screen.getByTestId("transition-label-pill")).toHaveTextContent("Continue Upstairs — Floor 3");
   });
 });

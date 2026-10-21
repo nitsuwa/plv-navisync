@@ -1,0 +1,320 @@
+{
+  "environment": "local Vite + Chromium; TEST ONLY cloned published snapshot; external Supabase routes intercepted",
+  "checks": {
+    "fixtureLoaded": true,
+    "adminUploadViaActualComponent": true,
+    "adminUploadAdapter": {
+      "metadataCreatedAsDraft": true,
+      "interceptedXhrBodyBytes": 0,
+      "sampleServedFromLocalFixture": true
+    },
+    "adminPreviewDecodedMetadata": {
+      "readyState": 4,
+      "duration": 16,
+      "videoWidth": 960,
+      "tracks": 0
+    },
+    "adminReviewAndPublishGate": true,
+    "adminDraftSaveReload": true,
+    "studentConsumedOnlyAdapterPublishedVideo": true,
+    "cabaBothRoutes": true,
+    "cabaRouteASelection": true,
+    "cabaRouteBSelection": true,
+    "fullMapVideoDecoded": {
+      "readyState": 4,
+      "width": 960,
+      "height": 540,
+      "paused": true,
+      "muted": true,
+      "currentTime": 0
+    },
+    "studentCaptionTrack": {
+      "loaded": true,
+      "cues": 4,
+      "firstCue": "This is a fictional PLV NaviSync video player test."
+    },
+    "routePausesForVideo": true,
+    "videoRouteMobile390": {
+      "width": 390,
+      "scrollWidth": 390,
+      "cardVisible": true
+    },
+    "videoRouteMobile360": {
+      "width": 360,
+      "scrollWidth": 360
+    },
+    "routeProgressPreserved": {
+      "before": "Take the Left Stair down to Floor 5.",
+      "after": "Take the Left Stair down to Floor 5.",
+      "sameStep": true,
+      "remainedPausedUntilExplicitAction": true,
+      "explicitAction": "Continue through the paused stair transition",
+      "videoTimeBeforeClose": 0.769488
+    },
+    "floorTransitionAfterVideoAction": "Floor · 5FCABA·Floor 5"
+  },
+  "adapterEvents": [
+    {
+      "type": "blocked-external-request",
+      "method": "GET",
+      "path": "/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js"
+    },
+    {
+      "type": "blocked-external-request",
+      "method": "GET",
+      "path": "/css2"
+    },
+    {
+      "type": "profile-bootstrap-test-adapter"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "system_settings"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "favorites"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "favorites"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "storage-upload",
+      "media": "video",
+      "bytes": 0
+    },
+    {
+      "type": "fixture-bytes-used-by-local-adapter",
+      "bytes": 223833,
+      "source": "attached TEST ONLY sample file"
+    },
+    {
+      "type": "metadata-insert",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8",
+      "status": "draft"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "video",
+      "range": "bytes=0-"
+    },
+    {
+      "type": "metadata-update",
+      "status": "draft",
+      "fields": [
+        "duration_seconds"
+      ]
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "storage-upload",
+      "media": "captions",
+      "bytes": 0
+    },
+    {
+      "type": "metadata-update",
+      "status": "draft",
+      "fields": [
+        "captions_path",
+        "captions_size_bytes",
+        "status",
+        "approved_route_fingerprint",
+        "approved_by",
+        "published_at"
+      ]
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "external-request-intercepted",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8-37b7aa55-98ec-48b6-9c95-fa7f3d388c48.vtt"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "video",
+      "range": "bytes=0-"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "captions",
+      "range": null
+    },
+    {
+      "type": "metadata-update",
+      "status": "draft",
+      "fields": [
+        "duration_seconds"
+      ]
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "metadata-update",
+      "status": "published",
+      "fields": [
+        "status",
+        "approved_route_fingerprint",
+        "approved_by",
+        "published_at"
+      ]
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "external-request-intercepted",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "metadata-read",
+      "videoId": "7e7446c8-65e3-40d7-9af2-f682172672e8"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "system_settings"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "auth-user-test-adapter"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "favorites"
+    },
+    {
+      "type": "supporting-read-test-adapter",
+      "table": "favorites"
+    },
+    {
+      "type": "student-video-rpc",
+      "result": "published"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8-37b7aa55-98ec-48b6-9c95-fa7f3d388c48.vtt"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "video",
+      "range": "bytes=0-"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "captions",
+      "range": null
+    },
+    {
+      "type": "external-request-intercepted",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "student-video-rpc",
+      "result": "published"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-url",
+      "object": "cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8-37b7aa55-98ec-48b6-9c95-fa7f3d388c48.vtt"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "video",
+      "range": "bytes=0-"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "captions",
+      "range": null
+    },
+    {
+      "type": "external-request-intercepted",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/cf5877a4-ac83-4bc3-9d10-0f4230dc3afb/ffe40872-45b8-4ca2-a148-61e6c7d00b40/7e7446c8-65e3-40d7-9af2-f682172672e8.mp4"
+    },
+    {
+      "type": "signed-media-fetch",
+      "media": "video",
+      "range": "bytes=196608-"
+    }
+  ],
+  "browserErrors": [],
+  "failure": {
+    "message": "page.screenshot: Target page, context or browser has been closed\nBrowser logs:\n\n<launching> C:/Users/user/AppData/Local/ms-playwright/chromium-1243/chrome-win64/chrome.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --enable-webgl --ignore-gpu-blocklist --use-gl=angle --use-angle=swiftshader --autoplay-policy=no-user-gesture-required --user-data-dir=C:\\Users\\user\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-NPgqi8 --remote-debugging-pipe --no-startup-window\n<launched> pid=31564\n[pid=31564][err] [31564:31216:1014/223528.319:ERROR:google_apis\\gcm\\engine\\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n[pid=31564][err] [31564:31216:1014/223555.383:ERROR:google_apis\\gcm\\engine\\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "stack": "page.screenshot: Target page, context or browser has been closed\nBrowser logs:\n\n<launching> C:/Users/user/AppData/Local/ms-playwright/chromium-1243/chrome-win64/chrome.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --enable-webgl --ignore-gpu-blocklist --use-gl=angle --use-angle=swiftshader --autoplay-policy=no-user-gesture-required --user-data-dir=C:\\Users\\user\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-NPgqi8 --remote-debugging-pipe --no-startup-window\n<launched> pid=31564\n[pid=31564][err] [31564:31216:1014/223528.319:ERROR:google_apis\\gcm\\engine\\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n[pid=31564][err] [31564:31216:1014/223555.383:ERROR:google_apis\\gcm\\engine\\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\emergency-video-test-only\\final-full-map.cjs:294:16)"
+  },
+  "failureBodyText": "",
+  "failureButtons": []
+}

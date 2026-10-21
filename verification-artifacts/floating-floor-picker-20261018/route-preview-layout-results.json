@@ -1,0 +1,3461 @@
+{
+  "fixture": "TEST ONLY saved dual-exit draft with an in-memory published MAIN CAMPUS read-only browser adapter",
+  "writes": "all non-read-only Supabase mutations blocked",
+  "browserErrors": [],
+  "browserResponses": [
+    {
+      "status": 403,
+      "method": "POST",
+      "pathname": "/41C27768-CC91-4DCA-B224-FE784C2BC030/89A995A8-4A41-4E2B-B468-9558687E4AC9/to/wsm.sessionActivated",
+      "expected": "TEST ONLY write blocked"
+    },
+    {
+      "status": 403,
+      "method": "POST",
+      "pathname": "/41C27768-CC91-4DCA-B224-FE784C2BC030/89A995A8-4A41-4E2B-B468-9558687E4AC9/callResult/cb.shutdown",
+      "expected": "TEST ONLY write blocked"
+    },
+    {
+      "status": 403,
+      "method": "POST",
+      "pathname": "/41C27768-CC91-4DCA-B224-FE784C2BC030/18E9381D-65C6-43E5-96E0-19E044C8A70B/to/wsm.sessionActivated",
+      "expected": "TEST ONLY write blocked"
+    },
+    {
+      "status": 403,
+      "method": "POST",
+      "pathname": "/41C27768-CC91-4DCA-B224-FE784C2BC030/18E9381D-65C6-43E5-96E0-19E044C8A70B/to/dp.onGetFields",
+      "expected": "TEST ONLY write blocked"
+    }
+  ],
+  "apiRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_published_campus_version_status"
+    },
+    {
+      "method": "GET",
+      "pathname": "/rest/v1/system_settings"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_published_campus_version_status"
+    },
+    {
+      "method": "GET",
+      "pathname": "/rest/v1/system_settings"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_coming_soon_campuses"
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/get_published_room_videos_for_room"
+    }
+  ],
+  "viewports": [
+    {
+      "width": 320,
+      "height": 568,
+      "check": {
+        "width": 320,
+        "height": 568,
+        "documentWidth": 320,
+        "documentHeight": 568,
+        "sheetState": "expanded",
+        "sheet": {
+          "x": 8,
+          "y": 162.5625,
+          "width": 304,
+          "height": 329.4375,
+          "top": 162.5625,
+          "right": 312,
+          "bottom": 492,
+          "left": 8
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 146.99998474121094,
+            "y": 72.1235122680664,
+            "width": 26.000015258789062,
+            "height": 26.000015258789062
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 320,
+        "documentWidth": 320,
+        "pickerRect": {
+          "x": 127.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 256,
+          "bottom": 52,
+          "left": 127.46875
+        },
+        "buttonRect": {
+          "x": 127.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 256,
+          "bottom": 52,
+          "left": 127.46875
+        },
+        "profileRect": {
+          "x": 264,
+          "y": 8,
+          "width": 48,
+          "height": 48,
+          "top": 8,
+          "right": 312,
+          "bottom": 56,
+          "left": 264
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "collapsed": {
+        "sheet": {
+          "x": 12,
+          "y": 361,
+          "width": 296,
+          "height": 134,
+          "top": 361,
+          "right": 308,
+          "bottom": 495,
+          "left": 12
+        },
+        "viewportWidth": 320,
+        "documentWidth": 320,
+        "summary": true,
+        "routeSelectorVisible": false,
+        "start": {
+          "visible": true,
+          "fullyInViewport": true,
+          "insideCollapsedCard": true
+        }
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 92.54135131835938,
+            "y": 57.949554443359375,
+            "width": 205.15625,
+            "height": 44,
+            "top": 57.949554443359375,
+            "right": 297.6976013183594,
+            "bottom": 101.94955444335938,
+            "left": 92.54135131835938
+          },
+          "visibleAboveSheet": true
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 503,
+            "top": 0,
+            "right": 320,
+            "bottom": 503,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 503,
+            "top": 0,
+            "right": 320,
+            "bottom": 503,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 320,
+            "height": 503
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 197.015625,
+                "y": 137.5679473876953,
+                "width": 120.96875,
+                "height": 20,
+                "top": 137.5679473876953,
+                "right": 317.984375,
+                "bottom": 157.5679473876953,
+                "left": 197.015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 462.0963439941406,
+                "y": 226.01065063476562,
+                "width": 55.328094482421875,
+                "height": 20,
+                "top": 226.01065063476562,
+                "right": 517.4244384765625,
+                "bottom": 246.01065063476562,
+                "left": 462.0963439941406
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 760.52734375,
+                "y": 539.8764038085938,
+                "width": 54.640625,
+                "height": 20,
+                "top": 539.8764038085938,
+                "right": 815.16796875,
+                "bottom": 559.8764038085938,
+                "left": 760.52734375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 646.6697998046875,
+                "y": 264.83441162109375,
+                "width": 100.609375,
+                "height": 20,
+                "top": 264.83441162109375,
+                "right": 747.2791748046875,
+                "bottom": 284.83441162109375,
+                "left": 646.6697998046875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 190.66453552246094,
+                "y": 43.66024398803711,
+                "width": 110.71876525878906,
+                "height": 20,
+                "top": 43.66024398803711,
+                "right": 301.38330078125,
+                "bottom": 63.66024398803711,
+                "left": 190.66453552246094
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 869.8446044921875,
+                "y": 327.4346923828125,
+                "width": 97,
+                "height": 20,
+                "top": 327.4346923828125,
+                "right": 966.8446044921875,
+                "bottom": 347.4346923828125,
+                "left": 869.8446044921875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 202.44004821777344,
+                "y": 83.32837677001953,
+                "width": 55.54689025878906,
+                "height": 16,
+                "top": 83.32837677001953,
+                "right": 257.9869384765625,
+                "bottom": 99.32837677001953,
+                "left": 202.44004821777344
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 849.7553100585938,
+                "y": 381.1694030761719,
+                "width": 61.984375,
+                "height": 16,
+                "top": 381.1694030761719,
+                "right": 911.7396850585938,
+                "bottom": 397.1694030761719,
+                "left": 849.7553100585938
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 847.2522583007812,
+                "y": 251.323486328125,
+                "width": 30.71807861328125,
+                "height": 8.602508544921875,
+                "top": 251.323486328125,
+                "right": 877.9703369140625,
+                "bottom": 259.9259948730469,
+                "left": 847.2522583007812
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 150.93370056152344,
+                "y": 241.8140106201172,
+                "width": 294.5264892578125,
+                "height": 14.176101684570312,
+                "top": 241.8140106201172,
+                "right": 445.46018981933594,
+                "bottom": 255.9901123046875,
+                "left": 150.93370056152344
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 360,
+      "height": 640,
+      "check": {
+        "width": 360,
+        "height": 640,
+        "documentWidth": 360,
+        "documentHeight": 640,
+        "sheetState": "expanded",
+        "sheet": {
+          "x": 8,
+          "y": 192.8125,
+          "width": 344,
+          "height": 371.1875,
+          "top": 192.8125,
+          "right": 352,
+          "bottom": 564,
+          "left": 8
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 175.18234252929688,
+            "y": 92.85882568359375,
+            "width": 9.635284423828125,
+            "height": 9.635299682617188
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 360,
+        "documentWidth": 360,
+        "pickerRect": {
+          "x": 167.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 296,
+          "bottom": 52,
+          "left": 167.46875
+        },
+        "buttonRect": {
+          "x": 167.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 296,
+          "bottom": 52,
+          "left": 167.46875
+        },
+        "profileRect": {
+          "x": 304,
+          "y": 8,
+          "width": 48,
+          "height": 48,
+          "top": 8,
+          "right": 352,
+          "bottom": 56,
+          "left": 304
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "collapsed": {
+        "sheet": {
+          "x": 12,
+          "y": 433,
+          "width": 336,
+          "height": 134,
+          "top": 433,
+          "right": 348,
+          "bottom": 567,
+          "left": 12
+        },
+        "viewportWidth": 360,
+        "documentWidth": 360,
+        "summary": true,
+        "routeSelectorVisible": false,
+        "start": {
+          "visible": true,
+          "fullyInViewport": true,
+          "insideCollapsedCard": true
+        }
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 117.55905151367188,
+            "y": 69.26227569580078,
+            "width": 205.15625,
+            "height": 44,
+            "top": 69.26227569580078,
+            "right": 322.7153015136719,
+            "bottom": 113.26227569580078,
+            "left": 117.55905151367188
+          },
+          "visibleAboveSheet": true
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 575,
+            "top": 0,
+            "right": 360,
+            "bottom": 575,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 575,
+            "top": 0,
+            "right": 360,
+            "bottom": 575,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 360,
+            "height": 575
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 237.015625,
+                "y": 158.24072265625,
+                "width": 120.96875,
+                "height": 20,
+                "top": 158.24072265625,
+                "right": 357.984375,
+                "bottom": 178.24072265625,
+                "left": 237.015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 529.1859741210938,
+                "y": 259.9996337890625,
+                "width": 55.328125,
+                "height": 20,
+                "top": 259.9996337890625,
+                "right": 584.5140991210938,
+                "bottom": 279.9996337890625,
+                "left": 529.1859741210938
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 870.0806274414062,
+                "y": 618.5265502929688,
+                "width": 54.640625,
+                "height": 20,
+                "top": 618.5265502929688,
+                "right": 924.7212524414062,
+                "bottom": 638.5265502929688,
+                "left": 870.0806274414062
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 743.3385620117188,
+                "y": 304.3533630371094,
+                "width": 100.609375,
+                "height": 20,
+                "top": 304.3533630371094,
+                "right": 843.9479370117188,
+                "bottom": 324.3533630371094,
+                "left": 743.3385620117188
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 222.9569091796875,
+                "y": 51.65460968017578,
+                "width": 110.71875,
+                "height": 20,
+                "top": 51.65460968017578,
+                "right": 333.6756591796875,
+                "bottom": 71.65460968017578,
+                "left": 222.9569091796875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 998.0955810546875,
+                "y": 375.866943359375,
+                "width": 97,
+                "height": 20,
+                "top": 375.866943359375,
+                "right": 1095.0955810546875,
+                "bottom": 395.866943359375,
+                "left": 998.0955810546875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 232.473388671875,
+                "y": 95.9922866821289,
+                "width": 55.546875,
+                "height": 16,
+                "top": 95.9922866821289,
+                "right": 288.020263671875,
+                "bottom": 111.9922866821289,
+                "left": 232.473388671875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 972.6447143554688,
+                "y": 436.2787170410156,
+                "width": 61.98443603515625,
+                "height": 16,
+                "top": 436.2787170410156,
+                "right": 1034.629150390625,
+                "bottom": 452.2787170410156,
+                "left": 972.6447143554688
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 967.5408935546875,
+                "y": 287.4365539550781,
+                "width": 30.7130126953125,
+                "height": 8.60107421875,
+                "top": 287.4365539550781,
+                "right": 998.25390625,
+                "bottom": 296.0376281738281,
+                "left": 967.5408935546875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 190.71041870117188,
+                "y": 277.02685546875,
+                "width": 294.4393310546875,
+                "height": 14.171905517578125,
+                "top": 277.02685546875,
+                "right": 485.1497497558594,
+                "bottom": 291.1987609863281,
+                "left": 190.71041870117188
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "check": {
+        "width": 390,
+        "height": 844,
+        "documentWidth": 390,
+        "documentHeight": 844,
+        "sheetState": "expanded",
+        "sheet": {
+          "x": 8,
+          "y": 278.484375,
+          "width": 374,
+          "height": 489.515625,
+          "top": 278.484375,
+          "right": 382,
+          "bottom": 768,
+          "left": 8
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 189.78086853027344,
+            "y": 134.02305603027344,
+            "width": 10.438232421875,
+            "height": 10.438247680664062
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 390,
+        "documentWidth": 390,
+        "pickerRect": {
+          "x": 197.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 326,
+          "bottom": 52,
+          "left": 197.46875
+        },
+        "buttonRect": {
+          "x": 197.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 326,
+          "bottom": 52,
+          "left": 197.46875
+        },
+        "profileRect": {
+          "x": 334,
+          "y": 8,
+          "width": 48,
+          "height": 48,
+          "top": 8,
+          "right": 382,
+          "bottom": 56,
+          "left": 334
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "collapsed": {
+        "sheet": {
+          "x": 12,
+          "y": 637,
+          "width": 366,
+          "height": 134,
+          "top": 637,
+          "right": 378,
+          "bottom": 771,
+          "left": 12
+        },
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "summary": true,
+        "routeSelectorVisible": false,
+        "start": {
+          "visible": true,
+          "fullyInViewport": true,
+          "insideCollapsedCard": true
+        }
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 146.7751922607422,
+            "y": 101.30487060546875,
+            "width": 205.15626525878906,
+            "height": 44,
+            "top": 101.30487060546875,
+            "right": 351.93145751953125,
+            "bottom": 145.30487060546875,
+            "left": 146.7751922607422
+          },
+          "visibleAboveSheet": true
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 779,
+            "top": 0,
+            "right": 390,
+            "bottom": 779,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 779,
+            "top": 0,
+            "right": 390,
+            "bottom": 779,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 390,
+            "height": 779
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 267.015625,
+                "y": 216.8009796142578,
+                "width": 120.96875,
+                "height": 20,
+                "top": 216.8009796142578,
+                "right": 387.984375,
+                "bottom": 236.8009796142578,
+                "left": 267.015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 677.5978393554688,
+                "y": 356.2846374511719,
+                "width": 55.328125,
+                "height": 20,
+                "top": 356.2846374511719,
+                "right": 732.9259643554688,
+                "bottom": 376.2846374511719,
+                "left": 677.5978393554688
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 1138.791015625,
+                "y": 841.3316040039062,
+                "width": 54.640625,
+                "height": 20,
+                "top": 841.3316040039062,
+                "right": 1193.431640625,
+                "bottom": 861.3316040039062,
+                "left": 1138.791015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 975.5518798828125,
+                "y": 416.3045654296875,
+                "width": 100.609375,
+                "height": 20,
+                "top": 416.3045654296875,
+                "right": 1076.1612548828125,
+                "bottom": 436.3045654296875,
+                "left": 975.5518798828125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 272.78363037109375,
+                "y": 74.29634094238281,
+                "width": 110.71875,
+                "height": 20,
+                "top": 74.29634094238281,
+                "right": 383.50238037109375,
+                "bottom": 94.29634094238281,
+                "left": 272.78363037109375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 1319.7838134765625,
+                "y": 513.0689697265625,
+                "width": 97,
+                "height": 20,
+                "top": 513.0689697265625,
+                "right": 1416.7838134765625,
+                "bottom": 533.0689697265625,
+                "left": 1319.7838134765625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 275.8998718261719,
+                "y": 131.8638916015625,
+                "width": 55.546875,
+                "height": 16,
+                "top": 131.8638916015625,
+                "right": 331.4467468261719,
+                "bottom": 147.8638916015625,
+                "left": 275.8998718261719
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 1279.143310546875,
+                "y": 592.3980712890625,
+                "width": 61.984375,
+                "height": 16,
+                "top": 592.3980712890625,
+                "right": 1341.127685546875,
+                "bottom": 608.3980712890625,
+                "left": 1279.143310546875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 1266.66796875,
+                "y": 389.7357482910156,
+                "width": 30.703369140625,
+                "height": 8.598388671875,
+                "top": 389.7357482910156,
+                "right": 1297.371337890625,
+                "bottom": 398.3341369628906,
+                "left": 1266.66796875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 261.699462890625,
+                "y": 376.7772216796875,
+                "width": 294.27490234375,
+                "height": 14.163970947265625,
+                "top": 376.7772216796875,
+                "right": 555.974365234375,
+                "bottom": 390.9411926269531,
+                "left": 261.699462890625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 430,
+      "height": 932,
+      "check": {
+        "width": 430,
+        "height": 932,
+        "documentWidth": 430,
+        "documentHeight": 932,
+        "sheetState": "expanded",
+        "sheet": {
+          "x": 8,
+          "y": 315.453125,
+          "width": 414,
+          "height": 540.546875,
+          "top": 315.453125,
+          "right": 422,
+          "bottom": 856,
+          "left": 8
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 208.96090698242188,
+            "y": 151.68746948242188,
+            "width": 12.078170776367188,
+            "height": 12.07818603515625
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 430,
+        "documentWidth": 430,
+        "pickerRect": {
+          "x": 237.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 366,
+          "bottom": 52,
+          "left": 237.46875
+        },
+        "buttonRect": {
+          "x": 237.46875,
+          "y": 8,
+          "width": 128.53125,
+          "height": 44,
+          "top": 8,
+          "right": 366,
+          "bottom": 52,
+          "left": 237.46875
+        },
+        "profileRect": {
+          "x": 374,
+          "y": 8,
+          "width": 48,
+          "height": 48,
+          "top": 8,
+          "right": 422,
+          "bottom": 56,
+          "left": 374
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "collapsed": {
+        "sheet": {
+          "x": 12,
+          "y": 725,
+          "width": 406,
+          "height": 134,
+          "top": 725,
+          "right": 418,
+          "bottom": 859,
+          "left": 12
+        },
+        "viewportWidth": 430,
+        "documentWidth": 430,
+        "summary": true,
+        "routeSelectorVisible": false,
+        "start": {
+          "visible": true,
+          "fullyInViewport": true,
+          "insideCollapsedCard": true
+        }
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 172.90789794921875,
+            "y": 115.13070678710938,
+            "width": 205.15625,
+            "height": 44,
+            "top": 115.13070678710938,
+            "right": 378.06414794921875,
+            "bottom": 159.13070678710938,
+            "left": 172.90789794921875
+          },
+          "visibleAboveSheet": true
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 430,
+            "height": 867,
+            "top": 0,
+            "right": 430,
+            "bottom": 867,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 0,
+            "width": 430,
+            "height": 867,
+            "top": 0,
+            "right": 430,
+            "bottom": 867,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 430,
+            "height": 867
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 307.015625,
+                "y": 242.0666961669922,
+                "width": 120.96875,
+                "height": 20.000015258789062,
+                "top": 242.0666961669922,
+                "right": 427.984375,
+                "bottom": 262.06671142578125,
+                "left": 307.015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 755.151123046875,
+                "y": 397.82537841796875,
+                "width": 55.328125,
+                "height": 20,
+                "top": 397.82537841796875,
+                "right": 810.479248046875,
+                "bottom": 417.82537841796875,
+                "left": 755.151123046875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 1268.2432861328125,
+                "y": 937.4569702148438,
+                "width": 54.640625,
+                "height": 20,
+                "top": 937.4569702148438,
+                "right": 1322.8839111328125,
+                "bottom": 957.4569702148438,
+                "left": 1268.2432861328125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 1089.2569580078125,
+                "y": 464.60400390625,
+                "width": 100.609375,
+                "height": 20,
+                "top": 464.60400390625,
+                "right": 1189.8663330078125,
+                "bottom": 484.60400390625,
+                "left": 1089.2569580078125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 307.8074951171875,
+                "y": 84.06647491455078,
+                "width": 110.71875,
+                "height": 20,
+                "top": 84.06647491455078,
+                "right": 418.5262451171875,
+                "bottom": 104.06647491455078,
+                "left": 307.8074951171875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 1472.0888671875,
+                "y": 572.26220703125,
+                "width": 97,
+                "height": 20,
+                "top": 572.26220703125,
+                "right": 1569.0888671875,
+                "bottom": 592.26220703125,
+                "left": 1472.0888671875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 308.1627502441406,
+                "y": 147.34121704101562,
+                "width": 55.546875,
+                "height": 16,
+                "top": 147.34121704101562,
+                "right": 363.7096252441406,
+                "bottom": 163.34121704101562,
+                "left": 308.1627502441406
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 1424.8953857421875,
+                "y": 659.7521362304688,
+                "width": 61.984375,
+                "height": 16,
+                "top": 659.7521362304688,
+                "right": 1486.8797607421875,
+                "bottom": 675.7521362304688,
+                "left": 1424.8953857421875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 1409.2396240234375,
+                "y": 433.8721008300781,
+                "width": 30.7008056640625,
+                "height": 8.59765625,
+                "top": 433.8721008300781,
+                "right": 1439.9404296875,
+                "bottom": 442.4697570800781,
+                "left": 1409.2396240234375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 305.8402099609375,
+                "y": 419.81256103515625,
+                "width": 294.2293701171875,
+                "height": 14.16180419921875,
+                "top": 419.81256103515625,
+                "right": 600.069580078125,
+                "bottom": 433.974365234375,
+                "left": 305.8402099609375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 768,
+      "height": 1024,
+      "check": {
+        "width": 768,
+        "height": 1024,
+        "documentWidth": 768,
+        "documentHeight": 1024,
+        "sheetState": null,
+        "sheet": {
+          "x": 12,
+          "y": 69,
+          "width": 380,
+          "height": 605.5,
+          "top": 69,
+          "right": 392,
+          "bottom": 674.5,
+          "left": 12
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 265.49755859375,
+            "y": 422.58477783203125,
+            "width": 22.407745361328125,
+            "height": 22.407745361328125
+          },
+          "clearOfSheet": false
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 768,
+        "documentWidth": 768,
+        "pickerRect": {
+          "x": 392,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 752,
+          "bottom": 117,
+          "left": 392
+        },
+        "buttonRect": {
+          "x": 392,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 752,
+          "bottom": 117,
+          "left": 392
+        },
+        "profileRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 362.34381103515625,
+            "y": 660.4567260742188,
+            "width": 205.15625,
+            "height": 44,
+            "top": 660.4567260742188,
+            "right": 567.5000610351562,
+            "bottom": 704.4567260742188,
+            "left": 362.34381103515625
+          },
+          "visibleAboveSheet": false
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 57,
+            "width": 768,
+            "height": 967,
+            "top": 57,
+            "right": 768,
+            "bottom": 1024,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 57,
+            "width": 768,
+            "height": 967,
+            "top": 57,
+            "right": 768,
+            "bottom": 1024,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 768,
+            "height": 967
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 641.7385864257812,
+                "y": 887.7886352539062,
+                "width": 120.96875,
+                "height": 20,
+                "top": 887.7886352539062,
+                "right": 762.7073364257812,
+                "bottom": 907.7886352539062,
+                "left": 641.7385864257812
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 1161.9422607421875,
+                "y": 1229.5989990234375,
+                "width": 55.328125,
+                "height": 20,
+                "top": 1229.5989990234375,
+                "right": 1217.2703857421875,
+                "bottom": 1249.5989990234375,
+                "left": 1161.9422607421875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 2119.843017578125,
+                "y": 2620.52587890625,
+                "width": 54.640625,
+                "height": 20,
+                "top": 2620.52587890625,
+                "right": 2174.483642578125,
+                "bottom": 2640.52587890625,
+                "left": 2119.843017578125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 1666.9775390625,
+                "y": 1381.7197265625,
+                "width": 100.609375,
+                "height": 20,
+                "top": 1381.7197265625,
+                "right": 1767.5869140625,
+                "bottom": 1401.7197265625,
+                "left": 1666.9775390625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 524.032470703125,
+                "y": 575.9930419921875,
+                "width": 110.71875,
+                "height": 20,
+                "top": 575.9930419921875,
+                "right": 634.751220703125,
+                "bottom": 595.9930419921875,
+                "left": 524.032470703125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 2269.423095703125,
+                "y": 1637.763916015625,
+                "width": 97,
+                "height": 20,
+                "top": 1637.763916015625,
+                "right": 2366.423095703125,
+                "bottom": 1657.763916015625,
+                "left": 2269.423095703125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 515.371337890625,
+                "y": 651.2391967773438,
+                "width": 55.546875,
+                "height": 16,
+                "top": 651.2391967773438,
+                "right": 570.918212890625,
+                "bottom": 667.2391967773438,
+                "left": 515.371337890625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 2180.0146484375,
+                "y": 1740.3179931640625,
+                "width": 61.984375,
+                "height": 16,
+                "top": 1740.3179931640625,
+                "right": 2241.9990234375,
+                "bottom": 1756.3179931640625,
+                "left": 2180.0146484375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 2179.319091796875,
+                "y": 1466.82568359375,
+                "width": 31.778564453125,
+                "height": 8.8994140625,
+                "top": 1466.82568359375,
+                "right": 2211.09765625,
+                "bottom": 1475.72509765625,
+                "left": 2179.319091796875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 562.8411254882812,
+                "y": 1283.304931640625,
+                "width": 322.67803955078125,
+                "height": 15.531005859375,
+                "top": 1283.304931640625,
+                "right": 885.5191650390625,
+                "bottom": 1298.8359375,
+                "left": 562.8411254882812
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "check": {
+        "width": 1024,
+        "height": 768,
+        "documentWidth": 1024,
+        "documentHeight": 768,
+        "sheetState": null,
+        "sheet": {
+          "x": 12,
+          "y": 69,
+          "width": 380,
+          "height": 576,
+          "top": 69,
+          "right": 392,
+          "bottom": 645,
+          "left": 12
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 388.8188171386719,
+            "y": 713.5817260742188,
+            "width": 27.407073974609375,
+            "height": 27.40704345703125
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 1024,
+        "documentWidth": 1024,
+        "pickerRect": {
+          "x": 648,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 1008,
+          "bottom": 117,
+          "left": 648
+        },
+        "buttonRect": {
+          "x": 648,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 1008,
+          "bottom": 117,
+          "left": 648
+        },
+        "profileRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 675.010009765625,
+            "y": 249.31658935546875,
+            "width": 205.15625,
+            "height": 44,
+            "top": 249.31658935546875,
+            "right": 880.166259765625,
+            "bottom": 293.31658935546875,
+            "left": 675.010009765625
+          },
+          "visibleAboveSheet": false
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 57,
+            "width": 1024,
+            "height": 711,
+            "top": 57,
+            "right": 1024,
+            "bottom": 768,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 57,
+            "width": 1024,
+            "height": 711,
+            "top": 57,
+            "right": 1024,
+            "bottom": 768,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 1024,
+            "height": 711
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 706.440185546875,
+                "y": 483.38897705078125,
+                "width": 120.96875,
+                "height": 20,
+                "top": 483.38897705078125,
+                "right": 827.408935546875,
+                "bottom": 503.38897705078125,
+                "left": 706.440185546875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 2009.0968017578125,
+                "y": 926.5719604492188,
+                "width": 55.3280029296875,
+                "height": 20,
+                "top": 926.5719604492188,
+                "right": 2064.4248046875,
+                "bottom": 946.5719604492188,
+                "left": 2009.0968017578125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 13359.1474609375,
+                "y": 9535.390625,
+                "width": 54.640625,
+                "height": 20,
+                "top": 9535.390625,
+                "right": 13413.7880859375,
+                "bottom": 9555.390625,
+                "left": 13359.1474609375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 3023.830810546875,
+                "y": 1180.9417724609375,
+                "width": 100.609375,
+                "height": 20,
+                "top": 1180.9417724609375,
+                "right": 3124.440185546875,
+                "bottom": 1200.9417724609375,
+                "left": 3023.830810546875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 823.9412841796875,
+                "y": 185.44264221191406,
+                "width": 110.71875,
+                "height": 20,
+                "top": 185.44264221191406,
+                "right": 934.6600341796875,
+                "bottom": 205.44264221191406,
+                "left": 823.9412841796875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 4704.15283203125,
+                "y": 1730.3319091796875,
+                "width": 97,
+                "height": 20,
+                "top": 1730.3319091796875,
+                "right": 4801.15283203125,
+                "bottom": 1750.3319091796875,
+                "left": 4704.15283203125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 806.3660888671875,
+                "y": 273.90289306640625,
+                "width": 55.546875,
+                "height": 16,
+                "top": 273.90289306640625,
+                "right": 861.9129638671875,
+                "bottom": 289.90289306640625,
+                "left": 806.3660888671875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 4345.1181640625,
+                "y": 1884.778076171875,
+                "width": 61.984375,
+                "height": 16,
+                "top": 1884.778076171875,
+                "right": 4407.1025390625,
+                "bottom": 1900.778076171875,
+                "left": 4345.1181640625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 4832.123046875,
+                "y": 1423.3966064453125,
+                "width": 35.2548828125,
+                "height": 9.8729248046875,
+                "top": 1423.3966064453125,
+                "right": 4867.3779296875,
+                "bottom": 1433.26953125,
+                "left": 4832.123046875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 1096.5380859375,
+                "y": 1004.12060546875,
+                "width": 549.3558349609375,
+                "height": 26.4415283203125,
+                "top": 1004.12060546875,
+                "right": 1645.8939208984375,
+                "bottom": 1030.5621337890625,
+                "left": 1096.5380859375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "check": {
+        "width": 1440,
+        "height": 900,
+        "documentWidth": 1440,
+        "documentHeight": 900,
+        "sheetState": null,
+        "sheet": {
+          "x": 12,
+          "y": 69,
+          "width": 460,
+          "height": 538,
+          "top": 69,
+          "right": 472,
+          "bottom": 607,
+          "left": 12
+        },
+        "startVisible": true,
+        "startInsideFooter": true,
+        "startInsideViewport": true,
+        "aboveBottomNav": true,
+        "routeSelectorVisible": true,
+        "emergencyPosition": {
+          "rect": {
+            "x": 546.7764282226562,
+            "y": 829.6852416992188,
+            "width": 38.54119873046875,
+            "height": 38.54119873046875
+          },
+          "clearOfSheet": true
+        }
+      },
+      "floorPicker": {
+        "count": 1,
+        "inlineCount": 0,
+        "visible": true,
+        "ownedByAccountControls": true,
+        "nestedInRoutePanel": false,
+        "belowAccount": false,
+        "width": 1440,
+        "documentWidth": 1440,
+        "pickerRect": {
+          "x": 1064,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 1424,
+          "bottom": 117,
+          "left": 1064
+        },
+        "buttonRect": {
+          "x": 1064,
+          "y": 73,
+          "width": 360,
+          "height": 44,
+          "top": 73,
+          "right": 1424,
+          "bottom": 117,
+          "left": 1064
+        },
+        "profileRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        },
+        "label": "CABA · 6FCABA·Floor 6"
+      },
+      "dark3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true,
+        "transitionCue": {
+          "text": "Continue Downstairs — Floor 5",
+          "rect": {
+            "x": 687.967041015625,
+            "y": 585.6088256835938,
+            "width": 205.15625,
+            "height": 44,
+            "top": 585.6088256835938,
+            "right": 893.123291015625,
+            "bottom": 629.6088256835938,
+            "left": 687.967041015625
+          },
+          "visibleAboveSheet": false
+        },
+        "renderer": {
+          "present": true,
+          "rect": {
+            "x": 0,
+            "y": 57,
+            "width": 1440,
+            "height": 843,
+            "top": 57,
+            "right": 1440,
+            "bottom": 900,
+            "left": 0
+          },
+          "opacity": "1",
+          "canvasRect": {
+            "x": 0,
+            "y": 57,
+            "width": 1440,
+            "height": 843,
+            "top": 57,
+            "right": 1440,
+            "bottom": 900,
+            "left": 0
+          },
+          "canvasPixels": {
+            "width": 1440,
+            "height": 843
+          },
+          "camera": null,
+          "routeLabelRects": [],
+          "labelRects": [
+            {
+              "text": "CABA LECTURE HALL",
+              "rect": {
+                "x": 936.9323120117188,
+                "y": 786.2545776367188,
+                "width": 120.96881103515625,
+                "height": 20,
+                "top": 786.2545776367188,
+                "right": 1057.901123046875,
+                "bottom": 806.2545776367188,
+                "left": 936.9323120117188
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6A",
+              "rect": {
+                "x": 1394.6380615234375,
+                "y": 1084.87060546875,
+                "width": 55.328125,
+                "height": 20,
+                "top": 1084.87060546875,
+                "right": 1449.9661865234375,
+                "bottom": 1104.87060546875,
+                "left": 1394.6380615234375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "MPH 6B",
+              "rect": {
+                "x": 2229.749755859375,
+                "y": 2302.56103515625,
+                "width": 54.640625,
+                "height": 20,
+                "top": 2302.56103515625,
+                "right": 2284.390380859375,
+                "bottom": 2322.56103515625,
+                "left": 2229.749755859375
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COMFORT ROOM",
+              "rect": {
+                "x": 1832.008544921875,
+                "y": 1218.0450439453125,
+                "width": 100.609375,
+                "height": 20,
+                "top": 1218.0450439453125,
+                "right": 1932.617919921875,
+                "bottom": 1238.0450439453125,
+                "left": 1832.008544921875
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "ELECTRICAL ROOM",
+              "rect": {
+                "x": 834.97705078125,
+                "y": 512.669677734375,
+                "width": 110.71875,
+                "height": 20,
+                "top": 512.669677734375,
+                "right": 945.69580078125,
+                "bottom": 532.669677734375,
+                "left": 834.97705078125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "STORAGE ROOM",
+              "rect": {
+                "x": 2357.432861328125,
+                "y": 1442.1995849609375,
+                "width": 97,
+                "height": 20,
+                "top": 1442.1995849609375,
+                "right": 2454.432861328125,
+                "bottom": 1462.1995849609375,
+                "left": 2357.432861328125
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Left Stair",
+              "rect": {
+                "x": 830.9639282226562,
+                "y": 579.0973510742188,
+                "width": 55.546875,
+                "height": 16,
+                "top": 579.0973510742188,
+                "right": 886.5108032226562,
+                "bottom": 595.0973510742188,
+                "left": 830.9639282226562
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Right Stair",
+              "rect": {
+                "x": 2281.734619140625,
+                "y": 1532.2857666015625,
+                "width": 61.984375,
+                "height": 16,
+                "top": 1532.2857666015625,
+                "right": 2343.718994140625,
+                "bottom": 1548.2857666015625,
+                "left": 2281.734619140625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "Elevator 1",
+              "rect": {
+                "x": 2283.092041015625,
+                "y": 1294.8607177734375,
+                "width": 31.723876953125,
+                "height": 8.8841552734375,
+                "top": 1294.8607177734375,
+                "right": 2314.81591796875,
+                "bottom": 1303.744873046875,
+                "left": 2283.092041015625
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair",
+              "rect": {
+                "x": 855.6832885742188,
+                "y": 1132.8206787109375,
+                "width": 321.75018310546875,
+                "height": 15.486328125,
+                "top": 1132.8206787109375,
+                "right": 1177.4334716796875,
+                "bottom": 1148.3070068359375,
+                "left": 855.6832885742188
+              },
+              "opacity": "1"
+            },
+            {
+              "text": "A",
+              "rect": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "opacity": "1"
+            }
+          ],
+          "labelTexts": [
+            "COMFORT ROOM",
+            "MPH 6B",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM",
+            "MPH 6A",
+            "CABA LECTURE HALL",
+            "CABA LECTURE HALL",
+            "MPH 6A",
+            "MPH 6B",
+            "COMFORT ROOM",
+            "ELECTRICAL ROOM",
+            "STORAGE ROOM"
+          ]
+        },
+        "routeStartMarker": {
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "clearOfSheet": true
+        }
+      },
+      "dark2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      },
+      "light3D": {
+        "startVisible": true,
+        "routeChoicesVisible": true,
+        "sheetWithinViewport": true
+      },
+      "light2D": {
+        "startVisible": true,
+        "routeChoicesVisible": true
+      }
+    }
+  ],
+  "floorPickerChecks": [
+    {
+      "stage": "route-preview-collapsed",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-320",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 320,
+      "documentWidth": 320,
+      "pickerRect": {
+        "x": 127.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 256,
+        "bottom": 52,
+        "left": 127.46875
+      },
+      "buttonRect": {
+        "x": 127.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 256,
+        "bottom": 52,
+        "left": 127.46875
+      },
+      "profileRect": {
+        "x": 264,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 312,
+        "bottom": 56,
+        "left": 264
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-320",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 320,
+      "documentWidth": 320,
+      "pickerRect": {
+        "x": 127.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 256,
+        "bottom": 52,
+        "left": 127.46875
+      },
+      "buttonRect": {
+        "x": 127.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 256,
+        "bottom": 52,
+        "left": 127.46875
+      },
+      "profileRect": {
+        "x": 264,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 312,
+        "bottom": 56,
+        "left": 264
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-360",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 360,
+      "documentWidth": 360,
+      "pickerRect": {
+        "x": 167.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 296,
+        "bottom": 52,
+        "left": 167.46875
+      },
+      "buttonRect": {
+        "x": 167.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 296,
+        "bottom": 52,
+        "left": 167.46875
+      },
+      "profileRect": {
+        "x": 304,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 352,
+        "bottom": 56,
+        "left": 304
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-360",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 360,
+      "documentWidth": 360,
+      "pickerRect": {
+        "x": 167.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 296,
+        "bottom": 52,
+        "left": 167.46875
+      },
+      "buttonRect": {
+        "x": 167.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 296,
+        "bottom": 52,
+        "left": 167.46875
+      },
+      "profileRect": {
+        "x": 304,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 352,
+        "bottom": 56,
+        "left": 304
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-430",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 430,
+      "documentWidth": 430,
+      "pickerRect": {
+        "x": 237.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 366,
+        "bottom": 52,
+        "left": 237.46875
+      },
+      "buttonRect": {
+        "x": 237.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 366,
+        "bottom": 52,
+        "left": 237.46875
+      },
+      "profileRect": {
+        "x": 374,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 422,
+        "bottom": 56,
+        "left": 374
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-430",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 430,
+      "documentWidth": 430,
+      "pickerRect": {
+        "x": 237.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 366,
+        "bottom": 52,
+        "left": 237.46875
+      },
+      "buttonRect": {
+        "x": 237.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 366,
+        "bottom": 52,
+        "left": 237.46875
+      },
+      "profileRect": {
+        "x": 374,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 422,
+        "bottom": 56,
+        "left": 374
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-768",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 768,
+      "documentWidth": 768,
+      "pickerRect": {
+        "x": 392,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 752,
+        "bottom": 117,
+        "left": 392
+      },
+      "buttonRect": {
+        "x": 392,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 752,
+        "bottom": 117,
+        "left": 392
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-768",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 768,
+      "documentWidth": 768,
+      "pickerRect": {
+        "x": 392,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 752,
+        "bottom": 117,
+        "left": 392
+      },
+      "buttonRect": {
+        "x": 392,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 752,
+        "bottom": 117,
+        "left": 392
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-1024",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 1024,
+      "documentWidth": 1024,
+      "pickerRect": {
+        "x": 648,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1008,
+        "bottom": 117,
+        "left": 648
+      },
+      "buttonRect": {
+        "x": 648,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1008,
+        "bottom": 117,
+        "left": 648
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-1024",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 1024,
+      "documentWidth": 1024,
+      "pickerRect": {
+        "x": 648,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1008,
+        "bottom": 117,
+        "left": 648
+      },
+      "buttonRect": {
+        "x": 648,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1008,
+        "bottom": 117,
+        "left": 648
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-expanded-1440",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 1440,
+      "documentWidth": 1440,
+      "pickerRect": {
+        "x": 1064,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1424,
+        "bottom": 117,
+        "left": 1064
+      },
+      "buttonRect": {
+        "x": 1064,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1424,
+        "bottom": 117,
+        "left": 1064
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "route-preview-3d-1440",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 1440,
+      "documentWidth": 1440,
+      "pickerRect": {
+        "x": 1064,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1424,
+        "bottom": 117,
+        "left": 1064
+      },
+      "buttonRect": {
+        "x": 1064,
+        "y": 73,
+        "width": 360,
+        "height": 44,
+        "top": 73,
+        "right": 1424,
+        "bottom": 117,
+        "left": 1064
+      },
+      "profileRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "profile-menu-before-open-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "profile-menu-closed-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "guided-navigation-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": true,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 253.46875,
+        "y": 64,
+        "width": 128.53125,
+        "height": 44,
+        "top": 64,
+        "right": 382,
+        "bottom": 108,
+        "left": 253.46875
+      },
+      "buttonRect": {
+        "x": 253.46875,
+        "y": 64,
+        "width": 128.53125,
+        "height": 44,
+        "top": 64,
+        "right": 382,
+        "bottom": 108,
+        "left": 253.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    },
+    {
+      "stage": "guided-navigation-expanded-390",
+      "count": 1,
+      "inlineCount": 0,
+      "visible": true,
+      "ownedByAccountControls": true,
+      "nestedInRoutePanel": false,
+      "belowAccount": false,
+      "width": 390,
+      "documentWidth": 390,
+      "pickerRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "buttonRect": {
+        "x": 197.46875,
+        "y": 8,
+        "width": 128.53125,
+        "height": 44,
+        "top": 8,
+        "right": 326,
+        "bottom": 52,
+        "left": 197.46875
+      },
+      "profileRect": {
+        "x": 334,
+        "y": 8,
+        "width": 48,
+        "height": 48,
+        "top": 8,
+        "right": 382,
+        "bottom": 56,
+        "left": 334
+      },
+      "label": "CABA · 6FCABA·Floor 6"
+    }
+  ],
+  "screenshots": [
+    "test-only-sos-preview-collapsed-390x844.png",
+    "test-only-sos-preview-expanded-route-choices-390x844.png",
+    "test-only-sos-preview-expanded-390x844.png",
+    "test-only-sos-preview-expanded-320x568.png",
+    "test-only-sos-preview-expanded-360x640.png",
+    "test-only-sos-preview-expanded-390x844.png",
+    "test-only-sos-preview-expanded-390-dark-3d.png",
+    "test-only-sos-preview-expanded-390-light-3d.png",
+    "test-only-sos-preview-expanded-430x932.png",
+    "test-only-sos-preview-expanded-768x1024.png",
+    "test-only-sos-preview-expanded-1024x768.png",
+    "test-only-sos-preview-expanded-1440x900.png",
+    "test-only-sos-preview-expanded-390-dark.png",
+    "test-only-guided-navigation-expanded-390x844.png"
+  ],
+  "fixtureSafetySetup": {
+    "testOnly": true,
+    "source": "isolated saved MAIN CAMPUS clone; only fixture review metadata was adjusted, production data is untouched",
+    "pointNames": [
+      "TEST ONLY - Admin Main Assembly Point A",
+      "TEST ONLY - East Gathering Area",
+      "TEST ONLY - Secondary Open Space"
+    ],
+    "approvedPointCount": 3,
+    "stairIdsConfiguredForFixture": [
+      "0a3c5bd7-a418-4eac-85f7-39412f95ee49",
+      "4de5be40-364c-4618-a432-672fb7187c27",
+      "a98911c2-4c8e-496e-aa78-aede55b345dc",
+      "43bf1513-8995-4415-95c5-ff41f04d9495",
+      "06a37ec2-ed12-415b-9f43-54fdc896d0ca",
+      "db24d52c-1457-485f-a5b5-d89df4fc977e",
+      "a0321988-79c7-4f59-9c25-c001beb816e1",
+      "5e2f66b7-a6c1-41f7-aaff-6889626b8544",
+      "6d42e804-f785-4cd0-9021-007e180414df",
+      "6b125c9f-c506-40e5-a005-d7d4a94443ca",
+      "d274be75-6a2e-4f83-bae2-5355e431bae6",
+      "e544a56a-2aa2-410a-bc8e-44b0804a6087"
+    ],
+    "eligibleRouteCount": 2,
+    "distinctPhysicalExits": 2,
+    "allComplete": true
+  },
+  "fixtureSummary": {
+    "source": "TEST ONLY saved local dual-exit campus fixture; no authored or production data changed",
+    "room": "CABA LECTURE HALL",
+    "campus": "TEST ONLY - Isolated Assembly Point Editor",
+    "assignedAssemblyPoint": true,
+    "destinationName": "TEST ONLY - Admin Main Assembly Point A",
+    "routeCount": 2,
+    "distinctPhysicalExits": 2
+  },
+  "fixtureDiagnostics": {
+    "destinationChecks": [
+      {
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "validation": {
+          "connection": "connected",
+          "readiness": "approved",
+          "reviewReasons": [],
+          "reasons": [],
+          "fingerprint": "b9b755f1"
+        }
+      },
+      {
+        "name": "TEST ONLY - East Gathering Area",
+        "validation": {
+          "connection": "connected",
+          "readiness": "approved",
+          "reviewReasons": [],
+          "reasons": [],
+          "fingerprint": "68a2880c"
+        }
+      },
+      {
+        "name": "TEST ONLY - Secondary Open Space",
+        "validation": {
+          "connection": "connected",
+          "readiness": "approved",
+          "reviewReasons": [],
+          "reasons": [],
+          "fingerprint": "dc57ed27"
+        }
+      }
+    ],
+    "candidateCount": 2,
+    "candidates": [
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2",
+        "completeDestination": true,
+        "completeAssembly": true,
+        "graphCompleteAssembly": true,
+        "emergencyReview": false,
+        "pointReview": false,
+        "pointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "designation": "primary",
+        "authored": true,
+        "pathNodes": 17,
+        "pathEdges": 6
+      },
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1",
+        "completeDestination": true,
+        "completeAssembly": true,
+        "graphCompleteAssembly": true,
+        "emergencyReview": false,
+        "pointReview": false,
+        "pointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "designation": "primary",
+        "authored": true,
+        "pathNodes": 20,
+        "pathEdges": 4
+      }
+    ],
+    "automaticRouteCount": 2,
+    "automaticMessage": null,
+    "candidateEligibility": [
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 2",
+        "eligible": true,
+        "pointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "pointAnchorId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+        "destinationOwnerId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "routeOwnerId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "designation": "primary",
+        "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+        "assigned": [
+          {
+            "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+            "designation": "primary"
+          }
+        ],
+        "authoredGraph": true
+      },
+      {
+        "exit": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Exterior Emergency Stair -> TEST ONLY - Admin Main Assembly Point A · Exterior Stair 1",
+        "eligible": true,
+        "pointId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "pointAnchorId": "fccd345a-eaeb-4148-8735-d742b2fb61a8",
+        "destinationOwnerId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "routeOwnerId": "1d3aefea-b57e-4dfb-a1c3-93ca9d3eb411",
+        "designation": "primary",
+        "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+        "assigned": [
+          {
+            "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+            "designation": "primary"
+          }
+        ],
+        "authoredGraph": true
+      }
+    ]
+  },
+  "collapsed390": {
+    "sheetState": "compact",
+    "height": 140,
+    "withinViewport": true,
+    "summaryInsideSheet": true,
+    "routeControlsVisible": false,
+    "startVisible": false,
+    "headerUtilityVisible": false,
+    "bodyText": "CABA LECTURE HALL → TEST ONLY - Admin Main Assembly Point ASOS route preview"
+  },
+  "expandedChoices390": {
+    "routeAVisible": true,
+    "routeBVisible": true,
+    "destination": "TEST ONLY - Admin Main Assembly Point A"
+  },
+  "routeBSwitchPreservesDestination": true,
+  "expanded390": {
+    "sheetState": "expanded",
+    "height": 489.515625,
+    "dialogTop": 278.484375,
+    "dialogBottom": 768,
+    "footerTop": 702,
+    "footerBottom": 767,
+    "startTop": 713,
+    "startBottom": 757,
+    "startFullyInFooter": true,
+    "startFullyInViewport": true,
+    "sheetAboveBottomNavigation": true,
+    "routeSelectorCount": 1,
+    "emergencyPosition": {
+      "x": 181.99998474121094,
+      "y": 126.24217987060547,
+      "width": 26.000015258789062,
+      "height": 25.99999237060547
+    },
+    "routeLine": null,
+    "startDisabled": false,
+    "scrollFlex": "1 1 0%",
+    "scrollOverflowY": "auto",
+    "scrollRegionHeight": 297.515625
+  },
+  "instructionScroll": {
+    "scrollTop": 310,
+    "pageY": 0,
+    "footerTop": 702,
+    "documentHeight": 844,
+    "viewportHeight": 844,
+    "keptPageAndFooterStable": true
+  },
+  "expandCollapseCameraStable": true,
+  "rendererSwitchPreservesPreview": {
+    "assemblyDestination": "TEST ONLY - Admin Main Assembly Point A",
+    "startVisible": true,
+    "selectorVisible": true
+  },
+  "profileMenuOwnsForeground": {
+    "profileMenuVisible": true,
+    "floorPickerCount": 0
+  },
+  "guidedNavigation": {
+    "phase": "navigating",
+    "step": "Step 2 of 11",
+    "paused": true
+  }
+}
