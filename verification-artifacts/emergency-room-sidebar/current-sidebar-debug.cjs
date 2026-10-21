@@ -1,0 +1,20 @@
+const path = require('node:path');
+const { chromium } = require(path.join(process.env.TEMP, 'plv-navisync-acceptance', 'node_modules', 'playwright'));
+(async () => {
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.route('**/rest/v1/emergency_evacuation_videos**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+  await page.route('**/storage/v1/object/list/emergency-evacuation-videos**', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ statusCode: '404', message: 'Bucket not found' }) }));
+  await page.goto('http://127.0.0.1:5174/verification-artifacts/emergency-room-sidebar/room-properties-preview.html', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Emergency Evacuation' }).click();
+  const before = await page.locator('body').innerText();
+  await page.getByRole('button', { name: 'Validate Routes' }).click();
+  await page.waitForTimeout(1500);
+  const after = await page.locator('body').innerText();
+  await page.screenshot({ path: 'verification-artifacts/emergency-room-sidebar/current-sidebar-debug.png', fullPage: true });
+  console.log(JSON.stringify({ before: before.slice(-1200), after: after.slice(-1700), errors }, null, 2));
+  await browser.close();
+})().catch(e => { console.error(e); process.exitCode = 1; });

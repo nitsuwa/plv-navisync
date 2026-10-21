@@ -725,6 +725,7 @@ describe("B4 floor management UX consistency", () => {
     // Save/Discard — Save persists the rename exactly once before the new floor
     // is created (no duplicate floor record, no duplicate floor number). The
     // save is async, so wait for the dialog to close before touching the tabs.
+    fireEvent.click(screen.getByTestId("start-blank-floor"));
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(screen.queryByText("Unsaved Floor Changes")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Floor actions" }));
@@ -1587,7 +1588,7 @@ describe("Phase 2.0 - transform and property UX completion", () => {
     expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 20, y: 20 });
   });
 
-  it("save feedback is a compact top-center floating surface", async () => {
+  it("uses the shared blocking save dialog over the editor while persistence is pending", async () => {
     let resolveSave!: (c: Campus) => void;
     const onSave = vi.fn((c: Campus) => new Promise<Campus>((resolve) => { resolveSave = resolve; }));
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} onSave={onSave} />);
@@ -1596,13 +1597,81 @@ describe("Phase 2.0 - transform and property UX completion", () => {
     fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
 
     const status = screen.getByTestId("floor-save-status");
     expect(status.className).toContain("top-4");
     expect(status.className).not.toContain("inset-0");
+    const dialog = screen.getByRole("dialog", { name: "Performing saving" });
+    expect(dialog).toHaveAttribute("aria-busy", "true");
+    expect(within(dialog).getByRole("heading", { name: "Saving changes" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Saving map data…")).toBeInTheDocument();
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.className).toContain("map-layer-blocking");
+    expect(container).toHaveProperty("inert", true);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     resolveSave(latestCampus!);
     await waitFor(() => expect(screen.getByTestId("floor-save-status")).toHaveTextContent("Saved"));
+    await screen.findByText("Floor Changes Saved");
+  });
+
+  it("blocks canvas and keyboard edits during save and prevents duplicate persistence", async () => {
+    let resolveSave!: (c: Campus) => void;
+    let latestCampus: Campus | null = null;
+    const onCampusChange = vi.fn((campus: Campus) => { latestCampus = campus; });
+    const onSave = vi.fn((campus: Campus) => new Promise<Campus>((resolve) => { resolveSave = resolve; }));
+    const { container } = render(<Harness onCampusChange={onCampusChange} onSave={onSave} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const savedRoomPosition = latestCampus!.buildings[0].floors[0].rooms[0];
+    const updateCountBeforeSave = onCampusChange.mock.calls.length;
+    const saveButton = screen.getByRole("button", { name: "Save floor draft" });
+
+    fireEvent.click(saveButton);
+    expect(await screen.findByRole("dialog", { name: "Performing saving" })).toBeInTheDocument();
+    fireEvent.click(saveButton);
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 95, clientY: 80, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyDown(window, { key: "Delete" });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onCampusChange).toHaveBeenCalledTimes(updateCountBeforeSave);
+    expect(latestCampus!.buildings[0].floors[0].rooms[0]).toEqual(savedRoomPosition);
+
+    resolveSave(latestCampus!);
+    await screen.findByText("Floor Changes Saved");
+  });
+
+  it("keeps failed edits and offers a real retry or continue-editing path", async () => {
+    let latestCampus: Campus | null = null;
+    const onCampusChange = vi.fn((campus: Campus) => { latestCampus = campus; });
+    const onSave = vi.fn()
+      .mockRejectedValueOnce(new Error("The save service is unavailable."))
+      .mockImplementation((campus: Campus) => Promise.resolve(campus));
+    const { container } = render(<Harness onCampusChange={onCampusChange} onSave={onSave} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    const editedRoom = structuredClone(latestCampus!.buildings[0].floors[0].rooms[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
+
+    const errorDialog = await screen.findByRole("dialog", { name: "saving failed" });
+    expect(within(errorDialog).getByText("Floor Changes Not Saved")).toBeInTheDocument();
+    expect(within(errorDialog).getByText("The save service is unavailable.")).toBeInTheDocument();
+    expect(latestCampus!.buildings[0].floors[0].rooms[0]).toEqual(editedRoom);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByText("Floor Changes Saved");
+    expect(onSave).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -2882,7 +2951,7 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     expect(container.querySelector('line[stroke="rgba(55,48,40,0.08)"]')).toBeNull();
 
     // The change made the floor dirty so Save is now enabled
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("explicitly creates and resizes managed perimeter walls without moving authored walls", () => {
@@ -3100,7 +3169,7 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
       extensions: [{ id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 }],
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     expect(persistedCampus!.buildings[0].floors[0].extensions).toEqual([
       { id: "right-extension", side: "right", offset: 20, width: 120, depth: 100 },
@@ -3160,7 +3229,7 @@ describe("Phase 1.8 — Floor Settings dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Redo" }));
     await waitFor(() => expect(updatedCampus.buildings[0].floors[0]).toMatchObject({ canvasW: 200, canvasH: 140 }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     const savedFloor = persistedCampus!.buildings[0].floors[0];
     expect(savedFloor).toMatchObject({ canvasW: 200, canvasH: 140 });
@@ -3377,7 +3446,7 @@ describe("Phase 1.8 — Save UX transitions", () => {
     fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     expect(screen.getByTestId("floor-save-status")).toBeInTheDocument();
     expect(screen.getByTestId("floor-save-status")).toHaveTextContent("Saving floor…");
 
@@ -3395,13 +3464,13 @@ describe("Phase 1.8 — Save UX transitions", () => {
     fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     expect(screen.getByTestId("floor-save-status")).toBeInTheDocument();
 
     await waitFor(() => expect(screen.queryByTestId("floor-save-status")).toBeNull());
     // Edits remain, dirty remains → Save is enabled again
     expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 35, y: 30 });
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("submits the rendered physical Floor and refuses a smaller hydrated response", async () => {
@@ -3420,7 +3489,7 @@ describe("Phase 1.8 — Save UX transitions", () => {
     fireEvent.mouseDown(roomGroup(container), { clientX: 45, clientY: 40, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 60, clientY: 50, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     const submittedFloor = onSave.mock.calls[0][0].buildings[0].floors[0];
@@ -3436,7 +3505,7 @@ describe("Phase 1.8 — Save UX transitions", () => {
     expect(latestCampus!.buildings[0].floors[0].walls).toHaveLength(1);
     expect(latestCampus!.buildings[0].floors[0].furniture).toHaveLength(1);
     expect(latestCampus!.buildings[0].floors[0].rooms[0]).toMatchObject({ x: 35, y: 30 });
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

@@ -6,6 +6,8 @@ export interface SharedFloorRoom {
   id: string; name: string; type: string;
   x: number; y: number; w: number; h: number;
   description?: string; accessibility?: boolean;
+  /** Private Storage path; student reads are restricted to the published Room snapshot. */
+  roomPhotoPath?: string;
 }
 
 export interface SharedFloorItem {

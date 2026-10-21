@@ -31,6 +31,32 @@ vi.mock("../../ui/NavigationProgress", () => ({ NavigationProgress: () => null }
 vi.mock("../../../app/components/ui/sonner", () => ({ Toaster: () => null }));
 
 describe("PublicLayout student entry", () => {
+  it("locks the map route into a viewport-sized shell with a dedicated navigation row", () => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    const view = render(
+      <MemoryRouter initialEntries={["/map"]}>
+        <Routes>
+          <Route element={<PublicLayout />}>
+            <Route path="/map" element={<div data-testid="map-page">Map</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const shell = screen.getByTestId("map-page").parentElement?.parentElement?.parentElement;
+    expect(shell).toHaveClass("student-map-app-shell", "overflow-hidden", "overscroll-none");
+    const main = document.getElementById("main-content");
+    expect(main).toHaveClass("flex", "min-h-0", "flex-1", "overflow-hidden");
+    expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.documentElement.style.overflow).toBe("hidden");
+
+    view.unmount();
+    expect(document.body.style.overflow).toBe(previousBodyOverflow);
+    expect(document.documentElement.style.overflow).toBe(previousRootOverflow);
+  });
+
   it("keeps the existing public Home for a guest", () => {
     authState.isStudent = false;
     authState.loading = false;

@@ -1,0 +1,249 @@
+{
+  "errors": [],
+  "observations": [
+    {
+      "label": "indoor-seek-next-previous",
+      "samples": [
+        {
+          "tMs": 0,
+          "transform": "translate(523,223.3840789473685)",
+          "progress": "0.36427631578947417",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 50,
+          "transform": "translate(528.969605263158,226)",
+          "progress": "0.41361842105263213",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 100,
+          "transform": "translate(535.8380263157895,226)",
+          "progress": "0.45309210526315846",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 150,
+          "transform": "translate(556.4432894736842,226)",
+          "progress": "0.5715131578947372",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 250,
+          "transform": "translate(557,300)",
+          "progress": "1",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 350,
+          "transform": "translate(557,300)",
+          "progress": "1",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        },
+        {
+          "tMs": 500,
+          "transform": "translate(557,300)",
+          "progress": "1",
+          "markerCount": 1,
+          "routePoints": [
+            "523,160 523,226 557,226 557,300"
+          ],
+          "floor": "4"
+        }
+      ]
+    }
+  ],
+  "startOptions": [
+    "CABA-405\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+  ],
+  "destinationOptions": [
+    "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+  ],
+  "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CABA-405 to CABA-403.\n\nRoute preview\n\nSTANDARD ROUTE\n\nCABA-405 → CABA-403\n\nIndoor route\nSteps\n3\nEdit Route\nStart Navigation\nClear",
+  "initial": {
+    "state": {
+      "transform": "translate(523,202.76164473684213)",
+      "progress": "0.24575657894736858",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "panel": "STEP 2 OF 3\n\nCABA-403\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of CABA-403.\n\nNext: Arrive at CABA-403.\n\nPrevious\nResume\nNext\n1×\nSteps"
+  },
+  "previousEnabledDuringSeek": false,
+  "retargetStart": {
+    "transform": "translate(523,223.3840789473685)",
+    "progress": "0.36427631578947417",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "rapidNextPrevious": [
+    {
+      "tMs": 0,
+      "transform": "translate(523,223.3840789473685)",
+      "progress": "0.36427631578947417",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 50,
+      "transform": "translate(528.969605263158,226)",
+      "progress": "0.41361842105263213",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 100,
+      "transform": "translate(535.8380263157895,226)",
+      "progress": "0.45309210526315846",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 150,
+      "transform": "translate(556.4432894736842,226)",
+      "progress": "0.5715131578947372",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 250,
+      "transform": "translate(557,300)",
+      "progress": "1",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 350,
+      "transform": "translate(557,300)",
+      "progress": "1",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    {
+      "tMs": 500,
+      "transform": "translate(557,300)",
+      "progress": "1",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    }
+  ],
+  "arrivalPrevious": "STEP 2 OF 3\n\nCABA-403\n\nFOLLOW\nEXPLORE\n\nFollow the indoor path to the door of CABA-403.\n\nNext: Arrive at CABA-403.\n\nPrevious\nResume\nNext\n1×\nSteps",
+  "pauseDuringSeek": {
+    "beforePause": {
+      "transform": "translate(523,168.87743421052642)",
+      "progress": "0.05101973684210592",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "pausedPosition": {
+      "transform": "translate(523,194.61684210526323)",
+      "progress": "0.19894736842105298",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "afterPauseWait": {
+      "transform": "translate(523,194.61684210526323)",
+      "progress": "0.19894736842105298",
+      "markerCount": 1,
+      "routePoints": [
+        "523,160 523,226 557,226 557,300"
+      ],
+      "floor": "4"
+    },
+    "stable": true
+  },
+  "rendererSwitchStart": {
+    "transform": "translate(523,194.61684210526323)",
+    "progress": "0.19894736842105298",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "renderer3D": {
+    "state": {
+      "transform": null,
+      "progress": null,
+      "markerCount": 0,
+      "routePoints": [],
+      "floor": null
+    },
+    "rendererCount": 0
+  },
+  "renderer2DReturn": {
+    "transform": "translate(523,194.61684210526323)",
+    "progress": "0.19894736842105298",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  },
+  "resumeAfterSeekPause": {
+    "transform": "translate(523,203.50572368395464)",
+    "progress": "0.2500328947353715",
+    "markerCount": 1,
+    "routePoints": [
+      "523,160 523,226 557,226 557,300"
+    ],
+    "floor": "4"
+  }
+}

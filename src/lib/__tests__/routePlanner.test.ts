@@ -5,9 +5,11 @@ import {
   planPointToDestinationRoute,
   planDestinationRoute,
   planAuthoredDestinationRoute,
+  planAuthoredDestinationRoutes,
   plannedRouteFromAuthoredPath,
   hasNavigableRoute,
   stepsFromGraphPath,
+  stepsFromCombined,
   detectFloorTransitions,
   formatDistance,
   formatMinutes,
@@ -117,6 +119,84 @@ describe("planBuildingRoute (building → building)", () => {
     expect(route?.fromCode).toBe("Campus Gate");
     expect(route?.points[0]).toEqual({ x: 20, y: 20 });
     expect(route?.points.at(-1)).toEqual({ x: 120, y: 20 });
+  });
+
+  it("routes to the exact Assembly Point-owned graph anchor", () => {
+    const graph: CampusNavGraph = {
+      navNodes: [
+        { id: "building-entry", name: "Library entrance", type: "entrance", buildingId: "lib", x: 0, y: 0, accessible: true },
+        { id: "walkway", name: "Walkway", type: "outdoor", x: 30, y: 0, accessible: true },
+        { id: "assembly-anchor", name: "East Assembly Point", type: "assembly", assemblyPointId: "assembly-east", x: 70, y: 10, accessible: true },
+        { id: "gate-anchor", name: "Campus Gate", type: "outdoor", gateId: "gate-main", x: 70, y: 80, accessible: true },
+      ],
+      navEdges: [
+        { id: "entry-walk", startNodeId: "building-entry", endNodeId: "walkway", distance: 30, bidirectional: true, accessible: true },
+        { id: "walk-assembly", startNodeId: "walkway", endNodeId: "assembly-anchor", distance: 42, bidirectional: true, accessible: true },
+      ],
+    };
+    const route = planDestinationRoute(
+      { type: "building", buildingId: "lib", label: "Library", code: "LIB" },
+      { type: "campus_place", campusPlaceId: "assembly-east", nodeId: "assembly-anchor", label: "East Assembly Point", code: "East Assembly Point" },
+      "standard",
+      graph,
+    );
+    expect(route).not.toBeNull();
+    expect(route?.points.at(-1)).toEqual({ x: 70, y: 10 });
+    expect(route?.points.at(-1)).not.toEqual({ x: 70, y: 80 });
+  });
+
+  it("finds a bounded second route from real authored branches", () => {
+    const graph: CampusNavGraph = {
+      navNodes: [
+        { id: "a-entry", name: "A Entrance", type: "entrance", buildingId: "a", x: 0, y: 0, accessible: true },
+        { id: "branch-left", name: "Left branch", type: "outdoor", x: 25, y: -10, accessible: true },
+        { id: "branch-right", name: "Right branch", type: "outdoor", x: 25, y: 10, accessible: true },
+        { id: "b-entry", name: "B Entrance", type: "entrance", buildingId: "b", x: 50, y: 0, accessible: true },
+      ],
+      navEdges: [
+        { id: "a-left", startNodeId: "a-entry", endNodeId: "branch-left", distance: 25, bidirectional: true, accessible: true },
+        { id: "left-b", startNodeId: "branch-left", endNodeId: "b-entry", distance: 27, bidirectional: true, accessible: true },
+        { id: "a-right", startNodeId: "a-entry", endNodeId: "branch-right", distance: 26, bidirectional: true, accessible: true },
+        { id: "right-b", startNodeId: "branch-right", endNodeId: "b-entry", distance: 27, bidirectional: true, accessible: true },
+      ],
+    };
+    const routes = planAuthoredDestinationRoutes(
+      { type: "building", buildingId: "a", label: "A", code: "A" },
+      { type: "building", buildingId: "b", label: "B", code: "B" },
+      "standard",
+      graph,
+    );
+    expect(routes).toHaveLength(2);
+    expect(routes[0].routeId).not.toBe(routes[1].routeId);
+    expect(routes.map((route) => route.authoredGraphEdgeIds)).toEqual(expect.arrayContaining([
+      expect.arrayContaining(["a-left", "left-b"]),
+      expect.arrayContaining(["a-right", "right-b"]),
+    ]));
+  });
+
+  it("suppresses duplicate alternatives that use parallel edges over the same authored corridor", () => {
+    const graph: CampusNavGraph = {
+      navNodes: [
+        { id: "a-entry", name: "A Entrance", type: "entrance", buildingId: "a", x: 0, y: 0, accessible: true },
+        { id: "corridor-one", name: "Corridor", type: "outdoor", x: 50, y: 0, accessible: true },
+        { id: "corridor-two", name: "Duplicate corridor node", type: "outdoor", x: 51, y: 0, accessible: true },
+        { id: "b-entry", name: "B Entrance", type: "entrance", buildingId: "b", x: 100, y: 0, accessible: true },
+      ],
+      navEdges: [
+        { id: "a-one", startNodeId: "a-entry", endNodeId: "corridor-one", distance: 50, bidirectional: true, accessible: true },
+        { id: "one-b", startNodeId: "corridor-one", endNodeId: "b-entry", distance: 50, bidirectional: true, accessible: true },
+        { id: "a-two", startNodeId: "a-entry", endNodeId: "corridor-two", distance: 51, bidirectional: true, accessible: true },
+        { id: "two-b", startNodeId: "corridor-two", endNodeId: "b-entry", distance: 49, bidirectional: true, accessible: true },
+      ],
+    };
+    const routes = planAuthoredDestinationRoutes(
+      { type: "building", buildingId: "a", label: "A", code: "A" },
+      { type: "building", buildingId: "b", label: "B", code: "B" },
+      "standard",
+      graph,
+    );
+
+    expect(routes).toHaveLength(1);
   });
 
   it("routes from a generic campus place through its exact authored node reference", () => {
@@ -908,6 +988,79 @@ describe("stepsFromGraphPath", () => {
     const steps = stepsFromGraphPath(path, "A", "B");
     // steps[0] is the prefixed start step; steps[1] is the Walk instruction
     expect(steps[1].distanceM).toBe(45);
+  });
+
+  it("does not mistake a zero-length Already at Entrance row for entering a building", () => {
+    const path: GraphPath = {
+      nodeIds: ["primary-entrance"],
+      distanceM: 0,
+      minutes: 0,
+      waypoints: [{ x: 0, y: 0 }],
+      steps: ["Already at Primary Entrance."],
+    };
+
+    expect(stepsFromGraphPath(path, "CEIT", "Campus Gate")[1]).toMatchObject({
+      icon: "info",
+      instruction: "Already at Primary Entrance.",
+    });
+  });
+
+  it("keeps start and walking instructions actionable when they mention an entrance", () => {
+    const path: GraphPath = {
+      nodeIds: ["caba-entry", "ceit-entry"],
+      distanceM: 190,
+      minutes: 2,
+      waypoints: [{ x: 240, y: 713 }, { x: 520, y: 560 }, { x: 774, y: 713 }],
+      steps: [
+        "Start from Entrance 2",
+        "Walk 21m to Primary Entrance",
+        "Arrive at CEIT",
+      ],
+    };
+
+    expect(stepsFromGraphPath(path, "CABA", "CEIT").map(({ icon }) => icon))
+      .toEqual(["start", "walk", "arrive"]);
+  });
+});
+
+describe("stepsFromCombined", () => {
+  const segment = (overrides: Partial<RouteSegment>): RouteSegment => ({
+    label: "route segment",
+    waypoints: [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    distanceM: 20,
+    seconds: 12,
+    steps: [],
+    buildingId: null,
+    floorNumber: null,
+    isIndoor: false,
+    ...overrides,
+  });
+
+  it("uses real indoor/outdoor segment order to describe an already-at doorway handoff", () => {
+    const exitSteps = stepsFromCombined([
+      segment({
+        label: "CEIT Ground Floor",
+        buildingId: "ceit",
+        floorNumber: 1,
+        isIndoor: true,
+        distanceM: 0,
+        steps: ["Already at Primary Entrance."],
+      }),
+      segment({ label: "Campus path", steps: ["Walk 20m toward Campus Gate"] }),
+    ], "CEIT", "Campus Gate");
+    const entrySteps = stepsFromCombined([
+      segment({ label: "Campus path", steps: ["Walk 20m toward Primary Entrance", "Already at Primary Entrance."] }),
+      segment({
+        label: "CEIT Ground Floor",
+        buildingId: "ceit",
+        floorNumber: 1,
+        isIndoor: true,
+        steps: ["Follow the indoor path to the room."],
+      }),
+    ], "Campus Gate", "CEIT");
+
+    expect(exitSteps[1]).toMatchObject({ icon: "enter", instruction: "Exit via Primary Entrance to Campus." });
+    expect(entrySteps[2]).toMatchObject({ icon: "enter", instruction: "Enter via Primary Entrance." });
   });
 });
 

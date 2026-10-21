@@ -51,9 +51,12 @@ describe("student indoor navigation controls", () => {
     );
 
     const card = screen.getByTestId("student-selected-place-card");
+    const stack = screen.getByTestId("student-room-and-video-stack");
     expect(card).toHaveAttribute("data-sheet-state", "default");
     expect(card).toHaveAttribute("data-map-layer", "room-sheet");
-    expect(card).toHaveClass("fixed", "inset-x-3", "bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))]");
+    expect(stack).toHaveClass("fixed", "inset-x-3", "bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))]");
+    expect(stack).toHaveClass("flex-col-reverse", "md:flex-col");
+    expect(stack).toHaveClass("md:right-3", "md:top-[calc(env(safe-area-inset-top,0px)+4.5rem)]");
     expect(card.style.height).toBe("auto");
     expect(card).toHaveTextContent("Administration Office");
     expect(within(card).getByRole("heading", { name: "Administration Office" })).toHaveClass("line-clamp-2", "min-w-0");
@@ -67,6 +70,17 @@ describe("student indoor navigation controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(onStartHere).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "More place actions" })).not.toBeInTheDocument();
+  });
+
+  it("clips the room sheet and footer to one rounded surface without nested blur or transformed actions", () => {
+    render(<StudentSelectedPlaceCard room={room} onDirections={vi.fn()} onStartHere={vi.fn()} onReport={vi.fn()} onClose={vi.fn()} />);
+    const card = screen.getByTestId("student-selected-place-card");
+    const footer = screen.getByTestId("room-action-footer");
+    expect(card).toHaveClass("isolate", "overflow-hidden", "rounded-2xl", "bg-clip-padding");
+    expect(card.className).not.toContain("backdrop-blur");
+    expect(footer.className).not.toContain("backdrop-blur");
+    expect(screen.getByRole("button", { name: "Directions" }).className).not.toContain("active:scale");
+    expect(screen.getByRole("button", { name: "Report this room" }).className).toContain("active:scale-100");
   });
 
   it("expands Room information and preserves it while the constrained Floor Picker takes focus", async () => {
@@ -136,9 +150,11 @@ describe("student indoor navigation controls", () => {
 
     expect(screen.getByTestId("student-floor-picker")).toHaveAttribute("data-dock", "floor-control-top");
     const card = screen.getByTestId("student-selected-place-card");
+    const stack = screen.getByTestId("student-room-and-video-stack");
     expect(card).toHaveAttribute("data-map-layer", "room-sheet");
-    expect(card.className).toContain("bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))]");
-    expect(card.className).not.toContain("student-map-room-card-top");
+    expect(stack.className).toContain("bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))]");
+    expect(stack.className).toContain("md:right-3");
+    expect(stack.className).not.toContain("student-map-room-card-top");
   });
 
 });

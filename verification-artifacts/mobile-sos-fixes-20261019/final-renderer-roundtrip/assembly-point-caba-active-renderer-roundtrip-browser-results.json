@@ -1,0 +1,86 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {},
+  "browserErrors": [],
+  "screenshots": [
+    "assembly-point-browser-failure.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "failure": {
+    "stage": "open Student Map",
+    "message": "page.evaluate: Error: CABA LECTURE HALL: route did not resolve to complete approved Assembly Point paths\n    at eval (eval at evaluate (:370:30), <anonymous>:140:13)\n    at async <anonymous>:396:30",
+    "stack": "page.evaluate: Error: CABA LECTURE HALL: route did not resolve to complete approved Assembly Point paths\n    at eval (eval at evaluate (:370:30), <anonymous>:140:13)\n    at async <anonymous>:396:30\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\sos-multifloor-arrival-20261019\\ordinary-sos-browser-final-playback.cjs:322:33)"
+  },
+  "pageDebug": {
+    "url": "http://127.0.0.1:5174/map",
+    "title": "PLV NaviSync — Smart Campus Navigator",
+    "text": "Skip to main content\nSC\n5F\nSTUDENT CENTER BUILDING\nCABA\n6F\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION\nCAN\n1F\nCANTEEN\nCOED\n6F\nCOLLEGE OF EDUCATION BUILDING\nCEIT\n6F\nCOLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nEnter\nST\nMAIN\nEvent map\nHome\nMap\nTap entrance icons to enter or exit buildings.\nST\nCampus visitor\nGuest\nStudent sign in",
+    "htmlLength": 717442
+  },
+  "visibleButtons": [
+    {
+      "text": "",
+      "ariaLabel": "Switch to 3D view",
+      "disabled": false
+    },
+    {
+      "text": "",
+      "ariaLabel": "Recenter map",
+      "disabled": false
+    },
+    {
+      "text": "",
+      "ariaLabel": "Scan location QR",
+      "disabled": false
+    },
+    {
+      "text": "",
+      "ariaLabel": "Open directions",
+      "disabled": false
+    },
+    {
+      "text": "ST",
+      "ariaLabel": "Campus visitor — user menu",
+      "disabled": false
+    },
+    {
+      "text": "MAIN",
+      "ariaLabel": "Change campus. Current campus: MAIN CAMPUS - PLV",
+      "disabled": false
+    },
+    {
+      "text": "Event map",
+      "ariaLabel": "Open event map",
+      "disabled": false
+    },
+    {
+      "text": "",
+      "ariaLabel": "Close toast",
+      "disabled": false
+    }
+  ]
+}

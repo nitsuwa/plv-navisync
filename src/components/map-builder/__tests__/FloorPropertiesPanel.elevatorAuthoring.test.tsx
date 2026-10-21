@@ -20,6 +20,9 @@ describe("Elevator authoring connections", () => {
     expect(screen.queryByTestId("elevator-connections-side-panel")).toBeNull();
     expect(screen.getByRole("button", { name: "Manage Elevator Connections" })).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("circulation-group-trigger-elevator"));
+    const sidePanel = screen.getByTestId("elevator-connections-side-panel");
+    expect(sidePanel.parentElement).toBe(document.body);
+    expect(screen.getByTestId("floor-properties-panel").contains(sidePanel)).toBe(false);
     const manager = screen.getByTestId("elevator-connections-manager");
     expect(manager).toHaveTextContent("Elevator Connections");
     expect(manager).toHaveTextContent("Floor 2 · Current");
@@ -214,5 +217,20 @@ describe("Elevator authoring connections", () => {
     expect(onDisconnectAll).not.toHaveBeenCalled();
     fireEvent.click(within(confirmation).getByRole("button", { name: "Disconnect All" }));
     expect(onDisconnectAll).toHaveBeenCalledWith("el-f2");
+  });
+});
+
+describe("emergency Stair authoring guidance", () => {
+  it("explains that intermediate stair floors do not need separate building exits", () => {
+    const onUpdateStairs = vi.fn();
+    render(<FloorPropertiesPanel {...baseProps as any}
+      selected={{ type: "stairs", id: "stair-f6" }}
+      stairs={[{ id: "stair-f6", label: "TEST ONLY Inner Stair", x: 40, y: 40, width: 28, height: 34, direction: "down", sharedId: "test-inner-stair", emergencySafe: false }]}
+      onUpdateStairs={onUpdateStairs}
+    />);
+    expect(screen.getByTestId("stair-emergency-use-control")).toHaveTextContent("Mark each landing in this stair run.");
+    expect(screen.getByTestId("stair-emergency-use-control")).toHaveTextContent("Intermediate floors need no separate building exit.");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Use this Stair for emergency evacuation" }));
+    expect(onUpdateStairs).toHaveBeenCalledWith("stair-f6", { emergencySafe: true });
   });
 });

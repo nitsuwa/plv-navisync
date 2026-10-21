@@ -2,7 +2,7 @@ import type { SearchResult } from "../hooks/useCampusSearch";
 import type { Building } from "../types";
 import type { RoomDest } from "./combinedPathfinding";
 import type { CampusPlaceDest } from "./combinedPathfinding";
-import type { CampusMarker } from "../components/map-builder/types";
+import type { AssemblyPoint, CampusMarker } from "../components/map-builder/types";
 
 export type RouteEndpoint =
   | { kind: "manual-pin"; point: { x: number; y: number }; label: "You are here" }
@@ -24,6 +24,7 @@ export function routeEndpointFromSearchResult(
   buildings: readonly Building[],
   rooms: readonly RoomDest[],
   places: readonly CampusMarker[] = [],
+  assemblyPoints: readonly AssemblyPoint[] = [],
 ): RouteEndpoint | null {
   if (result.kind === "building") {
     const building = findBuilding(result, buildings);
@@ -32,16 +33,19 @@ export function routeEndpointFromSearchResult(
 
   if (result.campusPlaceId) {
     const marker = places.find((candidate) => candidate.id === result.campusPlaceId);
-    if (!marker?.navNodeId) return null;
+    const assemblyPoint = assemblyPoints.find((candidate) => candidate.id === result.campusPlaceId);
+    const nodeId = marker?.navNodeId ?? assemblyPoint?.navNodeId;
+    if (!nodeId) return null;
+    const label = assemblyPoint?.name || marker?.name || "Campus place";
     return {
       kind: "campus-place",
       place: {
         type: "campus_place",
-        campusPlaceId: marker.id,
-        label: marker.name || "Campus place",
-        code: marker.name || "Campus place",
-        nodeId: marker.navNodeId,
-        accessible: marker.studentInfo?.accessibleEntrance,
+        campusPlaceId: result.campusPlaceId,
+        label,
+        code: label,
+        nodeId,
+        accessible: assemblyPoint?.accessible ?? marker?.studentInfo?.accessibleEntrance,
       },
     };
   }

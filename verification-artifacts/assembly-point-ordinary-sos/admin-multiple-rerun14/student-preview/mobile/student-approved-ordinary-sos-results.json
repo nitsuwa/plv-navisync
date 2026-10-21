@@ -1,0 +1,69 @@
+{
+  "isolation": "TEST ONLY exact saved local Admin campus served as browser-local published-like snapshot; remote writes blocked",
+  "source": {
+    "campusId": "90000000-0000-4000-8000-000000000198",
+    "campusName": "TEST ONLY - Isolated Assembly Point Editor",
+    "pointCount": 3,
+    "room": "CABA LECTURE HALL",
+    "smartMultiExit": false,
+    "approvedRouteCount": 1,
+    "primaryName": "TEST ONLY - Admin Main Assembly Point A",
+    "primaryNodeId": "61b46c2b-3cba-44a6-a81b-00bc48f28ff7",
+    "approvedRouteDestination": "61b46c2b-3cba-44a6-a81b-00bc48f28ff7"
+  },
+  "browserErrors": [],
+  "screenshots": [
+    "student-approved-ordinary-sos-route-a-preview-390.png",
+    "student-approved-ordinary-sos-active-2d-390.png",
+    "student-approved-ordinary-sos-active-3d-390.png"
+  ],
+  "progression": [],
+  "planner": {
+    "status": "approved",
+    "text": "Admin approved Destination · TEST ONLY - Admin Main Assembly Point A",
+    "primaryShown": true,
+    "findEnabled": true
+  },
+  "routePreview": {
+    "destinationShown": true,
+    "routeAOnly": true,
+    "startCount": 0,
+    "startDisabled": false
+  },
+  "pauseAction": {
+    "pauseClicks": 1,
+    "step": "GUIDED NAVIGATION\n\nStep 3 of 11 · TEST ONLY - Admin Main Assembly Point A\n\nFOLLOW\nEXPLORE\n\nTake the Left Stair down to Floor 5.\n\nPause\n1×\nExpand"
+  },
+  "active2d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "STEP 3 OF 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "STEP 3 OF 11 · APPROVED TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Next: Take the Left Stair down to Floor 4.",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "active3d": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "Step 3 of 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "GUIDED NAVIGATION Step 3 of 11 · TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Continue 1× Expand",
+    "markerCount": 0,
+    "markerProgress": []
+  },
+  "active2dReturn": {
+    "phase": "navigating",
+    "floor": "Choose floor. Current floor: Floor 6",
+    "step": "Step 3 of 11",
+    "instruction": "Take the Left Stair down to Floor 5.",
+    "panelText": "GUIDED NAVIGATION Step 3 of 11 · TEST ONLY - Admin Main Assembly Point A FOLLOW EXPLORE Take the Left Stair down to Floor 5. Tap the Left Stair or press Continue. Continue 1× Expand",
+    "markerCount": 1,
+    "markerProgress": [
+      "1"
+    ]
+  },
+  "rendererRoundTripPreserved": true
+}

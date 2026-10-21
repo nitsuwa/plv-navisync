@@ -19,10 +19,10 @@ export function RouteErrorState({ fromCode, toCode, mode, onSwitchMode }: RouteE
   // presenting ordinary walking edges as wheelchair-safe.
   const canTryStandard = mode !== "standard";
   const description = mode === "accessible"
-      ? "Accessibility routing is not available yet. Ask an administrator to author accessible paths, then try again."
+      ? "No accessible route was found."
     : mode === "emergency"
-      ? "No emergency-safe stair route is available for this destination. Follow posted emergency signage and contact campus emergency services if you are in danger. Do not use Standard mode as an emergency route."
-      : `We couldn't find a path from ${fromCode} to ${toCode}.`;
+      ? "No emergency route found. Follow posted evacuation instructions."
+      : `No path found from ${fromCode} to ${toCode}.`;
   return (
     <div
       className="mt-1 p-3 rounded-xl border border-destructive/20 bg-destructive/5 animate-fade-in"
@@ -35,12 +35,12 @@ export function RouteErrorState({ fromCode, toCode, mode, onSwitchMode }: RouteE
           <RouteOff className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-[11px] font-extrabold text-foreground">No available route</p>
+          <p className="text-[11px] font-extrabold text-foreground">{mode === "emergency" ? "SOS route unavailable" : mode === "accessible" ? "Accessible route unavailable" : "No route found"}</p>
           <p className="text-[10px] text-muted-foreground leading-snug">{description}</p>
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {canTryStandard && mode !== "emergency" && (
+      {mode !== "emergency" && <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {canTryStandard && (
           <button
             onClick={() => onSwitchMode("standard")}
             className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
@@ -48,10 +48,8 @@ export function RouteErrorState({ fromCode, toCode, mode, onSwitchMode }: RouteE
             <Compass className="h-3 w-3" /> Try Standard mode
           </button>
         )}
-        <p className="text-[10px] text-muted-foreground self-center ml-auto text-right">
-          Choose a different destination above in the destination picker{mode === "standard" ? " and try another route" : " or switch to Standard mode"}.
-        </p>
-      </div>
+        <p className="text-[10px] text-muted-foreground self-center ml-auto text-right">Choose another destination.</p>
+      </div>}
     </div>
   );
 }

@@ -1,0 +1,113 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": null,
+      "label": null
+    },
+    "disconnectedPlacementPreview": {
+      "snapKind": null,
+      "labelVisible": false,
+      "target": {
+        "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+        "x": 360,
+        "y": 405,
+        "sourceWaypoint": {
+          "x": 360,
+          "y": 440
+        },
+        "name": "Walking Point",
+        "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+        "sourcePathAttributes": {
+          "type": "road",
+          "color": "#cbd5e1",
+          "width": 28,
+          "locked": false,
+          "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+          "pointCount": 19,
+          "vertexCount": 19
+        },
+        "sourceEdgeAttributes": {
+          "bidirectional": true,
+          "accessible": true,
+          "emergencySafe": true,
+          "type": "walkway"
+        },
+        "incidentEdgeIds": [
+          "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+          "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+          "edbcc068-f1ee-4560-912e-af23d87488c3"
+        ]
+      }
+    },
+    "disconnectedBeforeConnect": {
+      "pointCreated": true,
+      "linkedNodeHasNoIncidentEdge": true,
+      "status": "Pathway Connection\nNot Connected\nConnect to Pathway",
+      "connectActionVisible": true
+    },
+    "explicitConnection": {
+      "connected": true,
+      "targetNodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+      "connectionEdgeEndpoints": [
+        [
+          "f3b05206-82ea-40cf-a69d-3e17870578a1",
+          "22fe88b3-66f6-45ca-ba41-076d7a47089c"
+        ]
+      ],
+      "noDanglingEdges": true,
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "savedConnection": {
+      "draftHasConnection": true,
+      "savedSnapshotHasConnection": true
+    },
+    "reloadedConnection": {
+      "pointPersists": true,
+      "targetEdgePersists": true,
+      "noDanglingEdges": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-admin-disconnected-properties-1440.png",
+    "assembly-point-admin-explicit-connection-1440.png",
+    "assembly-point-admin-explicit-connection-reloaded-1440.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 360,
+    "y": 405,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  }
+}

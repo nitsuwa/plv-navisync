@@ -1,0 +1,32 @@
+{
+  "browser": "Chromium portrait rendering using an in-memory TEST ONLY canvas recording",
+  "fixture": {
+    "bytes": 12755,
+    "width": 360,
+    "height": 640,
+    "mimeType": "video/webm"
+  },
+  "display": {
+    "sourceWidth": 360,
+    "sourceHeight": 640,
+    "objectFit": "contain",
+    "frameRatio": 1.7777777777777777,
+    "viewportWidth": 390,
+    "documentWidth": 380
+  },
+  "fullscreen": {
+    "objectFit": "contain",
+    "width": 380,
+    "height": 844,
+    "viewportWidth": 390,
+    "viewportHeight": 844,
+    "orientation": "landscape-primary"
+  },
+  "orientationLock": "not requested; viewport remained under browser control",
+  "screenshots": [
+    "home-showcase-video-portrait-mobile-390.png",
+    "home-showcase-video-portrait-fullscreen-390.png"
+  ],
+  "pageErrors": [],
+  "productionWrites": 0
+}

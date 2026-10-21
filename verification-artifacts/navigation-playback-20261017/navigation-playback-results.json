@@ -1,0 +1,177 @@
+{
+  "fixture": "read-only published campus; no geometry or route data writes",
+  "screenshots": [
+    "standard-caba-follow-2d-desktop.png",
+    "standard-caba-reverse-seek-2d-desktop.png",
+    "standard-caba-forward-seek-2d-desktop.png",
+    "standard-caba-explore-floor-settled-2d-desktop.png",
+    "standard-caba-explore-entrance-inspected-floor.png",
+    "standard-caba-explore-entrance.png",
+    "standard-caba-explore-entrance-3d-desktop.png",
+    "standard-caba-explore-entrance-3d-inspected-floor.png",
+    "standard-caba-reverse-seek-3d-desktop.png",
+    "standard-caba-forward-seek-3d-desktop.png",
+    "standard-caba-explore-entrance-mobile-390.png",
+    "standard-caba-navigation-3d-mobile-390.png",
+    "standard-caba-navigation-3d-mobile-360.png"
+  ],
+  "errors": [],
+  "checks": {
+    "standardRoutePreview": true,
+    "active2DProgressMarker": true,
+    "initialStep": "Step 3 of 5",
+    "reverseSeek": {
+      "markerTracks": [
+        {
+          "index": 0,
+          "samples": 41,
+          "uniquePositions": 8,
+          "uniqueProgressValues": 8,
+          "firstProgress": 0.9910000000008283,
+          "lastProgress": 0.002111111111939401,
+          "firstTransform": "translate(245.99382938333457,672.0499485781944)",
+          "lastTransform": "translate(108.40600879669523,380)"
+        }
+      ],
+      "best": {
+        "index": 0,
+        "samples": 41,
+        "uniquePositions": 8,
+        "uniqueProgressValues": 8,
+        "firstProgress": 0.9910000000008283,
+        "lastProgress": 0.002111111111939401,
+        "firstTransform": "translate(245.99382938333457,672.0499485781944)",
+        "lastTransform": "translate(108.40600879669523,380)"
+      },
+      "moved": true
+    },
+    "forwardSeek": {
+      "markerTracks": [
+        {
+          "index": 0,
+          "samples": 41,
+          "uniquePositions": 9,
+          "uniqueProgressValues": 9,
+          "firstProgress": 0.006499999999171724,
+          "lastProgress": 0.967611111110283,
+          "firstTransform": "translate(111.32902708231151,380)",
+          "lastTransform": "translate(261.5703859931791,672.1797532166098)"
+        }
+      ],
+      "best": {
+        "index": 0,
+        "samples": 41,
+        "uniquePositions": 9,
+        "uniqueProgressValues": 9,
+        "firstProgress": 0.006499999999171724,
+        "lastProgress": 0.967611111110283,
+        "firstTransform": "translate(111.32902708231151,380)",
+        "lastTransform": "translate(261.5703859931791,672.1797532166098)"
+      },
+      "moved": true
+    },
+    "playbackStepBeforeExplore": "GUIDED NAVIGATION\n\nStep 3 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nEnter CABA building.\n\nYou’re at the CABA entrance. Tap Enter CABA on the map or press Continue.\n\nContinue\n1×\nExpand",
+    "exploreTransitionLabels": [
+      "Enter CABA building."
+    ],
+    "markerVisibleInExploreSourceContext": true,
+    "exploreEntranceVisible": true,
+    "exploreEntrance": {
+      "stepBefore": null,
+      "stepAfter": null,
+      "explorePressed": true,
+      "floorPicker": "CABA\n·\nGround Floor",
+      "floorMode": null,
+      "activeTransitionLabels": []
+    },
+    "exploreFloorScene": {
+      "width": 1488.028076171875,
+      "height": 700.5078125,
+      "childCount": 23,
+      "visible": true
+    },
+    "exploreDidNotChangePlayback": {
+      "expectedStep": "Step 3 of 5",
+      "restoredStep": "Step 3 of 5",
+      "marker": {
+        "index": 0,
+        "progress": 1,
+        "transform": "translate(240,672)",
+        "world": {
+          "x": 240,
+          "y": 672
+        },
+        "screen": {
+          "x": 597.5264748215675,
+          "y": 797.1334433317185
+        },
+        "step": "Step 3 of 5",
+        "markerVisible": true
+      }
+    },
+    "desktopModeToggle": true,
+    "desktop3DCanvas": true,
+    "threeDEntranceButtonVisible": true,
+    "explore3DEntranceInspection": {
+      "floorPicker": "CABA\n·\nGround Floor",
+      "explorePressed": "true"
+    },
+    "threeDStepBeforeReverseSeek": "Step 3 of 5",
+    "threeDPreviousEnabled": true,
+    "threeDReverseSeekStep": "Step 2 of 5",
+    "threeDForwardSeekStep": "Step 3 of 5",
+    "modeToggleAt390": {
+      "visible": true,
+      "box": {
+        "x": 334,
+        "y": 519,
+        "width": 44,
+        "height": 44
+      }
+    },
+    "modeAfterToggleAt390": "2d",
+    "threeDCanvasAt390": true,
+    "rendererRoundTripProgress": {
+      "index": 0,
+      "progress": 1,
+      "transform": "translate(240,672)",
+      "world": {
+        "x": 240,
+        "y": 672
+      },
+      "screen": {
+        "x": 203.5319380760193,
+        "y": 395.0520952449125
+      },
+      "step": "Step 3 of 5",
+      "markerVisible": true
+    },
+    "modeToggleAt360": {
+      "visible": true,
+      "box": {
+        "x": 304,
+        "y": 455,
+        "width": 44,
+        "height": 44
+      }
+    },
+    "modeAfterToggleAt360": "2d",
+    "markerAfter360RoundTrip": {
+      "index": 0,
+      "progress": 1,
+      "transform": "translate(240,672)",
+      "world": {
+        "x": 240,
+        "y": 672
+      },
+      "screen": {
+        "x": 185.88742480558508,
+        "y": 343.67673335355875
+      },
+      "step": "Step 3 of 5",
+      "markerVisible": true
+    },
+    "remoteWritesBlocked": true,
+    "browserErrors": []
+  }
+}

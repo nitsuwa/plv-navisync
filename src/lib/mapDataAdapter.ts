@@ -32,6 +32,8 @@ export function buildingPositionsFromCampus(campus: CampusWithOptionalBuildings)
 // ── Floor plan data (legacy FLOOR_PLANS format) ────────────────────────────
 interface LegacyRoom {
   id: string; name: string; x: number; y: number; w: number; h: number; type: string;
+  description?: string;
+  roomPhotoPath?: string;
   shapePoints?: Array<{ x: number; y: number }>;
   accessibility?: boolean;
 }
@@ -60,6 +62,8 @@ export function floorPlansFromCampus(campus: CampusWithOptionalBuildings): Recor
           w: r.w,
           h: r.h,
           type: r.type,
+          description: r.description?.trim() || undefined,
+          roomPhotoPath: r.roomPhotoPath,
           shapePoints: r.shapePoints,
           accessibility: r.accessibility,
         })),

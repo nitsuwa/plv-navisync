@@ -1,0 +1,402 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "test-fixture",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {
+    "caba": {
+      "selected": true,
+      "displayFloor": "Choose floor. Current floor: Floor 6",
+      "standardMarkerVisible": false,
+      "accessibleMarkerVisible": false,
+      "sosFindRouteEnabled": true,
+      "destinationSummary": [
+        "Destination · TEST ONLY - Main Assembly Point A"
+      ],
+      "bothRoutesVisible": true,
+      "singleRouteMode": false,
+      "assemblyPointInSosView": true,
+      "routeOptionCount": 4,
+      "mobileWidth": {
+        "viewport": 390,
+        "scrollWidth": 390
+      },
+      "activeRouteSelected": true,
+      "renderer3dCanvasVisible": true,
+      "renderer3d": true,
+      "expectedAlternatives": 2
+    },
+    "ceit": {
+      "selected": true,
+      "displayFloor": "Choose floor. Current floor: Floor 6",
+      "standardMarkerVisible": false,
+      "accessibleMarkerVisible": false,
+      "sosFindRouteEnabled": true,
+      "destinationSummary": [
+        "Destination · TEST ONLY - Main Assembly Point A"
+      ],
+      "bothRoutesVisible": true,
+      "singleRouteMode": false,
+      "assemblyPointInSosView": true,
+      "routeOptionCount": 4,
+      "mobileWidth": {
+        "viewport": 390,
+        "scrollWidth": 390
+      },
+      "activeRouteSelected": true,
+      "renderer3dCanvasVisible": true,
+      "renderer3d": true,
+      "expectedAlternatives": 2
+    },
+    "auditorium": {
+      "selected": true,
+      "displayFloor": "Choose floor. Current floor: Floor 5",
+      "standardMarkerVisible": false,
+      "accessibleMarkerVisible": false,
+      "sosFindRouteEnabled": true,
+      "destinationSummary": [
+        "Destination · TEST ONLY - Main Assembly Point A"
+      ],
+      "bothRoutesVisible": true,
+      "singleRouteMode": false,
+      "assemblyPointInSosView": true,
+      "routeOptionCount": 4,
+      "mobileWidth": {
+        "viewport": 390,
+        "scrollWidth": 390
+      },
+      "activeRouteSelected": true,
+      "renderer3dCanvasVisible": true,
+      "renderer3d": true,
+      "expectedAlternatives": 2
+    },
+    "assembly-hall": {
+      "selected": true,
+      "displayFloor": "Choose floor. Current floor: Ground Floor",
+      "standardMarkerVisible": false,
+      "accessibleMarkerVisible": false,
+      "sosFindRouteEnabled": true,
+      "destinationSummary": [
+        "Destination · TEST ONLY - Main Assembly Point A"
+      ],
+      "bothRoutesVisible": false,
+      "singleRouteMode": true,
+      "assemblyPointInSosView": true,
+      "routeOptionCount": 0,
+      "mobileWidth": {
+        "viewport": 390,
+        "scrollWidth": 390
+      },
+      "expectedAlternatives": 1
+    }
+  },
+  "browserErrors": [],
+  "screenshots": [
+    "pathfinding-ui-caba-unavailable-360x800.png",
+    "pathfinding-ui-caba-unavailable-390x844.png",
+    "pathfinding-ui-caba-unavailable-430x932.png",
+    "pathfinding-ui-caba-unavailable-768x1024.png",
+    "pathfinding-ui-caba-unavailable-1440x900.png",
+    "pathfinding-ui-caba-both-routes-mobile-390.png",
+    "pathfinding-ui-caba-active-2d-mobile-390.png",
+    "pathfinding-ui-caba-active-3d-mobile-390.png",
+    "pathfinding-ui-ceit-both-routes-mobile-390.png",
+    "pathfinding-ui-ceit-active-2d-mobile-390.png",
+    "pathfinding-ui-ceit-active-3d-mobile-390.png",
+    "pathfinding-ui-auditorium-both-routes-mobile-390.png",
+    "pathfinding-ui-auditorium-active-2d-mobile-390.png",
+    "pathfinding-ui-auditorium-active-3d-mobile-390.png",
+    "pathfinding-ui-assembly-hall-single-route-mobile-390.png",
+    "pathfinding-ui-caba-both-routes-desktop-1440.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "pathfindingUi": {
+    "publishedCabaUnavailable": {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "status": "unavailable",
+      "copy": "SOS route unavailable\n\nNo approved assembly point for this building.\n\nFollow posted evacuation instructions.",
+      "statusCount": 1,
+      "technicalDetailsCount": 0,
+      "findRouteLabel": "Find Route",
+      "findRouteDisabled": true,
+      "noMisleadingStandardAdvice": true
+    },
+    "responsive": [
+      {
+        "width": 360,
+        "height": 800,
+        "scrollWidth": 360,
+        "statusVisible": true,
+        "findRouteVisible": true
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "scrollWidth": 390,
+        "statusVisible": true,
+        "findRouteVisible": true
+      },
+      {
+        "width": 430,
+        "height": 932,
+        "scrollWidth": 430,
+        "statusVisible": true,
+        "findRouteVisible": true
+      },
+      {
+        "width": 768,
+        "height": 1024,
+        "scrollWidth": 768,
+        "statusVisible": true,
+        "findRouteVisible": true
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "scrollWidth": 1440,
+        "statusVisible": true,
+        "findRouteVisible": true
+      }
+    ]
+  },
+  "fixtureSummary": {
+    "testOnly": true,
+    "source": "read-only published MAIN CAMPUS - PLV snapshot; edits and synthetic review stay local to this test",
+    "point": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "name": "TEST ONLY - Main Assembly Point A",
+      "navNodeId": "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+      "x": 146,
+      "y": 380,
+      "connection": "connected",
+      "review": "approved",
+      "incidentEdges": 3,
+      "assignedBuildings": 4,
+      "placementModel": "placed directly on an existing authored outdoor waypoint"
+    },
+    "rooms": [
+      {
+        "name": "PLV AUDITORIUM",
+        "building": "STUDENT CENTER BUILDING",
+        "displayFloor": "Floor 5",
+        "internalFloor": 6,
+        "assignedDoorCount": 3,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "disconnected",
+            "routeCount": 0
+          },
+          {
+            "label": "Room door 3",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 5,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ]
+      },
+      {
+        "name": "CABA LECTURE HALL",
+        "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 2,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 11,
+            "endsAtPoint": true
+          }
+        ]
+      },
+      {
+        "name": "ASSEMBLY HALL",
+        "building": "COLLEGE OF EDUCATION BUILDING",
+        "displayFloor": "Ground Floor",
+        "internalFloor": 1,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 1
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 1
+          }
+        ],
+        "routeCount": 1,
+        "distinctPhysicalExits": 1,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 16,
+            "endsAtPoint": true
+          }
+        ]
+      },
+      {
+        "name": "CEIT LECTURE HALL",
+        "building": "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY",
+        "displayFloor": "Floor 6",
+        "internalFloor": 6,
+        "assignedDoorCount": 2,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4",
+          "f5bb90ab-4cea-4479-bc8f-85b5ba53f1f4"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 15,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 13,
+            "endsAtPoint": true
+          }
+        ]
+      }
+    ]
+  },
+  "desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "scrollWidth": 1440
+    },
+    "bothRoutesVisible": true,
+    "testDestinationVisible": true
+  },
+  "responsiveMeasurements": [
+    {
+      "width": 360,
+      "height": 800,
+      "scrollWidth": 360
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390
+    },
+    {
+      "width": 430,
+      "height": 932,
+      "scrollWidth": 430
+    },
+    {
+      "width": 768,
+      "height": 1024,
+      "scrollWidth": 768
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "scrollWidth": 1280
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "scrollWidth": 1920
+    }
+  ]
+}

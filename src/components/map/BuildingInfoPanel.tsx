@@ -30,22 +30,26 @@ interface BuildingInfoPanelProps {
   facilities: string[];
   accessibility: string[];
   onBackToRoutePlanner?: () => void;
+  suspendedForSearch?: boolean;
 }
 
 export function BuildingInfoPanel({
   selected, campusId, onClose, onDirections, onEnterBuilding, saved, studentAuth,
   savedStateLoading = false, savedStateUnavailable = false,
   onToggleSave, onReport, onSignInPrompt, showQR, onToggleQR, hasFloorPlans,
-  floorPlanCount, facilities, accessibility, onBackToRoutePlanner,
+  floorPlanCount, facilities, accessibility, onBackToRoutePlanner, suspendedForSearch = false,
 }: BuildingInfoPanelProps) {
-  useEscToClose(onClose);
+  useEscToClose(onClose, !suspendedForSearch);
 
   return (
     <motion.aside
       data-no-drag
       data-testid="building-details-desktop"
+      data-suspended-for-search={suspendedForSearch}
+      aria-hidden={suspendedForSearch || undefined}
+      inert={suspendedForSearch ? ("" as never) : undefined}
       aria-label={`${selected.name} building details`}
-      className="absolute inset-y-0 right-0 z-30 hidden min-h-0 flex-col overflow-hidden border-l border-border/80 bg-card shadow-2xl md:flex"
+      className={`absolute inset-y-0 right-0 z-30 hidden min-h-0 flex-col overflow-hidden border-l border-border/80 bg-card shadow-2xl md:flex ${suspendedForSearch ? "invisible pointer-events-none" : ""}`}
       style={{ width: "clamp(340px, 32vw, 390px)" }}
       initial={{ x: 24, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}

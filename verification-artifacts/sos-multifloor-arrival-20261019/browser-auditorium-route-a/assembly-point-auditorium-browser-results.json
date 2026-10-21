@@ -1,0 +1,293 @@
+{
+  "fixture": "TEST ONLY: in-memory clone of the read-only published PLV snapshot",
+  "productionWrites": "blocked; test Assembly Point and review state never leave this browser context",
+  "adapterRequests": [
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "read-only-snapshot-clone",
+      "rowCount": 1
+    },
+    {
+      "method": "POST",
+      "pathname": "/rest/v1/rpc/list_event_safe_published_campuses",
+      "source": "test-fixture",
+      "rowCount": 1
+    }
+  ],
+  "rooms": {},
+  "browserErrors": [
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "screenshots": [
+    "assembly-point-auditorium-both-routes-mobile-390.png",
+    "assembly-point-browser-failure.png"
+  ],
+  "sourceSnapshot": {
+    "rows": 3,
+    "selected": [
+      {
+        "code": "MAIN",
+        "name": "MAIN CAMPUS - PLV"
+      }
+    ]
+  },
+  "productionSnapshotAccess": "one public read-only published-snapshot RPC; no production mutations",
+  "fixtureSummary": {
+    "testOnly": true,
+    "source": "read-only published MAIN CAMPUS - PLV snapshot; edits and synthetic review stay local to this test",
+    "point": {
+      "id": "90000000-0000-4000-8000-000000000101",
+      "name": "TEST ONLY - Main Assembly Point A",
+      "navNodeId": "c8a966a8-d720-4b38-bb43-211bea185c25",
+      "x": 293,
+      "y": 440,
+      "connection": "connected",
+      "review": "approved",
+      "incidentEdges": 3,
+      "assignedBuildings": 1,
+      "placementModel": "placed directly on an existing authored outdoor waypoint"
+    },
+    "rooms": [
+      {
+        "name": "PLV AUDITORIUM",
+        "building": "STUDENT CENTER BUILDING",
+        "displayFloor": "Floor 5",
+        "internalFloor": 6,
+        "assignedDoorCount": 3,
+        "doorReadiness": [
+          {
+            "label": "Room door 1",
+            "state": "route_ready",
+            "routeCount": 2
+          },
+          {
+            "label": "Room door 2",
+            "state": "disconnected",
+            "routeCount": 0
+          },
+          {
+            "label": "Room door 3",
+            "state": "route_ready",
+            "routeCount": 2
+          }
+        ],
+        "routeCount": 2,
+        "smartMultiExitEnabled": true,
+        "distinctPhysicalExits": 2,
+        "finalNodeIds": [
+          "c8a966a8-d720-4b38-bb43-211bea185c25",
+          "c8a966a8-d720-4b38-bb43-211bea185c25"
+        ],
+        "allPathsEndAtAssemblyPoint": true,
+        "outdoorSegments": [
+          {
+            "label": "Route A",
+            "pointCount": 2,
+            "endsAtPoint": true
+          },
+          {
+            "label": "Route B",
+            "pointCount": 13,
+            "endsAtPoint": true
+          }
+        ],
+        "selectedRouteArrival": {
+          "emergencyAssemblyPointId": "90000000-0000-4000-8000-000000000101",
+          "emergencyDestinationLabel": "TEST ONLY - Main Assembly Point A",
+          "targetContext": "campus",
+          "targetPhase": "outdoor",
+          "targetContextLegIndex": 5,
+          "finalWaypoint": {
+            "x": 293,
+            "y": 440
+          },
+          "assemblyWaypoint": {
+            "x": 293,
+            "y": 440
+          },
+          "steps": [
+            {
+              "index": 0,
+              "icon": "start",
+              "instruction": "Start from Door",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 1,
+              "icon": "walk",
+              "instruction": "Follow the indoor path to the Exterior Stair 2.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 2,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 4.",
+              "contextLegIndex": 0
+            },
+            {
+              "index": 3,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 3.",
+              "contextLegIndex": 1
+            },
+            {
+              "index": 4,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Floor 2.",
+              "contextLegIndex": 2
+            },
+            {
+              "index": 5,
+              "icon": "stairs",
+              "instruction": "Take the Exterior Stair 2 down to Ground Floor.",
+              "contextLegIndex": 3
+            },
+            {
+              "index": 6,
+              "icon": "enter",
+              "instruction": "Exit via Exterior Stair 2 to Campus.",
+              "contextLegIndex": 4
+            },
+            {
+              "index": 7,
+              "icon": "walk",
+              "instruction": "Follow the campus path to STUDENT CENTER BUILDING · Exterior Emergency Stair -> TEST ONLY - Main Assembly Point A · Exterior Stair 2.",
+              "contextLegIndex": 5
+            },
+            {
+              "index": 8,
+              "icon": "arrive",
+              "instruction": "Arrive at TEST ONLY - Main Assembly Point A.",
+              "contextLegIndex": 5
+            }
+          ],
+          "contextLegs": [
+            {
+              "index": 0,
+              "kind": "floor",
+              "segmentIndex": 0,
+              "start": {
+                "x": 180,
+                "y": 301
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 1,
+              "kind": "floor",
+              "segmentIndex": 1,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 2,
+              "kind": "floor",
+              "segmentIndex": 2,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 3,
+              "kind": "floor",
+              "segmentIndex": 3,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 4,
+              "kind": "floor",
+              "segmentIndex": 4,
+              "start": {
+                "x": 6,
+                "y": 230
+              },
+              "end": {
+                "x": 6,
+                "y": 230
+              }
+            },
+            {
+              "index": 5,
+              "kind": "campus",
+              "segmentIndex": null,
+              "start": {
+                "x": 296,
+                "y": 263
+              },
+              "end": {
+                "x": 293,
+                "y": 440
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "failure": {
+    "stage": "open Student Map",
+    "message": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button').filter({ hasText: /^Route A/ }).first()\u001b[22m\n",
+    "stack": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button').filter({ hasText: /^Route A/ }).first()\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\sos-multifloor-arrival-20261019\\ordinary-sos-browser-targeted.cjs:1089:27)"
+  },
+  "pageDebug": {
+    "url": "http://127.0.0.1:5174/map",
+    "title": "PLV NaviSync — Smart Campus Navigator",
+    "text": "Skip to main content\nA\nRoute B\nEXIT\nSTAIR EXIT\nEXIT\nSTAIR EXIT\nPLV AUDITORIUM\nSTORAGE\nDRESSING ROOMS AND MAKEUP AREA\nHOLDING AREA\nELECTRICAL ROOM\nCOMFORT ROOM\nA\nContinue Downstairs — Floor 4\nChoose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from PLV AUDITORIUM to TEST ONLY - Main Assembly Point A.\n\nRoute preview\n\nExpand\n\nPLV AUDITORIUM → TEST ONLY - Main Assembly Point A\n\nSOS route preview\n\nSC · 5F\nST\nEvent map\nHome\nMap\nST\nCampus visitor\nGuest\nStudent sign in",
+    "htmlLength": 1173742
+  },
+  "visibleButtons": [
+    {
+      "text": "",
+      "ariaLabel": "Switch to 3D view",
+      "disabled": false
+    },
+    {
+      "text": "Expand",
+      "ariaLabel": "Expand route panel",
+      "disabled": false
+    },
+    {
+      "text": "SC · 5F",
+      "ariaLabel": "Choose floor. Current floor: Floor 5",
+      "disabled": false
+    },
+    {
+      "text": "ST",
+      "ariaLabel": "Campus visitor — user menu",
+      "disabled": false
+    },
+    {
+      "text": "Event map",
+      "ariaLabel": "Open event map",
+      "disabled": true
+    }
+  ]
+}

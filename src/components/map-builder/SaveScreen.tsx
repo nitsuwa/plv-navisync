@@ -6,6 +6,14 @@ export interface SaveScreenProps {
   open: boolean;
   state: "saving" | "success" | "error";
   campusName?: string;
+  titleOverride?: ActionProgressDialogProps["titleOverride"];
+  loadingMessageOverride?: ActionProgressDialogProps["loadingMessageOverride"];
+  successTitleOverride?: ActionProgressDialogProps["successTitleOverride"];
+  successMessageOverride?: ActionProgressDialogProps["successMessageOverride"];
+  errorTitleOverride?: ActionProgressDialogProps["errorTitleOverride"];
+  errorMessageOverride?: ActionProgressDialogProps["errorMessageOverride"];
+  progressMessage?: ActionProgressDialogProps["progressMessage"];
+  indeterminateProgress?: boolean;
   onClose: () => void;
   onRetry?: () => void;
   autoDismissMs?: number;
@@ -18,6 +26,14 @@ export function SaveScreen({
   open,
   state,
   campusName,
+  titleOverride,
+  loadingMessageOverride,
+  successTitleOverride,
+  successMessageOverride,
+  errorTitleOverride,
+  errorMessageOverride,
+  progressMessage,
+  indeterminateProgress,
   onClose,
   onRetry,
   autoDismissMs = 1200,
@@ -33,6 +49,14 @@ export function SaveScreen({
       state={mappedState}
       action="saving"
       entityName={campusName}
+      titleOverride={titleOverride}
+      loadingMessageOverride={loadingMessageOverride}
+      successTitleOverride={successTitleOverride}
+      successMessageOverride={successMessageOverride}
+      errorTitleOverride={errorTitleOverride}
+      errorMessageOverride={errorMessageOverride}
+      progressMessage={progressMessage}
+      indeterminateProgress={indeterminateProgress}
       onClose={onClose}
       onRetry={onRetry}
       onReviewIssues={onReviewIssues}

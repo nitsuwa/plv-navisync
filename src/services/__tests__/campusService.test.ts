@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
 import type { Campus } from "../../components/map-builder/types";
+import { serializeCampusStructure } from "../campusStructureService";
+import { convertPathwaysToNavigation } from "../../lib/campusPathNavigation";
 import {
   CampusDeletionError,
   CampusServiceError,
   cleanupCampusStorage,
+  compilePublishedCampusPathways,
   comingSoonCampusFromSummary,
   createCampus,
   listCampuses,
@@ -298,10 +301,10 @@ describe("updateCampus (versioned update boundary)", () => {
     const auth = { getUser: vi.fn().mockRejectedValue(new Error("Auth session missing!")) };
     vi.mocked(getSupabase).mockReturnValue({ from: vi.fn(() => ({ update })), auth } as never);
 
-    const updated = await updateCampus("c1", { canvas_width: 1200 }, campusRow.updated_at);
+    const updated = await updateCampus("c1", { canvas_width: 1200, emergency_destination_policy: "nearest_eligible" }, campusRow.updated_at);
 
     expect(updated).toMatchObject({ id: "c1", canvasW: 900, canvasH: 680 });
-    expect(update).toHaveBeenCalledWith({ canvas_width: 1200 });
+    expect(update).toHaveBeenCalledWith({ canvas_width: 1200, emergency_destination_policy: "nearest_eligible" });
     expect(auth.getUser).not.toHaveBeenCalled();
   });
 });
@@ -545,6 +548,100 @@ describe("listPublishedCampusSnapshots (student snapshot boundary)", () => {
       publishStatus: "published",
       visibleToStudents: true,
     });
+  });
+
+  it("derives authored walkway intersections for legacy published snapshots in memory", async () => {
+    const campus = {
+      id: "20000000-0000-4000-8000-000000000021",
+      name: "TEST ONLY crossing snapshot",
+      code: "TEST",
+      canvasW: 900,
+      canvasH: 680,
+      buildings: [],
+      markers: [],
+      paths: [
+        { id: "horizontal", type: "walkway", color: "green", width: 4, pathNetworkId: "campus-walks", navigationVertexIds: ["h0", "h1"], points: [{ x: 0, y: 50 }, { x: 100, y: 50 }] },
+        { id: "vertical", type: "walkway", color: "green", width: 4, pathNetworkId: "campus-walks", navigationVertexIds: ["v0", "v1"], points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] },
+      ],
+      navNodes: [],
+      navEdges: [],
+      routes: [],
+      decorAssets: [],
+      assemblyPoints: [],
+      settings: {},
+    } as unknown as Campus;
+    let sequence = 0;
+    const first = convertPathwaysToNavigation(campus, ["horizontal", "vertical"], (prefix) => `${prefix}-fixture-${++sequence}`).campus;
+    const legacySnapshot = {
+      ...first,
+      navNodes: first.navNodes?.filter((node) => !node.generatedFromPathIntersections?.length),
+      navEdges: first.navEdges?.filter((edge) => !edge.generatedFromPathIntersectionSegments?.length),
+    };
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ snapshot: { campus: legacySnapshot }, published_at: "2026-10-18T00:00:00Z" }],
+      error: null,
+    });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
+
+    const compiled = compilePublishedCampusPathways(legacySnapshot);
+    const returned = await listPublishedCampusSnapshots();
+    expect(compiled.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(1);
+    expect(returned[0]?.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(1);
+    expect(legacySnapshot.navNodes?.some((node) => node.generatedFromPathIntersections?.length)).toBe(false);
+  });
+
+  it("preserves a serialized Assembly Point, anchor and assignment at the published Student Map boundary", async () => {
+    const campusId = "20000000-0000-4000-8000-000000000001";
+    const buildingId = "20000000-0000-4000-8000-000000000002";
+    const pointId = "20000000-0000-4000-8000-000000000003";
+    const anchorId = "20000000-0000-4000-8000-000000000004";
+    const approachId = "20000000-0000-4000-8000-000000000005";
+    const point = {
+      id: pointId,
+      name: "TEST ONLY Assembly Point",
+      x: 500,
+      y: 400,
+      campusId,
+      navNodeId: anchorId,
+      buildingAssignments: [{ buildingId, designation: "primary" as const }],
+      safetyReview: { status: "approved" as const, approvedAt: "2026-10-18T00:00:00.000Z", approvedByRole: "admin" as const, fingerprint: "fixture-fingerprint" },
+    };
+    const campus = {
+      id: campusId,
+      name: "TEST ONLY snapshot fixture",
+      code: "TEST",
+      canvasW: 900,
+      canvasH: 680,
+      buildings: [{ id: buildingId, name: "Building A", code: "A", category: "academic", description: "", x: 10, y: 20, width: 200, height: 100, floors: [] }],
+      markers: [], paths: [], routes: [], decorAssets: [], eventOverlays: [], accessibilityFeatures: [],
+      assemblyPoints: [point],
+      navNodes: [
+        { id: approachId, name: "Outdoor approach", type: "outdoor", x: 450, y: 400, campusId, accessible: true, color: "green" },
+        { id: anchorId, name: point.name, type: "assembly", x: point.x, y: point.y, campusId, assemblyPointId: pointId, accessible: true, color: "green" },
+      ],
+      navEdges: [{ id: "20000000-0000-4000-8000-000000000006", startNodeId: approachId, endNodeId: anchorId, distance: 50, bidirectional: true, accessible: true, emergencySafe: true, type: "outdoor", color: "green", width: 3 }],
+    } as unknown as Campus;
+    const structure = serializeCampusStructure(campus);
+    const snapshot = JSON.parse(JSON.stringify({ version: 1, campus, structure }));
+    const rpc = vi.fn().mockResolvedValue({ data: [{ snapshot, published_at: "2026-10-18T00:00:00Z" }], error: null });
+    vi.mocked(getSupabase).mockReturnValue({ rpc } as never);
+
+    const campuses = await listPublishedCampusSnapshots();
+
+    expect(structure.map_elements).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        element_type: "assembly_area",
+        id: pointId,
+        metadata: expect.objectContaining({ kind: "assembly_point" }),
+      }),
+    ]));
+    expect(structure.navigation_nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: anchorId, node_type: "assembly_area" }),
+    ]));
+    expect(campuses[0]?.assemblyPoints).toEqual([point]);
+    expect(campuses[0]?.navNodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: anchorId, assemblyPointId: pointId }),
+    ]));
   });
 });
 

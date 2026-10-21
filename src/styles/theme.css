@@ -3,8 +3,13 @@
 :root {
   --map-layer-controls: 20;
   --map-layer-building-sheet: 40;
+  --map-layer-bottom-nav: 50;
+  --map-layer-mode-toggle: 60;
   --map-layer-transient: 70;
   --map-layer-modal: 100;
+  /* Top-level blocking operations such as an in-flight editor save.  This is
+     intentionally above editor popovers/tooltips and app-level dialogs. */
+  --map-layer-blocking: 10000;
   --font-size: 16px;
   --font-sans: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
@@ -694,6 +699,21 @@
   background: radial-gradient(circle, rgba(200,150,12,0.16) 0%, rgba(200,150,12,0.04) 48%, transparent 74%);
 }
 
+/* Preserve source proportions when the optional Home showcase enters fullscreen. */
+.home-showcase-video {
+  object-fit: contain;
+}
+
+.home-showcase-video:fullscreen,
+.home-showcase-video:-webkit-full-screen {
+  width: 100vw;
+  height: 100dvh;
+  max-width: 100vw;
+  max-height: 100dvh;
+  background: #000;
+  object-fit: contain;
+}
+
 #landing-hero[data-document-hidden="true"] *,
 #landing-hero[data-document-hidden="true"] *::before,
 #landing-hero[data-document-hidden="true"] *::after,
@@ -941,6 +961,13 @@
 }
 
 @layer utilities {
+  .student-map-app-shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -1185,19 +1212,35 @@
     border-radius: var(--radius);
   }
 
-  /* Student map priority: map, controls (20), details sheet (40), transient
-     search/profile overlays (70), then modal dialogs (100). */
+  /* Student map priority: canvas, controls (20), details sheet (40), bottom
+     navigation (50), stable renderer toggle (60), transient search/profile
+     overlays (70), then modal dialogs (100). */
   .map-layer-controls { z-index: var(--map-layer-controls); }
+  .student-campus-selector {
+    position: absolute;
+    top: var(--student-map-campus-selector-top, calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 4.375rem));
+    bottom: auto;
+    left: max(12px, calc(env(safe-area-inset-left, 0px) + 12px));
+    z-index: var(--map-layer-controls);
+  }
+  .student-campus-selector-trigger {
+    max-width: min(var(--student-map-campus-selector-max-width, 260px), calc(100vw - 5.5rem));
+  }
+  .student-map-floating-account-controls {
+    top: max(0.5rem, env(safe-area-inset-top, 0.5rem));
+  }
   .map-layer-building-sheet { z-index: var(--map-layer-building-sheet); }
+  .map-layer-bottom-nav { z-index: var(--map-layer-bottom-nav); }
+  .map-layer-mode-toggle { z-index: var(--map-layer-mode-toggle); }
   .map-layer-transient { z-index: var(--map-layer-transient); }
   .map-layer-modal { z-index: var(--map-layer-modal); }
+  .map-layer-blocking { z-index: var(--map-layer-blocking); }
 
   .student-map-utility-stack {
-    --student-map-utility-anchor-right: calc(0.75rem + env(safe-area-inset-right, 0px));
     translate:
-      calc(var(--student-map-utility-anchor-right) - var(--student-map-utility-right-inset, var(--student-map-utility-anchor-right)))
+      0px
       calc(var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px))) - var(--student-map-utility-bottom-inset, var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px)))));
-    transition: translate 180ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+    transition: opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
   }
   .student-map-surface[data-utility-compact="true"] .student-map-utility-stack,
   .student-map-surface[data-utility-compact="true"] [data-testid="student-map-utility-actions"] {
@@ -1206,9 +1249,7 @@
   /* Event Map anchors the utility stack from the top on narrow screens; its
      vertical position is owned by that top offset, not the bottom-sheet inset. */
   .student-map-utility-stack[data-event-mode="true"] {
-    translate:
-      calc(var(--student-map-utility-anchor-right) - var(--student-map-utility-right-inset, var(--student-map-utility-anchor-right)))
-      0px;
+    translate: 0px 0px;
   }
   .student-map-utility-stack[data-profile-open="true"] {
     opacity: 0;
@@ -1224,8 +1265,10 @@
     transform: translate3d(0, 6px, 0);
   }
   @media (max-width: 767px) {
-    .student-map-event-control[data-indoor="true"] {
-      bottom: calc(var(--student-map-utility-bottom, 1rem) + 3.5rem);
+    .student-map-event-control {
+      /* Share the measured lower anchor with the right control rail. This
+         accounts for bottom sheets and safe areas without a separate offset. */
+      bottom: var(--student-map-utility-bottom-inset, var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px))));
     }
     [data-testid="student-floor-picker"][data-event-panel-open="true"] {
       top: calc(max(0.5rem, env(safe-area-inset-top, 0.5rem)) + 3.5rem);
@@ -1246,6 +1289,21 @@
     }
     .student-map-surface [data-testid="event-map-panel"] {
       max-height: min(var(--event-sheet-max-height), calc(100% - 8.5rem));
+    }
+  }
+
+  @media (min-width: 768px) {
+    .student-campus-selector {
+      top: auto;
+      bottom: var(--student-map-utility-anchor-bottom, 24px);
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .student-campus-selector-trigger {
+      max-width: min(360px, calc(100vw - 3rem));
+    }
+    .student-map-floating-account-controls {
+      top: max(1rem, env(safe-area-inset-top, 1rem));
     }
   }
   @media (min-width: 768px) and (max-width: 1023px) {
@@ -1346,15 +1404,8 @@
     100% { stroke-dashoffset: 0; opacity: 0; }
   }
 
-  @media (max-width: 768px) and (orientation: landscape) {
-    .landscape-minimized[data-sheet-state="default"] [data-testid="building-quick-facts-compact"] > div {
-      display: none;
-    }
-  }
-
   @media (max-width: 767px) {
-    .student-map-utility-control,
-    .student-map-event-control { bottom: var(--student-map-utility-bottom, 1rem); }
+    .student-map-utility-control { bottom: var(--student-map-utility-bottom, 1rem); }
     .student-map-utility-control[data-dock="floor-control-top"] { bottom: auto; }
   }
 
@@ -1368,12 +1419,6 @@
     .student-room-selection-outline,
     .student-room-selection-trace { animation: none; }
     .student-room-selection-trace { display: none; }
-  }
-
-  @media (max-height: 700px) {
-    [data-testid="mobile-building-sheet"][data-sheet-state="default"] [data-testid="building-description"] {
-      display: none;
-    }
   }
 
   /* ── Reduced motion — respect OS preference ── */

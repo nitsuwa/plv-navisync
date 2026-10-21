@@ -1,0 +1,13 @@
+{
+  "isolation": "TEST ONLY saved local campus copy with one Door node removed in memory; remote writes blocked",
+  "room": "CABA LECTURE HALL",
+  "door": "7ea80284-8929-4ed5-a0cc-0466dfe3a806",
+  "removedNodeCount": 1,
+  "browserErrors": [],
+  "routeStatus": "Route connection missing The Door has no valid navigation node on this Building and Floor. Inspect Connections",
+  "routeStatusIdentifiesMissingConnection": true,
+  "doorFocused": true,
+  "addToNavigationVisible": true,
+  "noNodeFabricated": true,
+  "noBrowserExceptions": true
+}

@@ -311,7 +311,7 @@ describe("Phase 1.7 — expanded multi-selection", () => {
 });
 
 describe("Phase 1.7 — wall connection snapping", () => {
-  it("snaps a new wall start to an existing wall endpoint and shows feedback", () => {
+  it("snaps a new wall start to an existing wall endpoint and shows feedback", async () => {
     const { container } = render(<Harness initialCampus={makeSnapCampus()} />);
     const svg = stubSvgRect(container, 580, 380);
 
@@ -319,24 +319,27 @@ describe("Phase 1.7 — wall connection snapping", () => {
     // Grid snap moves (55,59) → (60,60); endpoint (53,57) is 7.6 units away → snap
     fireEvent.mouseDown(svg, { clientX: 55, clientY: 59, bubbles: true });
 
-    const indicator = screen.getByTestId("wall-snap-indicator");
+    const indicator = await screen.findByTestId("wall-snap-interaction-overlay");
     expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cx"))).toBe(53);
     expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cy"))).toBe(57);
 
-    // The indicator survives the mid-gesture mouseup (the draw is still active)
+    // Mouse-up ends the transient overlay; a fresh pointer sample recreates it
+    // from the current world coordinate while the Wall tool remains active.
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(screen.getByTestId("wall-snap-indicator")).toBeInTheDocument();
+    expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull();
+    fireEvent.mouseMove(svg, { clientX: 55, clientY: 59, bubbles: true });
+    expect(await screen.findByTestId("wall-snap-interaction-overlay")).toBeInTheDocument();
 
     // Switching tools abandons the draw and clears the transient indicator
     fireEvent.keyDown(window, { key: "v" });
-    expect(screen.queryByTestId("wall-snap-indicator")).toBeNull();
+    expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull();
 
     // Completing a finished wall also clears it
     fireEvent.keyDown(window, { key: "w" });
     fireEvent.mouseDown(svg, { clientX: 55, clientY: 59, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 300, clientY: 200, bubbles: true });
     fireEvent.mouseDown(svg, { clientX: 300, clientY: 200, bubbles: true });
-    expect(screen.queryByTestId("wall-snap-indicator")).toBeNull();
+    expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull();
   });
 
   it("completes a wall endpoint-to-endpoint on an existing wall endpoint", () => {
@@ -351,6 +354,54 @@ describe("Phase 1.7 — wall connection snapping", () => {
     const walls = latestCampus!.buildings[0].floors[0].walls;
     expect(walls).toHaveLength(3);
     expect(walls[2]).toMatchObject({ x1: 53, y1: 57, x2: 253, y2: 57 });
+  });
+
+  it("shows a zoom-stable vertical wall alignment guide and releases it when the pointer moves away", async () => {
+    const campus = makeSnapCampus();
+    campus.buildings[0].floors[0].walls.push({
+      id: "vertical-guide", x1: 200, y1: 20, x2: 200, y2: 120, thickness: 4, color: "#64748b", material: "concrete",
+    });
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseDown(svg, { clientX: 120, clientY: 80, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 196, clientY: 80, bubbles: true });
+    let overlay = await screen.findByTestId("wall-snap-interaction-overlay");
+    expect(overlay.querySelector("[data-snap-guide]")).toHaveAttribute("visibility", "visible");
+    expect(overlay.querySelector("[data-snap-guide]")).toHaveAttribute("x1", "200");
+    expect(Number(overlay.querySelector("[data-snap-dot]")?.getAttribute("cx"))).toBe(200);
+
+    fireEvent.mouseMove(svg, { clientX: 320, clientY: 180, bubbles: true });
+    await waitFor(() => expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull());
+
+    fireEvent.mouseMove(svg, { clientX: 196, clientY: 80, bubbles: true });
+    overlay = await screen.findByTestId("wall-snap-interaction-overlay");
+    expect(overlay.querySelector("[data-snap-guide]")).toHaveAttribute("visibility", "visible");
+    fireEvent.mouseDown(svg, { clientX: 196, clientY: 80, bubbles: true });
+    expect(latestCampus!.buildings[0].floors[0].walls.at(-1)).toMatchObject({ x1: 120, y1: 80, x2: 200, y2: 80 });
+  });
+
+  it("suspends wall snapping during Space-pan without changing authored walls", async () => {
+    const initialCampus = makeSnapCampus();
+    const before = structuredClone(initialCampus.buildings[0].floors[0].walls);
+    const { container } = render(<Harness initialCampus={initialCampus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container, 580, 380);
+
+    fireEvent.keyDown(window, { key: "w" });
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 60, bubbles: true });
+    expect(await screen.findByTestId("wall-snap-interaction-overlay")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.mouseDown(svg, { button: 0, clientX: 60, clientY: 60, bubbles: true });
+    expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull();
+    fireEvent.mouseMove(svg, { clientX: 240, clientY: 120, bubbles: true });
+    await waitFor(() => expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull());
+    fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+
+    expect(latestCampus).toBeNull();
+    expect(initialCampus.buildings[0].floors[0].walls).toEqual(before);
   });
 
   it("uses the shared 15° Shift angle rule when a segment is off-axis", () => {
@@ -406,7 +457,7 @@ describe("Phase 1.7 — wall connection snapping", () => {
     expect(walls.find((w) => w.id === "w2")).toMatchObject({ x1: 253, y1: 57, x2: 580, y2: 57 });
   });
 
-  it("previews the structural snap for the start point BEFORE the first click", () => {
+  it("previews the structural snap for the start point BEFORE the first click", async () => {
     const { container } = render(<Harness initialCampus={makeSnapCampus()} />);
     const svg = stubSvgRect(container, 580, 380);
 
@@ -414,13 +465,14 @@ describe("Phase 1.7 — wall connection snapping", () => {
     // No click yet — hovering near the w1 endpoint (53,57) shows the exact
     // coordinate the first click will commit.
     fireEvent.mouseMove(svg, { clientX: 55, clientY: 59, bubbles: true });
-    const indicator = screen.getByTestId("wall-snap-indicator");
+    let indicator!: HTMLElement;
+    await waitFor(() => { indicator = screen.getByTestId("wall-snap-interaction-overlay"); });
     expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cx"))).toBe(53);
     expect(Number(indicator.querySelectorAll("circle")[0].getAttribute("cy"))).toBe(57);
 
     // Moving away from any structural target clears the hover indicator.
     fireEvent.mouseMove(svg, { clientX: 200, clientY: 200, bubbles: true });
-    expect(screen.queryByTestId("wall-snap-indicator")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("wall-snap-interaction-overlay")).toBeNull());
   });
 
   it("snaps creation start and end to a DIAGONAL existing wall", () => {

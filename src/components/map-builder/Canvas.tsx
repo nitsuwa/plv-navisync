@@ -32,6 +32,7 @@ import { CampusGroundSurface } from "./CampusGroundSurface";
 import { EntranceDirectionBadge, entranceDirectionBadgePlacement } from "./EntranceDirectionBadge";
 import { isSpacePressed } from "./useCanvasControls";
 import { useStableCallbackProps } from "./useStableCallbackProps";
+import type { EmergencyOutdoorConnectivityReport } from "../../lib/emergencyOutdoorConnectivity";
 
 // ── Rotation-aware resize cursor helpers (shared by buildings and decor assets) ──
 function angleToCursor(deg: number): string {
@@ -81,6 +82,8 @@ interface CanvasProps {
   /** Armed click-to-place outdoor asset preview. */
   armedDecorAssetType?: string | null;
   armedCampusGatePlacement?: boolean;
+  armedAssemblyPointPlacement?: boolean;
+  assemblyPointPlacementSnap?: { x: number; y: number; kind: "waypoint" | "path" } | null;
   pathPaintPreview?: { points: { x: number; y: number }[]; width: number; type: string; color: string; snapKind?: "endpoint" | "bend" | "segment" } | null;
   guides?: { type: "h" | "v"; pos: number }[];
   overlappingBuildings?: Set<string>;
@@ -91,7 +94,7 @@ interface CanvasProps {
   /** Fired when the cursor leaves the canvas (defaults to onCanvasUp for backward compatibility) */
   onCanvasLeave?: (e: React.MouseEvent<SVGSVGElement>) => void;
   onCanvasDblClick: (e: React.MouseEvent<SVGSVGElement>) => void;
-  onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "gate" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => void;
+  onItemDown: (e: React.MouseEvent, type: "building" | "marker" | "gate" | "assemblyPoint" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => void;
   onGroupSurfaceDown?: (e: React.MouseEvent) => void;
   onGroupResizeStart?: (e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se", bounds: { x: number; y: number; width: number; height: number }) => void;
   onGroupRotateStart?: (e: React.MouseEvent, center: { x: number; y: number }) => void;
@@ -165,6 +168,8 @@ interface CanvasProps {
   connectBlocked?: boolean;
   /** B5 Phase 6.10: set of edge IDs currently blocked by obstacles (rendered red). */
   navBlockedEdgeIds?: Set<string>;
+  /** Read-only Admin highlight for an Assembly Point's outdoor graph components. */
+  emergencyOutdoorConnectivityReport?: EmergencyOutdoorConnectivityReport | null;
   /** B7 Phase 1: restrained validation issue markers (world-space anchors). One
    *  small badge per affected campus object, pointer-events-none, drawn on top. */
   issueMarkers?: { key: string; x: number; y: number; severity: "error" | "warning" }[];
@@ -359,6 +364,8 @@ interface CursorPlacementOverlayProps {
   buildingPlacementPreview?: BuildingTypeDescriptor | null;
   armedDecorAssetType?: string | null;
   armedCampusGatePlacement?: boolean;
+  armedAssemblyPointPlacement?: boolean;
+  assemblyPointPlacementSnap?: { x: number; y: number; kind: "waypoint" | "path" } | null;
   updatePositionRef: React.MutableRefObject<(position: { x: number; y: number } | null) => void>;
 }
 
@@ -376,13 +383,16 @@ const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
   buildingPlacementPreview,
   armedDecorAssetType,
   armedCampusGatePlacement = false,
+  armedAssemblyPointPlacement = false,
+  assemblyPointPlacementSnap,
   updatePositionRef,
 }: CursorPlacementOverlayProps) {
   const latestPositionRef = useRef<{ x: number; y: number } | null>(null);
   const placementActive = Boolean(
     (tool === "decor" && armedDecorAssetType && DECOR_ASSET_MAP[armedDecorAssetType])
     || (tool === "building" && buildingPlacementPreview)
-    || (tool === "gate" && armedCampusGatePlacement),
+    || (tool === "gate" && armedCampusGatePlacement)
+    || (tool === "assembly-point" && armedAssemblyPointPlacement),
   );
   const placementActiveRef = useRef(placementActive);
   placementActiveRef.current = placementActive;
@@ -413,7 +423,7 @@ const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
 
   useEffect(() => {
     if (placementActive && latestPositionRef.current) setPlacementPosition(latestPositionRef.current);
-  }, [placementActive, armedDecorAssetType, armedCampusGatePlacement, buildingPlacementPreview]);
+  }, [placementActive, armedDecorAssetType, armedCampusGatePlacement, armedAssemblyPointPlacement, buildingPlacementPreview]);
 
   const cursorPosition = placementPosition ?? latestPositionRef.current;
   const decorDescriptor = armedDecorAssetType ? DECOR_ASSET_MAP[armedDecorAssetType] : undefined;
@@ -456,6 +466,13 @@ const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
                 <CampusGateVisual x={-22} y={-17} width={44} height={34} color="#2563eb" />
               </g>
             )}
+            {tool === "assembly-point" && armedAssemblyPointPlacement && (
+              <g data-testid="assembly-point-placement-preview" data-snap-kind={assemblyPointPlacementSnap?.kind} transform={`translate(${assemblyPointPlacementSnap?.x ?? cursorPosition.x},${assemblyPointPlacementSnap?.y ?? cursorPosition.y})`} opacity={0.82}>
+                <circle r={15} fill="rgba(22,163,74,0.12)" stroke="#15803d" strokeWidth={assemblyPointPlacementSnap ? 2 : 1.5} strokeDasharray={assemblyPointPlacementSnap ? undefined : "4 3"} />
+                <path d="M-4 10V-11 M-4-10H8L5-5H-4" fill="#16a34a" stroke="#fff" strokeWidth={1.5} strokeLinejoin="round" />
+                {assemblyPointPlacementSnap && <text x={0} y={25} textAnchor="middle" fill="#14532d" fontSize={7} fontWeight={800} stroke="white" strokeWidth={2.2} paintOrder="stroke" data-testid="assembly-point-snap-label">{assemblyPointPlacementSnap.kind === "path" ? "Snaps to active pathway" : "Uses existing waypoint"}</text>}
+              </g>
+            )}
           </g>
         </svg>
       )}
@@ -466,7 +483,7 @@ const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
 function CanvasView({
   campus, tool, layer, selected, multiSelected, selectedPathPoint = null, pathVertexSnapTarget = null, showGroupOutline = true, rubberBand, drawingPath, snapGrid,
   zoom, pan, cameraTransformRef, svgRef, containerRef, cursor,
-  buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, pathPaintPreview, guides, overlappingBuildings,
+  buildingDrag, buildingPlacementPreview, groundBrushPreview, groundErasePreview, groundPaintType = "grass", armedDecorAssetType, armedCampusGatePlacement = false, armedAssemblyPointPlacement = false, assemblyPointPlacementSnap, pathPaintPreview, guides, overlappingBuildings,
   onCanvasDown, onCanvasMove, onCanvasUp, onCanvasLeave, onCanvasDblClick,
   onItemDown, onGroupSurfaceDown, onGroupResizeStart, onGroupRotateStart, groupRotationEligible = false, groupRotationActive = false, onPathDown, onPathPointDown, onPathExtendStart, onPathAddPoint, onPathAddPointDragStart, onPathWidthDown, onEntranceDown, onExteriorEmergencyStairDown, focusedExteriorEmergencyStairId, exteriorEmergencyStairPreview, onItemContextMenu, onResizeStart, onMarkerResizeStart, onBuildingDoubleClick, onPathClick, onSelect,
   onExteriorEmergencyStairFloorNavigate,
@@ -479,7 +496,7 @@ function CanvasView({
   rotatingId, rotatingAngle,
   resizingId, highlightedRoute, animatingPathId,
   decorRotatingId, decorResizingId, markerResizingId = null, onDecorRotateStart, onDecorResizeStart,
-  navNodes, navEdges, showNavigationOverlay = false, routePreview = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navPathTargetHover, navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
+  navNodes, navEdges, showNavigationOverlay = false, routePreview = false, navConnectStartId, navPreview, navConnectBends = [], navPreviewPins = [], navPathTargetHover, navEntranceHover, edgeSnapPreview, connectBlocked, navBlockedEdgeIds, emergencyOutdoorConnectivityReport, onNavEdgeSelect, onNavEdgeBendDown, onNavEdgeAddBend,
   issueMarkers = [],
   testRoutePickKind = null, testRoutePickHover = null, onTestRoutePickHover, onRouteTransitionClick, transientCampusPreviewRef,
 }: CanvasProps) {
@@ -1898,7 +1915,8 @@ function CanvasView({
                     e.stopPropagation();
                     onPathDown?.(e, p.id);
                   } else if (!(tool === "path" && layer !== "navigation")
-                    && !(layer === "navigation" && (tool === "marker" || tool === "connect" || tool === "path"))) {
+                    && !(layer === "navigation" && (tool === "marker" || tool === "connect" || tool === "path"))
+                    && tool !== "assembly-point") {
                     e.stopPropagation();
                   }
                 }}
@@ -2771,7 +2789,7 @@ function CanvasView({
                       // so stopPropagation here would swallow the node click before
                       // handleSvgDown's node-target priority ever runs. Fall through
                       // for both marker and path (Connect) tools.
-                      if (tool === "marker" || tool === "connect" || tool === "path") return;
+                      if (tool === "marker" || tool === "connect" || tool === "path" || tool === "assembly-point") return;
                       ev.stopPropagation();
                       onNavEdgeSelect?.(ev, e.id);
                     }}
@@ -2902,6 +2920,10 @@ function CanvasView({
                   start / destination rings and subtle accessible + emergency
                   indicators only when relevant */}
               {renderNavNodes.map((n) => {
+                // Assembly Point has its own authored marker that owns clicks
+                // and Properties. The linked graph node remains routable and
+                // participates in Connect, but is not drawn twice.
+                if (n.assemblyPointId) return null;
                 const isSel = selected?.type === "navNode" && selected.id === n.id;
                 const isMultiSel = multiSelected.includes(n.id);
                 const isStart = navConnectStartId === n.id;
@@ -3225,8 +3247,67 @@ function CanvasView({
                   </g>
                 );
               })()}
+              {emergencyOutdoorConnectivityReport && (() => {
+                const report = emergencyOutdoorConnectivityReport;
+                const nodeById = new Map(renderNavNodes.map((node) => [node.id, node]));
+                const edgeById = new Map(renderNavEdges.map((edge) => [edge.id, edge]));
+                const assemblyIsMainComponent = report.assemblyComponent.nodeIds.length === report.mainComponent.nodeIds.length
+                  && report.assemblyComponent.nodeIds.every((id) => report.mainComponent.nodeIds.includes(id));
+                const drawComponent = (ids: string[], color: string, component: "assembly" | "main") => ids.flatMap((id) => {
+                  const edge = edgeById.get(id);
+                  if (edge) {
+                    const start = nodeById.get(edge.startNodeId);
+                    const end = nodeById.get(edge.endNodeId);
+                    if (!start || !end) return [];
+                    const points = [start, ...(edge.bendPoints ?? []), end].map((node) => `${node.x},${node.y}`).join(" ");
+                    return [<polyline key={`${component}-edge-${id}`} data-testid={`emergency-network-${component}-edge`} data-edge-id={id}
+                      points={points} fill="none" stroke={color} strokeWidth={9} strokeLinecap="round" strokeLinejoin="round" opacity={0.42} />];
+                  }
+                  const node = nodeById.get(id);
+                  return node ? [<circle key={`${component}-node-${id}`} data-testid={`emergency-network-${component}-node`} data-node-id={id}
+                    cx={node.x} cy={node.y} r={12} fill="none" stroke={color} strokeWidth={3} opacity={0.9} />] : [];
+                });
+                const gapStart = report.nearestGap && nodeById.get(report.nearestGap.assemblyNodeId);
+                const gapEnd = report.nearestGap && nodeById.get(report.nearestGap.networkNodeId);
+                return <g data-testid="emergency-outdoor-connectivity-overlay" className="pointer-events-none" aria-hidden="true">
+                  {drawComponent(report.assemblyComponent.edgeIds, "#7c3aed", "assembly")}
+                  {drawComponent(report.assemblyComponent.nodeIds, "#7c3aed", "assembly")}
+                  {!assemblyIsMainComponent && drawComponent(report.mainComponent.edgeIds, "#0284c7", "main")}
+                  {!assemblyIsMainComponent && drawComponent(report.mainComponent.nodeIds, "#0284c7", "main")}
+                  {report.blockedEdges.map((blocked) => {
+                    const edge = edgeById.get(blocked.edgeId);
+                    const start = edge && nodeById.get(edge.startNodeId);
+                    const end = edge && nodeById.get(edge.endNodeId);
+                    return start && end ? <polyline key={`blocked-${blocked.edgeId}`} data-testid="emergency-network-blocked-edge" data-edge-id={blocked.edgeId}
+                      points={[start, ...(edge?.bendPoints ?? []), end].map((node) => `${node.x},${node.y}`).join(" ")}
+                      fill="none" stroke="#dc2626" strokeWidth={11} strokeLinecap="round" opacity={0.72} /> : null;
+                  })}
+                  {gapStart && gapEnd && <line data-testid="emergency-network-gap-indicator" x1={gapStart.x} y1={gapStart.y} x2={gapEnd.x} y2={gapEnd.y}
+                    stroke="#d97706" strokeWidth={2.5} strokeDasharray="6 5" opacity={0.95} />}
+                </g>;
+              })()}
             </g>
           )}
+
+          {/* Canonical emergency destinations, linked to the shared outdoor graph. */}
+          {(campus.assemblyPoints ?? []).map((point) => {
+            const anchor = renderCampus.navNodes?.find((node) => node.id === point.navNodeId && node.assemblyPointId === point.id);
+            const x = anchor?.x ?? point.x;
+            const y = anchor?.y ?? point.y;
+            const isSelected = selected?.type === "assemblyPoint" && selected.id === point.id;
+            const isConnectTarget = navConnectStartId === point.navNodeId;
+            return <g key={point.id} data-testid="campus-assembly-point" data-assembly-point-id={point.id}
+              onMouseDown={(event) => { if (tool !== "assembly-point") onItemDown(event, "assemblyPoint", point.id, x, y); }}
+              style={{ cursor: tool === "select" ? "move" : tool === "connect" ? "crosshair" : cursor }}>
+              <circle cx={x} cy={y} r={isSelected ? 15 : 12} fill={isConnectTarget ? "rgba(22,163,74,0.15)" : "rgba(22,163,74,0.10)"}
+                stroke={isSelected || isConnectTarget ? "#15803d" : "#16a34a"} strokeWidth={isSelected ? 2.2 : 1.5} strokeDasharray={isConnectTarget ? "4 2" : undefined} />
+              <path d={`M${x - 3},${y + 7}V${y - 9} M${x - 3},${y - 8}H${x + 7}L${x + 4},${y - 4}H${x - 3}`} fill="#16a34a" stroke="white" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" className="pointer-events-none" />
+              {isSelected && <circle cx={x} cy={y} r={17} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" className="pointer-events-none" />}
+              {zoom > 0.55 && <text x={x} y={y + 21} textAnchor="middle" fill="#14532d" fontSize={8.5} fontWeight={800}
+                stroke="rgba(255,255,255,0.95)" strokeWidth={2.6} paintOrder="stroke" className="pointer-events-none select-none">{point.name}</text>}
+              <title>{point.name} · Emergency Assembly Point</title>
+            </g>;
+          })}
 
           {/* B5 Phase 6.1: edge snap preview for waypoint-on-edge insertion */}
           {edgeSnapPreview && (
@@ -3387,6 +3468,8 @@ function CanvasView({
         buildingPlacementPreview={buildingPlacementPreview}
         armedDecorAssetType={armedDecorAssetType}
         armedCampusGatePlacement={armedCampusGatePlacement}
+        armedAssemblyPointPlacement={armedAssemblyPointPlacement}
+        assemblyPointPlacementSnap={assemblyPointPlacementSnap}
         updatePositionRef={cursorPositionUpdaterRef}
       />
 

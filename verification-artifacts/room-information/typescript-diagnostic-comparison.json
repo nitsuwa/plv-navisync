@@ -1,0 +1,13 @@
+{
+  "baselinePath": "verification-artifacts/sos-multifloor-arrival-20261019/typescript-current-final.txt",
+  "currentPath": "verification-artifacts/room-information/typecheck.log",
+  "baselineDiagnostics": 1029,
+  "currentDiagnostics": 1023,
+  "introducedDiagnosticIdentities": 2,
+  "resolvedDiagnosticIdentities": 4,
+  "introducedInTouchedFiles": [],
+  "introducedSamples": [
+    "src/services/database.ts TS2352 Conversion of type '({ address: string | null; archived_at: string | null; canvas_configured: boolean; canvas_height: number; canvas_width: number; city: string | null; code: string; created_at: string; ... 17 more ...; updated_by: string | null; } | ... 29 more ... | { ...; })[]' to type 'T[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+    "src/services/database.ts TS2352 Conversion of type '{ address: string | null; archived_at: string | null; canvas_configured: boolean; canvas_height: number; canvas_width: number; city: string | null; code: string; created_at: string; ... 17 more ...; updated_by: string | null; } | ... 29 more ... | { ...; }' to type 'T' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
+  ]
+}

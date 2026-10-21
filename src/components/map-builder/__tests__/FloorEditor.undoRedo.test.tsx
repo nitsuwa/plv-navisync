@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
 import type { Campus } from "../types";
@@ -108,8 +108,8 @@ function makeEntranceCampus(): Campus {
 }
 
 /** Harness that keeps the editor's campus state in React so onUpdate round-trips. */
-function Harness({ onCampusChange }: { onCampusChange?: (c: Campus) => void }) {
-  const [campus, setCampus] = useState<Campus>(makeCampus);
+function Harness({ onCampusChange, initialCampus = makeCampus() }: { onCampusChange?: (c: Campus) => void; initialCampus?: Campus }) {
+  const [campus, setCampus] = useState<Campus>(initialCampus);
   return (
     <FloorEditor
       campus={campus}
@@ -160,6 +160,31 @@ afterEach(() => {
 });
 
 describe("FloorEditor undo/redo integration", () => {
+  it("guides a whole-wall drag onto another wall and commits one undo step", async () => {
+    const initialCampus = makeCampus();
+    initialCampus.buildings[0].floors[0].walls.push({
+      id: "w2", x1: 0, y1: 100, x2: 220, y2: 100, thickness: 4, color: "#64748b", material: "concrete",
+    });
+    const { container } = render(<Harness initialCampus={initialCampus} onCampusChange={(c) => { latestCampus = c; }} />);
+    const svg = stubSvgRect(container);
+
+    fireEvent.mouseDown(findWallG(container), { clientX: 60, clientY: 50, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 60, clientY: 96, bubbles: true });
+    await waitFor(() => {
+      const snapGuide = screen.getByTestId("wall-snap-interaction-overlay").querySelector("[data-snap-guide]");
+      expect(snapGuide).toHaveAttribute("visibility", "visible");
+      expect(snapGuide).toHaveAttribute("y1", "100");
+    });
+    fireEvent.mouseUp(svg, { clientX: 60, clientY: 96, bubbles: true });
+
+    expect(latestCampus!.buildings[0].floors[0].walls[0]).toMatchObject({ y1: 100, y2: 100 });
+    expect(latestCampus!.buildings[0].floors[0].walls[1]).toMatchObject({ y1: 100, y2: 100 });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(latestCampus!.buildings[0].floors[0].walls[0]).toMatchObject({ y1: 50, y2: 50 });
+    expect(latestCampus!.buildings[0].floors[0].walls[1]).toMatchObject({ y1: 100, y2: 100 });
+  });
+
   it("whole-wall drag moves x1/y1/x2/y2 and commits exactly one undo step via the toolbar", () => {
     const { container } = render(<Harness onCampusChange={(c) => { latestCampus = c; }} />);
     const svg = stubSvgRect(container);

@@ -1,0 +1,178 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "6af096d7-c89f-4947-834b-4203d7be0892",
+      "name": "Emergency Assembly Point",
+      "nodeId": "1523cba0-3d7d-49ee-8e39-3b9736feb959",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "1d5522b3-6a32-4c8f-a582-20115b1d39ff",
+        "1e8d5e57-7565-4fbd-be12-b570b83c035b"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "review": {
+      "authorizedTestRole": "admin",
+      "approved": true
+    },
+    "move": {
+      "dragStartScreen": {
+        "x": 585.125,
+        "y": 435.4166666666667
+      },
+      "dragGeometry": {
+        "point": {
+          "x": 380,
+          "y": 440
+        },
+        "anchor": {
+          "id": "1523cba0-3d7d-49ee-8e39-3b9736feb959",
+          "x": 380,
+          "y": 440,
+          "generatedFromPathVertices": [
+            {
+              "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+              "vertexId": "ff30ea23-0352-4a20-b34f-43488d47c246"
+            }
+          ]
+        },
+        "ownerPath": {
+          "id": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+          "locked": false,
+          "pointIndex": 16
+        },
+        "screen": {
+          "x": 585.125,
+          "y": 435.4166666666667
+        },
+        "svg": "<g data-testid=\"campus-assembly-point\" data-assembly-point-id=\"6af096d7-c89f-4947-834b-4203d7be0892\" style=\"cursor: move;\"><circle cx=\"380\" cy=\"440\" r=\"15\" fill=\"rgba(22,163,74,0.10)\" stroke=\"#15803d\" stroke-width=\"2.2\"></circle><path d=\"M377,447V431 M377,432H387L384,436H377\" fill=\"#16a34a\" stroke=\"white\" stroke-width=\"1.8\" stroke-linejoin=\"round\" stroke-linecap=\"round\" class=\"pointer-events-none\"></path><circle cx=\"380\" cy=\"440\" r=\"17\" fill=\"none\" stroke=\"var(--accent)\" stroke-width=\"1.5\" stroke-dasharray=\"4 3\" class=\"pointer-events-none\"></circle><text x=\"380\" y=\"461\" text-anchor=\"middle\" fill=\"#14532d\" font-size=\"8.5\" font-weight=\"800\" stroke=\"rgba(255,255,255,0.95)\" stroke-width=\"2.6\" paint-order=\"stroke\" class=\"pointer-events-none select-none\">TEST ONLY - Admin Main Assembly Point A</text><title>TEST ONLY - Admin Main Assembly Point A · Emergency Assembly Point</title></g>"
+      },
+      "before": {
+        "x": 380,
+        "y": 440
+      },
+      "after": {
+        "x": 420,
+        "y": 403
+      },
+      "nodeAfter": {
+        "id": "1523cba0-3d7d-49ee-8e39-3b9736feb959",
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "type": "assembly",
+        "x": 420,
+        "y": 403,
+        "campusId": "90000000-0000-4000-8000-000000000198",
+        "accessible": true,
+        "color": "#15803d",
+        "generatedFromPathVertices": [
+          {
+            "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+            "vertexId": "ff30ea23-0352-4a20-b34f-43488d47c246"
+          }
+        ],
+        "assemblyPointId": "6af096d7-c89f-4947-834b-4203d7be0892",
+        "emergencySafe": true
+      },
+      "ownerPathAfter": {
+        "id": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+        "locked": false,
+        "pointIndex": 16
+      },
+      "changed": true,
+      "pointAndAnchorAligned": true,
+      "incidentEdgeCount": 2,
+      "reviewStatus": "Needs Re-review",
+      "undoRestoredPosition": true,
+      "redoRestoredMovedPosition": true
+    },
+    "save": {
+      "draftRecordHasPoint": true,
+      "savedSnapshotHasPoint": true
+    },
+    "reload": {
+      "pointCount": 1,
+      "name": "TEST ONLY - Admin Main Assembly Point A",
+      "connected": true,
+      "assignment": false,
+      "approval": "Approved",
+      "pointAndAnchorAligned": true,
+      "incidentEdgeCount": 2
+    },
+    "delete": {
+      "pointRemoved": true,
+      "assignedBuildingsRemovedWithPoint": true,
+      "pathAnchorRetainedAsWalkingPoint": true,
+      "incidentEdgesPreserved": true,
+      "noDanglingEdges": true,
+      "undoRestored": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-admin-properties-approved-1440.png",
+    "assembly-point-admin-saved-1440.png",
+    "assembly-point-admin-reloaded-1440.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  }
+}

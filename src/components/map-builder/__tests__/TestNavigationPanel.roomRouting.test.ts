@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+// @ts-expect-error The app tsconfig omits Node ambient types; Vitest executes this fixture test in Node.
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { planStudentEmergencyRoute } from "../../../lib/studentEmergencyNavigation";
@@ -20,11 +22,13 @@ import {
   resolveBuildingIndoorEntranceNodeId,
   resolveNodeId,
   emergencyDestinationCandidatePools,
+  chooseEmergencyDestinationCandidates,
   chooseEmergencyDestinationCandidate,
   routineRouteGraph,
   filterRoutineEntranceDirectionEdges,
   presentationRouteTransitionMarkers,
   semanticDoorDisplayName,
+  humanRouteSteps,
   routeColorForMode,
   routeEdgeTrace,
   routeContinuationMarkers,
@@ -35,9 +39,18 @@ import {
 import { RouteContinuationMarker, RouteTransitionMarker, transitionLabelLayout } from "../RouteTransitionMarker";
 import { createNavigationRouteSearchCache, findNavigationRoute, prepareNavigationGraph } from "../../../lib/pathfinding";
 import { ROOM_DOOR_EDGE_TYPE } from "../../../lib/indoorNavigationGraph";
-import { syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
+import { approvedRoomEmergencyCandidates, evaluateRoomEmergencyEvacuation } from "../../../lib/roomEmergencyEvacuation";
+import {
+  resolveApprovedStudentEvacuationRoutes,
+  resolveAutomaticStudentEvacuationRoutes,
+  studentEmergencyCampusRouteSegments,
+  studentEmergencyFloorRouteSegments,
+} from "../../../lib/studentEmergencyEvacuation";
+import { exteriorEmergencyStairRouteReadiness, syncExteriorEmergencyStairGraph } from "../../../lib/exteriorEmergencyStairs";
+import { assemblyPointReviewFingerprint, assemblyPointValidation } from "../../../lib/emergencyAssemblyPoints";
 import { reconcileEntranceDoors, findEntranceTransitionForEntrance } from "../../../lib/entranceTransitions";
-import type { Campus, CampusEntrance, CampusMarker, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "../types";
+import { convertPathwaysToNavigation } from "../../../lib/campusPathNavigation";
+import type { AssemblyPoint, Campus, CampusEntrance, CampusMarker, CampusPath, FloorDoor, FloorPlan, FloorRoom, FloorWall, NavigationEdge, NavigationNode } from "../types";
 
 const edge = (
   id: string,
@@ -110,6 +123,54 @@ function makeCampus(overrides: Partial<Campus> = {}): Campus {
     ],
     ...overrides,
   } as Campus;
+}
+
+function addApprovedTestAssemblyPoint(campus: Campus, connectedOutdoorNodeIds: string[], pointId = "test-assembly-point"): Campus {
+  const connectedNodes = (campus.navNodes ?? []).filter((candidate) => connectedOutdoorNodeIds.includes(candidate.id));
+  const x = connectedNodes.length ? Math.max(...connectedNodes.map((candidate) => candidate.x)) + 40 : 720;
+  const y = connectedNodes.length ? connectedNodes[0].y : 240;
+  const navNodeId = `${pointId}-node`;
+  const point: AssemblyPoint = {
+    id: pointId,
+    name: "Main Assembly Point A",
+    x,
+    y,
+    campusId: campus.id,
+    navNodeId,
+    accessible: true,
+    buildingAssignments: [{ buildingId: "b1", designation: "primary" }],
+  };
+  const anchor: NavigationNode = {
+    id: navNodeId,
+    name: point.name,
+    type: "assembly",
+    x,
+    y,
+    accessible: true,
+    color: "#0f766e",
+    emergencySafe: true,
+    campusId: campus.id,
+    assemblyPointId: point.id,
+  };
+  const connected: Campus = {
+    ...campus,
+    assemblyPoints: [...(campus.assemblyPoints ?? []), point],
+    navNodes: [...(campus.navNodes ?? []), anchor],
+    navEdges: [
+      ...(campus.navEdges ?? []),
+      ...connectedOutdoorNodeIds.map((nodeId, index) => edge(`${pointId}-outdoor-${index}`, nodeId, anchor.id, {
+        distance: 40,
+        emergencySafe: true,
+      })),
+    ],
+  };
+  const fingerprint = assemblyPointReviewFingerprint(connected, point);
+  return {
+    ...connected,
+    assemblyPoints: connected.assemblyPoints!.map((candidate) => candidate.id === point.id
+      ? { ...candidate, safetyReview: { status: "approved", approvedAt: "2026-10-13T00:00:00.000Z", approvedBy: "test-admin", approvedByRole: "admin", fingerprint: fingerprint ?? undefined } }
+      : candidate),
+  };
 }
 
 function makeTwoEmergencyExitCampus(outdoorLeftDistance = 900, outdoorRightDistance = 5): Campus {
@@ -185,15 +246,15 @@ function makeUpperFloorEmergencyExitCampus(): Campus {
   const upperWall: FloorWall = { id: "upper-room-wall", x1: 80, y1: 20, x2: 80, y2: 60, thickness: 4, color: "#64748b", startAnchor: { targetType: "room", roomId: upperRoom.id, edge: "right", offset: 0.5 } };
   const ground = {
     ...base.buildings[0].floors[0], id: "f1", number: 1, label: "Ground", rooms: [], doors: [exitDoor], walls: [],
-    stairs: [{ id: "left-stair-f1", x: 300, y: 300, width: 24, height: 30, direction: "up" as const, sharedId: "left-shaft" }],
+    stairs: [{ id: "left-stair-f1", x: 300, y: 300, width: 24, height: 30, direction: "up" as const, label: "TEST ONLY Left Stair", sharedId: "left-shaft", emergencySafe: true }],
   };
   const floor2: FloorPlan = {
     ...ground, id: "f2", number: 2, label: "Floor 2", rooms: [], doors: [], walls: [],
-    stairs: [{ id: "left-stair-f2", x: 300, y: 180, width: 24, height: 30, direction: "both", sharedId: "left-shaft" }],
+    stairs: [{ id: "left-stair-f2", x: 300, y: 180, width: 24, height: 30, direction: "both", label: "TEST ONLY Left Stair", sharedId: "left-shaft", emergencySafe: true }],
   };
   const floor3: FloorPlan = {
     ...ground, id: "f3", number: 3, label: "Floor 3", rooms: [upperRoom], doors: [upperDoor], walls: [upperWall],
-    stairs: [{ id: "left-stair-f3", x: 300, y: 60, width: 24, height: 30, direction: "down", sharedId: "left-shaft" }],
+    stairs: [{ id: "left-stair-f3", x: 300, y: 60, width: 24, height: 30, direction: "down", label: "TEST ONLY Left Stair", sharedId: "left-shaft", emergencySafe: true }],
   };
   const building = { ...base.buildings[0], entrances: [emergencyEntrance], floors: [ground, floor2, floor3] };
   const nodes = [
@@ -223,6 +284,35 @@ function makeUpperFloorEmergencyExitCampus(): Campus {
       edge("ground-discharge-gate", "ground-exit-discharge", "ground-campus-gate", { emergencySafe: true }),
     ],
   });
+  return campus;
+}
+
+function addGroundGeneralGateExit(campus: Campus): Campus {
+  const building = campus.buildings[0];
+  const floor = building.floors.find((candidate) => candidate.id === "f1")!;
+  const entrance: CampusEntrance = {
+    id: "ground-general-exit",
+    buildingId: building.id,
+    edge: "bottom",
+    offset: 0.3,
+    type: "general",
+    direction: "exit_only",
+    name: "Ground General Exit",
+  };
+  const door: FloorDoor = { id: "ground-general-door", x: 500, y: 300, width: 12, direction: "right", color: "#2563eb" };
+  building.entrances = [...(building.entrances ?? []), entrance];
+  floor.doors = [...floor.doors, door];
+  campus.navNodes = [
+    ...(campus.navNodes ?? []),
+    node("ground-general-door-node", door.x, door.y, { floorId: "f1", doorId: door.id, name: "Ground General Exit Door" }),
+    node("ground-general-entrance-node", 600, 120, { floorId: undefined, entranceId: entrance.id, type: "entrance", name: entrance.name }),
+  ];
+  campus.navEdges = [
+    ...(campus.navEdges ?? []),
+    edge("ground-walk-general-door", "ground-walk", "ground-general-door-node", { emergencySafe: true }),
+    edge("ground-general-door-transition", "ground-general-door-node", "ground-general-entrance-node", { type: "entrance_transition", emergencySafe: true }),
+    edge("ground-general-outdoor", "ground-general-entrance-node", "ground-exit-discharge", { emergencySafe: true }),
+  ];
   return campus;
 }
 
@@ -262,7 +352,7 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
       mapPickResult: { kind: "start", value: "node:door-node-a" },
       onMapPickResultConsumed: consumed,
     }));
-    await waitFor(() => expect(screen.getByText("Room A Door")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Room A entrance")).toBeTruthy());
     expect(consumed).toHaveBeenCalledTimes(1);
   });
 
@@ -1055,7 +1145,114 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     );
     expect(physical[0]).toEqual({ x: 80, y: 40 });
     expect(physical[physical.length - 1]).toEqual({ x: 360, y: 40 });
-    expect(semanticDoorDisplayName(campus, campus.navNodes!.find((node) => node.id === "door-node-a")!)).toBe("Room A Door");
+    expect(semanticDoorDisplayName(campus, campus.navNodes!.find((node) => node.id === "door-node-a")!)).toBe("Room A entrance");
+  });
+
+  it("groups hallway graph edges and stair occurrences into concise floor-aware directions", () => {
+    const campus = makeCampus();
+    const building = campus.buildings[0];
+    const floor1 = building.floors[0];
+    const floor5: FloorPlan = {
+      ...floor1,
+      id: "f5",
+      number: 5,
+      label: "Floor 5",
+      rooms: [floor1.rooms[1]],
+      doors: [floor1.doors[1]],
+      stairs: [{ id: "upper-stair-f5", x: 0, y: 0, width: 20, height: 20, direction: "both", label: "Upper Stair", sharedId: "upper-shaft", emergencySafe: true }],
+    };
+    floor1.rooms = [floor1.rooms[0]];
+    floor1.doors = [floor1.doors[0]];
+    floor1.stairs = [{ id: "upper-stair-f1", x: 0, y: 0, width: 20, height: 20, direction: "both", label: "Upper Stair", sharedId: "upper-shaft", emergencySafe: true }];
+    building.floors.push(floor5);
+    campus.navNodes = [
+      node("start-room", 0, 0, { type: "room_access", roomId: "room-a", name: "Room A" }),
+      node("start-door", 0, 0, { doorId: "door-a", name: "Door 21" }),
+      node("walk-1", 10, 0, { name: "wp-1" }),
+      node("walk-2", 20, 0, { name: "wp-2" }),
+      node("walk-3", 30, 0, { name: "wp-3" }),
+      node("stair-f1", 40, 0, { type: "stair", stairId: "upper-stair-f1", transitionSharedId: "upper-shaft", emergencyStair: true, name: "Upper Stair lower landing" }),
+      node("stair-f5", 40, 0, { type: "stair", floorId: "f5", stairId: "upper-stair-f5", transitionSharedId: "upper-shaft", emergencyStair: true, name: "Upper Stair upper landing" }),
+      node("walk-f5", 60, 0, { floorId: "f5", name: "wp-f5" }),
+      node("destination-door", 80, 0, { floorId: "f5", doorId: "door-b", name: "Door 4" }),
+      node("destination-room", 90, 0, { type: "room_access", floorId: "f5", roomId: "room-b", name: "Room B" }),
+    ];
+
+    const steps = humanRouteSteps(campus, [
+      "start-room", "start-door", "walk-1", "walk-2", "walk-3", "stair-f1", "stair-f5", "walk-f5", "destination-door", "destination-room",
+    ], "room:b1:room-b");
+
+    expect(steps).toEqual([
+      "Start at Room A",
+      "Leave Room A and follow the hallway to the Upper Stair.",
+      "Take the Upper Stair to Floor 5.",
+      "Follow the hallway toward Room B.",
+      "Arrive at Room B.",
+    ]);
+    expect(steps.join(" ")).not.toMatch(/Door 21|Door 4|wp-/i);
+    expect(steps.filter((step) => step.includes("Upper Stair"))).toHaveLength(2);
+    expect(humanRouteSteps(campus, ["start-room", "start-door", "walk-1", "walk-2", "walk-3", "stair-f1", "stair-f5", "walk-f5", "destination-door", "destination-room"], "room:b1:room-b", "emergency"))
+      .toContain("Use the Upper Stair to Floor 5.");
+  });
+
+  it("keeps authored Door labels and prefers the destination Room over its access Door", () => {
+    const campus = makeCampus();
+    campus.buildings[0].floors[0].doors[0].label = "Library Main Entrance";
+    expect(semanticDoorDisplayName(campus, campus.navNodes!.find((candidate) => candidate.id === "door-node-a")!))
+      .toBe("Library Main Entrance");
+    const steps = humanRouteSteps(campus, ["room-node-a", "door-node-a", "wp-a", "wp-b", "door-node-b", "room-node-b"], "room:b1:room-b");
+    expect(steps.at(-1)).toBe("Arrive at Room B.");
+    expect(steps).toContain("Leave Room A and follow the hallway toward Room B.");
+    expect(steps.join(" ")).not.toContain("Door B");
+  });
+
+  it("uses the building entry context instead of exposing a generated Door name", () => {
+    const campus = makeCampus();
+    const building = campus.buildings[0];
+    building.name = "PLV Auditorium";
+    building.entrances = [{ id: "auditorium-main", buildingId: "b1", edge: "bottom", offset: 0.5, name: "Auditorium Main Entrance" }];
+    campus.navNodes = [
+      node("campus-start", 0, 0, { floorId: undefined, type: "outdoor" }),
+      node("campus-walk", 10, 0, { floorId: undefined, type: "outdoor" }),
+      node("auditorium-entrance", 20, 0, { floorId: undefined, type: "entrance", entranceId: "auditorium-main" }),
+      node("auditorium-door", 30, 0, { doorId: "door-b", name: "Door 21" }),
+      node("auditorium-hallway", 40, 0),
+      node("auditorium-room", 50, 0, { type: "room_access", roomId: "room-b", name: "Room B" }),
+    ];
+    campus.navEdges = [edge("auditorium-entry", "auditorium-entrance", "auditorium-door", { type: "entrance_transition" })];
+
+    const steps = humanRouteSteps(campus, [
+      "campus-start", "campus-walk", "auditorium-entrance", "auditorium-door", "auditorium-hallway", "auditorium-room",
+    ], "room:b1:room-b");
+    expect(steps).toEqual([
+      "Start at the campus path",
+      "Follow the campus path to the Auditorium Main Entrance.",
+      "Enter PLV Auditorium.",
+      "Follow the hallway toward Room B.",
+      "Arrive at Room B.",
+    ]);
+    expect(steps.join(" ")).not.toContain("Door 21");
+  });
+
+  it("describes an authored elevator transition once and names its destination floor", () => {
+    const campus = makeCampus();
+    const building = campus.buildings[0];
+    const floor1 = building.floors[0];
+    const floor5: FloorPlan = { ...floor1, id: "f5", number: 5, label: "Floor 5", rooms: [floor1.rooms[1]], doors: [floor1.doors[1]], elevators: [{ id: "lift-f5", x: 0, y: 0, width: 20, height: 20, doorWidth: 8, label: "Elevator 1", floors: [1, 5], sharedId: "lift-shaft" }] };
+    floor1.rooms = [floor1.rooms[0]];
+    floor1.doors = [floor1.doors[0]];
+    floor1.elevators = [{ id: "lift-f1", x: 0, y: 0, width: 20, height: 20, doorWidth: 8, label: "Elevator 1", floors: [1, 5], sharedId: "lift-shaft" }];
+    building.floors.push(floor5);
+    campus.navNodes = [
+      node("outside-start", 0, 0, { type: "hallway" }),
+      node("lift-lower", 10, 0, { type: "elevator", elevatorId: "lift-f1", transitionSharedId: "lift-shaft" }),
+      node("lift-upper", 10, 0, { floorId: "f5", type: "elevator", elevatorId: "lift-f5", transitionSharedId: "lift-shaft" }),
+      node("upper-walk", 20, 0, { floorId: "f5" }),
+      node("room-b", 30, 0, { floorId: "f5", type: "room_access", roomId: "room-b" }),
+    ];
+    const steps = humanRouteSteps(campus, ["outside-start", "lift-lower", "lift-upper", "upper-walk", "room-b"], undefined, "accessible");
+    expect(steps).toContain("Take the Elevator 1 to Floor 5.");
+    expect(steps.filter((step) => step.includes("Elevator 1"))).toHaveLength(1);
   });
 
   it("keeps semantic Room endpoints in the active display route while retaining physical Door interiors", () => {
@@ -1108,8 +1305,8 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     fireEvent.click(screen.getByRole("button", { name: "Calculate Route" }));
     await waitFor(() => expect(screen.getByTestId("test-route-compact")).toBeTruthy());
     expect(screen.getByTestId("test-route-compact").getAttribute("data-layout")).toBe("horizontal-monitor");
-    expect(screen.getByTestId("test-route-time-summary")).toHaveTextContent(/\d+ min/);
-    expect(screen.getByTestId("test-route-compact").textContent).not.toMatch(/\d+m/);
+    expect(screen.queryByTestId("test-route-time-summary")).toBeNull();
+    expect(screen.getByTestId("test-route-compact").textContent).not.toMatch(/\d+\s*min|estimated walk/i);
     expect(screen.getByRole("button", { name: "Clear route" })).toBeTruthy();
 
     view.rerender(createElement(TestNavigationPanel, {
@@ -1121,6 +1318,7 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     await waitFor(() => expect(screen.getByTestId("test-route-compact")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Expand Test Route" }));
     expect(screen.getByTestId("test-route-full")).toBeTruthy();
+    expect(screen.getByTestId("test-route-full").textContent).not.toMatch(/\d+\s*min|estimated walk/i);
   });
 
   it("keeps long Start and Destination names inside the fixed picker rows", () => {
@@ -1436,7 +1634,7 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
         instruction: "Continue outside via ramp",
       },
     })));
-    const marker = screen.getByRole("button", { name: "Continue outside via ramp" });
+    const marker = screen.getByRole("img", { name: "Continue outside via ramp" });
     expect(marker.querySelector('[data-testid="transition-tooltip-icon-ramp"]')).not.toBeNull();
     expect(marker.querySelector('[data-testid="transition-label-pill"]')).not.toBeNull();
     expect(screen.getByText("Continue outside via ramp")).toBeTruthy();
@@ -1850,7 +2048,7 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
         direction: "up",
       },
     })));
-    expect(screen.getByRole("button", { name: "Elevator Going up to Floor 3" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Elevator Going up to Floor 3" })).toBeTruthy();
     expect(screen.queryByTitle("Going up to Floor 3")).toBeNull();
     expect(screen.getByText("Going up to Floor 3")).toBeTruthy();
     expect(document.querySelector("circle.animate-pulse")).toBeTruthy();
@@ -2100,7 +2298,8 @@ describe("Admin Test Route Room → Door → Walking Network resolution", () => 
     await waitFor(() => expect(screen.getByTitle("Emergency Route")).toBeTruthy());
     expect(screen.queryByPlaceholderText(/Search\/select location/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand Test Route" }));
-    expect(screen.getByTestId("test-route-emergency-destination")).toHaveTextContent("Safest available exit");
+    expect(screen.getByTestId("test-route-emergency-destination")).toHaveTextContent("Exit-only preview");
+    expect(screen.getByTestId("test-route-emergency-destination")).toHaveTextContent("not a complete approved evacuation route");
     expect(screen.getByTestId("test-route-emergency-exit")).toHaveTextContent("Main Entrance");
   });
 
@@ -2204,7 +2403,7 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
     const floor1: FloorPlan = {
       id: "f1", buildingId: "b1", number: 1, label: "Ground",
       rooms: [], doors: [], walls: [], paths: [], windows: [], furniture: [],
-      stairs: [{ id: "inner-stair-f1", x: 300, y: 300, width: 24, height: 30, direction: "up", sharedId: "inner-stair", label: "Inner Stair" }],
+      stairs: [{ id: "inner-stair-f1", x: 300, y: 300, width: 24, height: 30, direction: "up", sharedId: "inner-stair", label: "Inner Stair", emergencySafe: true }],
       ramps: [], elevators: [], labels: [],
     };
     const floor2: FloorPlan = {
@@ -2213,7 +2412,7 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
       doors: [{ id: "door-a", x: 80, y: 40, width: 12, direction: "left", color: "#d97706", wallId: "wall-a", offset: 0.5 }],
       walls: [{ id: "wall-a", x1: 80, y1: 20, x2: 80, y2: 60, thickness: 4, color: "#64748b", startAnchor: { targetType: "room", roomId: "room-a", edge: "right", offset: 0.5 } } as FloorWall],
       paths: [], windows: [], furniture: [],
-      stairs: [{ id: "inner-stair-f2", x: 300, y: 60, width: 24, height: 30, direction: "down", sharedId: "inner-stair", label: "Inner Stair" }],
+      stairs: [{ id: "inner-stair-f2", x: 300, y: 60, width: 24, height: 30, direction: "down", sharedId: "inner-stair", label: "Inner Stair", emergencySafe: true }],
       ramps: [], elevators: [], labels: [],
     };
     const base: Campus = {
@@ -2290,19 +2489,251 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
   });
 
   it("student SOS uses the same designated stair and preserves upper-to-ground floor order", () => {
-    const campus = makeScreenshotCampus();
+    const baseCampus = makeScreenshotCampus();
+    const campus = addApprovedTestAssemblyPoint(baseCampus, ["outdoor-ext-network"]);
     const student = planStudentEmergencyRoute(campus, {
       type: "room", buildingId: "b1", floorNumber: 2, roomId: "room-a", roomName: "Room A",
       buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
     });
     const admin = chooseEmergencyDestinationCandidate(campus, buildTestRouteEdges(campus), "door-node-a");
     expect(student).not.toBeNull();
-    expect(student?.emergencyDestinationLabel).toBe(admin?.candidate.label);
+    expect(student?.emergencyDestinationLabel).toBe("Main Assembly Point A");
+    expect(student?.emergencyAssemblyPointId).toBe("test-assembly-point");
     expect(student?.indoorSegments?.map((segment) => segment.floorId)).toEqual(["f2", "f1"]);
     expect(student?.indoorSegments?.[0].waypoints[0]).toEqual({ x: 80, y: 40 });
     expect(student?.destinationRoom).toBeUndefined();
-    const discharge = campus.navNodes.find((node) => node.exteriorEmergencyStairId === "ext-stair" && !node.floorId)!;
-    expect(student?.points.at(-1)).toEqual({ x: discharge.x, y: discharge.y });
+    const navNodes = campus.navNodes ?? [];
+    const assembly = navNodes.find((node) => node.assemblyPointId === "test-assembly-point")!;
+    expect(student?.points.at(-1)).toEqual({ x: assembly.x, y: assembly.y });
+    const exteriorDischarge = navNodes.find((node) => node.exteriorEmergencyStairId === "ext-stair" && !node.floorId)!;
+    expect(student?.points).toContainEqual({ x: exteriorDischarge.x, y: exteriorDischarge.y });
+    expect(admin?.candidate.completeAssemblyRoute).toBe(true);
+  });
+
+  it("routes Room SOS through a compiled central X junction to its assigned TEST ONLY Assembly Point", () => {
+    const base = makeScreenshotCampus();
+    const outdoorHandoff = base.navNodes!.find((candidate) => candidate.id === "outdoor-ext-network")!;
+    const paths: CampusPath[] = [
+      {
+        id: "test-central-walkway",
+        type: "walkway",
+        color: "#94a3b8",
+        width: 12,
+        pathNetworkId: "test-central-campus-network",
+        navigationVertexIds: ["test-central-start", "test-central-junction", "test-central-end"],
+        points: [
+          { x: outdoorHandoff.x, y: outdoorHandoff.y },
+          { x: 520, y: 560 },
+          { x: 400, y: 560 },
+        ],
+      },
+      {
+        id: "test-central-crossing",
+        type: "walkway",
+        color: "#94a3b8",
+        width: 12,
+        pathNetworkId: "test-central-campus-network",
+        navigationVertexIds: ["test-crossing-start", "test-crossing-end"],
+        points: [{ x: 460, y: 500 }, { x: 580, y: 620 }],
+      },
+    ];
+    let sequence = 0;
+    const compiled = convertPathwaysToNavigation({ ...base, paths }, paths.map((path) => path.id), (prefix) => `test-${prefix}-${++sequence}`).campus;
+    const start = compiled.navNodes!.find((candidate) => candidate.generatedFromPathVertices?.some((ref) =>
+      ref.pathId === "test-central-walkway" && ref.vertexId === "test-central-start"))!;
+    const destination = compiled.navNodes!.find((candidate) => candidate.generatedFromPathVertices?.some((ref) =>
+      ref.pathId === "test-central-walkway" && ref.vertexId === "test-central-end"))!;
+    const crossing = compiled.navNodes!.find((candidate) => candidate.x === 520 && candidate.y === 560
+      && candidate.generatedFromPathVertices?.some((ref) => ref.pathId === "test-central-walkway"));
+    const withOutdoorHandoff = {
+      ...compiled,
+      navEdges: [
+        ...compiled.navEdges!,
+        edge("test-only-outdoor-handoff", outdoorHandoff.id, start.id, {
+          type: "walking_path",
+          accessible: true,
+          emergencySafe: true,
+        }),
+      ],
+    };
+    const campus = addApprovedTestAssemblyPoint(withOutdoorHandoff, [destination.id]);
+    const route = planStudentEmergencyRoute(campus, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: "room-a", roomName: "Room A",
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    });
+
+    expect(crossing).toMatchObject({ x: 520, y: 560 });
+    expect(compiled.navEdges!.filter((candidate) => candidate.generatedFromPathIntersectionSegments?.some((ref) =>
+      ref.pathId === "test-central-crossing"))).toHaveLength(2);
+    expect(route?.emergencyAssemblyPointId).toBe("test-assembly-point");
+    expect(route?.authoredGraphNodeIds).toContain(crossing?.id);
+    expect(route?.points).toContainEqual({ x: 520, y: 560 });
+  });
+
+  it("offers a same-floor Emergency Exit as Route A before a longer exterior-stair alternative", () => {
+    const source = makeScreenshotCampus();
+    const building = source.buildings[0];
+    const entrance: CampusEntrance = {
+      id: "upper-fire-exit", buildingId: "b1", edge: "right", offset: 0.5,
+      type: "emergency_exit", name: "Upper Fire Exit",
+    };
+    const exitDoor: FloorDoor = {
+      id: "upper-fire-door", x: 590, y: 100, width: 12, direction: "right",
+      color: "#dc2626", isEmergencyExit: true,
+    };
+    const campusWithExit: Campus = {
+      ...source,
+      buildings: source.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        entrances: [...(candidate.entrances ?? []), entrance],
+        floors: candidate.floors.map((floor) => floor.id === "f2"
+          ? { ...floor, doors: [...floor.doors, exitDoor] }
+          : floor),
+      }),
+      navNodes: [
+        ...(source.navNodes ?? []),
+        node("upper-fire-entrance-node", 600, 100, { buildingId: "b1", floorId: undefined, entranceId: entrance.id, type: "entrance" }),
+        node("upper-fire-door-node", 590, 100, { buildingId: "b1", floorId: "f2", doorId: exitDoor.id, name: "Upper Fire Door" }),
+        node("upper-fire-walk", 520, 100, { buildingId: "b1", floorId: "f2", name: "Upper Fire Exit Path" }),
+        node("upper-fire-outdoor", 650, 100, { buildingId: undefined, floorId: undefined, type: "outdoor", name: "Upper Exit Outdoor" }),
+      ],
+      navEdges: [
+        ...(source.navEdges ?? []),
+        edge("upper-fire-outdoor-link", "upper-fire-entrance-node", "upper-fire-outdoor", { emergencySafe: true }),
+        edge("upper-fire-threshold", "upper-fire-entrance-node", "upper-fire-door-node", { type: "entrance_transition", emergencySafe: true }),
+        edge("upper-fire-door-path", "upper-fire-door-node", "upper-fire-walk", { emergencySafe: true }),
+        edge("upper-fire-room-path", "wp-room-f2", "upper-fire-walk", { distance: 1, emergencySafe: true }),
+        edge("upper-fire-outdoor-network", "upper-fire-outdoor", "outdoor-ext-network", { emergencySafe: true }),
+      ],
+    };
+    const campus = addApprovedTestAssemblyPoint(campusWithExit, ["outdoor-ext-network"]);
+    const room = campus.buildings[0].floors.find((floor) => floor.id === "f2")!.rooms[0];
+    const routes = resolveAutomaticStudentEvacuationRoutes(campus, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: room.id, roomName: room.name,
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    }).routes;
+
+    expect(routes).toHaveLength(2);
+    expect(routes.map((route) => route.candidate.kind)).toEqual(["emergency_exit", "exterior_stair"]);
+    expect(new Set(routes.map((route) => route.candidate.exitId)).size).toBe(2);
+    expect(new Set(routes.map((route) => route.candidate.assemblyPointId))).toEqual(new Set(["test-assembly-point"]));
+    expect(routes.every((route) => route.candidate.route.authoredGraphNodeIds?.at(-1) === "test-assembly-point-node")).toBe(true);
+  });
+
+  it("keeps a mixed lower-floor exterior-stair route ahead of a lower-floor emergency exit after indoor stair descent", () => {
+    const source = makeScreenshotCampus();
+    const building = source.buildings[0];
+    const exteriorStair = building.exteriorEmergencyStairs?.[0];
+    expect(exteriorStair).toBeTruthy();
+
+    const lowerFloorExteriorStair = syncExteriorEmergencyStairGraph({
+      ...source,
+      buildings: source.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        exteriorEmergencyStairs: [{ ...exteriorStair!, servedFloorIds: ["f1"] }],
+      }),
+    });
+    const lowerExit: CampusEntrance = {
+      id: "lower-fire-exit", buildingId: "b1", edge: "bottom", offset: 0.7,
+      type: "emergency_exit", name: "Lower Fire Exit",
+    };
+    const lowerExitDoor: FloorDoor = {
+      id: "lower-fire-door", x: 590, y: 350, width: 12, direction: "right", color: "#dc2626", isEmergencyExit: true,
+    };
+    const withLowerExit: Campus = {
+      ...lowerFloorExteriorStair,
+      buildings: lowerFloorExteriorStair.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        entrances: [...(candidate.entrances ?? []), lowerExit],
+        floors: candidate.floors.map((floor) => floor.id === "f1"
+          ? { ...floor, doors: [...floor.doors, lowerExitDoor] }
+          : floor),
+      }),
+      navNodes: [
+        ...(lowerFloorExteriorStair.navNodes ?? []),
+        node("lower-fire-entrance-node", 600, 400, { buildingId: "b1", floorId: undefined, entranceId: lowerExit.id, type: "entrance" }),
+        node("lower-fire-door-node", 590, 350, { buildingId: "b1", floorId: "f1", doorId: lowerExitDoor.id, name: "Lower Fire Door" }),
+        node("lower-fire-walk", 520, 350, { buildingId: "b1", floorId: "f1", name: "Lower Fire Exit Path" }),
+        node("lower-fire-outdoor", 650, 400, { buildingId: undefined, floorId: undefined, type: "outdoor", name: "Lower Exit Outdoor" }),
+      ],
+      navEdges: [
+        ...(lowerFloorExteriorStair.navEdges ?? []).map((candidate) => candidate.id === "ext-local-f1" || candidate.id === "ext-outdoor-network"
+          ? { ...candidate, distance: 900 }
+          : candidate),
+        edge("lower-fire-outdoor-link", "lower-fire-entrance-node", "lower-fire-outdoor", { emergencySafe: true }),
+        edge("lower-fire-threshold", "lower-fire-entrance-node", "lower-fire-door-node", { type: "entrance_transition", emergencySafe: true }),
+        edge("lower-fire-door-path", "lower-fire-door-node", "lower-fire-walk", { emergencySafe: true }),
+        edge("ground-fire-room-path", "wp-ground", "lower-fire-walk", { distance: 1, emergencySafe: true }),
+        edge("lower-fire-outdoor-network", "lower-fire-outdoor", "outdoor-ext-network", { emergencySafe: true }),
+      ],
+    };
+    const campus = addApprovedTestAssemblyPoint(withLowerExit, ["outdoor-ext-network"]);
+    const room = campus.buildings[0].floors.find((floor) => floor.id === "f2")!.rooms[0];
+    const routes = resolveAutomaticStudentEvacuationRoutes(campus, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: room.id, roomName: room.name,
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    }).routes;
+
+    expect(routes.map((route) => route.candidate.kind)).toEqual(["exterior_stair", "emergency_exit"]);
+    expect(routes[0].candidate.route.authoredGraphNodeIds).toContain("inner-stair-f2-node");
+    expect(routes[0].candidate.route.authoredGraphNodeIds).toContain("inner-stair-f1-node");
+    expect(routes.every((route) => route.candidate.route.authoredGraphNodeIds?.at(-1) === "test-assembly-point-node")).toBe(true);
+    expect(routes.every((route) => route.candidate.emergencyUseReviewRequired === false)).toBe(true);
+  });
+
+  it("uses a complete same-floor Emergency Exit before routing to a lower-floor exterior stair", () => {
+    const source = makeScreenshotCampus();
+    const building = source.buildings[0];
+    const exteriorStair = building.exteriorEmergencyStairs?.[0];
+    const lowerFloorExteriorStair = syncExteriorEmergencyStairGraph({
+      ...source,
+      buildings: source.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        exteriorEmergencyStairs: [{ ...exteriorStair!, servedFloorIds: ["f1"] }],
+      }),
+    });
+    const upperExit: CampusEntrance = {
+      id: "upper-fire-exit", buildingId: "b1", edge: "right", offset: 0.5,
+      type: "emergency_exit", name: "Upper Fire Exit",
+    };
+    const upperExitDoor: FloorDoor = {
+      id: "upper-fire-door", x: 590, y: 100, width: 12, direction: "right", color: "#dc2626", isEmergencyExit: true,
+    };
+    const withUpperExit: Campus = {
+      ...lowerFloorExteriorStair,
+      buildings: lowerFloorExteriorStair.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        entrances: [...(candidate.entrances ?? []), upperExit],
+        floors: candidate.floors.map((floor) => floor.id === "f2"
+          ? { ...floor, doors: [...floor.doors, upperExitDoor] }
+          : floor),
+      }),
+      navNodes: [
+        ...(lowerFloorExteriorStair.navNodes ?? []),
+        node("upper-fire-entrance-node", 600, 100, { buildingId: "b1", floorId: undefined, entranceId: upperExit.id, type: "entrance" }),
+        node("upper-fire-door-node", 590, 100, { buildingId: "b1", floorId: "f2", doorId: upperExitDoor.id, name: "Upper Fire Door" }),
+        node("upper-fire-walk", 520, 100, { buildingId: "b1", floorId: "f2", name: "Upper Fire Exit Path" }),
+        node("upper-fire-outdoor", 650, 100, { buildingId: undefined, floorId: undefined, type: "outdoor", name: "Upper Exit Outdoor" }),
+      ],
+      navEdges: [
+        ...(lowerFloorExteriorStair.navEdges ?? []),
+        edge("upper-fire-outdoor-link", "upper-fire-entrance-node", "upper-fire-outdoor", { emergencySafe: true }),
+        edge("upper-fire-threshold", "upper-fire-entrance-node", "upper-fire-door-node", { type: "entrance_transition", emergencySafe: true }),
+        edge("upper-fire-door-path", "upper-fire-door-node", "upper-fire-walk", { emergencySafe: true }),
+        edge("upper-fire-room-path", "wp-room-f2", "upper-fire-walk", { distance: 1, emergencySafe: true }),
+        edge("upper-fire-outdoor-network", "upper-fire-outdoor", "outdoor-ext-network", { emergencySafe: true }),
+      ],
+    };
+    const campus = addApprovedTestAssemblyPoint(withUpperExit, ["outdoor-ext-network"]);
+    const room = campus.buildings[0].floors.find((floor) => floor.id === "f2")!.rooms[0];
+    const routes = resolveAutomaticStudentEvacuationRoutes(campus, {
+      type: "room", buildingId: "b1", floorNumber: 2, roomId: room.id, roomName: room.name,
+      buildingLabel: "Building", buildingCode: "B1", accessDoorId: "door-a",
+    }).routes;
+
+    expect(routes.map((route) => route.candidate.kind)).toEqual(["emergency_exit", "exterior_stair"]);
+    expect(routes[0].candidate.route.authoredGraphNodeIds).not.toContain("inner-stair-f1-node");
+    expect(routes.every((route) => route.candidate.route.authoredGraphNodeIds?.at(-1) === "test-assembly-point-node")).toBe(true);
   });
 
   it("student SOS reports no route when all evacuation paths are closed", () => {
@@ -2460,7 +2891,7 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
     expect(chooseEmergencyDestinationCandidate(campus, routeEdges, "room-node-a")?.candidate.kind).toBe("exterior_stair");
   });
 
-  it("8. the nearer Emergency Exit Entrance beats a longer Exterior Emergency Stair approach", () => {
+  it("8. a same-floor upper-floor Emergency Exit outranks an exterior stair detour", () => {
     const campus = makeScreenshotCampus();
     const emergencyEntrance: CampusEntrance = {
       id: "ent-emergency", buildingId: "b1", edge: "right", offset: 0.5, type: "emergency_exit", name: "East Fire Exit",
@@ -2495,6 +2926,121 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
     expect(selected?.candidate.kind).not.toBe("general");
   });
 
+  it("prefers a direct Ground-floor Emergency Exit over an Exterior Emergency Stair", () => {
+    const source = makeScreenshotCampus();
+    const building = source.buildings[0];
+    const entrance: CampusEntrance = {
+      id: "ground-fire-exit", buildingId: building.id, edge: "bottom", offset: 0.7,
+      type: "emergency_exit", name: "Ground Fire Exit",
+    };
+    const exitDoor: FloorDoor = {
+      id: "ground-fire-door", x: 420, y: 350, width: 12, direction: "left",
+      color: "#dc2626", isEmergencyExit: true,
+    };
+    const campus: Campus = {
+      ...source,
+      buildings: source.buildings.map((candidate) => candidate.id !== building.id ? candidate : {
+        ...candidate,
+        entrances: [...(candidate.entrances ?? []), entrance],
+        floors: candidate.floors.map((floor) => floor.id === "f1"
+          ? { ...floor, doors: [...floor.doors, exitDoor] }
+          : floor),
+      }),
+      navNodes: [
+        ...(source.navNodes ?? []),
+        node("ground-fire-entrance-node", 420, 400, { buildingId: "b1", floorId: undefined, entranceId: entrance.id, type: "entrance" }),
+        node("ground-fire-door-node", 420, 350, { buildingId: "b1", floorId: "f1", doorId: exitDoor.id, type: "hallway" }),
+        node("ground-fire-outdoor", 420, 450, { buildingId: undefined, floorId: undefined, type: "outdoor" }),
+      ],
+      navEdges: [
+        ...(source.navEdges ?? []),
+        edge("ground-fire-outdoor-link", "ground-fire-entrance-node", "ground-fire-outdoor"),
+        edge("ground-fire-door-threshold", "ground-fire-entrance-node", "ground-fire-door-node", { type: "entrance_transition" }),
+        edge("ground-fire-door-walk", "ground-fire-door-node", "wp-ground"),
+        edge("ground-fire-outdoor-network", "ground-fire-outdoor", "outdoor-ext-network"),
+      ],
+    };
+    const selected = chooseEmergencyDestinationCandidate(campus, buildTestRouteEdges(campus), "wp-ground");
+
+    expect(selected?.candidate.kind).toBe("emergency_exit");
+    expect(selected?.path.nodeIds).toContain("ground-fire-door-node");
+    expect(selected?.path.nodeIds).not.toContain("inner-stair-f1-node");
+  });
+
+  it("discovers a valid lower-floor descent when an unrelated upper stair landing is disconnected", () => {
+    const source = makeScreenshotCampus();
+    const sourceBuilding = source.buildings[0];
+    const stair = sourceBuilding.exteriorEmergencyStairs?.[0];
+    expect(stair).toBeTruthy();
+    const upperFloor: FloorPlan = {
+      ...sourceBuilding.floors.find((floor) => floor.id === "f2")!,
+      id: "f3", number: 3, label: "Floor 3", rooms: [], doors: [], walls: [], stairs: [],
+    };
+    const campus = syncExteriorEmergencyStairGraph({
+      ...source,
+      buildings: source.buildings.map((building) => building.id !== sourceBuilding.id ? building : {
+        ...building,
+        floors: [...building.floors, upperFloor],
+        exteriorEmergencyStairs: [{ ...stair!, servedFloorIds: ["f1", "f2", "f3"] }],
+      }),
+    });
+    const owner = campus.buildings[0].exteriorEmergencyStairs![0];
+    expect(exteriorEmergencyStairRouteReadiness(campus.buildings[0], owner, campus.navNodes, buildTestRouteEdges(campus)).ready).toBe(false);
+
+    const selected = chooseEmergencyDestinationCandidate(campus, buildTestRouteEdges(campus), "room-node-a");
+    const floorTwoLanding = campus.navNodes!.find((candidate) => candidate.exteriorEmergencyStairId === owner.id && candidate.floorId === "f2")!;
+    const groundLanding = campus.navNodes!.find((candidate) => candidate.exteriorEmergencyStairId === owner.id && candidate.floorId === "f1")!;
+    expect(selected?.candidate.kind).toBe("exterior_stair");
+    expect(selected?.path.nodeIds).toContain(floorTwoLanding.id);
+    expect(selected?.path.nodeIds).toContain(groundLanding.id);
+  });
+
+  it("falls back to an eligible ordinary Stair when the Exterior Emergency Stair is blocked", () => {
+    const source = makeScreenshotCampus();
+    const exteriorUpper = source.navNodes!.find((candidate) =>
+      candidate.exteriorEmergencyStairId === "ext-stair" && candidate.floorId === "f2",
+    )!;
+    const blocked: Campus = {
+      ...source,
+      // Keep the test-only outdoor endpoint within the campus map bounds so
+      // the Assembly Point review exercises route discovery, not placement validation.
+      navNodes: source.navNodes!.map((node) => node.id === "outdoor-wp" ? { ...node, x: 650, y: 200 } : node),
+      navEdges: (source.navEdges ?? []).map((edge) => edge.startNodeId === exteriorUpper.id || edge.endNodeId === exteriorUpper.id
+        ? { ...edge, closed: true }
+        : edge),
+    };
+
+    const selected = chooseEmergencyDestinationCandidate(blocked, buildTestRouteEdges(blocked), "room-node-a");
+
+    expect(selected?.candidate.kind).toBe("general");
+    expect(selected?.path.nodeIds).toContain("inner-stair-f2-node");
+    expect(selected?.path.nodeIds).toContain("inner-stair-f1-node");
+    expect(selected?.path.nodeIds.some((id) => blocked.navNodes!.find((node) => node.id === id)?.exteriorEmergencyStairId)).toBe(false);
+
+    const assemblyReadyCampus = addApprovedTestAssemblyPoint(blocked, ["outdoor-wp"]);
+    const origin = {
+      type: "room" as const,
+      buildingId: "b1",
+      floorNumber: 2,
+      roomId: "room-a",
+      roomName: "Room A",
+      buildingLabel: "Building",
+      buildingCode: "B1",
+      accessDoorId: "door-a",
+    };
+    const automatic = resolveAutomaticStudentEvacuationRoutes(assemblyReadyCampus, origin);
+    const studentRoute = planStudentEmergencyRoute(assemblyReadyCampus, origin);
+    const point = assemblyReadyCampus.assemblyPoints?.[0];
+    expect(point && assemblyPointValidation(assemblyReadyCampus, point).readiness).toBe("approved");
+    expect(automatic.routes).toHaveLength(1);
+    expect(automatic.routes[0].candidate.kind).toBe("general");
+    expect(studentRoute?.authoredGraphNodeIds).toContain("inner-stair-f2-node");
+    expect(studentRoute?.authoredGraphNodeIds).toContain("inner-stair-f1-node");
+    expect(studentRoute?.authoredGraphNodeIds).toContain("general-entrance-node");
+    expect(studentRoute?.authoredGraphNodeIds?.some((id) => assemblyReadyCampus.navNodes!.find((node) => node.id === id)?.exteriorEmergencyStairId)).toBe(false);
+    expect(studentRoute?.authoredGraphNodeIds?.at(-1)).toBe("test-assembly-point-node");
+  });
+
   it("9. a Service Entrance is never promoted to the General fallback pool", () => {
     const campus = makeScreenshotCampus();
     const serviceEntrance: CampusEntrance = {
@@ -2520,6 +3066,184 @@ describe("Emergency screenshot-scenario: Exterior Emergency Stair is Tier 1 and 
     expect(pools.general.some((candidate) => candidate.label.includes("Main Entrance"))).toBe(true);
     // With the exterior stair still complete, Service must not be selectable either.
     expect(chooseEmergencyDestinationCandidate(extended, routeEdges, "room-node-a")?.candidate.kind).toBe("exterior_stair");
+  });
+});
+
+describe("room-level smart multi-exit route validation", () => {
+  it("exposes only current, explicitly approved room assignments to Student Emergency mode", () => {
+    const campus = addApprovedTestAssemblyPoint(makeTwoEmergencyExitCampus(900, 5), ["exit-left-discharge", "exit-right-discharge"]);
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f1", "room-a");
+    campus.buildings[0].floors[0].rooms[0].emergencyEvacuation = {
+      enabled: true,
+      routes: evaluation.candidates.slice(0, 2).map((candidate, index) => ({
+        id: candidate.id,
+        doorId: candidate.doorId,
+        exitId: candidate.exitId,
+        destinationNodeId: candidate.destinationNodeId,
+        label: index === 0 ? "Left Exit" : "Right Exit",
+        approved: true,
+        approvedRouteSignature: candidate.routeSignature,
+        approvedAt: "2026-10-13T00:00:00.000Z",
+      })),
+    };
+    const room = { type: "room" as const, buildingId: "b1", floorNumber: 1, roomId: "room-a", roomName: "Room A", buildingLabel: "Building A", buildingCode: "A" };
+
+    const resolved = resolveApprovedStudentEvacuationRoutes(campus, room);
+    expect(resolved.configured).toBe(true);
+    expect(resolved.routes.map((option) => option.label)).toEqual(["Left Exit", "Right Exit"]);
+    expect(new Set(resolved.routes.map((option) => option.candidate.exitId)).size).toBe(2);
+
+    // The same resolved routes feed the campus SVG and 3D surface renderers.
+    // Keep both labels, colors, and authored geometry in the dual overview.
+    const campusSegments = studentEmergencyCampusRouteSegments(resolved.routes);
+    expect(campusSegments.map((segment) => segment.label)).toEqual(["Route A", "Route B"]);
+    expect(campusSegments.map((segment) => segment.color)).toEqual(["#dc2626", "#c2410c"]);
+    expect(campusSegments.every((segment) => segment.points.length > 1)).toBe(true);
+    expect(campusSegments.every((segment) => segment.showDoorMarker && segment.showExitMarker)).toBe(true);
+
+    // Room-local path segments are retained per route and floor for both the
+    // 2D indoor overlay and the 3D floor route surface.
+    const floorSegments = studentEmergencyFloorRouteSegments(resolved.routes, "b1", 1);
+    expect(floorSegments.map((segment) => segment.id)).toEqual(resolved.routes.map((option) => option.id));
+    expect(floorSegments.map((segment) => segment.color)).toEqual(["#dc2626", "#c2410c"]);
+    expect(floorSegments.every((segment) => segment.points.length > 1)).toBe(true);
+
+    campus.buildings[0].floors[0].rooms[0].emergencyEvacuation.routes[1].approvedRouteSignature = "stale-fingerprint";
+    const stale = resolveApprovedStudentEvacuationRoutes(campus, room);
+    expect(stale.routes.map((option) => option.id)).toEqual([evaluation.candidates[0].id]);
+
+    campus.buildings[0].floors[0].rooms[0].emergencyEvacuation.routes[0].approved = false;
+    const unapproved = resolveApprovedStudentEvacuationRoutes(campus, room);
+    expect(unapproved.routes).toEqual([]);
+    expect(unapproved.message).toMatch(/complete emergency-safe evacuation route is available/i);
+  });
+
+  it("evaluates complete routes from the assigned Room door and exposes distinct exits", () => {
+    const campus = addApprovedTestAssemblyPoint(makeTwoEmergencyExitCampus(900, 5), ["exit-left-discharge", "exit-right-discharge"]);
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f1", "room-a");
+
+    expect(evaluation.doorReadiness).toMatchObject([{ doorId: "door-a", state: "route_ready" }]);
+    expect(evaluation.candidates.map((candidate) => candidate.exitId)).toEqual(expect.arrayContaining([
+      "entrance:exit-left",
+      "entrance:exit-right",
+    ]));
+    expect(evaluation.candidates).toHaveLength(2);
+    expect(evaluation.candidates[0].distanceM).toBeLessThan(evaluation.candidates[1].distanceM);
+  });
+
+  it("returns all complete emergency egresses while preserving the existing single-best contract", () => {
+    const campus = makeTwoEmergencyExitCampus();
+    const edges = buildTestRouteEdges(campus);
+    const all = chooseEmergencyDestinationCandidates(campus, edges, "door-node-a");
+    const best = chooseEmergencyDestinationCandidate(campus, edges, "door-node-a");
+
+    expect(all).toHaveLength(2);
+    expect(best?.candidate).toEqual(all[0].candidate);
+    expect(best?.path).toEqual(all[0].path);
+  });
+
+  it("keeps Admin Test Route on the approved Primary unless an Alternate is explicitly selected", () => {
+    let campus = addApprovedTestAssemblyPoint(
+      makeTwoEmergencyExitCampus(900, 5),
+      ["exit-left-discharge", "exit-right-discharge"],
+      "primary-point",
+    );
+    const alternate: AssemblyPoint = {
+      id: "alternate-point",
+      name: "Nearby Alternate",
+      x: 696,
+      y: 200,
+      campusId: campus.id,
+      navNodeId: "alternate-point-node",
+      accessible: true,
+      buildingAssignments: [{ buildingId: "b1", designation: "alternate" }],
+    };
+    const alternateNode = node(alternate.navNodeId!, alternate.x, alternate.y, {
+      buildingId: undefined,
+      floorId: undefined,
+      type: "assembly",
+      assemblyPointId: alternate.id,
+    });
+    campus = {
+      ...campus,
+      assemblyPoints: [...(campus.assemblyPoints ?? []), alternate],
+      navNodes: [...(campus.navNodes ?? []), alternateNode],
+      navEdges: [...(campus.navEdges ?? []), edge("right-discharge-alternate", "exit-right-discharge", alternateNode.id, { distance: 1, emergencySafe: true })],
+    };
+    const alternateFingerprint = assemblyPointReviewFingerprint(campus, alternate);
+    const primary = campus.assemblyPoints!.find((point) => point.id === "primary-point")!;
+    const primaryFingerprint = assemblyPointReviewFingerprint(campus, primary);
+    campus = {
+      ...campus,
+      assemblyPoints: campus.assemblyPoints!.map((point) => point.id === alternate.id
+        ? { ...point, safetyReview: { status: "approved", approvedAt: "2026-10-13T00:00:00.000Z", approvedBy: "test-admin", approvedByRole: "admin", fingerprint: alternateFingerprint ?? undefined } }
+        : point.id === primary.id
+          ? { ...point, safetyReview: { status: "approved", approvedAt: "2026-10-13T00:00:00.000Z", approvedBy: "test-admin", approvedByRole: "admin", fingerprint: primaryFingerprint ?? undefined } }
+          : point),
+    };
+    const edges = buildTestRouteEdges(campus);
+
+    // The permissive candidate list makes the closer Alternate visible for an
+    // explicit reviewer scenario, while the Admin panel's normal selection
+    // pins the Primary just like Student SOS.
+    expect(chooseEmergencyDestinationCandidate(campus, edges, "door-node-a")?.candidate.assemblyPointId).toBe(alternate.id);
+    expect(chooseEmergencyDestinationCandidate(campus, edges, "door-node-a", { primaryOnly: true })?.candidate.assemblyPointId).toBe(primary.id);
+    expect(chooseEmergencyDestinationCandidate(campus, edges, "door-node-a", { assemblyPointId: alternate.id })?.candidate.assemblyPointDesignation).toBe("alternate");
+  });
+
+  it("reports assigned doors without a real Room-side or walking-network connection as ineligible", () => {
+    const campus = makeTwoEmergencyExitCampus();
+    const sourceFloor = campus.buildings[0].floors[0];
+    const assignedRoom = sourceFloor.rooms.find((room) => room.id === "room-a")!;
+    const danglingDoor: FloorDoor = { id: "nearby-but-disconnected", x: 82, y: 42, width: 12, direction: "left", color: "#d97706", wallId: "wall-a", offset: 0.55 };
+    campus.buildings[0].floors[0] = {
+      ...sourceFloor,
+      doors: [...sourceFloor.doors, danglingDoor],
+      rooms: [{ ...assignedRoom, accessDoorIds: ["door-a", danglingDoor.id] }],
+    };
+
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f1", "room-a");
+    expect(evaluation.doorReadiness).toEqual(expect.arrayContaining([
+      expect.objectContaining({ doorId: "nearby-but-disconnected", state: "disconnected", detail: expect.stringMatching(/navigation node/i) }),
+    ]));
+    expect(evaluation.candidates.some((candidate) => candidate.doorId === danglingDoor.id)).toBe(false);
+  });
+
+  it("exposes only explicitly approved assignments whose reviewed graph signature is still current", () => {
+    const campus = addApprovedTestAssemblyPoint(makeTwoEmergencyExitCampus(), ["exit-left-discharge", "exit-right-discharge"]);
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f1", "room-a");
+    const [candidate] = evaluation.candidates;
+    const config = {
+      enabled: true,
+      routes: [{
+        id: candidate.id,
+        doorId: candidate.doorId,
+        exitId: candidate.exitId,
+        destinationNodeId: candidate.destinationNodeId,
+        label: "Left Exit",
+        approved: true,
+        approvedRouteSignature: candidate.routeSignature,
+      }],
+    };
+    expect(approvedRoomEmergencyCandidates(evaluation, config)).toHaveLength(1);
+    expect(approvedRoomEmergencyCandidates(evaluation, { ...config, routes: [{ ...config.routes[0], approvedRouteSignature: "stale" }] })).toHaveLength(0);
+    expect(approvedRoomEmergencyCandidates(evaluation, { ...config, enabled: false })).toHaveLength(1);
+
+    const changedCampus = addApprovedTestAssemblyPoint(makeTwoEmergencyExitCampus(), ["exit-left-discharge", "exit-right-discharge"]);
+    changedCampus.buildings[0].floors[0].doors = changedCampus.buildings[0].floors[0].doors.map((door) => door.id === candidate.doorId
+      ? { ...door, width: door.width + 1 }
+      : door);
+    const changedEvaluation = evaluateRoomEmergencyEvacuation(changedCampus, "b1", "f1", "room-a");
+    expect(approvedRoomEmergencyCandidates(changedEvaluation, config)).toHaveLength(0);
+  });
+
+  it("gracefully keeps a single route when only one designated exit is available", () => {
+    const campus = makeTwoEmergencyExitCampus();
+    campus.buildings[0].entrances = campus.buildings[0].entrances?.filter((entrance) => entrance.id === "exit-left");
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f1", "room-a");
+    expect(evaluation.candidates).toHaveLength(1);
+    expect(evaluation.doorReadiness).toMatchObject([{ state: "connected_without_route" }]);
+    expect(evaluation.message).toMatch(/assign one Primary Assembly Point/i);
   });
 });
 
@@ -2582,5 +3306,106 @@ describe("Emergency egress distance and lower-floor Stair routing", () => {
     await waitFor(() => expect(screen.getByTitle("Emergency Route")).toBeTruthy());
     expect(highlight).toHaveBeenCalled();
     expect(screen.queryByText("No emergency route available.")).toBeNull();
+  });
+});
+
+describe("Admin evacuation route discovery from existing campus paths", () => {
+  it("finds an ordinary-stair route to a ground Emergency Exit when no exterior stair is available", () => {
+    const campus = addApprovedTestAssemblyPoint(makeUpperFloorEmergencyExitCampus(), ["ground-exit-discharge"]);
+    const room = campus.buildings[0].floors.find((floor) => floor.id === "f3")!.rooms[0];
+    const origin = {
+      type: "room" as const,
+      buildingId: "b1",
+      floorNumber: 3,
+      roomId: room.id,
+      roomName: room.name,
+      buildingLabel: "Building",
+      buildingCode: "B1",
+      accessDoorId: "upper-room-door",
+    };
+
+    const routes = resolveAutomaticStudentEvacuationRoutes(campus, origin).routes;
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0].candidate.kind).toBe("emergency_exit");
+    expect(routes[0].candidate.emergencyUseReviewRequired).toBe(false);
+    expect(routes[0].candidate.route.authoredGraphNodeIds).toEqual(expect.arrayContaining([
+      "left-stair-node-f3", "left-stair-node-f2", "left-stair-node-f1", "ground-exit-entrance-node",
+    ]));
+    expect(routes[0].candidate.route.authoredGraphNodeIds?.at(-1)).toBe("test-assembly-point-node");
+  });
+
+  it("previews connected ordinary Stair transitions without marking them student-safe", () => {
+    const campus = addApprovedTestAssemblyPoint(addGroundGeneralGateExit(makeUpperFloorEmergencyExitCampus()), ["ground-exit-discharge"]);
+    campus.buildings[0].floors = campus.buildings[0].floors.map((floor) => ({
+      ...floor,
+      stairs: floor.stairs?.map((stair) => ({ ...stair, emergencySafe: false })),
+    }));
+    const routeEdges = buildTestRouteEdges(campus);
+    const routineGraph = routineRouteGraph(campus, campus.navNodes ?? [], routeEdges, "standard");
+
+    const standard = findNavigationRoute(routineGraph.nodes, routineGraph.edges, "upper-room-door-node", "ground-campus-gate", false, false);
+    expect(standard?.nodeIds).toContain("left-stair-node-f2");
+    expect(chooseEmergencyDestinationCandidate(campus, routeEdges, "upper-room-door-node", { primaryOnly: true })).toBeNull();
+
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f3", "upper-room");
+    const candidate = evaluation.candidates[0];
+    expect(evaluation.doorReadiness).toMatchObject([{ state: "route_needs_review" }]);
+    expect(candidate.graphCompleteAssemblyRoute).toBe(true);
+    expect(candidate.completeAssemblyRoute).toBe(false);
+    expect(candidate.emergencyUseReviewRequired).toBe(true);
+    expect(candidate.route.emergencyDestinationLabel).toBe("Main Assembly Point A");
+    expect(candidate.route.campusPoints?.at(-1)).toEqual({ x: campus.assemblyPoints?.[0].x, y: campus.assemblyPoints?.[0].y });
+    expect(candidate.route.transitions).toHaveLength(2);
+    expect(candidate.emergencyReviewRequirements?.map((item) => item.id)).toEqual(expect.arrayContaining([
+      "left-stair-f3", "left-stair-f2", "left-stair-f1",
+    ]));
+    expect(approvedRoomEmergencyCandidates(evaluation, {
+      enabled: false,
+      routes: [{ id: candidate.id, doorId: candidate.doorId, exitId: candidate.exitId, destinationNodeId: candidate.destinationNodeId, label: "Route A", approved: true, approvedRouteSignature: candidate.routeSignature }],
+    })).toHaveLength(0);
+  });
+
+  it("keeps an assigned Assembly Point route available when its legacy review fingerprint is stale", () => {
+    const campus = addApprovedTestAssemblyPoint(makeUpperFloorEmergencyExitCampus(), ["ground-exit-discharge"]);
+    const point = campus.assemblyPoints?.[0];
+    expect(point).toBeTruthy();
+    campus.assemblyPoints = campus.assemblyPoints?.map((item) => item.id === point?.id
+      ? { ...item, safetyReview: { ...item.safetyReview, status: item.safetyReview?.status ?? "approved", fingerprint: "stale-review-fingerprint" } }
+      : item);
+
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f3", "upper-room");
+    expect(evaluation.candidates[0]).toMatchObject({
+      graphCompleteAssemblyRoute: true,
+      completeAssemblyRoute: true,
+      emergencyUseReviewRequired: false,
+    });
+  });
+
+  it("does not preview a route across a genuinely missing Stair transition", () => {
+    const campus = addApprovedTestAssemblyPoint(makeUpperFloorEmergencyExitCampus(), ["ground-exit-discharge"]);
+    const floor2 = campus.buildings[0].floors.find((floor) => floor.id === "f2")!;
+    floor2.stairs = floor2.stairs?.map((stair) => ({ ...stair, sharedId: "disconnected-stairwell" }));
+
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, "b1", "f3", "upper-room");
+    expect(evaluation.candidates.filter((candidate) => candidate.graphCompleteAssemblyRoute)).toHaveLength(0);
+    expect(evaluation.doorReadiness).toMatchObject([{ state: "connected_without_route" }]);
+  });
+
+  it("finds CABA Lecture Hall candidates in the isolated TEST ONLY saved campus copy", () => {
+    const campus = JSON.parse(readFileSync(
+      "verification-artifacts/assembly-point-ordinary-sos/admin-conflict-rerun-draft/test-only-campus-saved.json",
+      "utf8",
+    )) as Campus;
+    const building = campus.buildings.find((candidate) => candidate.name === "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION")!;
+    const floor = building.floors.find((candidate) => candidate.rooms.some((room) => room.name === "CABA LECTURE HALL"))!;
+    const room = floor.rooms.find((candidate) => candidate.name === "CABA LECTURE HALL")!;
+    const primary = campus.assemblyPoints?.find((point) => point.buildingAssignments?.some((assignment) => assignment.buildingId === building.id && assignment.designation === "primary"));
+    expect(primary).toBeTruthy();
+
+    const evaluation = evaluateRoomEmergencyEvacuation(campus, building.id, floor.id, room.id);
+    const primaryCandidates = evaluation.candidates.filter((candidate) => candidate.assemblyPointId === primary?.id && candidate.graphCompleteAssemblyRoute);
+    expect(primaryCandidates.length).toBeGreaterThan(0);
+    expect(primaryCandidates.every((candidate) => candidate.destinationNodeId === primary?.navNodeId)).toBe(true);
   });
 });

@@ -1,0 +1,8 @@
+{
+    "typecheckExit":  1,
+    "baselineDiagnostics":  1039,
+    "currentDiagnostics":  1039,
+    "newDiagnosticIdentities":  0,
+    "resolvedDiagnosticIdentities":  0,
+    "identityNormalization":  "file + TS code + diagnostic text; source line/column excluded"
+}

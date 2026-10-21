@@ -393,6 +393,110 @@ export function wallOpeningSpan(opening: FloorDoor | FloorWindow, wall: FloorWal
   };
 }
 
+export interface WallOpeningResizeResult {
+  x: number;
+  y: number;
+  offset: number;
+  width: number;
+  fixedEdge: number;
+  movingEdge: number;
+}
+
+/**
+ * Resize a wall-mounted opening in wall-local coordinates. `handleSign` is -1
+ * for the start handle and +1 for the end handle; the opposite endpoint stays
+ * fixed for the whole gesture. `pointer` is a world-space point (the caller
+ * converts from screen coordinates once), so pan/zoom never changes the math.
+ */
+export function resizeWallOpeningAlongWall({
+  wall,
+  opening,
+  pointer,
+  handleSign,
+  minWidth,
+  maxWidth,
+  otherOpenings = [],
+  otherWalls = [],
+}: {
+  wall: FloorWall;
+  opening: FloorDoor | FloorWindow;
+  pointer: { x: number; y: number };
+  handleSign: -1 | 1;
+  minWidth: number;
+  maxWidth: number;
+  otherOpenings?: Array<FloorDoor | FloorWindow>;
+  otherWalls?: FloorWall[];
+}): WallOpeningResizeResult | null {
+  const geometry = resolveWallOpeningGeometry(opening, wall);
+  if (!geometry || geometry.length < 1 || !Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) return null;
+
+  const length = geometry.length;
+  const originCenter = geometry.offset * length;
+  const fixedEdge = originCenter - handleSign * geometry.width / 2;
+  const minimum = Math.ceil(Math.max(1, Math.min(minWidth, length)));
+  const requestedMaximum = Math.max(minimum, Math.floor(Math.min(maxWidth, length)));
+  const endpointMargin = wallOpeningSafetyUnits(requestedMaximum, wall.thickness);
+  const lowerBound = endpointMargin;
+  const upperBound = length - endpointMargin;
+
+  // Clamp the movable end at the nearest authored opening on this same wall.
+  // The fixed end is never moved to make room for the resize.
+  let movableBound = handleSign < 0 ? lowerBound : upperBound;
+  for (const other of otherOpenings) {
+    if (other.id === opening.id || other.wallId !== wall.id) continue;
+    const span = wallOpeningSpan(other, wall);
+    if (!span) continue;
+    if (fixedEdge > span.start && fixedEdge < span.end) return null;
+    if (handleSign < 0 && span.end <= fixedEdge && span.end > movableBound) movableBound = span.end;
+    if (handleSign > 0 && span.start >= fixedEdge && span.start < movableBound) movableBound = span.start;
+  }
+
+  // Do not let an opening grow across a visible intersecting wall on its host
+  // segment. Project proper segment intersections into the host's local axis;
+  // parallel/collinear walls do not define a new stop point.
+  const hostDx = wall.x2 - wall.x1;
+  const hostDy = wall.y2 - wall.y1;
+  const hostLengthSquared = hostDx * hostDx + hostDy * hostDy;
+  for (const other of otherWalls) {
+    if (other.id === wall.id || other.visible === false) continue;
+    const otherDx = other.x2 - other.x1;
+    const otherDy = other.y2 - other.y1;
+    const denominator = hostDx * otherDy - hostDy * otherDx;
+    if (Math.abs(denominator) < 1e-8) continue;
+    const deltaX = other.x1 - wall.x1;
+    const deltaY = other.y1 - wall.y1;
+    const hostT = (deltaX * otherDy - deltaY * otherDx) / denominator;
+    const otherT = (deltaX * hostDy - deltaY * hostDx) / denominator;
+    if (hostT < 0 || hostT > 1 || otherT < 0 || otherT > 1) continue;
+    const intersection = hostT * Math.sqrt(hostLengthSquared);
+    if (handleSign < 0 && intersection < fixedEdge && intersection > movableBound) movableBound = intersection;
+    if (handleSign > 0 && intersection > fixedEdge && intersection < movableBound) movableBound = intersection;
+  }
+
+  const available = handleSign < 0 ? fixedEdge - movableBound : movableBound - fixedEdge;
+  const allowedMaximum = Math.floor(Math.min(requestedMaximum, available));
+  // A too-small available span means the fixed edge cannot support even the
+  // minimum opening without crossing a wall endpoint or another opening.
+  if (allowedMaximum < minimum) return null;
+
+  const ux = (wall.x2 - wall.x1) / length;
+  const uy = (wall.y2 - wall.y1) / length;
+  const pointerAlong = clamp((pointer.x - wall.x1) * ux + (pointer.y - wall.y1) * uy, 0, length);
+  const requestedWidth = handleSign * (pointerAlong - fixedEdge);
+  const width = clamp(Math.round(requestedWidth), minimum, allowedMaximum);
+  const movingEdge = fixedEdge + handleSign * width;
+  const center = (fixedEdge + movingEdge) / 2;
+
+  return {
+    x: wall.x1 + ux * center,
+    y: wall.y1 + uy * center,
+    offset: center / length,
+    width,
+    fixedEdge,
+    movingEdge,
+  };
+}
+
 /**
  * Tests whether two wall-mounted apertures overlap on the same physical wall.
  * A small tolerance permits adjacent openings to touch at their jambs without

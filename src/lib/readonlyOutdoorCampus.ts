@@ -6,6 +6,7 @@ import type {
   CampusMarker,
   CampusPath,
   ExteriorEmergencyStair,
+  AssemblyPoint,
   CampusGroundMaterial,
   CampusGroundTexture,
 } from "../components/map-builder/types";
@@ -41,6 +42,7 @@ export interface ReadonlyOutdoorCampus {
   entrances: readonly ReadonlyOutdoorEntrance[];
   exteriorEmergencyStairs: readonly ExteriorEmergencyStair[];
   markers: readonly CampusMarker[];
+  assemblyPoints: readonly AssemblyPoint[];
   decorAssets: readonly CampusDecorAsset[];
 }
 
@@ -96,6 +98,7 @@ export function projectReadonlyOutdoorCampus(campus: Campus): ReadonlyOutdoorCam
     entrances,
     exteriorEmergencyStairs,
     markers: campus.markers ?? [],
+    assemblyPoints: campus.assemblyPoints ?? [],
     decorAssets: (campus.decorAssets ?? []).filter((asset) => asset.visible !== false),
   };
 }

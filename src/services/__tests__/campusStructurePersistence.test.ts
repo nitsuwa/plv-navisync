@@ -159,6 +159,53 @@ describe("student-facing building information persistence", () => {
   });
 });
 
+describe("Room Information structure round-trip", () => {
+  it("preserves the description and Room-scoped photo path through serialization and hydration", () => {
+    const campus = makeCampus([{ id: IDs.floorA, number: 1, label: "Ground Floor" }]);
+    campus.buildings[0].floors[0].rooms = [{
+      id: "room-content-round-trip",
+      name: "Room 101",
+      type: "classroom",
+      floorId: IDs.floorA,
+      buildingId: IDs.building,
+      x: 48,
+      y: 32,
+      w: 120,
+      h: 80,
+      description: "A quiet place for focused study.",
+      roomPhotoPath: `${IDs.campus}/${IDs.building}/${IDs.floorA}/room-content-round-trip/photo.webp`,
+    }];
+
+    const payload = serializeCampusStructure(campus);
+    const roomElement = payload.map_elements.find((element) => (
+      (element.metadata as { kind?: string }).kind === "room"
+    ));
+    expect(roomElement).toMatchObject({
+      campus_id: IDs.campus,
+      building_id: IDs.building,
+      floor_id: IDs.floorA,
+      id: "room-content-round-trip",
+    });
+    expect((roomElement?.metadata as { ui: { description?: string; roomPhotoPath?: string } }).ui).toMatchObject({
+      description: "A quiet place for focused study.",
+      roomPhotoPath: `${IDs.campus}/${IDs.building}/${IDs.floorA}/room-content-round-trip/photo.webp`,
+    });
+
+    const hydrated = hydrateCampusStructure(campus, {
+      buildings: payload.buildings as never[],
+      floors: payload.floors as never[],
+      mapElements: payload.map_elements as never[],
+      navigationNodes: payload.navigation_nodes as never[],
+      navigationEdges: payload.navigation_edges as never[],
+    });
+    expect(hydrated.buildings[0].floors[0].rooms[0]).toMatchObject({
+      id: "room-content-round-trip",
+      description: "A quiet place for focused study.",
+      roomPhotoPath: `${IDs.campus}/${IDs.building}/${IDs.floorA}/room-content-round-trip/photo.webp`,
+    });
+  });
+});
+
 describe("B5 Phase 3.1.2 — floor unique-constraint persistence (write order)", () => {
   afterEach(() => vi.clearAllMocks());
 
@@ -1196,7 +1243,8 @@ function makeMaximalCampus(): Campus {
     canvasW: 580, canvasH: 380, backgroundColor: "#e8e1d7", showGrid: true, gridSize: 20,
     rooms: [{
       id: "room-101", name: "Room 101", type: "classroom", x: 120, y: 140, w: 60, h: 40, rotation: 0,
-      zOrder: 0, visible: true, locked: false, description: "Lecture hall", accessibility: true,
+      zOrder: 0, visible: true, locked: false, description: "Lecture hall",
+      roomPhotoPath: "campus-a/bldg-eng/flr-g/room-101/room.webp", accessibility: true,
       floorId: "flr-g", buildingId: "bldg-eng", navConnection: { x: 150, y: 160 },
       accessNodeId: "node-room101", accessType: "door" as const,
     }],
@@ -1415,6 +1463,7 @@ describe("B6 Phase 2 — deterministic round-trip + save/reload integrity", () =
     expect(ground.rooms.map((r) => r.id)).toEqual(["room-101"]);
     expect(ground.rooms[0]).toMatchObject({
       name: "Room 101", type: "classroom", x: 120, y: 140, w: 60, h: 40, description: "Lecture hall",
+      roomPhotoPath: "campus-a/bldg-eng/flr-g/room-101/room.webp",
       accessibility: true, floorId: "flr-g", buildingId: "bldg-eng", navConnection: { x: 150, y: 160 },
       accessNodeId: "node-room101", accessType: "door",
     });

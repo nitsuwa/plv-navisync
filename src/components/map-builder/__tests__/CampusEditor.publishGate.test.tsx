@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 function clickPublish() {
-  fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+  fireEvent.click(screen.getByRole("button", { name: "Review & Publish" }));
 }
 
 describe("B7 Phase 2 — Publish severity gating", () => {

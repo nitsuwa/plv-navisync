@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guidedRouteProgressDuration, navigationWalkDuration, outdoorWalkingDistance, walkingAnimationDuration } from "../walkingAnimation";
+import { guidedRouteProgressDuration, navigationSeekDuration, navigationWalkDuration, outdoorWalkingDistance, reducedMotionWalkingDuration, walkingAnimationDuration } from "../walkingAnimation";
 
 describe("shared indoor and outdoor walking pace", () => {
   it("paces guided movement by meaningful route steps rather than map distance", () => {
@@ -18,6 +18,23 @@ describe("shared indoor and outdoor walking pace", () => {
   it("makes 2x speed double movement progress without changing transition policy", () => {
     expect(navigationWalkDuration(80, 320, 2)).toBe(navigationWalkDuration(80, 320) / 2);
     expect(navigationWalkDuration(0, 320, 2)).toBe(1);
+  });
+
+  it("keeps authored indoor seeks visibly animated, including under reduced motion", () => {
+    const normal = navigationSeekDuration(0, 28, 0, 1);
+    const reduced = navigationSeekDuration(0, 28, 0, 1, true);
+    expect(normal).toBeGreaterThanOrEqual(650);
+    expect(normal).toBeLessThanOrEqual(1800);
+    expect(reduced).toBeGreaterThan(0);
+    expect(reduced).toBeLessThan(normal);
+    expect(navigationSeekDuration(0, 0, 0)).toBe(0);
+  });
+
+  it("shortens reduced-motion indoor playback without flattening a real polyline", () => {
+    const duration = reducedMotionWalkingDuration(4000, 42);
+    expect(duration).toBeGreaterThan(0);
+    expect(duration).toBeLessThan(4000);
+    expect(reducedMotionWalkingDuration(4000, 0)).toBe(0);
   });
 
   it("uses equal milliseconds per meter for indoor and outdoor legs", () => {

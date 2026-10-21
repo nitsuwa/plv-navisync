@@ -581,6 +581,8 @@ export type NavigationRouteOptions = {
   allowedNodeIds?: ReadonlySet<string>;
   /** Memoize identical route legs for this calculation and prepared graph. */
   searchCache?: NavigationRouteSearchCache;
+  /** Exclude explicit authored edges for bounded alternative-route searches. */
+  blockedEdgeIds?: ReadonlySet<string>;
 };
 
 export type PreparedNavigationNeighbor = {
@@ -839,7 +841,7 @@ function runPreparedNavigationRoute(
   toNodeId: string,
   accessibleOnly = false,
   emergencySafeOnly = false,
-  options: Pick<NavigationRouteOptions, "transitionPreference" | "preferredElevatorSharedIds" | "allowedNodeIds"> = {},
+  options: Pick<NavigationRouteOptions, "transitionPreference" | "preferredElevatorSharedIds" | "allowedNodeIds" | "blockedEdgeIds"> = {},
 ): GraphPath | null {
   if (!fromNodeId || !toNodeId) return null;
   const allowedView = options.allowedNodeIds ? graph.allowedViewFor(options.allowedNodeIds) : undefined;
@@ -999,6 +1001,7 @@ function runPreparedNavigationRoute(
     const visitNeighbor = (neighbor: PreparedNavigationNeighbor) => {
       const neighborId = neighbor.nodeId;
       if (closed.has(neighborId) || !isAllowed(neighborId)) return;
+      if (neighbor.edge?.id && options.blockedEdgeIds?.has(neighbor.edge.id)) return;
       const transitionKind = neighbor.transitionKind;
       if (transitionKind === "elevator" && options.preferredElevatorSharedIds?.length) {
         if (!neighbor.transitionSharedId || !options.preferredElevatorSharedIds.includes(neighbor.transitionSharedId)) return;
@@ -1052,7 +1055,7 @@ export function findPreparedNavigationRoute(
   toNodeId: string,
   accessibleOnly = false,
   emergencySafeOnly = false,
-  options: Pick<NavigationRouteOptions, "transitionPreference" | "preferredElevatorSharedIds" | "allowedNodeIds" | "searchCache"> = {},
+  options: Pick<NavigationRouteOptions, "transitionPreference" | "preferredElevatorSharedIds" | "allowedNodeIds" | "searchCache" | "blockedEdgeIds"> = {},
 ): GraphPath | null {
   const cache = options.searchCache;
   if (!cache || cache.graph !== graph) {
@@ -1076,6 +1079,7 @@ export function findPreparedNavigationRoute(
     options.transitionPreference ?? null,
     options.preferredElevatorSharedIds ? [...options.preferredElevatorSharedIds].sort() : [],
     allowedSetId,
+    options.blockedEdgeIds ? [...options.blockedEdgeIds].sort() : [],
   ]);
   if (cache.values.has(key)) return cache.values.get(key) ?? null;
   const result = runPreparedNavigationRoute(graph, fromNodeId, toNodeId, accessibleOnly, emergencySafeOnly, options);

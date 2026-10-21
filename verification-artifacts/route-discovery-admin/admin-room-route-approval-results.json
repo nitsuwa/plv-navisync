@@ -1,0 +1,20 @@
+{
+  "isolation": "TEST ONLY saved local campus; real FloorEditor + properties controls; remote writes blocked",
+  "target": {
+    "building": "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION",
+    "buildingId": "15676664-3144-4fd6-8954-0b99b5bf437b",
+    "floor": "Floor 6",
+    "floorId": "c6a8cedf-d462-4abc-aa68-f5465b2e158e",
+    "room": "CABA LECTURE HALL",
+    "roomId": "ffe40872-45b8-4ca2-a148-61e6c7d00b40",
+    "initialSmartMultiExit": false
+  },
+  "browserErrors": [],
+  "failure": {
+    "message": "page.goto: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:5174/\", waiting until \"domcontentloaded\"\u001b[22m\n",
+    "stack": "page.goto: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:5174/\", waiting until \"domcontentloaded\"\u001b[22m\n\n    at main (C:\\Users\\user\\AppData\\Local\\Temp\\plv-focused-route-discovery-admin.cjs:41:16)"
+  },
+  "screenshots": [
+    "admin-room-route-approval-failure.png"
+  ]
+}

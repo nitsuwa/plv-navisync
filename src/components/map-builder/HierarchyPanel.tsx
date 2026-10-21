@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Building2, Plus, Pencil, Trash2, Copy, GripVertical, MoreHorizontal,
   ChevronRight, ChevronDown, FolderOpen, Search, Eye, EyeOff, Lock, TreePine, Sparkles, Layers,
-  DoorOpen,
+  DoorOpen, Flag,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { genId, DECOR_PALETTE_TYPES, DECOR_ASSET_MAP, DECOR_CATEGORIES, groundTypeForDecorType, isDecorAreaType } from "./constants";
@@ -58,6 +58,9 @@ interface HierarchyPanelProps {
   onSelectCampusGate?: () => void;
   /** Whether the Campus Gate placement tool is currently armed. */
   activeCampusGatePlacement?: boolean;
+  /** Arm the emergency-only Assembly Point placement tool. */
+  onSelectAssemblyPoint?: () => void;
+  activeAssemblyPointPlacement?: boolean;
   /** Number of decorative assets placed */
   decorAssetCount?: number;
   /** Whether the authoring asset palette is available in this mode */
@@ -76,7 +79,7 @@ function HierarchyPanelView({
   onDeleteBuilding,
   onSelectBuildingType, activeBuildingType, decorAssetCount = 0,
   assetsEnabled = true, buildingIdentityReservations = [], onReserveBuildingIdentity,
-  onSelectCampusGate, activeCampusGatePlacement = false,
+  onSelectCampusGate, activeCampusGatePlacement = false, onSelectAssemblyPoint, activeAssemblyPointPlacement = false,
   onArmDecorAsset, activeDecorAssetType = null, tutorialPanelTab = null,
 }: HierarchyPanelProps) {
   // ── Panel tab: "hierarchy" | "assets" ──
@@ -451,8 +454,18 @@ function HierarchyPanelView({
       </div>
 
       {/* ═══ ASSETS TAB ═══ */}
-      {assetsEnabled && panelTab === "assets" && (
+        {assetsEnabled && panelTab === "assets" && (
         <div data-testid="outdoor-assets-scroll" data-tutorial="outdoor-assets" className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-show-on-hover scroll-smooth py-2 px-2 space-y-3" onWheelCapture={(event) => event.stopPropagation()} style={{ overscrollBehaviorY: "contain" }}>
+          <div>
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5"><Flag className="h-2.5 w-2.5 text-emerald-600" />Emergency / Safety</span>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <button type="button" data-testid="asset-emergency-assembly-point" aria-label="Place Emergency Assembly Point" title="Place a designated emergency gathering destination and connect it to an outdoor pathway." onClick={() => onSelectAssemblyPoint?.()} className={cn("flex min-h-[70px] min-w-0 flex-col items-center justify-start gap-1 p-1.5 rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 group active:scale-95", activeAssemblyPointPlacement ? "border-emerald-500/40 bg-emerald-500/8 ring-1 ring-emerald-500/20" : "border-transparent hover:bg-muted/50")}>
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-emerald-700" style={{ backgroundColor: "#16a34a14", border: "1px solid #16a34a35" }}><Flag className="h-5 w-5" fill="currentColor" /></div>
+                <span className="block max-w-full text-[8px] font-semibold text-foreground/70 group-hover:text-foreground text-center leading-tight">Emergency Assembly Point</span>
+              </button>
+            </div>
+            <p className="px-1 pt-1 text-[8px] leading-snug text-muted-foreground">Place a designated emergency gathering destination and connect it to an outdoor pathway.</p>
+          </div>
           <div>
             <span className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1.5"><DoorOpen className="h-2.5 w-2.5" />Functional</span>
             <div className="mt-1.5 grid grid-cols-2 gap-1.5">

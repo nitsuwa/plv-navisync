@@ -1656,6 +1656,8 @@ export interface CrossFloorOwnerInfo {
   floorLabel: string;
   /** Stair direction as authored on this floor. Elevators do not use it. */
   direction?: StairDirection;
+  /** Ordinary Stairs remain emergency traversable unless an authored false explicitly blocks them. */
+  emergencySafe?: boolean;
   /** Elevator served floors (floor NUMBERS) — undefined when unspecified. */
   servedFloors?: number[];
 }
@@ -1687,7 +1689,7 @@ export function findCrossFloorOwnerInfo(
         ? { exteriorEmergencyStairId: owner.exteriorEmergencyStairId ?? node.exteriorEmergencyStairId }
         : {}),
       floorId: floor.id, floorOrder, floorNumber: floor.number ?? 0,
-      floorLabel: floor.label, direction: owner.direction,
+      floorLabel: floor.label, direction: owner.direction, emergencySafe: owner.emergencySafe,
     };
   }
   if (node.elevatorId) {
@@ -1818,9 +1820,14 @@ export function reconcileCrossFloorTransitions(
         const canGoDown = upperDirection === "down" || upperDirection === "both";
         if (!canGoUp && !canGoDown) continue;
         const bidirectional = canGoUp && canGoDown;
+        // Eligibility belongs to this exact floor-to-floor transition. An
+        // unrelated landing elsewhere in the same stairwell must not veto a
+        // valid pair; every traversed pair is checked independently.
         const emergencySafe = kind === "elevator"
           ? group.every((entry) => entry.node.emergencySafe === true)
-          : group.every((entry) => entry.node.emergencySafe !== false);
+          : exteriorEmergencyGroup
+            ? a.info.emergencySafe !== false && b.info.emergencySafe !== false
+            : a.info.emergencySafe !== false && b.info.emergencySafe !== false;
         desired.set(pairKey, {
           a: bidirectional || canGoUp ? lower.node.id : upper.node.id,
           b: bidirectional || canGoUp ? upper.node.id : lower.node.id,
@@ -1839,7 +1846,9 @@ export function reconcileCrossFloorTransitions(
         emergencyStair: group.some((entry) => entry.node.emergencyStair === true),
         emergencySafe: kind === "elevator"
           ? group.every((entry) => entry.node.emergencySafe === true)
-          : group.every((entry) => entry.node.emergencySafe !== false),
+          : exteriorEmergencyGroup
+            ? group.every((entry) => entry.info.emergencySafe !== false)
+            : group.every((entry) => entry.info.emergencySafe !== false),
       });
     }
   }

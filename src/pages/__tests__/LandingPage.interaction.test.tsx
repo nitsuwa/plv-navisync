@@ -66,10 +66,21 @@ describe("LandingPage interactive tour", () => {
   it("renders the shorter landing-page information architecture", () => {
     renderLandingPage();
 
+    expect(screen.getByRole("heading", { name: "See PLV NaviSync in Action" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "How NaviSync Helps You" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "See It in Action" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "A Day With NaviSync" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Latest Announcements & Campus Events" })).not.toBeInTheDocument();
+
+    const showcase = screen.getByTestId("landing-showcase");
+    const featureTour = screen.getByTestId("landing-feature-tour");
+    expect(showcase.compareDocumentPosition(featureTour) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(showcase).getByText("Press play to watch")).toBeInTheDocument();
+    const showcaseVideo = within(showcase).getByTestId("home-showcase-video") as HTMLVideoElement;
+    expect(showcaseVideo).toHaveAttribute("src", "/videos/plv-navisync-showcase.mp4");
+    expect(showcaseVideo).not.toHaveAttribute("autoplay");
+    expect(showcaseVideo.paused).toBe(true);
+    expect(within(showcase).getByRole("button", { name: /play.*showcase/i })).toBeInTheDocument();
+    expect(within(showcase).getAllByRole("link", { name: /explore campus map/i }).every((link) => link.getAttribute("href") === "/map")).toBe(true);
   });
 
   it("keeps campus contact details in the footer instead of duplicating them in the landing CTA", () => {
@@ -254,8 +265,9 @@ describe("LandingPage interactive tour", () => {
     renderLandingPage();
 
     const rail = screen.getByRole("navigation", { name: "Landing page sections" });
-    expect(within(rail).getAllByRole("link")).toHaveLength(4);
+    expect(within(rail).getAllByRole("link")).toHaveLength(5);
     expect(within(rail).getByRole("link", { name: /Hero — Start here/i })).toHaveAttribute("href", "#landing-hero");
+    expect(within(rail).getByRole("link", { name: /NaviSync Showcase — See the platform/i })).toHaveAttribute("href", "#landing-showcase");
     expect(within(rail).getByRole("link", { name: /How NaviSync Helps You — Explore campus tasks/i })).toHaveAttribute("href", "#landing-feature-tour");
     expect(within(rail).getByRole("link", { name: /What NaviSync Does — See core capabilities/i })).toHaveAttribute("href", "#landing-capabilities");
     expect(within(rail).getByRole("link", { name: /Final Call to Action — Open the campus map/i })).toHaveAttribute("href", "#landing-final-cta");

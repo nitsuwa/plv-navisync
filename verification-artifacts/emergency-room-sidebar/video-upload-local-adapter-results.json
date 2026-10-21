@@ -1,0 +1,254 @@
+{
+  "fixture": "TEST ONLY FloorPropertiesPanel with isolated Playwright request adapter",
+  "unexpectedBackendRequests": 0,
+  "blockedExternalRequests": 2,
+  "browserErrors": [],
+  "adapterEvents": [
+    {
+      "method": "GET",
+      "path": "/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js"
+    },
+    {
+      "type": "blocked-external-request",
+      "method": "GET",
+      "path": "/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js"
+    },
+    {
+      "method": "GET",
+      "path": "/css2"
+    },
+    {
+      "type": "blocked-external-request",
+      "method": "GET",
+      "path": "/css2"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/list/emergency-evacuation-videos"
+    },
+    {
+      "type": "bucket-ready"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "type": "object-upload",
+      "objectPath": "test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4",
+      "requestBodyBytesVisibleToPlaywright": 0,
+      "contentLengthHeader": null,
+      "fixtureBytesUsedByLocalAdapter": true
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "type": "metadata-insert",
+      "id": "734a1d12-d017-4265-a7d0-078cc5304c9c"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "type": "signed-url",
+      "objectPath": "test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "type": "metadata-update",
+      "fields": [
+        "duration_seconds"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c-68dbbe49-5503-4dbd-9c6f-f43fb71bcc1e.vtt"
+    },
+    {
+      "type": "object-upload",
+      "objectPath": "test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c-68dbbe49-5503-4dbd-9c6f-f43fb71bcc1e.vtt",
+      "requestBodyBytesVisibleToPlaywright": 0,
+      "contentLengthHeader": null,
+      "fixtureBytesUsedByLocalAdapter": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "type": "metadata-update",
+      "fields": [
+        "captions_path",
+        "captions_size_bytes",
+        "status",
+        "approved_route_fingerprint",
+        "approved_by",
+        "published_at"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "type": "signed-url",
+      "objectPath": "test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c-68dbbe49-5503-4dbd-9c6f-f43fb71bcc1e.vtt"
+    },
+    {
+      "type": "signed-url",
+      "objectPath": "test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c-68dbbe49-5503-4dbd-9c6f-f43fb71bcc1e.vtt"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c.mp4"
+    },
+    {
+      "method": "GET",
+      "path": "/storage/v1/object/sign/emergency-evacuation-videos/test-campus-only/test-room-101/734a1d12-d017-4265-a7d0-078cc5304c9c-68dbbe49-5503-4dbd-9c6f-f43fb71bcc1e.vtt"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "type": "metadata-update",
+      "fields": [
+        "duration_seconds"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/v1/user"
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/emergency-evacuation-videos/test-campus-only/test-room-101/195215f3-b46c-4ca3-bba9-9caaf9d47adf.mp4"
+    },
+    {
+      "type": "object-upload",
+      "objectPath": "test-campus-only/test-room-101/195215f3-b46c-4ca3-bba9-9caaf9d47adf.mp4",
+      "requestBodyBytesVisibleToPlaywright": 223833,
+      "contentLengthHeader": null,
+      "fixtureBytesUsedByLocalAdapter": false
+    },
+    {
+      "method": "POST",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    },
+    {
+      "type": "metadata-insert",
+      "id": "195215f3-b46c-4ca3-bba9-9caaf9d47adf"
+    },
+    {
+      "method": "GET",
+      "path": "/rest/v1/emergency_evacuation_videos"
+    }
+  ],
+  "checks": {
+    "storageReadyEnablesUpload": true,
+    "invalidMediaRejected": "Choose an MP4 video file.",
+    "uploadProgressVisible": true,
+    "uploadProgressValue": 0,
+    "uploadProgressAdvances": "not observable from intercepted XHR",
+    "localAdapterServesTestMp4ForPreview": true,
+    "reviewGateNeedsApprovedRoute": true,
+    "previewMetadata": {
+      "duration": 16,
+      "width": 960,
+      "height": 540
+    },
+    "captionUploaded": true,
+    "captionTrackPresent": true,
+    "replacementCreatedNewDraft": true,
+    "replacementXhrBytesMatchTestMp4": true,
+    "removeClearedRoomReference": true,
+    "removedMediaRetainedByAdapter": true,
+    "browserErrors": []
+  },
+  "pageInfo": {
+    "title": "TEST ONLY — Emergency Room Properties",
+    "buttons": [
+      "",
+      "Hide",
+      "Lock",
+      " Back",
+      " Front",
+      " Down",
+      " Up",
+      "Custom#DBEAFE",
+      "Emergency Evacuation",
+      "Edit Room Shape",
+      " Save Room as Template",
+      " Duplicate Room + Contents",
+      "Duplicate Room Only",
+      "Select Room Setup",
+      " Flip Setup H",
+      " Flip Setup V",
+      "East Door",
+      "Add Door",
+      "Remove from Navigation",
+      " Delete Room"
+    ],
+    "body": "Room\n\nSTATE & LAYER\nHide\nLock\nBack\nFront\nDown\nUp\nNAME\nCOLOR\nCUSTOM\n#DBEAFE\nDESCRIPTION\nEmergency Evacuation\n\nLAYOUT\n\nX\nY\nWIDTH\nHEIGHT\nROTATION\n0 deg\n\nROOM SHAPE\n\nRectangle\nEdit Room Shape\n\nCustom shapes are visual Room boundaries. Walls and openings remain independent physical objects.\n\nROOM SETUP\n\n1 Wall • 1 Opening • 0 Furniture\nSave Room as Template\nDuplicate Room + Contents\nDuplicate Room Only\nSelect Room Setup\n\nTRANSFORM SETUP\n\nFlip Setup H\nFlip Setup V\n\nNAVIGATION\n\nReady for routing ✓\n\nDoor connected to the Walking Network ✓\n\nROOM ACCESS · 1 DOOR\n\nEast Door\nAdd DoorRemove from Navigation\nDelete Room\nTEST ONLY — no connection selected"
+  },
+  "uploadStatusText": "Video title\nPLV_NaviSync_Emergency_Video_TEST_ONLY (1).mp4\n219 KB\nPreview\nReplace video\nAttach captions (.vtt)\nI previewed this video against the current approved evacuation route and exit assignment.\n\nValidate and approve at least one current connected evacuation route before publishing this guide.\n\nReview & publish\nUnpublish\nRemove from room",
+  "uploadAlert": []
+}

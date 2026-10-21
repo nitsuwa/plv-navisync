@@ -244,6 +244,7 @@ describe("FloorEditor floor switching", () => {
     expect(activeFloorId).toBe("f1");
     expect(floorOne(latestCampus!).walls).toHaveLength(1);
     expect(screen.getByText("Unsaved Floor Changes")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("switches cleanly after an explicit save without prompting again", async () => {
@@ -253,9 +254,19 @@ describe("FloorEditor floor switching", () => {
     );
 
     drawWall(container);
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Redo" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    drawWall(container, 220, 100, 300, 100);
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(floorOne(latestCampus!).walls).toHaveLength(1));
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(floorTwoButton());
 
     expect(activeFloorId).toBe("f2");

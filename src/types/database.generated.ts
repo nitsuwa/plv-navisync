@@ -14,6 +14,155 @@ export type Database = {
   }
   public: {
     Tables: {
+      emergency_evacuation_videos: {
+        Row: {
+          id: string
+          campus_id: string
+          building_id: string
+          floor_id: string
+          room_id: string
+          storage_path: string
+          captions_path: string | null
+          captions_size_bytes: number | null
+          original_filename: string
+          mime_type: string
+          file_size_bytes: number
+          title: string
+          duration_seconds: number | null
+          status: string
+          approved_route_fingerprint: Json | null
+          uploaded_by: string
+          approved_by: string | null
+          published_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          campus_id: string
+          building_id: string
+          floor_id: string
+          room_id: string
+          storage_path: string
+          captions_path?: string | null
+          captions_size_bytes?: number | null
+          original_filename: string
+          mime_type?: string
+          file_size_bytes: number
+          title: string
+          duration_seconds?: number | null
+          status?: string
+          approved_route_fingerprint?: Json | null
+          uploaded_by: string
+          approved_by?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          campus_id?: string
+          building_id?: string
+          floor_id?: string
+          room_id?: string
+          storage_path?: string
+          captions_path?: string | null
+          captions_size_bytes?: number | null
+          original_filename?: string
+          mime_type?: string
+          file_size_bytes?: number
+          title?: string
+          duration_seconds?: number | null
+          status?: string
+          approved_route_fingerprint?: Json | null
+          uploaded_by?: string
+          approved_by?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "emergency_evacuation_videos_campus_id_fkey"; columns: ["campus_id"]; isOneToOne: false; referencedRelation: "campuses"; referencedColumns: ["id"] },
+          { foreignKeyName: "emergency_evacuation_videos_building_id_fkey"; columns: ["building_id"]; isOneToOne: false; referencedRelation: "buildings"; referencedColumns: ["id"] },
+          { foreignKeyName: "emergency_evacuation_videos_floor_id_fkey"; columns: ["floor_id"]; isOneToOne: false; referencedRelation: "floors"; referencedColumns: ["id"] },
+          { foreignKeyName: "emergency_evacuation_videos_room_id_fkey"; columns: ["room_id"]; isOneToOne: false; referencedRelation: "map_elements"; referencedColumns: ["id"] },
+          { foreignKeyName: "emergency_evacuation_videos_uploaded_by_fkey"; columns: ["uploaded_by"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          { foreignKeyName: "emergency_evacuation_videos_approved_by_fkey"; columns: ["approved_by"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
+      room_videos: {
+        Row: {
+          id: string
+          campus_id: string
+          building_id: string
+          floor_id: string
+          room_id: string
+          storage_path: string
+          captions_path: string | null
+          captions_size_bytes: number | null
+          original_filename: string
+          mime_type: string
+          file_size_bytes: number
+          title: string
+          duration_seconds: number | null
+          status: string
+          uploaded_by: string
+          approved_by: string | null
+          published_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          campus_id: string
+          building_id: string
+          floor_id: string
+          room_id: string
+          storage_path: string
+          captions_path?: string | null
+          captions_size_bytes?: number | null
+          original_filename: string
+          mime_type?: string
+          file_size_bytes: number
+          title: string
+          duration_seconds?: number | null
+          status?: string
+          uploaded_by: string
+          approved_by?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          campus_id?: string
+          building_id?: string
+          floor_id?: string
+          room_id?: string
+          storage_path?: string
+          captions_path?: string | null
+          captions_size_bytes?: number | null
+          original_filename?: string
+          mime_type?: string
+          file_size_bytes?: number
+          title?: string
+          duration_seconds?: number | null
+          status?: string
+          uploaded_by?: string
+          approved_by?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "room_videos_campus_id_fkey"; columns: ["campus_id"]; isOneToOne: false; referencedRelation: "campuses"; referencedColumns: ["id"] },
+          { foreignKeyName: "room_videos_building_id_fkey"; columns: ["building_id"]; isOneToOne: false; referencedRelation: "buildings"; referencedColumns: ["id"] },
+          { foreignKeyName: "room_videos_floor_id_fkey"; columns: ["floor_id"]; isOneToOne: false; referencedRelation: "floors"; referencedColumns: ["id"] },
+          { foreignKeyName: "room_videos_room_id_fkey"; columns: ["room_id"]; isOneToOne: false; referencedRelation: "map_elements"; referencedColumns: ["id"] },
+          { foreignKeyName: "room_videos_uploaded_by_fkey"; columns: ["uploaded_by"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          { foreignKeyName: "room_videos_approved_by_fkey"; columns: ["approved_by"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
       event_organizations: {
         Row: { id: string; code: string; name: string; is_active: boolean; created_at: string; updated_at: string }
         Insert: { id?: string; code: string; name: string; is_active?: boolean; created_at?: string; updated_at?: string }
@@ -476,6 +625,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           description: string | null
+          emergency_destination_policy: "fixed_primary" | "nearest_eligible"
           id: string
           is_default: boolean
           latest_published_version_id: string | null
@@ -503,6 +653,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          emergency_destination_policy?: "fixed_primary" | "nearest_eligible"
           id?: string
           is_default?: boolean
           latest_published_version_id?: string | null
@@ -530,6 +681,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           description?: string | null
+          emergency_destination_policy?: "fixed_primary" | "nearest_eligible"
           id?: string
           is_default?: boolean
           latest_published_version_id?: string | null
@@ -1556,6 +1708,8 @@ export type Database = {
         Returns: { organization_id: string; organization_name: string; grant_id: string; academic_year: string; expires_at: string }[]
       }
       get_event_organization_handover: { Args: { p_expected_grant_id: string }; Returns: Json }
+      get_published_emergency_evacuation_video: { Args: { p_video_id: string }; Returns: Json }
+      get_published_room_videos_for_room: { Args: { p_campus_id: string; p_room_id: string }; Returns: Json }
       ack_event_organization_handover: { Args: { p_expected_grant_id: string }; Returns: string }
       get_event_edit_access: { Args: { p_event_id: string }; Returns: Json }
       get_organization_event: { Args: { p_event_id: string }; Returns: Json }

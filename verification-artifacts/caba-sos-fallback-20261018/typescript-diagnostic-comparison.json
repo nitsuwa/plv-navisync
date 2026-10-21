@@ -1,0 +1,18 @@
+{
+    "typecheckExit":  1,
+    "baseline":  "verification-artifacts/floating-floor-picker-20261018/typescript-current.txt",
+    "current":  "verification-artifacts/caba-sos-fallback-20261018/typescript-current.txt",
+    "identityDefinition":  "source file + TypeScript code + diagnostic message (line shifts ignored)",
+    "baselineDiagnosticOccurrences":  1029,
+    "currentDiagnosticOccurrences":  1029,
+    "baselineDiagnosticIdentities":  516,
+    "currentDiagnosticIdentities":  516,
+    "newDiagnosticIdentities":  0,
+    "resolvedDiagnosticIdentities":  0,
+    "newExamples":  [
+
+                    ],
+    "resolvedExamples":  [
+
+                         ]
+}

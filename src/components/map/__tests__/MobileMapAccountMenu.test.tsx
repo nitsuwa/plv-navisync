@@ -121,6 +121,26 @@ describe("MobileMapAccountMenu", () => {
     expect(screen.queryByRole("menu", { name: "Student account menu" })).not.toBeInTheDocument();
   });
 
+  it("dismisses the profile menu but allows the first map-header control click through", () => {
+    const onToggleView = vi.fn();
+    render(
+      <MemoryRouter>
+        <div data-map-search-shell="true">
+          <button type="button" onClick={onToggleView}>Switch map view</button>
+        </div>
+        <MobileMapAccountMenu />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /user menu/i }));
+    const toggle = screen.getByRole("button", { name: "Switch map view" });
+    fireEvent.pointerDown(toggle, { pointerType: "mouse" });
+    fireEvent.click(toggle);
+
+    expect(onToggleView).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu", { name: "Student account menu" })).not.toBeInTheDocument();
+  });
+
   it("keeps the building sheet and its snap state underneath the active profile menu", () => {
     function OverlayHarness() {
       const [profileOpen, setProfileOpen] = useState(false);

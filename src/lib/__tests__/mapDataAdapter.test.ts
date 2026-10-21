@@ -46,7 +46,7 @@ function makeCampus(): SharedCampusData {
             number: 1,
             label: "Ground Floor",
             rooms: [
-              { id: "r1", name: "Room 101", type: "classroom", x: 0, y: 0, w: 10, h: 10 },
+              { id: "r1", name: "Room 101", type: "classroom", x: 0, y: 0, w: 10, h: 10, description: "A bright classroom.", roomPhotoPath: "c1/b1/f1/r1/photo.webp" },
               { id: "r2", name: "Restroom", type: "restroom", x: 0, y: 0, w: 10, h: 10 },
               { id: "r3", name: "Hallway A", type: "hallway", x: 0, y: 0, w: 10, h: 10 },
               { id: "r4", name: "Elevator Core", type: "elevator", x: 0, y: 0, w: 10, h: 10 },
@@ -116,7 +116,10 @@ describe("floorPlansFromCampus", () => {
     expect(plan.buildingName).toBe("Main Academic Building");
     expect(plan.floors[0].number).toBe(1);
     expect(plan.floors[0].rooms).toHaveLength(6);
-    expect(plan.floors[0].rooms[0]).toMatchObject({ id: "r1", name: "Room 101", type: "classroom" });
+    expect(plan.floors[0].rooms[0]).toMatchObject({
+      id: "r1", name: "Room 101", type: "classroom",
+      description: "A bright classroom.", roomPhotoPath: "c1/b1/f1/r1/photo.webp",
+    });
   });
 
   it("omits buildings without floors", () => {

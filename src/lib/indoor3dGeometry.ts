@@ -1,4 +1,7 @@
-import type { FloorDoor, FloorFurniture, FloorRoom, FloorStairs, FloorWall, FloorWindow } from "../components/map-builder/types";
+import type { FloorDoor, FloorFurniture, FloorPlan, FloorRoom, FloorStairs, FloorWall, FloorWindow } from "../components/map-builder/types";
+import { exteriorZoneAccessFeatureGeometry } from "./exteriorFloorZones";
+import { getFloorShapeRegions } from "./floorShape";
+import { roomOutlinePoints } from "./roomShape";
 
 export interface IndoorWallSegment {
   x1: number;
@@ -195,6 +198,156 @@ export function indoorWallOccludesFocus(
 const DISTANCE_EPSILON = 1.75;
 const ANGLE_EPSILON = 0.025;
 
+export const INDOOR_FLOOR_CAMERA_DIRECTION = [0.78, 1.18, 0.86] as const;
+export const DISCOVER_INDOOR_CAMERA_DIRECTION = [0.4, 1.25, 0.95] as const;
+/** Portrait Discover views turn the long building axis into screen height so
+ * an authored elongated floor uses the available phone viewport naturally. */
+export const DISCOVER_INDOOR_PORTRAIT_CAMERA_DIRECTION = [1.2, 2, 0.22] as const;
+
+export function discoverIndoorCameraDirection(aspect: number): readonly [number, number, number] {
+  return Number.isFinite(aspect) && aspect < 0.82
+    ? DISCOVER_INDOOR_PORTRAIT_CAMERA_DIRECTION
+    : DISCOVER_INDOOR_CAMERA_DIRECTION;
+}
+
+/** Keep the ordinary indoor camera's three-quarter elevation while turning an
+ * elongated floor's long axis toward screen-up on portrait viewports. This
+ * reduces the width demanded from a phone's narrow horizontal field of view. */
+export function indoorFloorCameraDirectionForViewport(
+  floorWidth: number,
+  floorHeight: number,
+  aspect: number,
+  baseDirection: readonly [number, number, number] = INDOOR_FLOOR_CAMERA_DIRECTION,
+): readonly [number, number, number] {
+  const safeAspect = Number.isFinite(aspect) ? Math.max(0.25, aspect) : 1;
+  const width = Math.max(1, floorWidth);
+  const height = Math.max(1, floorHeight);
+  const elongation = Math.max(0, Math.min(1, (Math.max(width, height) / Math.min(width, height) - 1.03) / 0.45));
+  const portrait = Math.max(0, Math.min(1, (0.95 - safeAspect) / 0.4));
+  // Compact and square layouts need a modest portrait rotation too. Without
+  // it, their default diagonal azimuth spends most of the phone's height on
+  // empty space even though the floor itself has room to grow. Elongated
+  // layouts continue to receive the full geometry-led adjustment.
+  const blend = portrait * (0.35 + elongation * 0.65);
+  if (blend <= 0.001) return baseDirection;
+
+  const horizontalLength = Math.hypot(baseDirection[0], baseDirection[2]);
+  const baseYaw = Math.atan2(baseDirection[2], baseDirection[0]);
+  // Keep a visible three-quarter side while aligning an elongated floor more
+  // closely to portrait screen-up. The lower mobile yaw reduces wasted width
+  // in the narrow field of view without changing the camera's elevation.
+  const sideAngle = Math.atan(0.18);
+  const targetYaw = width >= height ? sideAngle : Math.PI / 2 - sideAngle;
+  const fullTurn = 2 * Math.PI;
+  const yawDelta = ((targetYaw - baseYaw + Math.PI) % fullTurn + fullTurn) % fullTurn - Math.PI;
+  const yaw = baseYaw + yawDelta * blend;
+  return [Math.cos(yaw) * horizontalLength, baseDirection[1], Math.sin(yaw) * horizontalLength];
+}
+
+/** Preserve desktop breathing room and use a tighter margin when the actual
+ * usable fit area is portrait. Authored structural bounds already include a
+ * small perimeter for doors, stairs and exits. */
+export function indoorFloorCameraFitPadding(aspect: number): number {
+  return Number.isFinite(aspect) && aspect < 0.82 ? 1.04 : 1.08;
+}
+
+export interface IndoorFloorCameraBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function rotatedFloorRectPoints(x: number, y: number, width: number, height: number, rotation = 0) {
+  const radians = rotation * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  return [
+    { x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height },
+  ].map((point) => ({
+    x: centerX + (point.x - centerX) * cosine - (point.y - centerY) * sine,
+    y: centerY + (point.x - centerX) * sine + (point.y - centerY) * cosine,
+  }));
+}
+
+/** Fit to authored room and circulation geometry. Decorative furniture, text,
+ * and broad exterior zones must not make a whole Floor appear tiny; those
+ * remain rendered, but structural rooms, doors, stairs, exits and floor
+ * extensions own the initial frame. Furniture is only a fallback for legacy
+ * Floors that have no structural geometry. */
+export function indoorFloorCameraBounds(
+  floor: FloorPlan,
+  fallback: IndoorFloorCameraBounds,
+): IndoorFloorCameraBounds {
+  const structural: { x: number; y: number }[] = [];
+  const furniture: { x: number; y: number }[] = [];
+  const addRect = (points: { x: number; y: number }[], x: number, y: number, width: number, height: number, rotation = 0) => {
+    if (![x, y, width, height, rotation].every(Number.isFinite)) return;
+    points.push(...rotatedFloorRectPoints(x, y, width, height, rotation));
+  };
+  const addPoint = (points: { x: number; y: number }[], x: number, y: number, padding = 0) => {
+    if (![x, y, padding].every(Number.isFinite)) return;
+    points.push({ x: x - padding, y: y - padding }, { x: x + padding, y: y + padding });
+  };
+
+  floor.rooms.filter((room) => room.visible !== false).forEach((room) => structural.push(...roomOutlinePoints(room)));
+  floor.walls.filter((wall) => wall.visible !== false).forEach((wall) => {
+    const thickness = Math.max(0, wall.thickness || 0) / 2;
+    addPoint(structural, wall.x1, wall.y1, thickness);
+    addPoint(structural, wall.x2, wall.y2, thickness);
+  });
+  floor.paths.forEach((path) => path.points.forEach((point) => addPoint(structural, point.x, point.y, Math.max(0, path.width || 0) / 2)));
+  floor.doors.filter((door) => door.visible !== false).forEach((door) => addPoint(structural, door.x, door.y, Math.max(6, door.width / 2)));
+  floor.windows.filter((window) => window.visible !== false).forEach((window) => addRect(structural, window.x - window.width / 2, window.y - window.height / 2, window.width, window.height));
+  floor.stairs.filter((item) => item.visible !== false).forEach((item) => addRect(structural, item.x, item.y, item.width, item.height, item.rotation));
+  floor.ramps.filter((item) => item.visible !== false).forEach((item) => addRect(structural, item.x, item.y, item.width, item.height, item.rotation));
+  floor.elevators.filter((item) => item.visible !== false).forEach((item) => addRect(structural, item.x, item.y, item.width, item.height, item.rotation));
+  const zones = new Map((floor.exteriorZones ?? []).map((zone) => [zone.id, zone]));
+  const canvasW = floor.canvasW ?? 600;
+  const canvasH = floor.canvasH ?? 450;
+  const addEntranceFeature = (item: { x: number; y: number; width: number; height: number; rotation?: number; visible?: boolean; parentZoneId?: string }) => {
+    if (item.visible === false) return;
+    const parent = item.parentZoneId ? zones.get(item.parentZoneId) : undefined;
+    const geometry = parent ? exteriorZoneAccessFeatureGeometry(parent, item, canvasW, canvasH) : null;
+    if (geometry) addRect(structural, geometry.x, geometry.y, geometry.width, geometry.height, geometry.rotation);
+    else if (!parent) addRect(structural, item.x, item.y, item.width, item.height, item.rotation);
+  };
+  floor.entranceRamps?.forEach(addEntranceFeature);
+  floor.entranceSteps?.forEach(addEntranceFeature);
+  getFloorShapeRegions(floor).slice(1).forEach((region) => addRect(structural, region.x, region.y, region.width, region.height));
+
+  floor.furniture.filter((item) => item.visible !== false).forEach((item) => addRect(furniture, item.x, item.y, item.width, item.height, item.rotation));
+
+  const points = structural.length > 0 ? structural : furniture;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  points.forEach((point) => {
+    if (![point.x, point.y].every(Number.isFinite)) return;
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  });
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return fallback;
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const width = Math.max(48, maxX - minX);
+  const height = Math.max(48, maxY - minY);
+  const paddingX = Math.max(12, width * 0.035);
+  const paddingY = Math.max(12, height * 0.035);
+  return {
+    x: centerX - width / 2 - paddingX,
+    y: centerY - height / 2 - paddingY,
+    width: width + paddingX * 2,
+    height: height + paddingY * 2,
+  };
+}
+
 /** Return the orbit-camera offset multiplier needed to frame a floor from the
  * renderer's fixed isometric direction. The narrow viewport aspect is part of
  * the calculation so phones do not open on a tiny close-up slice of the plan. */
@@ -204,6 +357,8 @@ export function indoorFloorCameraHalfDepth(
   aspect: number,
   worldScale = 0.025,
   verticalFovDegrees = 42,
+  cameraDirection: readonly [number, number, number] = INDOOR_FLOOR_CAMERA_DIRECTION,
+  fitPadding = 1.08,
 ): number {
   const width = Math.max(1, floorWidth) * worldScale;
   const height = Math.max(1, floorHeight) * worldScale;
@@ -211,9 +366,9 @@ export function indoorFloorCameraHalfDepth(
   const verticalFov = verticalFovDegrees * Math.PI / 180;
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * safeAspect);
 
-  // Camera offset in FloorScene is [0.78, 1.18, 0.86] * halfDepth.
-  const length = Math.hypot(0.78, 1.18, 0.86);
-  const direction = [0.78 / length, 1.18 / length, 0.86 / length];
+  // The same authored direction is used for the camera offset in FloorScene.
+  const length = Math.hypot(...cameraDirection);
+  const direction = cameraDirection.map((value) => value / length);
   const right = [-direction[2], 0, direction[0]];
   const rightLength = Math.hypot(right[0], right[2]);
   right[0] /= rightLength;
@@ -221,14 +376,47 @@ export function indoorFloorCameraHalfDepth(
   const up = [-direction[0] * direction[1], 1 - direction[1] * direction[1], -direction[2] * direction[1]];
   const upLength = Math.hypot(up[0], up[1], up[2]);
   const screenUp = up.map((value) => value / upLength);
-  const horizontalHalfExtent = (Math.abs(right[0]) * width + Math.abs(right[2]) * height) / 2;
-  const verticalHalfExtent = (Math.abs(screenUp[0]) * width + Math.abs(screenUp[2]) * height) / 2;
-  const depthHalfExtent = (Math.abs(direction[0]) * width + Math.abs(direction[2]) * height) / 2;
-  const requiredDistance = Math.max(
-    horizontalHalfExtent / Math.tan(horizontalFov / 2),
-    verticalHalfExtent / Math.tan(verticalFov / 2),
-  ) + depthHalfExtent;
-  return Math.max(4.5, requiredDistance * 1.08 / length);
+  const horizontalTangent = Math.tan(horizontalFov / 2);
+  const verticalTangent = Math.tan(verticalFov / 2);
+  const padding = Math.max(1, fitPadding);
+  let requiredDistance = 0;
+
+  if (safeAspect < 0.82) {
+    // On portrait screens, independently maximizing the projected width,
+    // height, and depth sums extents that belong to different corners. That
+    // can pull compact floors much farther away than their actual perspective
+    // projection requires. Solve the four floor-bound corners instead:
+    // screenX = horizontal / ((distance - towardCamera) * tan(horizontalFov)).
+    // This keeps the complete structural rectangle inside the padded view
+    // while recovering the space lost by the independent-extents estimate.
+    for (const xSign of [-1, 1]) {
+      for (const zSign of [-1, 1]) {
+        const x = xSign * width / 2;
+        const z = zSign * height / 2;
+        const horizontal = x * right[0] + z * right[2];
+        const vertical = x * screenUp[0] + z * screenUp[2];
+        const towardCamera = x * direction[0] + z * direction[2];
+        requiredDistance = Math.max(
+          requiredDistance,
+          Math.abs(horizontal) * padding / horizontalTangent + towardCamera,
+          Math.abs(vertical) * padding / verticalTangent + towardCamera,
+        );
+      }
+    }
+  } else {
+    const horizontalHalfExtent = (Math.abs(right[0]) * width + Math.abs(right[2]) * height) / 2;
+    const verticalHalfExtent = (Math.abs(screenUp[0]) * width + Math.abs(screenUp[2]) * height) / 2;
+    const depthHalfExtent = (Math.abs(direction[0]) * width + Math.abs(direction[2]) * height) / 2;
+    requiredDistance = Math.max(
+      horizontalHalfExtent / horizontalTangent,
+      verticalHalfExtent / verticalTangent,
+    ) + depthHalfExtent;
+    requiredDistance *= padding;
+  }
+
+  // A smaller physical floor needs a shorter minimum camera distance too;
+  // the former fixed 4.5 half-depth left compact layouts visibly undersized.
+  return Math.max(2.4, requiredDistance / length);
 }
 
 /** The active Floor camera may pull back to 2.7 × this fit depth. Keep its far
@@ -285,6 +473,104 @@ export function shouldRenderStudentCanteenDiningFurniture(
     .toLowerCase().replace(/[_-]+/g, " ");
   if (/\b(table tennis|ping pong)\b/.test(identity)) return false;
   return /\b(table|chair|seat|stool)\b/.test(identity);
+}
+
+export interface StudentAuditoriumChairLayout {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  color: string;
+  flipX: boolean;
+  flipY: boolean;
+}
+
+/** Expand authored seating into lightweight visual chair instances. Generic
+ * chair types are included only when their authored centers lie inside an
+ * auditorium/lecture-hall room polygon on this floor. This uses floor geometry
+ * as context instead of relying on a building name or display/floor number. */
+export function deriveStudentAuditoriumChairLayouts(
+  items: readonly FloorFurniture[],
+  auditoriumRoomPolygons: readonly (readonly { x: number; y: number }[])[] = [],
+): StudentAuditoriumChairLayout[] {
+  const layouts: StudentAuditoriumChairLayout[] = [];
+  for (const item of items) {
+    if (item.visible === false) continue;
+    const type = `${item.assetKey ?? ""} ${item.type ?? ""}`.toLowerCase().replace(/[_-]+/g, " ").trim();
+    const identity = `${type} ${item.name ?? ""} ${item.category ?? ""}`.toLowerCase().replace(/[_-]+/g, " ");
+    const groupedSeating = /\baudience seating 4x4\b/.test(type) || /\baudience seating 4x4\b/.test(identity);
+    const explicitAuditoriumChair = /\b(audience chair|auditorium chair|auditorium arm chair|theater chair|theatre chair|lecture chair writing arm)\b/.test(type)
+      || /\b(audience chair|auditorium chair|auditorium arm chair|theater chair|theatre chair|lecture chair writing arm)\b/.test(identity);
+    const chairCenter = { x: item.x + item.width / 2, y: item.y + item.height / 2 };
+    const contextualArmchair = auditoriumRoomPolygons.length > 0
+      && /\b(arm chair|armchair|auditorium chair|audience chair|chair|seat)\b/.test(identity)
+      && !/\b(desk|office|workstation|computer|stool|bench|dining|table)\b/.test(identity)
+      && auditoriumRoomPolygons.some((polygon) => pointInPolygon(chairCenter, polygon));
+    if (!groupedSeating && !explicitAuditoriumChair && !contextualArmchair) continue;
+
+    const rotation = Number.isFinite(item.rotation) ? item.rotation : 0;
+    const flipX = item.flipX === true;
+    const flipY = item.flipY === true;
+    const color = item.color || "#3d4652";
+    const pushLayout = (id: string, x: number, y: number, width: number, height: number) => {
+      layouts.push({ id, x, y, width, height, rotation, color, flipX, flipY });
+    };
+
+    if (groupedSeating) {
+      const columns = 4;
+      const rows = 4;
+      const cellW = item.width / columns;
+      const cellH = item.height / rows;
+      const centerX = item.x + item.width / 2;
+      const centerY = item.y + item.height / 2;
+      const angle = rotation * Math.PI / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const flipXSign = flipX ? -1 : 1;
+      const flipYSign = flipY ? -1 : 1;
+      const chairW = Math.max(4, Math.min(cellW * 0.6, 10));
+      const chairH = Math.max(4, Math.min(cellH * 0.62, 10));
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const localX = (column + 0.5 - columns / 2) * cellW * flipXSign;
+          const localY = (row + 0.5 - rows / 2) * cellH * flipYSign;
+          // Match the authored SVG item's rotation in floor coordinates.
+          // The 3D renderer uses positive world Z for floor Y, then applies
+          // the same rotation through its existing negative Y-axis rotation.
+          const x = centerX + localX * cos - localY * sin;
+          const y = centerY + localX * sin + localY * cos;
+          pushLayout(`${item.id}:seat-${row}-${column}`, x, y, chairW, chairH);
+        }
+      }
+      continue;
+    }
+
+    const isLectureChair = /lecture chair writing arm/.test(type) || /lecture chair writing arm/.test(identity);
+    const width = explicitAuditoriumChair
+      ? Math.max(isLectureChair ? 5 : 4, item.width * (isLectureChair ? 0.62 : 0.62))
+      : Math.max(6, item.width * 0.82);
+    const height = explicitAuditoriumChair
+      ? Math.max(isLectureChair ? 5 : 4, item.height * (isLectureChair ? 0.66 : 0.62))
+      : Math.max(6, item.height * 0.78);
+    pushLayout(item.id, item.x + item.width / 2, item.y + item.height / 2, width, height);
+  }
+  return layouts;
+}
+
+/** Build chair instances from the authoritative authored FloorPlan. The
+ * display label and floor number are intentionally irrelevant: published
+ * floor records can have a display label such as "Floor 5" while their
+ * internal ordinal differs. */
+export function deriveStudentAuditoriumChairLayoutsForFloor(
+  floor: Pick<FloorPlan, "rooms" | "furniture">,
+): StudentAuditoriumChairLayout[] {
+  const auditoriumRoomPolygons = floor.rooms
+    .filter((room) => room.visible !== false && /\b(auditorium|lecture hall|lecture theatre|lecture theater)\b/i.test(`${room.name} ${room.type}`))
+    .map(roomOutlinePoints)
+    .filter((polygon) => polygon.length >= 3);
+  return deriveStudentAuditoriumChairLayouts(floor.furniture, auditoriumRoomPolygons);
 }
 
 /** Angles for evenly spaced seats around a table; kept pure for renderer tests. */

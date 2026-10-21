@@ -26,7 +26,7 @@ describe("mobile building details sheet", () => {
     expect(resolveMobileBuildingSheetSnap("default", -300, -700, heights)).toBe("expanded");
   });
 
-  it("opens in a useful medium state with primary actions and reveals full details on expansion", () => {
+  it("opens in a useful medium state with primary actions and full readable details", () => {
     render(<MobileBuildingSheet
       selected={building} campusId="campus-1" onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}
       onSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
@@ -45,9 +45,54 @@ describe("mobile building details sheet", () => {
     expect(sheetContent.getByRole("button", { name: /Save/ })).toBeVisible();
     expect(sheetContent.getByRole("button", { name: "Show building QR code" })).toBeVisible();
     expect(sheetContent.getByRole("button", { name: "Report map issue" })).toBeVisible();
-    expect(sheetContent.getByTestId("building-quick-facts-compact")).toHaveTextContent("Academic");
-    expect(sheetContent.getByTestId("building-quick-facts-compact")).toHaveTextContent("6 floors");
+    expect(sheetContent.getByRole("region", { name: `${building.name} building information` })).toHaveClass("overflow-y-auto");
+    expect(sheetContent.getByRole("region", { name: `${building.name} building information` })).toHaveAttribute("tabindex", "0");
+    expect(sheetContent.getByRole("region", { name: "Quick information" })).toHaveTextContent("Academic");
+    expect(sheetContent.getByRole("region", { name: "Quick information" })).toHaveTextContent("6 floors");
     expect(sheetContent.queryByText(/floor plan/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps complete building information scrollable in the compact state with actions fixed below it", () => {
+    const description = "The CEIT building supports engineering and information technology programs with learning, laboratory, collaboration, and student service spaces. ".repeat(5);
+    render(<MobileBuildingSheet
+      selected={{ ...building, description, operating_hours: "Monday to Friday, 7:00 AM to 8:00 PM" }}
+      onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()} onSave={vi.fn()} onReport={vi.fn()}
+      onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
+      hasFloorPlans floorPlanCount={6} facilities={["Classrooms", "Laboratories", "Library", "Student lounge"]}
+      accessibility={["Accessible entrance", "Elevator access", "Accessible restrooms"]}
+      showQR={false} onToggleQR={vi.fn()}
+    />);
+
+    const sheet = screen.getByTestId("mobile-building-sheet");
+    const content = within(sheet).getByRole("region", { name: `${building.name} building information` });
+    const actions = within(sheet).getByTestId("building-sheet-actions");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
+    expect(content).toHaveClass("overflow-y-auto", "overscroll-contain", "touch-pan-y");
+    expect(within(content).getByTestId("building-description")).toHaveTextContent(description.trim());
+    expect(within(content).getByRole("region", { name: "Facilities" })).toHaveTextContent("Student lounge");
+    expect(within(content).getByRole("region", { name: "Accessibility" })).toHaveTextContent("Accessible restrooms");
+    expect(within(content).getByTestId("building-hours")).toHaveTextContent("7:00 AM to 8:00 PM");
+    expect(actions.parentElement).toBe(sheet);
+    expect(within(actions).getByRole("button", { name: "Directions" })).toBeVisible();
+    expect(within(actions).getByRole("button", { name: "Enter Building" })).toBeVisible();
+    expect(within(actions).getByRole("button", { name: /Save/ })).toBeVisible();
+    expect(within(actions).getByRole("button", { name: "Show building QR code" })).toBeVisible();
+    expect(within(actions).getByRole("button", { name: "Report map issue" })).toBeVisible();
+  });
+
+  it("does not hand scroll-region pointer gestures to the sheet handle", () => {
+    render(<MobileBuildingSheet
+      selected={building} onClose={vi.fn()} onDirections={vi.fn()} onEnterBuilding={vi.fn()}
+      onSave={vi.fn()} onReport={vi.fn()} onSignInPrompt={vi.fn()} saved={new Set()} studentAuth={{ isStudent: true } as StudentAuthState}
+      hasFloorPlans floorPlanCount={6} facilities={[]} accessibility={[]} showQR={false} onToggleQR={vi.fn()}
+    />);
+    const sheet = screen.getByTestId("mobile-building-sheet");
+    const content = screen.getByRole("region", { name: `${building.name} building information` });
+    fireEvent.pointerDown(content, { pointerId: 12, clientY: 300 });
+    fireEvent.pointerMove(content, { pointerId: 12, clientY: 180 });
+    fireEvent.pointerUp(content, { pointerId: 12, clientY: 180 });
+    expect(sheet).toHaveAttribute("data-dragging", "false");
+    expect(sheet).toHaveAttribute("data-sheet-state", "default");
   });
 
   it("keeps Report and QR visible while More contains Share and Copy Link", () => {
@@ -97,7 +142,8 @@ describe("mobile building details sheet", () => {
     const image = within(cover).getByAltText(`${building.name} building`);
     expect(sheet).toHaveAttribute("data-sheet-state", "default");
     expect(image).toHaveAttribute("src", "https://images.example/caba.jpg");
-    expect(cover.compareDocumentPosition(within(sheet).getByRole("heading", { name: building.name })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(sheet).getByRole("heading", { name: building.name }).compareDocumentPosition(cover) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(sheet).getByRole("heading", { name: building.name }).closest("header")).toHaveClass("sticky", "top-0");
   });
 
   it("offers peek and expanded sheet states without losing the current building", () => {

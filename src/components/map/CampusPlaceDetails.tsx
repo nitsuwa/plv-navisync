@@ -27,6 +27,7 @@ interface CampusPlaceDetailsProps {
   onSave: () => void;
   onReport: () => void;
   onSignInPrompt: (message: string) => void;
+  suspendedForSearch?: boolean;
 }
 
 const GATE_TYPE_LABELS: Record<string, string> = {
@@ -56,7 +57,7 @@ function PlaceCover({ place, compact = false }: { place: CampusMarker; compact?:
   );
 }
 
-export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRouteTo, canStartAt, saved, studentAuth, onClose, onDirections, onStartHere, onSave, onReport, onSignInPrompt }: CampusPlaceDetailsProps) {
+export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRouteTo, canStartAt, saved, studentAuth, onClose, onDirections, onStartHere, onSave, onReport, onSignInPrompt, suspendedForSearch = false }: CampusPlaceDetailsProps) {
   const reducedMotion = useReducedMotion();
   const toast = useToast();
   const [showGateQR, setShowGateQR] = useState(false);
@@ -164,14 +165,14 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
 
   return (
     <>
-      <motion.aside data-testid="campus-place-details-desktop" data-no-drag aria-label={`${place.name} campus place details`} className="map-layer-building-sheet absolute inset-y-0 right-0 z-30 hidden min-h-0 w-[min(370px,32vw)] flex-col overflow-y-auto border-l border-border/80 bg-card shadow-2xl md:flex" initial={reducedMotion ? false : { x: 18, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={reducedMotion ? { opacity: 0 } : { x: 12, opacity: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.22 }}>
+      <motion.aside data-testid="campus-place-details-desktop" data-no-drag data-suspended-for-search={suspendedForSearch} aria-hidden={suspendedForSearch || undefined} inert={suspendedForSearch ? ("" as never) : undefined} aria-label={`${place.name} campus place details`} className={`map-layer-building-sheet absolute inset-y-0 right-0 z-30 hidden min-h-0 w-[min(370px,32vw)] flex-col overflow-y-auto border-l border-border/80 bg-card shadow-2xl md:flex ${suspendedForSearch ? "invisible pointer-events-none" : ""}`} initial={reducedMotion ? false : { x: 18, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={reducedMotion ? { opacity: 0 } : { x: 12, opacity: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.22 }}>
         <div className="relative shrink-0 p-3 pb-0"><PlaceCover place={place} /><button type="button" onClick={onClose} aria-label={`Close ${place.name} details`} className="absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-slate-950/50 text-white"><X className="h-4 w-4" /></button></div>
         <div className="space-y-3 p-5"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{kind} · Campus place</span><h2 className="mt-1 break-words text-xl font-extrabold leading-tight">{place.name || "Campus place"}</h2></div><button type="button" onClick={onClose} aria-label={`Close ${place.name} details`} className="sr-only md:not-sr-only md:flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-muted"><X className="h-4 w-4" /></button></div>
           {info?.description && <p className="text-sm leading-relaxed text-muted-foreground">{info.description}</p>}{actions()}
           {features.length > 0 && <section className="space-y-1.5"><h3 className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Information</h3>{features.map((feature) => <p key={feature} className="flex items-center gap-2 rounded-lg border border-border/70 px-2.5 py-2 text-xs font-semibold"><Accessibility className="h-3.5 w-3.5 text-emerald-600" />{feature}</p>)}</section>}
         </div>
       </motion.aside>
-      <motion.section data-testid="campus-place-details-mobile" data-no-drag data-sheet-state={mobileSheetState} aria-label={`${place.name} campus place details`} className="map-layer-building-sheet fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-40 flex flex-col overflow-hidden rounded-3xl border border-border/80 bg-card shadow-[0_12px_42px_rgba(15,23,42,0.22)] md:hidden" initial={reducedMotion ? false : { y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reducedMotion ? { y: 12, opacity: 0 } : { y: 18, opacity: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.21 }} style={{ height: mobileSheetState === "peek" ? "clamp(166px, 22dvh, 180px)" : mobileSheetState === "default" ? "clamp(250px, 42dvh, 330px)" : "min(76dvh, 620px)", maxHeight: "var(--student-map-mobile-panel-max-height, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px)))" }}>
+      <motion.section data-testid="campus-place-details-mobile" data-no-drag data-suspended-for-search={suspendedForSearch} data-sheet-state={mobileSheetState} aria-hidden={suspendedForSearch || undefined} inert={suspendedForSearch ? ("" as never) : undefined} aria-label={`${place.name} campus place details`} className={`map-layer-building-sheet fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-40 flex flex-col overflow-hidden rounded-3xl border border-border/80 bg-card shadow-[0_12px_42px_rgba(15,23,42,0.22)] md:hidden ${suspendedForSearch ? "invisible pointer-events-none" : ""}`} initial={reducedMotion ? false : { y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reducedMotion ? { y: 12, opacity: 0 } : { y: 18, opacity: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.21 }} style={{ height: mobileSheetState === "peek" ? "clamp(166px, 22dvh, 180px)" : mobileSheetState === "default" ? "clamp(250px, 42dvh, 330px)" : "min(76dvh, 620px)", maxHeight: "var(--student-map-mobile-panel-max-height, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px)))" }}>
         <div className="grid h-11 shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b border-border/50 bg-card/95 px-2">
           <span aria-hidden="true" />
           <button type="button" data-testid="campus-place-sheet-handle" aria-label={mobileSheetState === "expanded" ? "Collapse place details" : mobileSheetState === "peek" ? "Show place details" : "Expand place details"} aria-expanded={mobileSheetState === "expanded"} className="flex h-11 min-w-0 touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50" onPointerDown={handleSheetPointerDown} onPointerMove={handleSheetPointerMove} onPointerUp={(event) => finishSheetPointer(event)} onPointerCancel={(event) => finishSheetPointer(event, true)} onLostPointerCapture={(event) => finishSheetPointer(event, true)} onClick={cycleMobileSheet}>

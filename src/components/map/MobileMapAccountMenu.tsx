@@ -47,7 +47,7 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || wrapperRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-testid='student-map-search-panel']")) {
+      if (target instanceof Element && target.closest("[data-map-search-shell='true']")) {
         changeOpen(false);
         return;
       }
@@ -95,7 +95,7 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
       if (!openRef.current) return;
       const target = event.target as Node;
       if (menuRef.current?.contains(target) || wrapperRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-testid='student-map-search-panel']")) {
+      if (target instanceof Element && target.closest("[data-map-search-shell='true']")) {
         changeOpen(false);
         return;
       }

@@ -1,0 +1,92 @@
+{
+  "graphNodes": 1055,
+  "graphEdges": 1237,
+  "candidates": [
+    {
+      "label": "Route A",
+      "routeCost": 467,
+      "traversedAuthoredEdgeCount": 28,
+      "destinationDoor": {
+        "id": "a5262e6c-e1e3-4cb9-b621-6df4eca21244",
+        "name": "Door",
+        "x": 557,
+        "y": 300,
+        "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596"
+      },
+      "elevatorTransitions": [
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+          "toFloorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3"
+        },
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+          "toFloorId": "9c340b05-9d5c-4668-b9ec-1707a44015c5"
+        },
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "9c340b05-9d5c-4668-b9ec-1707a44015c5",
+          "toFloorId": "a9df9844-16b0-4544-a449-d699a5b5f596"
+        }
+      ],
+      "floorFourSegment": {
+        "start": {
+          "x": 864,
+          "y": 78
+        },
+        "end": {
+          "x": 557,
+          "y": 300
+        },
+        "waypoints": 8
+      }
+    },
+    {
+      "label": "Route B",
+      "routeCost": 501,
+      "traversedAuthoredEdgeCount": 31,
+      "destinationDoor": {
+        "id": "2ef43d96-cd58-406a-b09b-1e7e48d5ff81",
+        "name": "Door",
+        "x": 403,
+        "y": 300,
+        "floorId": "a9df9844-16b0-4544-a449-d699a5b5f596"
+      },
+      "elevatorTransitions": [
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "29938739-2688-4436-836e-ddbf5e89cd27",
+          "toFloorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3"
+        },
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "a0d6e1e6-0ea3-4118-9e86-4d3f0f9937d3",
+          "toFloorId": "9c340b05-9d5c-4668-b9ec-1707a44015c5"
+        },
+        {
+          "label": "Elevator 1",
+          "sharedId": "shared_el_15676664-3144-4fd6-8954-0b99b5bf437b_de078f46-c59c-4ee5-b560-6c660fa01639",
+          "fromFloorId": "9c340b05-9d5c-4668-b9ec-1707a44015c5",
+          "toFloorId": "a9df9844-16b0-4544-a449-d699a5b5f596"
+        }
+      ],
+      "floorFourSegment": {
+        "start": {
+          "x": 864,
+          "y": 78
+        },
+        "end": {
+          "x": 403,
+          "y": 300
+        },
+        "waypoints": 11
+      }
+    }
+  ]
+}

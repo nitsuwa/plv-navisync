@@ -1,0 +1,16 @@
+{
+    "typecheckExit":  1,
+    "baseline":  "verification-artifacts/floating-floor-picker-20261018/typescript-current.txt",
+    "current":  "verification-artifacts/sos-priority-audit-20261018/typescript-current.txt",
+    "identityDefinition":  "source file + TypeScript code + diagnostic message (line shifts ignored)",
+    "baselineDiagnostics":  1029,
+    "currentDiagnostics":  1029,
+    "newDiagnosticIdentities":  0,
+    "resolvedDiagnosticIdentities":  0,
+    "newExamples":  [
+
+                    ],
+    "resolvedExamples":  [
+
+                         ]
+}

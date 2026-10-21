@@ -40,6 +40,7 @@ export interface UseCampusSearchResult {
 export function connectedCampusDestinations(campus: Campus): {
   buildingIds: Set<string>;
   roomKeys: Set<string>;
+  assemblyPointIds: Set<string>;
 } {
   const nodes = campus.navNodes ?? [];
   const edges = (campus.navEdges ?? []).filter((edge) => !edge.closed);
@@ -48,6 +49,14 @@ export function connectedCampusDestinations(campus: Campus): {
     .flatMap((edge) => [edge.startNodeId, edge.endNodeId]));
   const buildingIds = new Set<string>();
   const roomKeys = authoredNavigableRoomKeys(campus);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const assemblyPointIds = new Set((campus.assemblyPoints ?? []).flatMap((point) => {
+    const anchor = nodes.find((node) => node.id === point.navNodeId && node.assemblyPointId === point.id);
+    if (!anchor || !edges.some((edge) => edge.startNodeId !== edge.endNodeId
+      && nodeIds.has(edge.startNodeId) && nodeIds.has(edge.endNodeId)
+      && (edge.startNodeId === anchor.id || edge.endNodeId === anchor.id))) return [];
+    return [point.id];
+  }));
 
   for (const building of campus.buildings ?? []) {
     const entranceIds = new Set((building.entrances ?? []).map((entrance) => entrance.id));
@@ -60,7 +69,7 @@ export function connectedCampusDestinations(campus: Campus): {
     if (hasEntrance) buildingIds.add(building.id);
 
   }
-  return { buildingIds, roomKeys };
+  return { buildingIds, roomKeys, assemblyPointIds };
 }
 
 /**
@@ -219,6 +228,31 @@ export function useCampusSearch(
         description: m.studentInfo?.description || (m.type === "gate" ? "Campus Gate" : "Campus Landmark"),
         accessible: Boolean(m.studentInfo?.accessibleEntrance),
         keywords: [mName.toLowerCase(), "landmark", m.type.toLowerCase(), ...(m.studentInfo?.description ? [m.studentInfo.description.toLowerCase()] : [])],
+      });
+    });
+
+    // Assembly Points share the authored outdoor graph, but retain their own
+    // stable identity and destination type. Requiring the point-owned anchor
+    // plus an actual incident graph edge prevents a visual marker from being
+    // presented as a routable destination.
+    (campus.assemblyPoints ?? []).forEach((point) => {
+      const connectedPoint = connected?.assemblyPointIds.has(point.id)
+        ?? Boolean(point.navNodeId && (campus.navNodes ?? []).some((node) =>
+          node.id === point.navNodeId && node.assemblyPointId === point.id)
+          && (campus.navEdges ?? []).some((edge) => !edge.closed
+            && edge.startNodeId !== edge.endNodeId
+            && (edge.startNodeId === point.navNodeId || edge.endNodeId === point.navNodeId)));
+      if (!connectedPoint) return;
+      entries.push({
+        id: point.id,
+        name: point.name || "Emergency Assembly Point",
+        kind: "destination",
+        category: "assembly_point",
+        campusPlaceId: point.id,
+        description: "Emergency Assembly Point",
+        accessible: Boolean(point.accessible),
+        keywords: [point.name || "Emergency Assembly Point", "assembly point", "emergency destination"]
+          .map((value) => value.toLowerCase()),
       });
     });
 

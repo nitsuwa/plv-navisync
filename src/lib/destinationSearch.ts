@@ -48,6 +48,8 @@ export function destinationKindLabel(result: SearchResult): string {
       return "Facility";
     case "marker":
       return result.category === "event" ? "Event" : "Landmark";
+    case "destination":
+      return result.category === "assembly_point" ? "Emergency Assembly Point" : "Campus destination";
     default:
       return "Campus place";
   }

@@ -1,5 +1,6 @@
 // Isolated browser audit: real demo sign-in/published-map reads; event responses and writes controlled.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
@@ -211,7 +212,9 @@ async function expired(){
   check(await page.getByRole('alert').getByText(/Your session has expired/).isVisible(),'Expired read explains signing in again rather than claiming the event is missing');
 }
 async function nativeZoom(role='student'){
-  const root=path.resolve('.tmp'),folder=path.join(root,`event-final-zoom-${randomUUID()}`);
+  const root=path.join(os.tmpdir(),'plv-navisync-browser-profiles');
+  const folder=path.join(root,`event-final-zoom-${randomUUID()}`);
+  fs.mkdirSync(root,{recursive:true});
   fs.mkdirSync(path.join(folder,'Default'),{recursive:true});
   let context;
   try{
@@ -235,7 +238,7 @@ async function nativeZoom(role='student'){
     if(role==='org')await proposal(viewport,{context,zoom:true});else if(role==='admin')await adminReview(viewport,{context,zoom:true});else await student(viewport,{context,zoom:true});
   }finally{
     await context?.close();page=null;
-    if(path.dirname(folder)!==root||!path.basename(folder).startsWith('event-final-zoom-'))throw Error('Unsafe zoom profile cleanup');
+    if(path.dirname(path.resolve(folder))!==path.resolve(root)||!path.basename(folder).startsWith('event-final-zoom-'))throw Error('Unsafe zoom profile cleanup');
     fs.rmSync(folder,{recursive:true,force:true});
   }
 }

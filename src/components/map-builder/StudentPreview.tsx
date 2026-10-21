@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, CheckCircle2, Globe2, Loader2, X, AlertTriangle } from "lucide-react";
 import { CampusMapPage } from "../../pages/CampusMapPage";
 import type { Campus } from "./types";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { cn } from "../../lib/utils";
+import { CampusPublicationOutcomeUncertainError } from "../../services/campusService";
 
 interface StudentPreviewProps {
   campus: Campus;
@@ -25,6 +26,9 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishOutcomeUncertain, setPublishOutcomeUncertain] = useState(false);
+  const [warningsExpanded, setWarningsExpanded] = useState(true);
+  const publishingRef = useRef(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setPreparing(false));
@@ -33,26 +37,39 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
 
   const blockers = useMemo(() => validationIssues.filter((issue) => issue.severity === "error"), [validationIssues]);
   const warnings = useMemo(() => validationIssues.filter((issue) => issue.severity === "warning"), [validationIssues]);
+  const issueLocation = (issue: ValidationIssue) => {
+    const building = issue.buildingId ? campus.buildings.find((item) => item.id === issue.buildingId) : undefined;
+    const floor = building && issue.floorId ? building.floors.find((item) => item.id === issue.floorId) : undefined;
+    const room = floor && issue.roomId ? floor.rooms.find((item) => item.id === issue.roomId) : undefined;
+    return [building?.name || building?.code, floor?.label, room?.name].filter(Boolean).join(" · ") || null;
+  };
   const previewLabel = campus.lifecycleStatus === "coming_soon"
     ? "Coming Soon Preview"
     : campus.publishStatus === "published" ? "Published Map Preview" : "Draft Preview";
 
   const submitPublish = async () => {
+    if (publishingRef.current || blockers.length > 0) return;
+    publishingRef.current = true;
     setPublishing(true);
     setPublishError(null);
     try {
       await onPublish();
       setConfirmOpen(false);
       setPublished(true);
+      setPublishOutcomeUncertain(false);
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : "Publishing failed. Try again.");
+      setPublishOutcomeUncertain(error instanceof CampusPublicationOutcomeUncertainError);
     } finally {
+      publishingRef.current = false;
       setPublishing(false);
     }
   };
 
   return (
     <motion.div
+      data-testid="student-preview-root"
+      data-student-preview-root="true"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -66,7 +83,7 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
             <Globe2 className="h-3.5 w-3.5 shrink-0 text-primary" />
             <p className="truncate text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">{previewLabel}</p>
           </div>
-          <button onClick={onBack} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[11px] font-bold text-foreground hover:bg-muted" aria-label="Back to editor">
+          <button onClick={onBack} disabled={publishing || publishOutcomeUncertain} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[11px] font-bold text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-50" aria-label="Back to editor">
             <ArrowLeft className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Back to Editor</span><span className="sm:hidden">Back</span>
           </button>
           {!published && (
@@ -125,23 +142,31 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
 
       <AnimatePresence>
         {confirmOpen && !published && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[360] flex items-center justify-center bg-black/35 p-4" onClick={() => !publishing && setConfirmOpen(false)}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[360] flex items-center justify-center bg-black/35 p-4" onClick={() => { if (!publishing && !publishOutcomeUncertain) setConfirmOpen(false); }}>
             <motion.div initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Publish campus">
               <div className="flex items-start gap-3">
                 <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", blockers.length ? "bg-red-100 text-red-600" : warnings.length ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600")}>
                   {blockers.length ? <AlertTriangle className="h-4 w-4" /> : <Globe2 className="h-4 w-4" />}
                 </div>
-                <div className="min-w-0 flex-1"><h2 className="text-base font-extrabold text-foreground">{blockers.length ? "Campus isn’t ready to publish yet" : "Publish Campus?"}</h2><p className="mt-0.5 text-xs text-muted-foreground">Students will see this saved version of {campus.name}.</p></div>
-                <button onClick={() => setConfirmOpen(false)} disabled={publishing} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" aria-label="Close publish dialog"><X className="h-4 w-4" /></button>
+                <div className="min-w-0 flex-1"><h2 className="text-base font-extrabold text-foreground">{publishing ? "Publishing Campus…" : blockers.length ? "Campus isn’t ready to publish yet" : "Publish Campus?"}</h2><p className="mt-0.5 text-xs text-muted-foreground">{publishing ? "Publishing the saved version for students. Please wait for server confirmation." : `Students will see this saved version of ${campus.name}.`}</p></div>
+                {!publishing && !publishOutcomeUncertain && <button onClick={() => setConfirmOpen(false)} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" aria-label="Close publish dialog"><X className="h-4 w-4" /></button>}
               </div>
               {(blockers.length > 0 || warnings.length > 0) && (
                 <div className="mt-4 space-y-2 rounded-xl border border-border/70 bg-muted/20 p-3">
-                  {blockers.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600">What needs attention ({blockers.length})</p><ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{blockers.slice(0, 6).map((issue, index) => <li key={`${issue.type}-${index}`}>{issue.message}</li>)}</ul>{blockers.length > 6 && <p className="mt-1 text-[10px] text-muted-foreground">And {blockers.length - 6} more blocking issues.</p>}</div>}
-                  {warnings.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Warnings ({warnings.length})</p><p className="mt-1 text-xs text-muted-foreground">Warnings do not prevent publishing.</p></div>}
+                  {blockers.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600">What needs attention ({blockers.length})</p><ul className="mt-1.5 max-h-32 overflow-y-auto space-y-2 text-xs text-muted-foreground">{blockers.slice(0, 6).map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-red-200/70 bg-background/60 px-2.5 py-2"><span className="mr-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-red-700">Error</span>{issue.message}{issueLocation(issue) && <span className="mt-1 block text-[10px]">{issueLocation(issue)}</span>}</li>)}</ul>{blockers.length > 6 && <p className="mt-1 text-[10px] text-muted-foreground">And {blockers.length - 6} more blocking issues.</p>}</div>}
+                  {warnings.length > 0 && <section>
+                    <button type="button" onClick={() => setWarningsExpanded((expanded) => !expanded)} aria-expanded={warningsExpanded} className="flex w-full items-center justify-between text-left">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Warnings ({warnings.length})</span>
+                      <span className="text-[10px] font-bold text-muted-foreground">{warningsExpanded ? "Hide details" : "Show details"}</span>
+                    </button>
+                    <p className="mt-1 text-xs text-muted-foreground">Warnings do not prevent publishing, but review each finding before continuing.</p>
+                    {warningsExpanded && <ul className="mt-2 max-h-36 overflow-y-auto space-y-2" aria-label="Publication warnings">{warnings.map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-amber-200/70 bg-background/60 px-2.5 py-2 text-xs text-foreground"><span className="mr-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-amber-800">Warning</span>{issue.message}{issueLocation(issue) && <span className="mt-1 block text-[10px] text-muted-foreground">{issueLocation(issue)}</span>}</li>)}</ul>}
+                  </section>}
                 </div>
               )}
-              {publishError && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{publishError}</p>}
-              <div className="mt-5 flex justify-end gap-2"><button onClick={() => setConfirmOpen(false)} disabled={publishing} className="h-9 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Cancel</button><button onClick={submitPublish} disabled={publishing || blockers.length > 0} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{publishing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{warnings.length > 0 ? "Publish Anyway" : "Publish"}</button></div>
+              {publishError && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300" role="alert">{publishError}</p>}
+              {publishing && <div className="mt-4 flex items-center gap-2 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2.5 text-xs font-semibold text-primary" role="status" aria-live="polite"><Loader2 className="h-4 w-4 animate-spin" />Publishing campus data…</div>}
+              <div className="mt-5 flex justify-end gap-2">{!publishing && !publishOutcomeUncertain && <button onClick={() => setConfirmOpen(false)} className="h-9 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Cancel</button>}<button onClick={submitPublish} disabled={publishing || blockers.length > 0} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{publishing ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Publishing…</> : publishOutcomeUncertain ? "Check status & retry" : warnings.length > 0 ? "Publish Anyway" : "Publish"}</button></div>
             </motion.div>
           </motion.div>
         )}

@@ -9,6 +9,8 @@ export interface Room {
   name: string;
   x: number; y: number; w: number; h: number;
   type: RoomType;
+  description?: string;
+  roomPhotoPath?: string;
 }
 
 export interface Floor {

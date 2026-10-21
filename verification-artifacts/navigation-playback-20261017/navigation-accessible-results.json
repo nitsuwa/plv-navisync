@@ -1,0 +1,17 @@
+{
+  "fixture": "read-only published campus; remote writes blocked",
+  "checks": {
+    "accessibleControlAvailable": false,
+    "accessibleRoutePreview": true,
+    "accessibleActiveMarker": true,
+    "accessibleStepBefore": "GUIDED NAVIGATION\n\nStep 1 of 5 · BUSINESS OFFICE SIMULATION ROOM\n\nFOLLOW\nEXPLORE\n\nStart at Campus Gate.\n\nPause\n1×\nExpand",
+    "accessiblePreviousAvailable": false,
+    "accessibleNextAvailable": true,
+    "errors": [],
+    "remoteWritesBlocked": true
+  },
+  "errors": [],
+  "screenshots": [
+    "accessible-caba-route-preview.png"
+  ]
+}

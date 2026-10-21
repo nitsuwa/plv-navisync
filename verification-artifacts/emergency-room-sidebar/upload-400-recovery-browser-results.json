@@ -1,0 +1,54 @@
+{
+  "fixture": "TEST ONLY local Storage/PostgREST adapter",
+  "productionWrites": "none",
+  "storageRequests": [
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/emergency-evacuation-videos/test-campus-only/test-room-101/ff70215a-f4b2-480c-ba8d-6f79efac56d2.mp4",
+      "contentType": "video/mp4",
+      "attempt": 1
+    },
+    {
+      "method": "POST",
+      "path": "/storage/v1/object/emergency-evacuation-videos/test-campus-only/test-room-101/5e1d6701-05cf-4289-b357-74fc3ff4cfed.mp4",
+      "contentType": "video/mp4",
+      "attempt": 2
+    }
+  ],
+  "metadataRows": [
+    {
+      "id": "5e1d6701-05cf-4289-b357-74fc3ff4cfed",
+      "campus_id": "test-campus-only",
+      "building_id": "test-building-1",
+      "floor_id": "test-floor-1",
+      "room_id": "test-room-101",
+      "storage_path": "test-campus-only/test-room-101/5e1d6701-05cf-4289-b357-74fc3ff4cfed.mp4",
+      "original_filename": "TEST_ONLY retry.mp4",
+      "mime_type": "video/mp4",
+      "file_size_bytes": 12,
+      "title": "TEST_ONLY retry",
+      "uploaded_by": "90000000-0000-4000-8000-000000000001",
+      "captions_path": null,
+      "captions_size_bytes": null,
+      "duration_seconds": null,
+      "status": "draft",
+      "approved_route_fingerprint": null,
+      "approved_by": null,
+      "published_at": null,
+      "created_at": "2026-10-16T07:33:35.140Z",
+      "updated_at": "2026-10-16T07:33:35.140Z"
+    }
+  ],
+  "checks": {
+    "conciseError": true,
+    "diagnosticsInitiallyCollapsed": true,
+    "storage400IsIdentified": true,
+    "pathAndMimeAreVisible": true,
+    "retryCreatesOneMetadataRow": true,
+    "retryUsesFreshCanonicalObjectPath": true,
+    "uploadedDraftRendersAfterReloadingMetadata": true,
+    "failureDiagnosticClearsOnSuccess": true,
+    "noBrowserErrors": true
+  },
+  "browserErrors": []
+}

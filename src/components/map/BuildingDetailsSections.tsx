@@ -38,7 +38,7 @@ export function BuildingDetailsSections({
     return (
       <div className="space-y-2.5">
         {description && variant === "compact" && (
-          <p data-testid="building-description" className="line-clamp-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
+          <p data-testid="building-description" className="text-xs leading-relaxed text-muted-foreground">{description}</p>
         )}
         <div data-testid="building-quick-facts-compact" className="space-y-1.5">
           <p className="text-xs font-semibold text-foreground/80">{facts.join(" · ")}</p>

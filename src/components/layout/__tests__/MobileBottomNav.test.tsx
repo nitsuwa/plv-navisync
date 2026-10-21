@@ -26,9 +26,20 @@ describe("MobileBottomNav", () => {
   it("shows the configured Home and Map routes for public visitors", () => {
     renderNav("/map");
     const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(nav).toHaveAttribute("data-layout-mode", "map-row");
+    expect(nav).toHaveClass("relative", "w-full", "shrink-0", "map-layer-bottom-nav");
+    expect(nav).not.toHaveClass("fixed", "bottom-0");
+    expect(nav).toHaveClass("pb-[env(safe-area-inset-bottom)]");
     expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
     expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("href", "/map");
     expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps the navigation fixed over ordinary scrolling pages", () => {
+    renderNav("/home");
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(nav).toHaveAttribute("data-layout-mode", "fixed-overlay");
+    expect(nav).toHaveClass("fixed", "inset-x-0", "bottom-0", "z-50");
   });
 
   it("shows Home and Map for regular students", () => {

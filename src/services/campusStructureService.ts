@@ -1,4 +1,5 @@
 import { getSupabase } from "../lib/supabase";
+import { genId } from "../components/map-builder/constants";
 import { assertFloorPhysicalReferences, normalizeFloor } from "../lib/floorPlanNormalization";
 import { repairInvalidFloorMapElementIds } from "../lib/physicalFloorIntegrity";
 import { nextFloorNumberForBuilding } from "../lib/floorManagement";
@@ -8,6 +9,7 @@ import { ENTRANCE_TRANSITION_EDGE_TYPE, reconcileEntranceTransitions } from "../
 import { canonicalExteriorEmergencyStairsForBuilding, syncExteriorEmergencyStairGraph } from "../lib/exteriorEmergencyStairs";
 import { syncCampusGateNavigation } from "../lib/campusGates";
 import { reconcileExteriorApproachNavigation } from "../lib/exteriorApproachNavigation";
+import { reconcilePathwayNavigation } from "../lib/campusPathNavigation";
 import { physicalFloorMismatch } from "../lib/physicalFloorIntegrity";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type {
@@ -758,7 +760,11 @@ function verifyHydratedBuildingCodes(payload: CampusStructurePayload, hydrated: 
  * serialized.
  */
 export function canonicalizeCampusStructureForPersistence(campus: Campus): Campus {
-  const positionedEntranceNodes = syncEntranceNodePositions(campus.buildings ?? [], campus.navNodes ?? []);
+  // Persist compiler-derived intersections together with the authored pathway
+  // network. This makes legacy drafts converge on the same graph at save time
+  // and ensures a subsequent reload does not lose newly derived junctions.
+  const reconciledPathways = reconcilePathwayNavigation(campus, genId, { preserveAuthoredGeometry: true });
+  const positionedEntranceNodes = syncEntranceNodePositions(reconciledPathways.buildings ?? [], reconciledPathways.navNodes ?? []);
   const indoorNodes = positionedEntranceNodes.filter((node) => !!node.floorId);
   const positionedIndoorNodes = (campus.buildings ?? []).flatMap((building) =>
     syncIndoorLinkedNodePositions(
@@ -774,7 +780,7 @@ export function canonicalizeCampusStructureForPersistence(campus: Campus): Campu
   );
   const positionedById = new Map(positionedIndoorNodes.map((node) => [node.id, node]));
   const positionedCampus = {
-    ...campus,
+    ...reconciledPathways,
     navNodes: positionedEntranceNodes.map((node) => positionedById.get(node.id) ?? node),
   };
   const withExteriorStairs = syncExteriorEmergencyStairGraph(
@@ -1140,7 +1146,7 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
   // emergency-stair, and Campus Gate identities are restored so a save/reload
   // round-trip produces the same approach nodes/edges without duplicates.
   const withExteriorApproach = reconcileExteriorApproachNavigation(withCampusGates);
-  return { ...withExteriorApproach,
+  const hydrated = { ...withExteriorApproach,
     ...(canvasAppearance ? {
       canvasGroundMaterial: canvasAppearance.canvasGroundMaterial,
       canvasGroundColor: canvasAppearance.canvasGroundColor,
@@ -1152,6 +1158,10 @@ export function hydrateCampusStructure(campus: Campus, rows: CampusStructureRows
     assemblyPoints: top<AssemblyPoint>("assembly_point"), decorAssets: top<CampusDecorAsset>("decor"),
     eventOverlays: top<CampusEventOverlay>("event_overlay"),
     navNodes: withExteriorApproach.navNodes ?? [], navEdges: withExteriorApproach.navEdges ?? [], buildings: withExteriorApproach.buildings };
+  // Compile only after the persisted path metadata has been hydrated. Paths
+  // without explicit navigation ownership remain visual geometry and are not
+  // promoted into the route graph.
+  return reconcilePathwayNavigation(hydrated, genId, { preserveAuthoredGeometry: true });
 }
 
 async function selectStructure(campusId: string): Promise<CampusStructureRows> {

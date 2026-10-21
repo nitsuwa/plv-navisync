@@ -887,8 +887,35 @@ describe("B5 Phase 3 — cross-floor navigation transitions", () => {
     const t = edges[0];
     expect(t.type).toBe(CROSS_FLOOR_EDGE_TYPE);
     expect(t.accessible).toBe(false);
+    expect(t.emergencySafe).toBe(true);
     expect(crossFloorTransitionAccessible("stair")).toBe(false);
     expect([t.startNodeId, t.endNodeId].sort()).toEqual(["n1", "n2"]);
+  });
+
+  it("assesses ordinary Stair emergency eligibility per connected floor pair", () => {
+    const threeFloors = [
+      { ...floors[0], stairs: [{ ...stair("s1", "shared-stair"), emergencySafe: true }] },
+      { ...floors[1], stairs: [{ ...stair("s2", "shared-stair"), emergencySafe: true }] },
+      { ...floors[2], stairs: [{ ...stair("s3", "shared-stair"), emergencySafe: false }] },
+    ];
+    const nodes = [
+      linked("n1", "f1", { stairId: "s1" }),
+      linked("n2", "f2", { stairId: "s2" }),
+      linked("n3", "f3", { stairId: "s3" }),
+    ];
+
+    const transitions = reconcileCrossFloorTransitions(nodes, [], threeFloors, "b1");
+    expect(transitions.find((edge) => [edge.startNodeId, edge.endNodeId].includes("n1")
+      && [edge.startNodeId, edge.endNodeId].includes("n2"))?.emergencySafe).toBe(true);
+    expect(transitions.find((edge) => [edge.startNodeId, edge.endNodeId].includes("n2")
+      && [edge.startNodeId, edge.endNodeId].includes("n3"))?.emergencySafe).toBe(false);
+
+    const explicitlyBlockedFloor2 = threeFloors.map((floor) => floor.id === "f2"
+      ? { ...floor, stairs: [{ ...floor.stairs[0], emergencySafe: false }] }
+      : floor);
+    const blockedTransitions = reconcileCrossFloorTransitions(nodes, [], explicitlyBlockedFloor2, "b1");
+    expect(blockedTransitions.find((edge) => [edge.startNodeId, edge.endNodeId].includes("n1")
+      && [edge.startNodeId, edge.endNodeId].includes("n2"))?.emergencySafe).toBe(false);
   });
 
   it("changing Direction only never creates a new Stair connection", () => {

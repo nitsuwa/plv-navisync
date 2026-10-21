@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeElements } from "@react-three/fiber";
 import { Billboard, Html, OrbitControls } from "@react-three/drei";
-import { CalendarDays, DoorOpen, MapPin } from "lucide-react";
+import { CalendarDays, DoorOpen, Flag, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 import type { ReadonlyOutdoorCampus } from "../../lib/readonlyOutdoorCampus";
@@ -11,12 +11,16 @@ import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
 import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } from "../../lib/studentCampus3dCoordinates";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
-import { student3dFocusDistance, student3dSafeFocusCenter } from "../../lib/student3dCameraFocus";
-import { clampStudent3dCameraTarget, configureStudent3dInputMappings, crossedStudent3dDragThreshold, type Student3dCameraTargetBounds } from "../../lib/student3dInput";
+import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection } from "../../lib/student3dCameraFocus";
+import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
+import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
 import type { EventVenue } from "../../lib/eventMapView";
-import type { Pt } from "../../lib/routePlanner";
+import type { Pt, RouteMode } from "../../lib/routePlanner";
+import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
+import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
+import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { SUHAY_HUSAY_V3_LIMBS, SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V4_LIMBS, SUHAY_HUSAY_V4_POINTS, SUHAY_HUSAY_V4_SUPPORTS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V5_ROCKS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, type SuhayPointName, type SuhayV4PointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
 
 declare module "react" {
@@ -27,8 +31,17 @@ declare module "react" {
 
 interface StudentCampus3DRendererProps {
   campus: ReadonlyOutdoorCampus;
+  routeMode?: RouteMode;
+  routeColor?: string;
+  animateRouteArrows?: boolean;
   routePoints?: Pt[];
   routeSegments?: Pt[][];
+  emergencyRouteSegments?: readonly { id: string; points: Pt[]; color: string; label: string; doorLabel?: string; exitLabel?: string; showDoorMarker?: boolean; showExitMarker?: boolean }[];
+  activeEmergencyRouteId?: string | null;
+  emergencyRouteOverview?: boolean;
+  emergencyRouteOverviewNonce?: number;
+  emergencyAssemblyPointIds?: ReadonlySet<string>;
+  activeEmergencyAssemblyPointId?: string | null;
   followRoutePoints?: Pt[];
   routePreview?: boolean;
   startPoint?: Pt | null;
@@ -37,10 +50,14 @@ interface StudentCampus3DRendererProps {
   showDestinationMarker?: boolean;
   humanPoint?: Pt | null;
   walkProgressRef?: MutableRefObject<number>;
-  activeTransition?: { point: Pt; label: string; buildingId?: string | null; entranceId?: string | null; onActivate: () => void } | null;
-  exploreTransitionCues?: readonly { id: string; point: Pt; label: string; onActivate: () => void }[];
+  activeTransition?: { point: Pt; label: string; displayLabel?: string; buildingId?: string | null; entranceId?: string | null; onActivate: () => void } | null;
+  exploreTransitionCues?: readonly StudentRouteExploreTransitionMarker[];
   focusPoint?: Pt | null;
   focusNonce?: number;
+  /** Refit a selected tour stop when its responsive viewport layout changes. */
+  focusOnViewportChange?: boolean;
+  /** Selected exterior tour stop; only this selection uses entrance-facing showcase framing. */
+  showcaseBuildingId?: string | null;
   arrivalFocusPoint?: Pt | null;
   arrivalFocusKey?: string | null;
   arrivalFocusBuildingId?: string | null;
@@ -48,6 +65,8 @@ interface StudentCampus3DRendererProps {
   routeInspectionFocusPoint?: Pt | null;
   routeInspectionFocusKey?: string;
   recenterNonce?: number;
+  recenterFollowOffset?: Student3dCameraOffset | null;
+  onRecenterComplete?: (nonce: number) => void;
   selectedBuildingId?: string | null;
   selectedPlaceId?: string | null;
   showEvents?: boolean;
@@ -66,6 +85,10 @@ interface StudentCampus3DRendererProps {
   onInspectEventVenue?: (venueId: string) => void;
   onIntentionalPan?: () => void;
   onSelectTransition?: () => void;
+  onCameraPoseChange?: (pose: Student3dCameraPose) => void;
+  cameraPoseRestore?: Student3dCameraPose | null;
+  cameraPoseRestoreNonce?: number;
+  onCameraPoseRestoreComplete?: (nonce: number) => void;
 }
 const EMPTY_EVENT_VENUES: readonly EventVenue[] = Object.freeze([]);
 
@@ -95,6 +118,7 @@ function campusContentBounds(campus: ReadonlyOutdoorCampus) {
   campus.buildings.forEach((building) => addBounds(building.x + building.width / 2, building.y + building.height / 2, building.width, building.height, building.rotation));
   campus.paths.forEach((path) => path.points.forEach((point) => { xs.push(point.x); ys.push(point.y); }));
   campus.markers.forEach((marker) => { xs.push(marker.x); ys.push(marker.y); });
+  campus.assemblyPoints.forEach((point) => { xs.push(point.x); ys.push(point.y); });
   campus.decorAssets.forEach((asset) => {
     if (["ground-area", "lawn-area", "garden-area", "plaza-area", "parking-lot"].includes(asset.type)) {
       addBounds(asset.x, asset.y, asset.width ?? 150, asset.height ?? 95, asset.rotation);
@@ -159,19 +183,22 @@ function buildRibbonGeometry(points: readonly Pt[], width: number, elevation: nu
   return geometry;
 }
 
-function PathSurface({ path, route = false, halo = false }: { path: CampusPath | { id: string; points: Pt[]; width: number; type: string; color?: string }; route?: boolean; halo?: boolean }) {
+type RouteSurfacePath = { id: string; points: Pt[]; width: number; type: string; color?: string; opacity?: number; label?: string };
+
+function PathSurface({ path, route = false, halo = false }: { path: CampusPath | RouteSurfacePath; route?: boolean; halo?: boolean }) {
   const road = !route && path.type === "road";
   const width = (path.width || (route ? 10 : 12)) + (halo ? (route ? 14 : 7) : 0);
   const geometry = useMemo(() => buildRibbonGeometry(path.points, width, route ? (halo ? 0.105 : 0.12) : road ? (halo ? 0.006 : 0.009) : (halo ? 0.012 : 0.015)), [path.points, width, road, route, halo]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const color = route ? (halo ? "#ffffff" : "#1769e0") : halo ? "#8c9d89" : road ? "#77818b" : path.type === "accessible" ? "#c5d8e8" : path.color || "#f8f6ef";
+  const color = route ? (halo ? "#ffffff" : path.color ?? "#1769e0") : halo ? "#8c9d89" : road ? "#77818b" : path.type === "accessible" ? "#c5d8e8" : path.color || "#f8f6ef";
+  const opacity = route ? (halo ? 0.92 : ("opacity" in path ? path.opacity ?? 1 : 1)) : 1;
   return <mesh geometry={geometry} receiveShadow={false} renderOrder={route ? (halo ? 8 : 9) : 2}>
-    <meshStandardMaterial color={color} roughness={0.94} metalness={0} transparent={route && halo} opacity={route && halo ? 0.92 : 1} side={THREE.DoubleSide} depthWrite />
+    <meshStandardMaterial color={color} roughness={0.94} metalness={0} transparent={route && (halo || opacity < 1)} opacity={opacity} side={THREE.DoubleSide} depthWrite={opacity > 0.8} />
   </mesh>;
 }
 const MemoPathSurface = memo(PathSurface);
 
-function RouteArrows({ points, reducedMotion = false }: { points: readonly Pt[]; reducedMotion?: boolean }) {
+function RouteArrows({ points, reducedMotion = false, animate = true }: { points: readonly Pt[]; reducedMotion?: boolean; animate?: boolean }) {
   const arrows = useMemo(() => routeArrowPlacements(points, { worldScale: STUDENT_CAMPUS_3D_SCALE }), [points]);
   const routeSampler = useMemo(() => createRouteWorldSampler(points, STUDENT_CAMPUS_3D_SCALE), [points]);
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -203,7 +230,7 @@ function RouteArrows({ points, reducedMotion = false }: { points: readonly Pt[];
   }, [arrows]);
   useFrame((_, delta) => {
     const mesh = meshRef.current;
-    if (!mesh || reducedMotion || arrows.length === 0) return;
+    if (!mesh || reducedMotion || !animate || arrows.length === 0) return;
     const usable = routeSampler.totalLength - 1.8;
     if (usable <= 0) return;
     elapsedRef.current += Math.min(delta, 0.05);
@@ -1602,11 +1629,11 @@ function ActiveTransitionMarker({ transition, reducedMotion, shouldSuppressClick
   return <group position={point}>
     <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.17, 0.22, 24]} /><meshBasicMaterial color="#1769e0" transparent opacity={0.82} side={THREE.DoubleSide} /></mesh>
     <mesh position={[0, 0.24, 0]}><cylinderGeometry args={[0.012, 0.012, 0.46, 8]} /><meshStandardMaterial color="#1769e0" transparent opacity={0.72} /></mesh>
-    <ActiveTransitionLabel label={transition.label} onActivate={transition.onActivate} reducedMotion={reducedMotion} shouldSuppressClick={shouldSuppressClick} />
+    <ActiveTransitionLabel label={transition.displayLabel ?? transition.label} onActivate={transition.onActivate} reducedMotion={reducedMotion} shouldSuppressClick={shouldSuppressClick} />
   </group>;
 }
 
-function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, arrivalFocusPoint, arrivalFocusKey, arrivalFocusBuildingId, arrivalFocusPlaceId, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, surfaceRef }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "arrivalFocusPoint" | "arrivalFocusKey" | "arrivalFocusBuildingId" | "arrivalFocusPlaceId" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null> }) {
+function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, focusOnViewportChange, showcaseBuildingId, emergencyRouteSegments, emergencyRouteOverview, emergencyRouteOverviewNonce, arrivalFocusPoint, arrivalFocusKey, arrivalFocusBuildingId, arrivalFocusPlaceId, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, recenterFollowOffset, onRecenterComplete, surfaceRef, onCameraPoseChange, cameraPoseRestore, cameraPoseRestoreNonce, onCameraPoseRestoreComplete }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "focusOnViewportChange" | "showcaseBuildingId" | "emergencyRouteSegments" | "emergencyRouteOverview" | "emergencyRouteOverviewNonce" | "arrivalFocusPoint" | "arrivalFocusKey" | "arrivalFocusBuildingId" | "arrivalFocusPlaceId" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion" | "onRecenterComplete" | "onCameraPoseChange" | "cameraPoseRestore" | "cameraPoseRestoreNonce" | "onCameraPoseRestoreComplete"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null>; recenterFollowOffset?: Student3dCameraOffset | null }) {
   const { invalidate, camera, size } = useThree();
   const initialized = useRef(false);
   const owner = useRef<"fit" | "focus" | "follow" | "arrival" | "user" | "recenter">("fit");
@@ -1615,18 +1642,24 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   const cameraTime = useRef(0);
   const lastHuman = useRef<Pt>({ x: Number.NaN, y: Number.NaN });
   const desired = useRef(new THREE.Vector3());
+  const followViewportOffset = useRef(new THREE.Vector3());
   const focusKey = useRef("");
   const routeInspectionKey = useRef("");
   const lastArrivalFocusKey = useRef("");
   const enteredFollow = useRef(false);
+  const pendingRecenterNonce = useRef<number | null>(null);
+  const previousFollowPlaying = useRef(Boolean(followPlaying));
+  const lastCameraPoseRestoreNonce = useRef(0);
   const route = routePoints ?? [];
   // walkProgressRef is local to the active campus leg. Sampling that fraction
   // against the full route can pull Follow back toward an earlier building.
   const followRoute = followRoutePoints?.length ? followRoutePoints : route;
   const sampleFollowRoute = useMemo(() => createRoutePointSampler(followRoute), [followRoute]);
-  const routeFrameKey = useMemo(() => routePreview && route.length > 1
-    ? route.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")
-    : "", [route, routePreview]);
+  const routeFrameKey = useMemo(() => emergencyRouteOverview && emergencyRouteSegments?.length
+    ? `emergency-overview:${emergencyRouteOverviewNonce ?? 0}:${emergencyRouteSegments.flatMap((segment) => segment.points).map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")}`
+    : routePreview && route.length > 1
+      ? route.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")
+      : "", [emergencyRouteOverview, emergencyRouteOverviewNonce, emergencyRouteSegments, route, routePreview]);
   const lastRouteFrameKey = useRef("");
   const selectionKey = selectedBuildingId
     ? `building:${selectedBuildingId}`
@@ -1641,13 +1674,63 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   } else if (!routePreview && routePreviewFocusBaseline.current.active) {
     routePreviewFocusBaseline.current.active = false;
   }
+  const getSafeViewportOffset = useCallback((distance: number, offsetDirection: THREE.Vector3) => {
+    const canvas = surfaceRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    if (!rect) return new THREE.Vector3();
+    const overlays = Array.from(document.querySelectorAll<HTMLElement>(
+      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-testid='discover-tour-panel'], [data-map-search-header='true']",
+    )).filter((item) => {
+      const panel = item.getBoundingClientRect();
+      const style = getComputedStyle(item);
+      return style.display !== "none" && style.visibility !== "hidden" && panel.width > 0 && panel.height > 0;
+    }).map((item) => item.getBoundingClientRect());
+    const perspective = camera as THREE.PerspectiveCamera;
+    const pixelOffset = student3dSafeFocusOffset(rect, overlays, distance, perspective.fov ?? 44);
+    const viewDirection = offsetDirection.clone().negate();
+    const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
+    const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+    return new THREE.Vector3()
+      .addScaledVector(right, pixelOffset.right)
+      .addScaledVector(screenUp, pixelOffset.up);
+  }, [camera, surfaceRef]);
+  const followPoseForPoint = useCallback((point: Pt, distance = 12, preferredOffset?: Student3dCameraOffset | null) => {
+    const source = campusMapPointToWorld(point);
+    const requestedOffset = preferredOffset
+      ? new THREE.Vector3(...preferredOffset)
+      : new THREE.Vector3(0, 0.74, 0.673).normalize().multiplyScalar(distance);
+    const controls = orbitRef.current;
+    const safeOffset = clampStudent3dCameraOffset(
+      [requestedOffset.x, requestedOffset.y, requestedOffset.z],
+      controls?.minDistance ?? 4,
+      controls?.maxDistance ?? 60,
+    );
+    const offset = new THREE.Vector3(...safeOffset);
+    const effectiveDistance = offset.length();
+    const target = new THREE.Vector3(source.x, 0, source.z);
+    const offsetDirection = offset.clone().normalize();
+    const viewportOffset = getSafeViewportOffset(effectiveDistance, offsetDirection);
+    target.add(viewportOffset);
+    return { target, position: target.clone().add(offset), viewportOffset };
+  }, [getSafeViewportOffset, orbitRef]);
   const samplePointRef = useRef<Pt>({ x: 0, y: 0 });
   const routeFramePose = useCallback(() => {
     if (route.length < 2) return null;
-    // Preview mirrors the 2D map's full-campus framing. Focusing only the
-    // route's first point (or a planner-selected endpoint) clips the rest of
-    // the route behind mobile panels and makes Preview feel like a new map.
-    const content = campusContentBounds(campus);
+    const overviewPoints = emergencyRouteOverview
+      ? emergencyRouteSegments?.flatMap((segment) => segment.points) ?? []
+      : [];
+    // A multi-exit overview frames the union of the approved route geometry;
+    // ordinary route preview keeps its established full-campus framing.
+    const content = overviewPoints.length > 1
+      ? (() => {
+        const bounds = overviewPoints.reduce((value, point) => ({
+          minX: Math.min(value.minX, point.x), minY: Math.min(value.minY, point.y),
+          maxX: Math.max(value.maxX, point.x), maxY: Math.max(value.maxY, point.y),
+        }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+        const pad = Math.max(36, Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.08);
+        return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2, width: bounds.maxX - bounds.minX + pad * 2, height: bounds.maxY - bounds.minY + pad * 2 };
+      })()
+      : campusContentBounds(campus);
     const worldCenter = campusMapPointToWorld(content);
     const target = new THREE.Vector3(worldCenter.x, 0, worldCenter.z);
     const perspective = camera as THREE.PerspectiveCamera;
@@ -1656,18 +1739,17 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const distance = Math.max(
       campusMapSizeToWorld(content.width) / (2 * tangent * aspect),
       campusMapSizeToWorld(content.height) / (2 * tangent),
-    ) * 1.5;
+    ) * (overviewPoints.length > 1 ? 1.25 : 1.5);
     const offsetDirection = new THREE.Vector3(0, 0.74, 0.673).normalize();
     const canvas = surfaceRef.current;
     const rect = canvas?.getBoundingClientRect();
-    const surface = canvas?.closest<HTMLElement>("[data-testid='student-map-surface']");
-    const overlays = surface ? Array.from(surface.querySelectorAll<HTMLElement>(
-      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-map-search-header='true']",
+    const overlays = Array.from(document.querySelectorAll<HTMLElement>(
+      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-testid='discover-tour-panel'], [data-map-search-header='true']",
     )).filter((item) => {
       const panel = item.getBoundingClientRect();
       const style = getComputedStyle(item);
       return style.display !== "none" && style.visibility !== "hidden" && panel.width > 0 && panel.height > 0;
-    }).map((item) => item.getBoundingClientRect()) : [];
+    }).map((item) => item.getBoundingClientRect());
     if (rect) {
       const safeCenter = student3dSafeFocusCenter(rect, overlays);
       const verticalSpan = 2 * distance * Math.tan(THREE.MathUtils.degToRad(perspective.fov ?? 44) / 2);
@@ -1676,10 +1758,11 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       const offsetY = safeCenter.y - (rect.top + rect.height / 2);
       const viewDirection = offsetDirection.clone().negate();
       const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
-      target.addScaledVector(right, -offsetX * unitPerPx).addScaledVector(camera.up, offsetY * unitPerPx);
+      const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+      target.addScaledVector(right, -offsetX * unitPerPx).addScaledVector(screenUp, offsetY * unitPerPx);
     }
     return { target, position: target.clone().add(offsetDirection.multiplyScalar(distance)) };
-  }, [camera, campus, route, size.height, size.width, surfaceRef]);
+  }, [camera, campus, emergencyRouteOverview, emergencyRouteSegments, route, size.height, size.width, surfaceRef]);
   const focusTarget = useCallback((point: Pt, override?: { buildingId?: string | null; placeId?: string | null }) => {
     const focusBuildingId = override ? override.buildingId : selectedBuildingId;
     const focusPlaceId = override ? override.placeId : selectedPlaceId;
@@ -1692,51 +1775,72 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const buildingHeight = selectedBuilding ? 0.38 + Math.max(1, selectedBuilding.floors?.length ?? 1) * 0.15 : 0;
     const isGate = selectedPlace?.type === "gate";
     const landmarkHeight = isGate ? 1.52 : isSuhayHusay ? 1.5 : /monument|suhay|landmark/i.test(`${selectedPlace?.name ?? ""} ${selectedPlace?.type ?? ""}`) ? 2.0 : 0.8;
+    const buildingRotation = selectedBuilding ? THREE.MathUtils.degToRad(selectedBuilding.rotation ?? 0) : 0;
+    const buildingWidth = selectedBuilding ? Math.abs(selectedBuilding.width * Math.cos(buildingRotation)) + Math.abs(selectedBuilding.height * Math.sin(buildingRotation)) : 0;
+    const buildingDepth = selectedBuilding ? Math.abs(selectedBuilding.width * Math.sin(buildingRotation)) + Math.abs(selectedBuilding.height * Math.cos(buildingRotation)) : 0;
     const width = selectedBuilding
-      ? campusMapSizeToWorld(selectedBuilding.width)
+      ? campusMapSizeToWorld(buildingWidth)
       : isGate ? 1.72 : isSuhayHusay ? 1.22 : campusMapSizeToWorld(selectedPlace?.width ?? 72);
     const depth = selectedBuilding
-      ? campusMapSizeToWorld(selectedBuilding.height)
+      ? campusMapSizeToWorld(buildingDepth)
       : isGate ? 0.42 : isSuhayHusay ? 0.88 : campusMapSizeToWorld(selectedPlace?.height ?? 58);
     const height = buildingHeight || landmarkHeight;
     const source = campusMapPointToWorld(physicalFocusPoint, Math.max(0.3, height * 0.52));
     const next = new THREE.Vector3(source.x, source.y, source.z);
     const canvas = surfaceRef.current;
     const rect = canvas?.getBoundingClientRect();
-    const surface = canvas?.closest<HTMLElement>("[data-testid='student-map-surface']");
-    const overlays = surface ? Array.from(surface.querySelectorAll<HTMLElement>(
-      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-map-search-header='true']",
+    const overlays = Array.from(document.querySelectorAll<HTMLElement>(
+      ".map-layer-building-sheet, [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet'], [data-testid='event-map-panel'], [data-testid='route-planner-dialog'], [data-testid='collapsed-route-card'], [data-testid='mobile-active-route-dock'], [data-testid='student-floor-picker'], [data-testid='discover-tour-panel'], [data-map-search-header='true']",
     )).filter((item) => {
       const panel = item.getBoundingClientRect();
       const style = getComputedStyle(item);
       return style.display !== "none" && style.visibility !== "hidden" && panel.width > 0 && panel.height > 0;
-    }).map((item) => item.getBoundingClientRect()) : [];
+    }).map((item) => item.getBoundingClientRect());
     const safeCenter = rect
       ? student3dSafeFocusCenter(rect, overlays)
       : { x: size.width / 2, y: size.height / 2 };
     const perspective = camera as THREE.PerspectiveCamera;
+    const isShowcaseBuilding = Boolean(selectedBuilding && selectedBuilding.id === showcaseBuildingId);
     const distance = student3dFocusDistance(
       width,
       depth,
       height,
       perspective.fov ?? 44,
       size.width / Math.max(1, size.height),
-      { padding: selectedBuilding ? 1.55 : 1.45, min: selectedBuilding ? 8 : 6.5, max: selectedBuilding ? 19 : 14 },
+      { padding: selectedBuilding ? isShowcaseBuilding ? 1.28 : 1.55 : 1.45, min: selectedBuilding ? isShowcaseBuilding ? 6.5 : 8 : 6.5, max: selectedBuilding ? 21 : 14 },
     );
-    // Keep one stable elevated three-quarter direction for architectural
-    // selections. Move the look target only enough to center it in the usable
-    // area left after panels, using a single measurement at selection time.
-    const offsetDirection = new THREE.Vector3(0.43, 0.72, 0.55).normalize();
+    // Discover uses an authored front entrance as the camera's leading face,
+    // adding a restrained side offset for a recognizable three-quarter view.
+    // Ordinary map selections retain the established camera direction.
+    let offsetDirection = new THREE.Vector3(0.43, 0.72, 0.55).normalize();
+    if (isShowcaseBuilding && selectedBuilding) {
+      const entrances = [...(selectedBuilding.entrances ?? [])];
+      const preferredEntrance = entrances
+        .filter((entrance) => entrance.type !== "emergency_exit" && entrance.type !== "emergency" && entrance.direction !== "exit_only")
+        .sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)))[0]
+        ?? entrances.sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)))[0];
+      const authoredEntrance = preferredEntrance
+        ? entranceWorldPosition(selectedBuilding, preferredEntrance)
+        : selectedBuilding.entrance;
+      if (authoredEntrance) {
+        const showcaseDirection = student3dShowcaseCameraDirection(
+          { x: selectedBuilding.x + selectedBuilding.width / 2, y: selectedBuilding.y + selectedBuilding.height / 2 },
+          { x: authoredEntrance.x, y: authoredEntrance.y },
+        );
+        if (showcaseDirection) offsetDirection = new THREE.Vector3(showcaseDirection.x, showcaseDirection.y, showcaseDirection.z);
+      }
+    }
     const viewDirection = offsetDirection.clone().negate();
     const right = new THREE.Vector3().crossVectors(viewDirection, camera.up).normalize();
     const verticalSpan = 2 * distance * Math.tan(THREE.MathUtils.degToRad(perspective.fov ?? 44) / 2);
     const unitPerPx = verticalSpan / Math.max(1, rect?.height ?? size.height);
     const offsetX = safeCenter.x - ((rect?.left ?? 0) + (rect?.width ?? size.width) / 2);
     const offsetY = safeCenter.y - ((rect?.top ?? 0) + (rect?.height ?? size.height) / 2);
-    next.addScaledVector(right, -offsetX * unitPerPx).addScaledVector(camera.up, offsetY * unitPerPx);
+    const screenUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+    next.addScaledVector(right, -offsetX * unitPerPx).addScaledVector(screenUp, offsetY * unitPerPx);
     const position = next.clone().add(offsetDirection.multiplyScalar(distance));
     return { target: next, position, distance };
-  }, [camera, campus.buildings, campus.decorAssets, campus.markers, selectedBuildingId, selectedPlaceId, size.height, size.width, surfaceRef]);
+  }, [camera, campus.buildings, campus.decorAssets, campus.markers, selectedBuildingId, selectedPlaceId, showcaseBuildingId, size.height, size.width, surfaceRef]);
   const restoreDamping = useCallback(() => {
     const controls = orbitRef.current;
     if (!controls || previousDamping.current === null) return;
@@ -1814,30 +1918,48 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       lastArrivalFocusKey.current = "";
       return;
     }
-    const controls = orbitRef.current;
-    if (lastArrivalFocusKey.current === arrivalFocusKey || !initialized.current || !controls) return;
-    lastArrivalFocusKey.current = arrivalFocusKey;
-    // Arrival has higher priority than Follow, route inspection, selection,
-    // preview framing, or an older Recenter request. startTween replaces any
-    // in-flight camera owner so its stale target cannot win later.
-    const pose = focusTarget(arrivalFocusPoint, {
-      buildingId: arrivalFocusBuildingId,
-      placeId: arrivalFocusPlaceId,
-    });
-    if (reducedMotion) {
-      tween.current = null;
-      restoreDamping();
-      owner.current = "arrival";
-      controls.target.copy(pose.target);
-      controls.object.position.copy(pose.position);
-      controls.update();
-      invalidate();
-      return;
-    }
-    startTween(pose.target, "arrival", pose.position);
-  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, focusTarget, invalidate, orbitRef, reducedMotion, restoreDamping, startTween]);
+    if (lastArrivalFocusKey.current === arrivalFocusKey) return;
+    // The arrival sheet may be portaled and finish its layout after the map
+    // canvas mounts. Measure it once after that layout settles so the point is
+    // framed in the exposed map area, not behind the sheet.
+    const timer = window.setTimeout(() => {
+      const controls = orbitRef.current;
+      if (!initialized.current || !controls) return;
+      lastArrivalFocusKey.current = arrivalFocusKey;
+      // Arrival has higher priority than Follow, route inspection, selection,
+      // preview framing, or an older Recenter request. startTween replaces any
+      // in-flight camera owner so its stale target cannot win later.
+      const pose = focusTarget(arrivalFocusPoint, {
+        buildingId: arrivalFocusBuildingId,
+        placeId: arrivalFocusPlaceId,
+      });
+      if (reducedMotion) {
+        tween.current = null;
+        restoreDamping();
+        owner.current = "arrival";
+        controls.target.copy(pose.target);
+        controls.object.position.copy(pose.position);
+        controls.update();
+        invalidate();
+        return;
+      }
+      startTween(pose.target, "arrival", pose.position);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, focusTarget, invalidate, orbitRef, reducedMotion, restoreDamping, size.height, size.width, startTween]);
 
   useEffect(() => { enteredFollow.current = false; }, [followSessionKey]);
+  useEffect(() => {
+    const wasPlaying = previousFollowPlaying.current;
+    previousFollowPlaying.current = Boolean(followPlaying);
+    if (!wasPlaying || followPlaying) return;
+    // Freeze the rendered pose on Pause and discard any old follow tween.
+    tween.current = null;
+    pendingRecenterNonce.current = null;
+    restoreDamping();
+    if (followMode && !freeLook) owner.current = "user";
+    invalidate();
+  }, [followMode, followPlaying, freeLook, invalidate, restoreDamping]);
   useEffect(() => {
     // Follow owns the camera as soon as the canonical session returns to this
     // renderer, including a paused Follow session after Explore inspection.
@@ -1846,15 +1968,16 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     if (arrivalFocusKey || !followMode || freeLook || enteredFollow.current || !orbitRef.current) return;
     tween.current = null;
     const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
-    const source = currentPoint ? campusMapPointToWorld(currentPoint) : null;
-    const target = source ? new THREE.Vector3(source.x, 0, source.z) : desired.current.clone();
+    const pose = currentPoint ? followPoseForPoint(currentPoint) : null;
+    const target = pose ? pose.target : desired.current.clone();
+    followViewportOffset.current.copy(pose?.viewportOffset ?? new THREE.Vector3());
     desired.current.copy(target);
     if (currentPoint) { lastHuman.current.x = currentPoint.x; lastHuman.current.y = currentPoint.y; }
-    const position = target.clone().add(new THREE.Vector3(0, 8.88, 8.08));
+    const position = pose?.position ?? target.clone().add(new THREE.Vector3(0, 8.88, 8.08));
     startTween(target, "follow", position);
     enteredFollow.current = true;
     invalidate();
-  }, [arrivalFocusKey, followMode, freeLook, followSessionKey, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
+  }, [arrivalFocusKey, followMode, freeLook, followSessionKey, followPoseForPoint, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
 
   useEffect(() => {
     // Selection focus is a presentation action; it must never take camera
@@ -1873,7 +1996,13 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       : selectedPlaceId
         ? `place:${selectedPlaceId}`
         : `route:${focusPoint.x.toFixed(1)}:${focusPoint.y.toFixed(1)}`;
-    const requestKey = `${key}:${focusNonce ?? 0}`;
+    // Tour showcases need a fresh fit after portrait/landscape or responsive
+    // panel changes. Keep normal Student Map selections untouched so a resize
+    // does not unexpectedly override the user's own orbit there.
+    const responsiveViewportKey = focusOnViewportChange
+      ? `${size.width < 768 ? "mobile" : "desktop"}:${Math.round((size.width / Math.max(1, size.height)) * 10) / 10}`
+      : "";
+    const requestKey = `${key}:${focusNonce ?? 0}:${responsiveViewportKey}`;
     if (focusKey.current === requestKey) return;
     focusKey.current = requestKey;
     const pose = focusTarget(focusPoint);
@@ -1888,7 +2017,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       return;
     }
     startTween(pose.target, "focus", pose.position);
-  }, [arrivalFocusKey, focusNonce, focusPoint, focusTarget, followMode, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, routePreview, selectedBuildingId, selectedPlaceId, selectionKey, startTween]);
+  }, [arrivalFocusKey, focusNonce, focusPoint, focusOnViewportChange, focusTarget, followMode, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, routePreview, selectedBuildingId, selectedPlaceId, selectionKey, size.height, size.width, startTween]);
   useEffect(() => {
     if (arrivalFocusKey || followMode && !freeLook) {
       routeInspectionKey.current = "";
@@ -1910,6 +2039,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const direction = currentOffset.lengthSq() > 1e-6
       ? currentOffset.normalize()
       : new THREE.Vector3(0, 0.74, 0.673).normalize();
+    target.add(getSafeViewportOffset(distance, direction));
     const position = target.clone().add(direction.multiplyScalar(distance));
     if (reducedMotion) {
       tween.current = null;
@@ -1922,7 +2052,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       return;
     }
     startTween(target, "focus", position);
-  }, [arrivalFocusKey, freeLook, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, followMode, startTween]);
+  }, [arrivalFocusKey, freeLook, getSafeViewportOffset, invalidate, orbitRef, reducedMotion, restoreDamping, routeInspectionFocusKey, routeInspectionFocusPoint, followMode, startTween]);
   useEffect(() => {
     if (arrivalFocusKey || !routePreview || !routeFrameKey || !initialized.current || !orbitRef.current) {
       if (!routePreview) lastRouteFrameKey.current = "";
@@ -1954,8 +2084,9 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       lastHuman.current.x = currentPoint.x;
       lastHuman.current.y = currentPoint.y;
     }
-    if (!recenterNonce || recenterNonce <= lastRecenterNonce.current || !orbitRef.current || !initialized.current) return;
-    lastRecenterNonce.current = recenterNonce;
+    const requestedNonce = student3dCameraRecenterNonceToHandle(recenterNonce, lastRecenterNonce.current);
+    if (requestedNonce === null || !orbitRef.current || !initialized.current) return;
+    lastRecenterNonce.current = requestedNonce;
     if (arrivalFocusKey && arrivalFocusPoint) {
       const pose = focusTarget(arrivalFocusPoint, {
         buildingId: arrivalFocusBuildingId,
@@ -1964,11 +2095,42 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       startTween(pose.target, "arrival", pose.position);
       return;
     }
+    if (followMode && currentPoint && reducedMotion) {
+      const currentOffset = camera.position.clone().sub(orbitRef.current.target);
+      const followOffset = student3dFollowCameraOffsetForRecovery(
+        recenterFollowOffset,
+        [currentOffset.x, currentOffset.y, currentOffset.z],
+        [0, 8.88, 8.08],
+        orbitRef.current.minDistance ?? 4,
+        orbitRef.current.maxDistance ?? 60,
+        owner.current === "follow" || owner.current === "user",
+      );
+      const pose = followPoseForPoint(currentPoint, 12, followOffset);
+      followViewportOffset.current.copy(pose.viewportOffset);
+      orbitRef.current.target.copy(pose.target);
+      camera.position.copy(pose.position);
+      camera.lookAt(pose.target);
+      orbitRef.current.update();
+      owner.current = "user";
+      onRecenterComplete?.(requestedNonce);
+      invalidate();
+      return;
+    }
     let target: THREE.Vector3;
     let distance: number;
     if (followMode && currentPoint) {
-      const source = campusMapPointToWorld(currentPoint);
-      target = new THREE.Vector3(source.x, 0, source.z);
+      const currentOffset = camera.position.clone().sub(orbitRef.current.target);
+      const followOffset = student3dFollowCameraOffsetForRecovery(
+        recenterFollowOffset,
+        [currentOffset.x, currentOffset.y, currentOffset.z],
+        [0, 8.88, 8.08],
+        orbitRef.current.minDistance ?? 4,
+        orbitRef.current.maxDistance ?? 60,
+        owner.current === "follow" || owner.current === "user",
+      );
+      const pose = followPoseForPoint(currentPoint, 12, followOffset);
+      target = pose.target;
+      followViewportOffset.current.copy(pose.viewportOffset);
       distance = 12;
     } else if (focusPoint) {
       const selectedBuilding = campus.buildings.find((building) => focusPoint.x >= building.x - 1 && focusPoint.x <= building.x + building.width + 1
@@ -1991,8 +2153,9 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       distance = Math.max(campusMapSizeToWorld(content.width) / (2 * tangent * aspect), campusMapSizeToWorld(content.height) / (2 * tangent)) * 1.5;
     }
     const destinationPosition = target.clone().add(new THREE.Vector3(0, distance * 0.74, distance * 0.673));
+    if (followMode && currentPoint) pendingRecenterNonce.current = requestedNonce;
     startTween(target, "recenter", destinationPosition);
-  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, freeLook, humanPoint, orbitRef, recenterNonce, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
+  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, followPoseForPoint, freeLook, humanPoint, invalidate, onRecenterComplete, orbitRef, recenterFollowOffset, recenterNonce, reducedMotion, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
 
   useEffect(() => {
     if (arrivalFocusKey) return;
@@ -2004,6 +2167,35 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     }
     else if (!followPlaying && owner.current !== "focus" && owner.current !== "arrival" && owner.current !== "recenter" && owner.current !== "user") owner.current = "fit";
   }, [arrivalFocusKey, followPlaying, freeLook, restoreDamping]);
+
+  useEffect(() => {
+    const controls = orbitRef.current;
+    if (!controls || !onCameraPoseChange) return;
+    const publishPose = () => onCameraPoseChange({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [controls.target.x, controls.target.y, controls.target.z],
+    });
+    controls.addEventListener("change", publishPose);
+    publishPose();
+    return () => controls.removeEventListener("change", publishPose);
+  }, [camera, onCameraPoseChange, orbitRef]);
+
+  useEffect(() => {
+    const nonce = cameraPoseRestoreNonce ?? 0;
+    if (!cameraPoseRestore || nonce <= lastCameraPoseRestoreNonce.current || !initialized.current) return;
+    const controls = orbitRef.current;
+    if (!controls) return;
+    lastCameraPoseRestoreNonce.current = nonce;
+    tween.current = null;
+    restoreDamping();
+    controls.target.set(...cameraPoseRestore.target);
+    camera.position.set(...cameraPoseRestore.position);
+    camera.lookAt(controls.target);
+    controls.update();
+    owner.current = "user";
+    invalidate();
+    onCameraPoseRestoreComplete?.(nonce);
+  }, [camera, cameraPoseRestore, cameraPoseRestoreNonce, invalidate, onCameraPoseRestoreComplete, orbitRef, restoreDamping]);
 
   useFrame((_, delta) => {
     if (!initialized.current || document.hidden) return;
@@ -2020,23 +2212,28 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       controls.object.position.copy(active.startPosition).lerp(active.endPosition, eased);
       controls.update();
       tweenOwnsFrame = true;
-      if (t >= 1) { tween.current = null; restoreDamping(); }
+      if (t >= 1) {
+        tween.current = null;
+        restoreDamping();
+        const completedNonce = pendingRecenterNonce.current;
+        if (completedNonce !== null && owner.current === "recenter") {
+          pendingRecenterNonce.current = null;
+          onRecenterComplete?.(completedNonce);
+        }
+      }
       else invalidate();
     }
     const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
-    if (!tweenOwnsFrame && !arrivalFocusKey && followMode && currentPoint && !freeLook) {
+    if (!tweenOwnsFrame && !arrivalFocusKey && followPlaying && followMode && currentPoint && !freeLook) {
       owner.current = "follow";
       if (Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015) {
         lastHuman.current.x = currentPoint.x;
         lastHuman.current.y = currentPoint.y;
         const next = campusMapPointToWorld(currentPoint);
-        desired.current.set(next.x, 0, next.z);
+        desired.current.set(next.x, 0, next.z).add(followViewportOffset.current);
       }
       const amount = 1 - Math.exp(-safeDelta * 2.7);
-      const previous = controls.target.clone();
-      controls.target.x += (desired.current.x - controls.target.x) * amount;
-      controls.target.z += (desired.current.z - controls.target.z) * amount;
-      controls.object.position.add(controls.target.clone().sub(previous));
+      translateStudent3dFollowCamera(controls.object.position, controls.target, desired.current, amount, { y: false });
       controls.update();
     }
   });
@@ -2052,28 +2249,69 @@ function FollowHumanMarker({ route, progressRef, initialPoint }: { route: readon
     if (!group) return;
     const point = progressRef ? sampleRoute(progressRef.current, samplePoint.current) : initialPoint;
     if (!point) { group.visible = false; return; }
-    const world = campusMapPointToWorld(point, 0.25);
+    // Route ribbons sit at 0.12 world units. Keep the tracked marker just
+    // above that plane so its dark outline cannot be sliced by the route.
+    const world = campusMapPointToWorld(point, 0.145);
     group.visible = true;
     group.position.set(world.x, world.y, world.z);
   });
   return <group ref={groupRef}>
-    <mesh rotation={[-Math.PI / 2, 0, 0]}><circleGeometry args={[0.24, 24]} /><meshBasicMaterial color="#1d4ed8" transparent opacity={0.2} /></mesh>
-    <mesh><cylinderGeometry args={[0.17, 0.2, 0.12, 24]} /><meshStandardMaterial color="#1769e0" emissive="#1769e0" emissiveIntensity={0.25} /></mesh>
-    <mesh position={[0, 0.13, 0]}><sphereGeometry args={[0.065, 12, 8]} /><meshStandardMaterial color="#fff" /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={20}><circleGeometry args={[0.23, 24]} /><meshBasicMaterial color="#0f172a" depthWrite={false} /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0]} renderOrder={21}><circleGeometry args={[0.19, 24]} /><meshBasicMaterial color="#ffffff" depthWrite={false} /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.016, 0]} renderOrder={22}><circleGeometry args={[0.15, 24]} /><meshBasicMaterial color="#0f766e" depthWrite={false} /></mesh>
+    <mesh position={[0, 0.065, 0]} renderOrder={23}><cylinderGeometry args={[0.105, 0.13, 0.1, 16]} /><meshStandardMaterial color="#0f766e" roughness={0.55} /></mesh>
+    <mesh position={[0, 0.15, 0]} renderOrder={24}><sphereGeometry args={[0.045, 12, 8]} /><meshStandardMaterial color="#f8fafc" roughness={0.5} /></mesh>
   </group>;
 }
 
 function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTMLCanvasElement | null>; draggedRef: MutableRefObject<boolean> }) {
   const { campus } = props;
   const invalidate = useThree((state) => state.invalidate);
+  const initialExploreGroups = useMemo(
+    () => groupStudentRouteExploreTransitions((props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices), 0),
+    [props.exploreTransitionCues],
+  );
+  const [screenExploreTransitionGroups, setScreenExploreTransitionGroups] = useState(initialExploreGroups);
+  const exploreGroupSourceRef = useRef(props.exploreTransitionCues);
+  const exploreGroupSignatureRef = useRef(initialExploreGroups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|"));
+  useFrame(({ camera, size }) => {
+    const choices = (props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices);
+    if (choices.length === 0) {
+      if (exploreGroupSourceRef.current !== props.exploreTransitionCues || exploreGroupSignatureRef.current) {
+        exploreGroupSourceRef.current = props.exploreTransitionCues;
+        exploreGroupSignatureRef.current = "";
+        setScreenExploreTransitionGroups([]);
+      }
+      return;
+    }
+    const projectedPoints = new Map<string, Pt>();
+    for (const choice of choices) {
+      const projected = new THREE.Vector3(...worldTuple(choice.point, STUDENT_CAMPUS_3D_GROUND_EPSILON + 0.8)).project(camera);
+      projectedPoints.set(choice.id, {
+        x: (projected.x * 0.5 + 0.5) * size.width,
+        y: (-projected.y * 0.5 + 0.5) * size.height,
+      });
+    }
+    const groups = groupStudentRouteExploreTransitions(choices, 164, (choice) => projectedPoints.get(choice.id) ?? choice.point);
+    const signature = groups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|");
+    if (exploreGroupSourceRef.current !== props.exploreTransitionCues || exploreGroupSignatureRef.current !== signature) {
+      exploreGroupSourceRef.current = props.exploreTransitionCues;
+      exploreGroupSignatureRef.current = signature;
+      setScreenExploreTransitionGroups(groups);
+    }
+  });
   useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const worldW = campusMapSizeToWorld(campus.canvasW);
   const worldH = campusMapSizeToWorld(campus.canvasH);
   const route = props.routePoints ?? [];
-  const routeSegments = useMemo(() => props.routeSegments?.filter((points) => points.length > 1)
-    ?? (route.length > 1 ? [route] : []), [props.routeSegments, route]);
-  const routeEnd = props.destinationPoint ? worldTuple(props.destinationPoint, 0.12) : null;
-  const start = props.startPoint ? worldTuple(props.startPoint, 0.12) : null;
+  const routeSegments = useMemo(() => props.emergencyRouteSegments?.length
+    ? props.emergencyRouteSegments
+      .filter((segment) => segment.points.length > 1)
+      .filter((segment) => props.emergencyRouteOverview || !props.activeEmergencyRouteId || segment.id.startsWith(`${props.activeEmergencyRouteId}-`))
+      .map((segment) => segment.points)
+    : props.routeSegments?.filter((points) => points.length > 1) ?? (route.length > 1 ? [route] : []), [props.activeEmergencyRouteId, props.emergencyRouteOverview, props.emergencyRouteSegments, props.routeSegments, route]);
+  const routeEnd = props.destinationPoint ? worldTuple(props.destinationPoint, 0.15) : null;
+  const start = props.startPoint ? worldTuple(props.startPoint, 0.15) : null;
   const human = props.humanPoint ? worldTuple(props.humanPoint, 0.25) : null;
   const hasRoute = routeSegments.length > 0;
   const orbitRef = useRef<any>(null);
@@ -2091,8 +2329,10 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       maxZ: Math.max(first.z, second.z) + padding,
     };
   }, [campus]);
-  const pointerStart = useRef<{ x: number; y: number; id: number; button: number } | null>(null);
-  const pointers = useRef(new Set<number>());
+  const pointerStarts = useRef(new Map<number, { x: number; y: number; button: number; pointerType: string }>());
+  const pointers = useRef(new Map<number, Student3dTouchPoint>());
+  const touchGestureStart = useRef<readonly [Student3dTouchPoint, Student3dTouchPoint] | null>(null);
+  const followPanReported = useRef(false);
   const propsRef = useRef(props);
   propsRef.current = props;
   const selectBuilding = useCallback((buildingId: string) => propsRef.current.onSelectBuilding?.(buildingId), []);
@@ -2105,47 +2345,91 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     const element = orbitRef.current?.domElement as HTMLCanvasElement | undefined;
     if (!element) return;
     const handleDown = (event: PointerEvent) => {
-      pointers.current.add(event.pointerId);
-      if (event.pointerType === "touch" && pointers.current.size > 1) { pointerStart.current = null; props.draggedRef.current = true; return; }
-      pointerStart.current = { x: event.clientX, y: event.clientY, id: event.pointerId, button: event.button };
-      props.draggedRef.current = false;
+      if (pointers.current.size === 0) {
+        props.draggedRef.current = false;
+        followPanReported.current = false;
+      }
+      if (event.pointerType === "mouse") element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-right-button-dragging");
+      const point = { x: event.clientX, y: event.clientY };
+      pointers.current.set(event.pointerId, point);
+      pointerStarts.current.set(event.pointerId, { ...point, button: event.button, pointerType: event.pointerType });
+      if (event.pointerType === "touch" && pointers.current.size === 2) {
+        const pair = [...pointers.current.values()];
+        touchGestureStart.current = [pair[0], pair[1]];
+      }
     };
     const handleMove = (event: PointerEvent) => {
-      if (!pointerStart.current || pointerStart.current.id !== event.pointerId || props.draggedRef.current || pointers.current.size > 1) return;
-      if (crossedStudent3dDragThreshold(pointerStart.current, event)) {
-        props.draggedRef.current = true;
-        const surface = element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']");
-        if (event.pointerType === "mouse" && (!props.followMode || props.freeLook || pointerStart.current.button === 2)) {
-          if (surface) surface.dataset.dragging = "true";
-        }
-        if (!props.followMode) props.onIntentionalPan?.();
+      const start = pointerStarts.current.get(event.pointerId);
+      if (!start) return;
+      const point = { x: event.clientX, y: event.clientY };
+      pointers.current.set(event.pointerId, point);
+      let gesture: ReturnType<typeof student3dCameraGesture> = "none";
+      if (event.pointerType === "touch" && pointers.current.size >= 2 && touchGestureStart.current) {
+        const pair = [...pointers.current.values()].slice(0, 2);
+        const motion = student3dTouchGestureMotion(touchGestureStart.current, [pair[0], pair[1]]);
+        gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointers.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance });
+      } else {
+        const movement = Math.hypot(point.x - start.x, point.y - start.y);
+        gesture = student3dCameraGesture({ pointerType: start.pointerType, button: start.button, pointerCount: 1, movement });
+      }
+      if (gesture === "none") return;
+      props.draggedRef.current = true;
+      const surface = element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']");
+      if (event.pointerType === "mouse" && gesture === "orbit" && Boolean(event.buttons & 2) && surface) surface.dataset.rightButtonDragging = "true";
+      if (event.pointerType === "mouse" && (gesture === "pan" || gesture === "orbit") && surface) surface.dataset.dragging = "true";
+      const currentProps = propsRef.current;
+      if (shouldPauseFollowForManualCameraGesture(Boolean(currentProps.followMode), gesture === "pan") && !followPanReported.current) {
+        followPanReported.current = true;
+        currentProps.onIntentionalPan?.();
       }
     };
     const handleUp = (event: PointerEvent) => {
       pointers.current.delete(event.pointerId);
-      if (pointerStart.current?.id === event.pointerId) pointerStart.current = null;
-      if (pointers.current.size === 0) element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-dragging");
+      pointerStarts.current.delete(event.pointerId);
+      if (pointers.current.size < 2) touchGestureStart.current = null;
+      if (pointers.current.size === 0) {
+        element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-dragging");
+        followPanReported.current = false;
+      }
     };
     const reset = () => {
-      pointers.current.clear(); pointerStart.current = null; props.draggedRef.current = false;
+      pointers.current.clear(); pointerStarts.current.clear(); props.draggedRef.current = false;
+      touchGestureStart.current = null; followPanReported.current = false;
       element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-dragging");
+      element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']")?.removeAttribute("data-right-button-dragging");
+    };
+    const handleContextMenu = (event: MouseEvent) => {
+      const surface = element.closest<HTMLElement>("[data-testid='student-campus-3d-surface']");
+      const isRotationDrag = shouldPreventStudent3dContextMenu(event.button, surface?.dataset.rightButtonDragging === "true");
+      if (isRotationDrag && surface) {
+        event.preventDefault();
+        delete surface.dataset.rightButtonDragging;
+      }
+      // OrbitControls prevents every canvas context menu internally. Stop that
+      // listener so ordinary right-click menus remain available when no drag ran.
+      event.stopImmediatePropagation();
     };
     element.addEventListener("pointerdown", handleDown, { passive: true });
     element.addEventListener("pointermove", handleMove, { passive: true });
+    element.addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("pointerup", handleUp, { passive: true });
     window.addEventListener("pointercancel", reset, { passive: true });
     window.addEventListener("blur", reset);
     document.addEventListener("visibilitychange", reset);
     return () => {
       element.removeEventListener("pointerdown", handleDown); element.removeEventListener("pointermove", handleMove);
+      element.removeEventListener("contextmenu", handleContextMenu, true);
       window.removeEventListener("pointerup", handleUp); window.removeEventListener("pointercancel", reset); window.removeEventListener("blur", reset); document.removeEventListener("visibilitychange", reset);
     };
-  }, [props.draggedRef, props.followMode, props.freeLook, props.onIntentionalPan]);
+  }, [props.draggedRef]);
 
   useEffect(() => {
     const controls = orbitRef.current;
     if (!controls) return;
-    configureStudent3dInputMappings(controls);
+    const updateInputMappings = () => configureStudent3dInputMappings(controls);
+    updateInputMappings();
+    window.addEventListener("resize", updateInputMappings);
+    return () => window.removeEventListener("resize", updateInputMappings);
   }, []);
 
   useEffect(() => {
@@ -2159,7 +2443,20 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
 
   const shouldSuppressClick = useCallback(() => props.draggedRef.current, [props.draggedRef]);
 
-  const routes = useMemo(() => routeSegments.map((points, index) => ({ id: `canonical-route-${index}`, points, width: 12, type: "route" })), [routeSegments]);
+  const routes = useMemo<RouteSurfacePath[]>(() => props.emergencyRouteSegments?.length
+    ? props.emergencyRouteSegments
+      .filter((segment) => segment.points.length > 1)
+      .filter((segment) => props.emergencyRouteOverview || !props.activeEmergencyRouteId || segment.id.startsWith(`${props.activeEmergencyRouteId}-`))
+      .map((segment) => ({
+      id: segment.id, points: segment.points, width: 12, type: "route", color: segment.color,
+      opacity: props.emergencyRouteOverview || Boolean(props.activeEmergencyRouteId && segment.id.startsWith(`${props.activeEmergencyRouteId}-campus-`)) ? 1 : 0.34,
+      label: segment.label,
+    }))
+    : routeSegments.map((points, index) => ({
+      id: `canonical-route-${index}`, points, width: 12, type: "route",
+      color: props.routeColor ?? (props.routeMode === "emergency" ? "#dc2626" : props.routeMode === "accessible" ? "#16a34a" : "#1769e0"),
+    })),
+  [props.activeEmergencyRouteId, props.emergencyRouteOverview, props.emergencyRouteSegments, props.routeColor, props.routeMode, routeSegments]);
   const markers = props.showEvents ? props.eventVenues ?? EMPTY_EVENT_VENUES : EMPTY_EVENT_VENUES;
   const selectedLocationIds = new Set([props.selectedEventLocationId].filter(Boolean));
   const selectedPlace = campus.markers.find((marker) => marker.id === props.selectedPlaceId);
@@ -2206,27 +2503,75 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
         {!(hasRoute && props.activeTransition && selected) && <Html position={[0, marker.type === "gate" ? 1.38 : 0.38, 0]} center zIndexRange={selected ? [60, 0] : [10, 0]} style={{ pointerEvents: "none", userSelect: "none" }}><div className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-slate-800 shadow whitespace-nowrap">{marker.name}</div></Html>}
       </group>;
     })}
+    {props.emergencyAssemblyPointIds && campus.assemblyPoints.filter((point) => props.emergencyAssemblyPointIds?.has(point.id)).map((point) => {
+      const active = point.id === props.activeEmergencyAssemblyPointId;
+      return <group key={`emergency-assembly-${point.id}`} position={worldTuple(point, STUDENT_CAMPUS_3D_GROUND_EPSILON)} name={`emergency-assembly-${point.id}`}>
+        <mesh position={[0, 0.34, 0]} castShadow>
+          <cylinderGeometry args={[0.012, 0.012, 0.68, 7]} />
+          <meshStandardMaterial color={active ? "#166534" : "#15803d"} roughness={0.8} />
+        </mesh>
+        <Billboard position={[0.095, 0.56, 0]}>
+          <mesh>
+            <planeGeometry args={[0.22, 0.15]} />
+            <meshStandardMaterial color={active ? "#15803d" : "#16a34a"} side={THREE.DoubleSide} roughness={0.75} />
+          </mesh>
+        </Billboard>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.13, 0]} renderOrder={20}>
+          <ringGeometry args={[active ? 0.15 : 0.12, active ? 0.19 : 0.15, 24]} />
+          <meshBasicMaterial color={active ? "#166534" : "#16a34a"} side={THREE.DoubleSide} />
+        </mesh>
+        <Html position={[0, 0.72, 0]} center distanceFactor={8} zIndexRange={active ? [92, 0] : [64, 0]} style={{ pointerEvents: "none", userSelect: "none" }}>
+          <div data-testid="student-3d-emergency-assembly-point" data-assembly-point-id={point.id} title={point.name} className={`flex max-w-[170px] items-center justify-center gap-1 rounded-xl border-2 border-white px-2 py-1 text-center text-[9px] font-extrabold leading-tight text-white shadow-lg ${active ? "bg-emerald-800" : "bg-emerald-700"}`}>
+            <Flag className="h-3 w-3" fill="currentColor" />{point.name}
+          </div>
+        </Html>
+      </group>;
+    })}
     {markers.map((venue) => <MemoEventMarker key={venue.id} venue={venue} selected={venue.locations.some((location) => selectedLocationIds.has(location.locationId))} onSelectVenue={inspectEventVenue} shouldSuppressClick={shouldSuppressClick} />)}
     {hasRoute && routes.map((segment, index) => <group key={segment.id}>
       <MemoPathSurface path={segment} route halo />
       <MemoPathSurface path={segment} route />
-      <RouteArrows points={segment.points} reducedMotion={props.reducedMotion} />
+      {!props.emergencyRouteOverview && (!props.emergencyRouteSegments?.length || Boolean(props.activeEmergencyRouteId && segment.id.startsWith(`${props.activeEmergencyRouteId}-campus-`))) && <RouteArrows points={segment.points} reducedMotion={props.reducedMotion} animate={props.animateRouteArrows} />}
+      {segment.label && <Html position={worldTuple(segment.points[0], 0.22)} center distanceFactor={12} zIndexRange={[90, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded-full border border-white/80 px-2 py-1 text-[10px] font-extrabold text-white shadow" style={{ backgroundColor: segment.color ?? "#1769e0" }}>{segment.label}</span></Html>}
     </group>)}
-    {start && (props.showStartMarker ?? true) && <group position={start}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.14, 0.19, 24]} /><meshBasicMaterial color="#22a06b" side={THREE.DoubleSide} /></mesh>
-      <Html position={[0, 0.18, 0]} center distanceFactor={12}><span className="grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-emerald-600 text-[13px] font-black text-white shadow-lg">A</span></Html>
+    {props.emergencyRouteOverview && props.emergencyRouteSegments?.map((segment) => <group key={`${segment.id}-endpoints`}>
+      {segment.showDoorMarker && <group position={worldTuple(segment.points[0], 0.13)}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.18, 0.25, 24]} /><meshBasicMaterial color={segment.color} side={THREE.DoubleSide} /></mesh>
+        <Html position={[0, 0.12, 0]} center distanceFactor={14} zIndexRange={[95, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded-full border border-white/90 px-2 py-1 text-[9px] font-extrabold text-white shadow" style={{ backgroundColor: segment.color }}>Door · {segment.doorLabel || segment.label}</span></Html>
+      </group>}
+      {segment.showExitMarker && <group position={worldTuple(segment.points.at(-1)!, 0.15)}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.2, 0.28, 24]} /><meshBasicMaterial color={segment.color} side={THREE.DoubleSide} /></mesh>
+        <Html position={[0, 0.14, 0]} center distanceFactor={14} zIndexRange={[96, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded-full border border-white/90 px-2 py-1 text-[9px] font-extrabold text-white shadow" style={{ backgroundColor: segment.color }}>Exit · {segment.exitLabel || segment.label}</span></Html>
+      </group>}
+    </group>)}
+    {start && (props.showStartMarker ?? true) && !props.emergencyRouteOverview && <group position={start}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.13, 0.17, 24]} /><meshBasicMaterial color="#16845b" side={THREE.DoubleSide} /></mesh>
+      <Html position={[0, 0.02, 0]} center occlude zIndexRange={[76, 0]}><span data-testid="student-3d-route-start-pin" className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-emerald-700 text-[10px] font-black text-white shadow-md">A</span></Html>
     </group>}
-    {routeEnd && (props.showDestinationMarker ?? true) && <group position={routeEnd}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.13, 0.17, 24]} /><meshBasicMaterial color="#e44646" transparent opacity={0.62} side={THREE.DoubleSide} /></mesh>
-      <Html position={[0, 0.015, 0]} center distanceFactor={10} zIndexRange={[85, 0]}>
-        <span className="student-destination-pin block -translate-y-full drop-shadow-md"><MapPin className="h-8 w-8 fill-rose-600 stroke-white stroke-[2.25]" /></span>
+    {routeEnd && (props.showDestinationMarker ?? true) && !props.emergencyRouteOverview && <group position={routeEnd}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.12, 0.16, 24]} /><meshBasicMaterial color="#c83c51" transparent opacity={0.72} side={THREE.DoubleSide} /></mesh>
+      <Html position={[0, 0.015, 0]} center occlude zIndexRange={[85, 0]}>
+        <span data-testid="student-3d-route-destination-pin" className="student-destination-pin block -translate-y-full drop-shadow-sm"><MapPin className="h-6 w-6 fill-rose-600 stroke-white stroke-[2.25]" /></span>
       </Html>
     </group>}
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
-    {props.exploreTransitionCues?.map((transition) => <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
-    <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan={!props.followMode || props.freeLook} enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
-  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} surfaceRef={props.surfaceRef} />
+    {screenExploreTransitionGroups.map((transition) => transition.choices.length > 1
+      ? <group key={`explore-${transition.id}`} position={worldTuple(transition.point, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.17, 0.22, 24]} /><meshBasicMaterial color="#1769e0" transparent opacity={0.82} side={THREE.DoubleSide} /></mesh>
+        <mesh position={[0, 0.24, 0]}><cylinderGeometry args={[0.012, 0.012, 0.46, 8]} /><meshStandardMaterial color="#1769e0" transparent opacity={0.72} /></mesh>
+        <Html position={[0, 0.8, 0]} center zIndexRange={[120, 0]}>
+          <StudentExploreTransitionChoiceControl
+            kind={transition.kind}
+            choices={transition.choices}
+            testId="campus-explore-transition-choice-marker"
+            canOpen={() => !shouldSuppressClick()}
+          />
+        </Html>
+      </group>
+      : <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
+    <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
+  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} focusOnViewportChange={props.focusOnViewportChange} showcaseBuildingId={props.showcaseBuildingId} emergencyRouteSegments={props.emergencyRouteSegments} emergencyRouteOverview={props.emergencyRouteOverview} emergencyRouteOverviewNonce={props.emergencyRouteOverviewNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} recenterFollowOffset={props.recenterFollowOffset} onRecenterComplete={props.onRecenterComplete} surfaceRef={props.surfaceRef} onCameraPoseChange={props.onCameraPoseChange} cameraPoseRestore={props.cameraPoseRestore} cameraPoseRestoreNonce={props.cameraPoseRestoreNonce} onCameraPoseRestoreComplete={props.onCameraPoseRestoreComplete} />
   </>;
 }
 
@@ -2250,7 +2595,12 @@ function StudentCampus3DRenderer(props: StudentCampus3DRendererProps & { onFallb
     return () => canvas.removeEventListener("webglcontextlost", contextLost);
   }, [props.onFallback]);
   return <SceneErrorBoundary onError={props.onFallback}>
-    <div ref={interactionSurfaceRef} data-testid="student-campus-3d-surface" className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => event.preventDefault()} onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {
+    <div ref={interactionSurfaceRef} data-testid="student-campus-3d-surface" className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => {
+      if (shouldPreventStudent3dContextMenu(event.nativeEvent.button, event.currentTarget.dataset.rightButtonDragging === "true")) {
+        event.preventDefault();
+        delete event.currentTarget.dataset.rightButtonDragging;
+      }
+    }} onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {
       if (!draggedRef.current) return;
       event.preventDefault(); event.stopPropagation(); draggedRef.current = false;
     }}>
@@ -2260,7 +2610,7 @@ function StudentCampus3DRenderer(props: StudentCampus3DRendererProps & { onFallb
       eventSource={interactionSurfaceRef as unknown as MutableRefObject<HTMLElement>}
       dpr={[1, 1.25]}
       shadows={false}
-      frameloop={!visible ? "never" : (props.followPlaying || (Boolean(props.routePoints?.length) && !props.reducedMotion)) ? "always" : "demand"}
+      frameloop={!visible ? "never" : (props.followPlaying || (props.animateRouteArrows && !props.reducedMotion && !props.emergencyRouteOverview)) ? "always" : "demand"}
       camera={{ fov: 44, near: 0.1, far: 150, position: [campusMapSizeToWorld(props.campus.canvasW) / 2, 8, campusMapSizeToWorld(props.campus.canvasH) / 2 + 8] }}
       onCreated={({ gl, invalidate }) => { surfaceRef.current = gl.domElement; invalidateRef.current = invalidate; }}
       fallback={<div>Interactive 3D campus view.</div>}

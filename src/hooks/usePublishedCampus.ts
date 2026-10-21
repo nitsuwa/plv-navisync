@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { campusService } from "../services/campusService";
 import type { Campus } from "../components/map-builder/types";
 import { studentCampusListing } from "../lib/studentCampusListing";
-import { useAuth } from "../contexts/StudentAuthContext";
+import { useAuthUserId } from "../contexts/StudentAuthContext";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
@@ -268,8 +268,8 @@ interface UsePublishedCampusResult {
 }
 
 export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedCampusResult {
-  const auth = useAuth();
-  const userId = auth.session?.user.id ?? auth.profile?.id ?? "guest";
+  const authenticatedUserId = useAuthUserId();
+  const userId = authenticatedUserId ?? "guest";
   // Do not present a session snapshot as current until the lightweight version
   // RPC confirms that its exact version id is still published.
   const [campuses, setCampuses] = useState<Campus[]>([]);

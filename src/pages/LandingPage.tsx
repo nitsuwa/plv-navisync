@@ -10,6 +10,7 @@ import { useRef, useState, useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PLVLogo } from "../components/ui/PLVLogo";
 import { AccessibleRouteDemo as A11yDemo } from "../components/landing/AccessibleRouteDemo";
+import { HomeShowcaseSection } from "../components/landing/HomeShowcaseSection";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -163,6 +164,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 const LANDING_SECTION_LINKS = [
   { id: "landing-hero", label: "Hero", description: "Start here" },
+  { id: "landing-showcase", label: "NaviSync Showcase", description: "See the platform" },
   { id: "landing-feature-tour", label: "How NaviSync Helps You", description: "Explore campus tasks" },
   { id: "landing-capabilities", label: "What NaviSync Does", description: "See core capabilities" },
   { id: "landing-final-cta", label: "Final Call to Action", description: "Open the campus map" },
@@ -1582,6 +1584,7 @@ export function LandingPage() {
     <div className="min-h-screen w-full max-w-full overflow-x-hidden">
       <LandingSectionRail />
       <HeroSection />
+      <HomeShowcaseSection />
       <HowHelpsYou />
       <CampusCapabilities />
       <FinalCTA />

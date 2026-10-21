@@ -1,0 +1,99 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "00652a21-b0d5-4bae-a818-ab57a64cfd9d",
+      "name": "Emergency Assembly Point",
+      "nodeId": "e199622f-1f8d-44dc-9754-d29a44dad31b",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "17e9dafb-fa60-4631-963b-4fe92774e410",
+        "6322e48d-5aee-4f6a-ab77-2e3565108f4c"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "placementAttempt-TEST ONLY - East Gathering Area": {
+      "candidate": {
+        "id": "e6d2df74-5825-4aa8-812f-875ffc936f17",
+        "x": 867,
+        "y": 440
+      },
+      "screenPoint": {
+        "x": 994.0020833333334,
+        "y": 435.4166666666667
+      },
+      "marker": {
+        "x": 585.125,
+        "y": 437.9354166666667
+      },
+      "snapKind": "waypoint"
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-admin-browser-failure.png"
+  ],
+  "browserErrors": [],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  },
+  "failure": {
+    "message": "page.waitForFunction: Timeout 8000ms exceeded.",
+    "stack": "page.waitForFunction: Timeout 8000ms exceeded.\n    at placeOnFreeWaypoint (D:\\Build PLV NaviSync App\\verification-artifacts\\assembly-point-ordinary-sos\\assembly-point-multiple-admin-browser.cjs:449:20)\n    at async main (D:\\Build PLV NaviSync App\\verification-artifacts\\assembly-point-ordinary-sos\\assembly-point-multiple-admin-browser.cjs:462:7)"
+  }
+}

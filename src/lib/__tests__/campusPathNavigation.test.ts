@@ -3,6 +3,7 @@ import type { Campus, CampusPath, NavigationEdge, NavigationNode } from "../../c
 import { convertPathwaysToNavigation, reconcilePathwayNavigation } from "../campusPathNavigation";
 import { pathNetworkNavigationStatus } from "../campusPathNetwork";
 import { validateNavigationGraph } from "../validateNavigationGraph";
+import { findNavigationRoute } from "../pathfinding";
 
 const makeIdFactory = () => {
   let sequence = 0;
@@ -21,6 +22,16 @@ function campus(paths: CampusPath[], navNodes: NavigationNode[] = [], navEdges: 
     settings: { accessibility: true, emergency: true, eventLayer: true, gps: false },
     buildings: [], markers: [], paths, navNodes, navEdges, createdAt: "", updatedAt: "",
   } as Campus;
+}
+
+function networkPath(
+  id: string,
+  points: { x: number; y: number }[],
+  networkId: string,
+  vertexIds: string[],
+  extra: Partial<CampusPath> = {},
+): CampusPath {
+  return { ...path(id, points, vertexIds), pathNetworkId: networkId, ...extra };
 }
 
 function ownedNodes(value: Campus, pathId: string) {
@@ -124,6 +135,199 @@ describe("campus Pathway navigation ownership reconciliation", () => {
     const shared = result.campus.navNodes?.filter((node) => (node.generatedFromPathVertices?.length ?? 0) > 1);
     expect(shared).toHaveLength(1);
     expect(validateNavigationGraph(result.campus).issues.filter((issue) => issue.type === "nav_disconnected_component")).toHaveLength(0);
+  });
+
+  it("derives an X junction inside two explicitly shared walking-network segments without moving their geometry", () => {
+    const factory = makeIdFactory();
+    const source = campus([
+      networkPath("horizontal", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["h0", "h1"]),
+      networkPath("vertical", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network", ["v0", "v1"]),
+    ]);
+    const once = convertPathwaysToNavigation(source, ["horizontal", "vertical"], factory).campus;
+    const junction = once.navNodes?.find((node) => node.generatedFromPathIntersections?.length === 2);
+    expect(junction).toMatchObject({ x: 50, y: 50, type: "outdoor" });
+    expect(once.paths).toEqual(source.paths);
+    expect(once.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(4);
+    const horizontalStart = ownedNodes(once, "horizontal").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "h0"))!;
+    const verticalEnd = ownedNodes(once, "vertical").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "v1"))!;
+    const route = findNavigationRoute(once.navNodes ?? [], once.navEdges ?? [], horizontalStart.id, verticalEnd.id, false, false, { useDerivedTransitions: false });
+    expect(route?.nodeIds).toContain(junction?.id);
+    expect(route?.distanceM).toBe(22);
+    const twice = reconcilePathwayNavigation(once, factory);
+    expect(twice).toEqual(once);
+  });
+
+  it("round-trips a derived crossing and restores its graph through serialized undo/redo snapshots", () => {
+    const factory = makeIdFactory();
+    const source = campus([
+      networkPath("horizontal", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["h0", "h1"]),
+      networkPath("vertical", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network", ["v0", "v1"]),
+    ]);
+    const compiled = convertPathwaysToNavigation(source, ["horizontal", "vertical"], factory).campus;
+    const savedJson = JSON.stringify(compiled);
+    const hydrated = reconcilePathwayNavigation(JSON.parse(savedJson) as Campus, factory);
+    expect(hydrated).toEqual(compiled);
+
+    const moved = reconcilePathwayNavigation({
+      ...hydrated,
+      paths: hydrated.paths.map((item) => item.id === "vertical"
+        ? { ...item, points: [{ x: 150, y: 0 }, { x: 150, y: 100 }] }
+        : item),
+    }, factory);
+    expect(moved.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(0);
+    expect(moved.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(0);
+
+    const undone = reconcilePathwayNavigation(JSON.parse(savedJson) as Campus, factory);
+    const redone = reconcilePathwayNavigation(JSON.parse(JSON.stringify(moved)) as Campus, factory);
+    expect(undone).toEqual(compiled);
+    expect(redone).toEqual(moved);
+  });
+
+  it("connects a T endpoint to a same-network segment and a rectangular center shortcut beats its perimeter", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(campus([
+      networkPath("perimeter", [{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }, { x: 100, y: 0 }], "campus-walks", ["p0", "p1", "p2", "p3"]),
+      networkPath("center", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "campus-walks", ["c0", "c1"]),
+    ]), ["perimeter", "center"], factory).campus;
+    const start = ownedNodes(converted, "perimeter").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "p0"))!;
+    const destination = ownedNodes(converted, "perimeter").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "p3"))!;
+    const route = findNavigationRoute(converted.navNodes ?? [], converted.navEdges ?? [], start.id, destination.id, false, false, { useDerivedTransitions: false });
+    expect(route?.waypoints).toContainEqual({ x: 0, y: 50 });
+    expect(route?.waypoints).toContainEqual({ x: 100, y: 50 });
+    expect(route?.distanceM).toBe(44);
+    expect(converted.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(4);
+  });
+
+  it("uses the authored MAIN CAMPUS central X crossing when it is cheaper than the perimeter", () => {
+    const factory = makeIdFactory();
+    const networkId = "main-campus-walks";
+    const compiled = convertPathwaysToNavigation(campus([
+      networkPath("perimeter", [
+        { x: 486, y: 440 }, { x: 549, y: 440 }, { x: 571, y: 440 }, { x: 619, y: 440 },
+        { x: 640, y: 440 }, { x: 680, y: 440 }, { x: 680, y: 620 }, { x: 680, y: 680 },
+        { x: 680, y: 713 }, { x: 680, y: 880 }, { x: 620, y: 880 }, { x: 360, y: 880 },
+        { x: 360, y: 740 }, { x: 360, y: 713 }, { x: 360, y: 673 }, { x: 360, y: 440 },
+        { x: 400, y: 440 }, { x: 462, y: 440 }, { x: 486, y: 440 },
+      ], networkId, Array.from({ length: 19 }, (_, index) => `loop-${index}`)),
+      networkPath("diagonal-east", [{ x: 360, y: 500 }, { x: 680, y: 620 }], networkId, ["east-a", "east-b"]),
+      networkPath("diagonal-west", [{ x: 360, y: 800 }, { x: 600, y: 440 }], networkId, ["west-a", "west-b"], {
+        // Legacy disconnection keys describe former coordinates. The current
+        // authored crossing is (520, 560) and has no matching prohibition.
+        disconnectedJunctionKeys: ["540:440", "507.397:540.274"],
+      }),
+    ]), ["perimeter", "diagonal-east", "diagonal-west"], factory).campus;
+    const crossing = compiled.navNodes?.find((node) =>
+      node.generatedFromPathIntersections?.some((ref) => ref.pathId === "diagonal-east")
+      && node.generatedFromPathIntersections?.some((ref) => ref.pathId === "diagonal-west"),
+    );
+    expect(crossing).toMatchObject({ x: 520, y: 560 });
+
+    const start = ownedNodes(compiled, "perimeter").find((node) => node.x === 680 && node.y === 620)!;
+    const destination = ownedNodes(compiled, "diagonal-west").find((node) => node.x === 360 && node.y === 800)!;
+    // Keep the real endpoint-to-segment joins and remove only the central X
+    // split to reproduce the legacy perimeter-only graph.
+    const perimeterOnly = {
+      nodes: (compiled.navNodes ?? []).filter((node) => node.id !== crossing?.id),
+      edges: (compiled.navEdges ?? []).filter((edge) => edge.startNodeId !== crossing?.id && edge.endNodeId !== crossing?.id),
+    };
+    const longRoute = findNavigationRoute(perimeterOnly.nodes, perimeterOnly.edges, start.id, destination.id, false, false, { useDerivedTransitions: false });
+    const shortRoute = findNavigationRoute(compiled.navNodes ?? [], compiled.navEdges ?? [], start.id, destination.id, false, false, { useDerivedTransitions: false });
+
+    expect(longRoute).not.toBeNull();
+    expect(shortRoute?.waypoints).toContainEqual({ x: 520, y: 560 });
+    expect(shortRoute!.distanceM).toBeLessThan(longRoute!.distanceM);
+  });
+
+  it("keeps X crossings separate across different network IDs, different elevations, and explicit disconnect keys", () => {
+    const factory = makeIdFactory();
+    const cases: CampusPath[][] = [
+      [
+        networkPath("a", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network-a", ["a0", "a1"]),
+        networkPath("b", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network-b", ["b0", "b1"]),
+      ],
+      [
+        networkPath("a", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["a0", "a1"], { elevation: 0 }),
+        networkPath("b", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network", ["b0", "b1"], { elevation: 4 }),
+      ],
+      [
+        networkPath("a", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["a0", "a1"], { disconnectedJunctionKeys: ["50:50"] }),
+        networkPath("b", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network", ["b0", "b1"]),
+      ],
+    ];
+    for (const paths of cases) {
+      const result = convertPathwaysToNavigation(campus(paths), paths.map((item) => item.id), factory).campus;
+      expect(result.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(0);
+      expect(result.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(0);
+    }
+  });
+
+  it("does not turn a visual attachment into a navigation junction", () => {
+    const result = convertPathwaysToNavigation(campus([
+      networkPath("surface", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["s0", "s1"]),
+      networkPath("visual-branch", [{ x: 50, y: 50 }, { x: 50, y: 100 }], "network", ["v0", "v1"], {
+        visualAttachments: [{ pointIndex: 0, targetPathId: "surface", targetSegmentIndex: 0, targetT: 0.5 }],
+      }),
+    ]), ["surface", "visual-branch"], makeIdFactory()).campus;
+    expect(result.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(0);
+    expect(result.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(0);
+  });
+
+  it("keeps an explicitly visual-only endpoint disconnected when its target segment metadata is stale after a split", () => {
+    const result = convertPathwaysToNavigation(campus([
+      networkPath("surface", [
+        { x: 0, y: 50 }, { x: 40, y: 50 }, { x: 100, y: 50 },
+      ], "network", ["s0", "s1", "s2"]),
+      networkPath("visual-branch", [{ x: 50, y: 50 }, { x: 50, y: 100 }], "network", ["v0", "v1"], {
+        // This visual attachment was authored against the original unsplit
+        // segment. Its index/fraction now point somewhere else, but its
+        // endpoint and target path identity remain authoritative.
+        visualAttachments: [{ pointIndex: 0, targetPathId: "surface", targetSegmentIndex: 0, targetT: 0.5 }],
+      }),
+    ]), ["surface", "visual-branch"], makeIdFactory()).campus;
+
+    expect(result.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(0);
+    expect(result.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.length)).toHaveLength(0);
+  });
+
+  it("preserves one-way, accessibility, emergency, closed, and proportional edge cost across a crossing split", () => {
+    const factory = makeIdFactory();
+    const converted = convertPathwaysToNavigation(campus([
+      networkPath("horizontal", [{ x: 0, y: 50 }, { x: 100, y: 50 }], "network", ["h0", "h1"]),
+      networkPath("vertical", [{ x: 50, y: 0 }, { x: 50, y: 100 }], "network", ["v0", "v1"]),
+    ]), ["horizontal", "vertical"], factory).campus;
+    const horizontalBase = converted.navEdges?.find((edge) => edge.generatedFromPathIds?.includes("horizontal"))!;
+    const restricted = {
+      ...converted,
+      navEdges: converted.navEdges?.map((edge) => edge.id === horizontalBase.id
+        ? { ...edge, bidirectional: false, accessible: false, emergencySafe: false, closed: false }
+        : edge),
+    };
+    const compiled = reconcilePathwayNavigation(restricted, factory);
+    const split = compiled.navEdges?.filter((edge) => edge.generatedFromPathIntersectionSegments?.some((ref) => ref.pathId === "horizontal")) ?? [];
+    expect(split).toHaveLength(2);
+    expect(split.every((edge) => edge.bidirectional === false && edge.accessible === false && edge.emergencySafe === false && edge.closed === false)).toBe(true);
+    expect(split.reduce((total, edge) => total + edge.distance, 0)).toBeCloseTo(horizontalBase.distance);
+    const start = ownedNodes(compiled, "horizontal").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "h0"))!;
+    const end = ownedNodes(compiled, "horizontal").find((node) => node.generatedFromPathVertices?.some((ref) => ref.vertexId === "h1"))!;
+    expect(findNavigationRoute(compiled.navNodes ?? [], compiled.navEdges ?? [], start.id, end.id, false, false, { useDerivedTransitions: false })).not.toBeNull();
+    expect(findNavigationRoute(compiled.navNodes ?? [], compiled.navEdges ?? [], end.id, start.id, false, false, { useDerivedTransitions: false })).toBeNull();
+    expect(findNavigationRoute(compiled.navNodes ?? [], compiled.navEdges ?? [], start.id, end.id, true, false, { useDerivedTransitions: false })).toBeNull();
+    expect(findNavigationRoute(compiled.navNodes ?? [], compiled.navEdges ?? [], start.id, end.id, false, true, { useDerivedTransitions: false })).toBeNull();
+    const closed = reconcilePathwayNavigation({
+      ...compiled,
+      navEdges: compiled.navEdges?.map((edge) => edge.generatedFromPathIds?.includes("horizontal")
+        ? { ...edge, closed: true }
+        : edge),
+    }, factory);
+    expect(findNavigationRoute(closed.navNodes ?? [], closed.navEdges ?? [], start.id, end.id, false, false, { useDerivedTransitions: false })).toBeNull();
+  });
+
+  it("derives a same-level self-crossing while keeping elevation differences disconnected", () => {
+    const selfCrossing = networkPath("loop", [
+      { x: 0, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 100, y: 0 }, { x: 0, y: 0 },
+    ], "network", ["v0", "v1", "v2", "v3", "v4"]);
+    const result = convertPathwaysToNavigation(campus([selfCrossing]), ["loop"], makeIdFactory()).campus;
+    expect(result.navNodes?.filter((node) => node.generatedFromPathIntersections?.length)).toHaveLength(1);
   });
 
   it("canonicalizes a shared junction when members are enabled in separate operations", () => {

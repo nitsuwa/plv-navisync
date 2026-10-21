@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Layers, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { cn } from "../../lib/utils";
 
@@ -101,6 +101,10 @@ interface StudentFloorPickerProps {
   routeFloors?: readonly number[];
   routePanelOpen?: boolean;
   embedded?: boolean;
+  /** Places the single picker in the map's floating account-control cluster. */
+  accountAnchor?: boolean;
+  /** Drops the account-anchored trigger below the profile row when search owns the top row. */
+  belowAccount?: boolean;
   onSelect: (floorNumber: number) => void;
   /** True only while a constrained-screen modal fallback owns the small-screen surface. */
   onFallbackOpenChange?: (open: boolean) => void;
@@ -123,6 +127,8 @@ export function StudentFloorPicker({
   routeFloors = [],
   routePanelOpen = false,
   embedded = false,
+  accountAnchor = false,
+  belowAccount = false,
   onSelect,
   onFallbackOpenChange,
 }: StudentFloorPickerProps) {
@@ -139,7 +145,7 @@ export function StudentFloorPicker({
     if (typeof window === "undefined") return;
     const trigger = triggerRef.current?.getBoundingClientRect();
     const surfaceElement = rootRef.current?.closest<HTMLElement>("[data-testid='student-map-surface']");
-    if (!trigger || !surfaceElement) return;
+    if (!trigger) return;
     const visualViewport = window.visualViewport;
     const viewport = {
       left: visualViewport?.offsetLeft ?? 0,
@@ -147,10 +153,18 @@ export function StudentFloorPicker({
       width: visualViewport?.width ?? window.innerWidth,
       height: visualViewport?.height ?? window.innerHeight,
     };
-    const surface = surfaceElement.getBoundingClientRect();
-    const searchHeader = surfaceElement.querySelector<HTMLElement>("[data-map-search-header='true']");
+    // Student Preview can host this control inside a nested/embedded map. If
+    // that wrapper does not expose the usual surface marker, fall back to the
+    // visible viewport instead of leaving `open` true with no measured menu.
+    const surface = surfaceElement?.getBoundingClientRect() ?? {
+      left: viewport.left,
+      right: viewport.left + viewport.width,
+      top: viewport.top,
+      bottom: viewport.top + viewport.height,
+    };
+    const searchHeader = surfaceElement?.querySelector<HTMLElement>("[data-map-search-header='true']");
     const headerBottom = searchHeader?.getBoundingClientRect().bottom;
-    const obstacles = Array.from(surfaceElement.querySelectorAll<HTMLElement>("[data-testid='route-planner-dialog'], [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet']"))
+    const obstacles = Array.from(surfaceElement?.querySelectorAll<HTMLElement>("[data-testid='route-planner-dialog'], [data-testid='student-selected-place-card'], [data-testid='mobile-building-sheet']") ?? [])
       .map((element) => element.getBoundingClientRect())
       .filter((rect) => rect.width > 0 && rect.height > 0);
     const computedLayout = computeStudentFloorPickerLayout({
@@ -195,13 +209,6 @@ export function StudentFloorPicker({
     fallbackOpenRef.current = next;
     onFallbackOpenChange?.(next);
   }, [layout?.kind, onFallbackOpenChange, open]);
-
-  // The standalone control hands off to the Route Planner's embedded mobile
-  // trigger. Close any already-open standalone menu so its portal cannot stay
-  // visible as a second competing Floor selector.
-  useEffect(() => {
-    if (!embedded && routePanelOpen) setOpen(false);
-  }, [embedded, routePanelOpen]);
 
   useEffect(() => () => onFallbackOpenChange?.(false), [onFallbackOpenChange]);
 
@@ -261,6 +268,12 @@ export function StudentFloorPicker({
     optionRefs.current[next]?.focus();
   };
   const stopMapEvents = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  // Admin Student Preview is itself a higher stacking layer than the public
+  // page. A body portal with z-120 ends up behind that z-300 preview root, so
+  // put the menu inside the preview layer when one is present. It remains a
+  // body portal on the public map, where the existing overlay layer applies.
+  const portalTarget = rootRef.current?.closest<HTMLElement>("[data-student-preview-root]")
+    ?? (typeof document !== "undefined" ? document.body : null);
 
   const optionList = (
     <div id="student-floor-picker-options" role="listbox" aria-label={`Floors in ${buildingName}`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
@@ -300,16 +313,14 @@ export function StudentFloorPicker({
     </div>
   );
 
-  const menu = open && layout && typeof document !== "undefined" ? createPortal(
-    <AnimatePresence initial={false}>
-      {layout.kind === "sheet" ? (
+  const menu = open && layout && portalTarget ? createPortal(
+    layout.kind === "sheet" ? (
         <motion.div
           key="student-floor-picker-scrim"
           data-testid="student-floor-picker-scrim"
-            className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/35 px-3 py-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/35 px-3 py-4 backdrop-blur-[2px]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
           style={{ paddingTop: "max(1rem, env(safe-area-inset-top, 0px))", paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))" }}
           onPointerDown={(event) => { stopMapEvents(event); if (event.target === event.currentTarget) closePicker(); }}
           onClick={stopMapEvents}
@@ -325,7 +336,6 @@ export function StudentFloorPicker({
             style={{ maxHeight: `${layout.maxHeight}px` }}
             initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 5, scale: 0.985 }}
             transition={reducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: "easeOut" }}
             onPointerDown={stopMapEvents}
             onClick={stopMapEvents}
@@ -338,7 +348,7 @@ export function StudentFloorPicker({
                 <p className="text-[13px] font-bold leading-tight text-foreground">Choose floor</p>
                 {buildingCode && <p className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{buildingName}</p>}
               </div>
-            <button type="button" aria-label="Close floor picker" onClick={() => closePicker()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              <button type="button" aria-label="Close floor picker" onClick={() => closePicker()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
             </div>
             {optionList}
           </motion.div>
@@ -354,7 +364,6 @@ export function StudentFloorPicker({
           style={{ top: layout.top, left: layout.left, width: layout.width, maxHeight: layout.maxHeight }}
           initial={reducedMotion ? false : { opacity: 0, y: layout.placement === "below" ? -4 : 4, scale: 0.985 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: layout.placement === "below" ? -3 : 3, scale: 0.985 }}
           transition={reducedMotion ? { duration: 0.01 } : { duration: 0.15, ease: "easeOut" }}
           onPointerDown={stopMapEvents}
           onClick={stopMapEvents}
@@ -368,9 +377,8 @@ export function StudentFloorPicker({
           </div>
           {optionList}
         </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body,
+      ),
+    portalTarget,
   ) : null;
 
   return (
@@ -379,12 +387,19 @@ export function StudentFloorPicker({
       data-testid={embedded ? "student-floor-picker-inline" : "student-floor-picker"}
       data-dock="floor-control-top"
       data-no-drag
-      className={cn(embedded
-        ? "student-map-utility-control relative z-[65] shrink-0 md:hidden"
-        : "student-map-utility-control absolute isolate right-3 top-[calc(env(safe-area-inset-top,0px)+4.5rem)] md:right-4 md:top-4",
-        !embedded && routePanelOpen && "hidden md:block",
-        !embedded && (open ? "z-[90]" : routePanelOpen ? "z-[60]" : "z-[45]"))}
+      className={cn(
+        accountAnchor
+          ? cn("student-map-utility-control relative z-[65] min-w-0 shrink-0 md:w-full", belowAccount && "absolute right-0 top-[calc(100%+0.875rem)] md:static")
+          : embedded
+            ? "student-map-utility-control relative z-[65] shrink-0 md:hidden"
+            : "student-map-utility-control absolute isolate right-3 top-[calc(env(safe-area-inset-top,0px)+4.5rem)] md:right-4 md:top-4",
+        !accountAnchor && !embedded && routePanelOpen && "hidden md:block",
+        open ? "z-[90]" : routePanelOpen ? "z-[60]" : "z-[45]",
+      )}
       data-route-panel-open={routePanelOpen ? "true" : "false"}
+      data-account-anchor={accountAnchor ? "true" : undefined}
+      data-below-account={accountAnchor && belowAccount ? "true" : undefined}
+      style={accountAnchor && belowAccount ? { top: "var(--student-map-floor-picker-top, calc(100% + 0.875rem))" } : undefined}
     >
       <button
         ref={triggerRef}
@@ -402,10 +417,14 @@ export function StudentFloorPicker({
           }
         }}
         title={`${buildingName} · ${current.label}`}
-        className={cn("flex min-h-11 w-auto max-w-[calc(100vw-7rem)] items-center gap-2 rounded-2xl border border-border/80 bg-card/95 px-3.5 text-xs font-bold text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-muted hover:shadow-lg active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:w-[min(360px,calc(100vw-2rem))] md:max-w-[min(360px,calc(100vw-2rem))] md:px-4", embedded && "max-w-[136px] px-2.5")}
+        className={cn(
+          "flex min-h-11 w-auto max-w-[calc(100vw-7rem)] items-center gap-2 rounded-2xl border border-border/80 bg-card/95 px-3.5 text-xs font-bold text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-muted hover:shadow-lg active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:w-[min(360px,calc(100vw-2rem))] md:max-w-[min(360px,calc(100vw-2rem))] md:px-4",
+          embedded && "max-w-[136px] px-2.5",
+          accountAnchor && "max-w-[136px] px-2.5 md:w-full md:max-w-full md:px-4",
+        )}
       >
         <Layers className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-        <span data-testid="student-floor-mobile-label" className="min-w-0 truncate md:hidden">Floor · {compactFloorLabel(current)}</span>
+        <span data-testid="student-floor-mobile-label" className="min-w-0 truncate md:hidden">{buildingCode ? `${buildingCode} · ${compactFloorLabel(current)}` : `Floor · ${compactFloorLabel(current)}`}</span>
         <span className="hidden min-w-0 flex-1 items-center gap-2 overflow-hidden md:flex">
           <span data-testid="student-floor-building-name" className="min-w-0 flex-1 truncate" title={buildingName}>{buildingCode || buildingName}</span>
           <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">·</span>

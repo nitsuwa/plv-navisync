@@ -82,6 +82,13 @@
     padding-block: 0.375rem;
   }
 
+  /* The Floor Editor has a longer utility rail than the campus header. Keep
+     both grid columns bounded on narrow screens so its Save action stays in
+     an actual horizontal scroll region instead of extending past the viewport. */
+  .editor-toolbar-shell:has([data-testid="floor-toolbar-right"]) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
   .editor-toolbar-shell [data-testid="campus-toolbar-left"],
   .editor-toolbar-shell [data-testid="floor-toolbar-left"] {
     grid-area: left;
@@ -100,9 +107,17 @@
   .editor-toolbar-shell [data-testid="campus-toolbar-right"],
   .editor-toolbar-shell [data-testid="floor-toolbar-right"] {
     grid-area: right;
-    min-width: max-content;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
     justify-self: end;
     align-self: center;
+  }
+
+  .editor-toolbar-shell [data-testid="floor-toolbar-right"] {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
   }
 }
 

@@ -1,0 +1,196 @@
+{
+  "isolation": "TEST ONLY in-memory editor copy; all remote writes denied",
+  "checks": {
+    "toolInObjectLibrary": true,
+    "snapPreview": {
+      "snapKind": "path",
+      "label": null
+    },
+    "placed": {
+      "id": "c26d8dce-9085-4f30-8105-f7763a8f63e9",
+      "name": "Emergency Assembly Point",
+      "nodeId": "361131e6-0581-4c30-bc67-4f84dac9fa81",
+      "x": 380,
+      "y": 440,
+      "reusesOutdoorWaypoint": false,
+      "connectedIncidentEdgeIds": [
+        "c3974eed-ed52-498e-9fe5-d1c13e0464c5",
+        "5b37c7d5-82c3-4f09-a53f-19da41b6a183"
+      ],
+      "pointNodeType": "assembly",
+      "status": "Pathway Connection\nConnected\nEdit Connection"
+    },
+    "pathSplitIntegrity": {
+      "sourcePathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+      "insertedPathVertex": true,
+      "pathAttributesPreserved": true,
+      "traversableSplitEdgeCount": 2,
+      "routingAttributesPreserved": true,
+      "noDuplicateOrZeroLengthEdges": true
+    },
+    "undoRedoCreate": {
+      "available": true,
+      "undoRemovedPoint": true
+    },
+    "properties": {
+      "renamed": "TEST ONLY - Admin Main Assembly Point A",
+      "assignmentVisible": true,
+      "connection": "Pathway Connection\nConnected\nEdit Connection",
+      "reviewStatus": "Ready for Review"
+    },
+    "placementAttempt-TEST ONLY - East Gathering Area": {
+      "candidate": {
+        "id": "99748238-3644-4e6d-b497-feb263084e58",
+        "x": 462,
+        "y": 440
+      },
+      "screenPoint": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "marker": {
+        "x": 653.9708333333333,
+        "y": 435.4166666666667
+      },
+      "snapKind": "waypoint"
+    },
+    "placementAttempt-TEST ONLY - Secondary Open Space": {
+      "candidate": {
+        "id": "2c7f6cf7-b6a9-455b-b901-043b0f867e8f",
+        "x": 507,
+        "y": 828
+      },
+      "screenPoint": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "marker": {
+        "x": 691.7520833333333,
+        "y": 761.1750000000001
+      },
+      "snapKind": "waypoint"
+    },
+    "multipleAssignments": [
+      {
+        "id": "c26d8dce-9085-4f30-8105-f7763a8f63e9",
+        "name": "TEST ONLY - Admin Main Assembly Point A",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "primary"
+          },
+          {
+            "code": "SC",
+            "designation": "primary"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "ffd5b214-536e-435a-9cdd-9ea1b5106dbe",
+        "name": "TEST ONLY - East Gathering Area",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "COED",
+            "designation": "primary"
+          },
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "id": "c4a02d85-e412-45ab-9e06-c7f14cf65c8c",
+        "name": "TEST ONLY - Secondary Open Space",
+        "anchorMatches": true,
+        "connected": true,
+        "assignments": [
+          {
+            "code": "CABA",
+            "designation": "alternate"
+          },
+          {
+            "code": "COED",
+            "designation": "alternate"
+          }
+        ],
+        "review": "approved"
+      },
+      {
+        "uniqueIds": true,
+        "primaryConflicts": [],
+        "alternateCountForCaba": 2
+      }
+    ],
+    "multipleSave": {
+      "draftPointCount": 3,
+      "savedSnapshotPointCount": 3,
+      "allThreeApproved": true,
+      "noDanglingEdges": true
+    },
+    "multipleReload": {
+      "pointCount": 3,
+      "allApproved": true,
+      "names": [
+        "TEST ONLY - Admin Main Assembly Point A",
+        "TEST ONLY - East Gathering Area",
+        "TEST ONLY - Secondary Open Space"
+      ],
+      "connectedCount": 3,
+      "noDanglingEdges": true
+    }
+  },
+  "screenshots": [
+    "assembly-point-admin-object-library-1440.png",
+    "assembly-point-admin-placement-preview-1440.png",
+    "assembly-point-three-points-saved-1440.png",
+    "assembly-point-three-points-reloaded-1440.png",
+    "assembly-point-admin-test-route-primary-1440.png",
+    "assembly-point-admin-browser-failure.png"
+  ],
+  "browserErrors": [
+    "Warning: %s: `ref` is not a prop. Trying to access it will result in `undefined` being returned. If you need to access the same value within the child component, you should pass it as a different prop. (https://reactjs.org/link/special-props)%s [object Object] \n    at PopChild (http://127.0.0.1:5174",
+    "onOpenFloor is not a function"
+  ],
+  "selectedOutdoorAnchor": {
+    "nodeId": "22fe88b3-66f6-45ca-ba41-076d7a47089c",
+    "x": 380,
+    "y": 440,
+    "sourceWaypoint": {
+      "x": 360,
+      "y": 440
+    },
+    "name": "Walking Point",
+    "pathId": "2fb5f52f-41bd-4fbb-b66f-4c7027e2eff0",
+    "sourcePathAttributes": {
+      "type": "road",
+      "color": "#cbd5e1",
+      "width": 28,
+      "locked": false,
+      "pathNetworkId": "517410a6-62d0-4a8f-8c75-c112a7cb0bd9",
+      "pointCount": 19,
+      "vertexCount": 19
+    },
+    "sourceEdgeAttributes": {
+      "bidirectional": true,
+      "accessible": true,
+      "emergencySafe": true,
+      "type": "walkway"
+    },
+    "incidentEdgeIds": [
+      "9b2e4b5b-ac8f-48a8-bbe0-074d41f1ae12",
+      "172f8780-2ee8-41dd-a015-b3821ad8c8a9",
+      "edbcc068-f1ee-4560-912e-af23d87488c3"
+    ]
+  },
+  "failure": {
+    "message": "locator.selectOption: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-testid=\"test-route-full\"]').first().getByTestId('test-route-assembly-point-select')\u001b[22m\n",
+    "stack": "locator.selectOption: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-testid=\"test-route-full\"]').first().getByTestId('test-route-assembly-point-select')\u001b[22m\n\n    at main (D:\\Build PLV NaviSync App\\verification-artifacts\\assembly-point-ordinary-sos\\assembly-point-multiple-admin-browser.cjs:570:33)"
+  }
+}

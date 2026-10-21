@@ -1,0 +1,68 @@
+{
+  "environment": "actual CampusMapPage in local Vite/Chromium with test-only approved graph snapshot; external APIs blocked",
+  "rooms": {
+    "caba": {
+      "bothRoutes": true,
+      "candidateButtons": 2,
+      "routeASelectionAndPlayback": true,
+      "routeBSelectionAndPlayback": true,
+      "routeSwitchChangedInstruction": true,
+      "exploreNextAdvanced": true,
+      "followReturned": true,
+      "pauseResume": true,
+      "previousNext": true,
+      "speedCycle": [
+        "1×",
+        "1.5×",
+        "2×"
+      ],
+      "renderer2d3d2d": true,
+      "floorSwitcher": "Choose floor. Current floor: Floor 6"
+    },
+    "ceit": {
+      "bothRoutes": true,
+      "candidateButtons": 2,
+      "routeASelectionAndPlayback": true,
+      "routeBSelectionAndPlayback": true,
+      "routeSwitchChangedInstruction": true,
+      "exploreNextAdvanced": true,
+      "followReturned": true,
+      "pauseResume": true,
+      "previousNext": true,
+      "speedCycle": [
+        "1×",
+        "1.5×",
+        "2×"
+      ],
+      "renderer2d3d2d": true,
+      "floorSwitcher": "Choose floor. Current floor: Floor 6"
+    },
+    "auditorium": {
+      "bothRoutes": true,
+      "candidateButtons": 2,
+      "routeASelectionAndPlayback": true,
+      "routeBSelectionAndPlayback": true,
+      "routeSwitchChangedInstruction": true,
+      "exploreNextAdvanced": true,
+      "followReturned": true,
+      "pauseResume": true,
+      "previousNext": true,
+      "speedCycle": [
+        "1×",
+        "1.5×",
+        "2×"
+      ],
+      "renderer2d3d2d": true,
+      "floorSwitcher": "Choose floor. Current floor: Floor 5"
+    },
+    "assemblyHall": {
+      "singleMainExit": false,
+      "noDualRouteOverview": true,
+      "routeStarted": true,
+      "mobile390ScrollWidth": 390,
+      "mobile390Width": 390,
+      "renderer2d3d": true
+    }
+  },
+  "browserErrors": []
+}

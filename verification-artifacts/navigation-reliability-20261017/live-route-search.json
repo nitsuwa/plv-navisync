@@ -1,0 +1,133 @@
+{
+  "errors": [],
+  "routeSearches": [
+    {
+      "endpoint": "start",
+      "query": "CANTEEN",
+      "options": [
+        "CANTEEN\nBUILDING\nCANTEEN"
+      ]
+    },
+    {
+      "endpoint": "destination",
+      "query": "CABA-403",
+      "options": [
+        "CABA-403\nROOM\nCOLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION · Floor 4"
+      ]
+    }
+  ],
+  "bootstrap": {
+    "readyState": "complete",
+    "title": "PLV NaviSync — Smart Campus Navigator",
+    "root": "<div class=\"flex w-full max-w-full flex-col student-map-app-shell overflow-hidden overscroll-none\"><a href=\"#main-content\" class=\"sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:px-4 focus:py-2.5 focus:rounded-xl focus:bg-primary focus:text-primary-foreground focus:text-sm focus:font-bold focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring\">Skip to main content</a><div class=\"sticky top-0 z-40 shrink-0 hidden md:block\"><nav class=\"sticky top-0 z-40",
+    "scripts": [
+      "",
+      "http://127.0.0.1:5174/@vite/client",
+      "",
+      "http://127.0.0.1:5174/src/main.tsx"
+    ]
+  },
+  "preview": "Choose a starting point, destination, and travel mode to get walking directions.\n\nRoute ready from CANTEEN to CABA-403.\n\nRoute preview\n\nALTERNATIVE ROUTES\n\nRoute A\nRoute B\n\nChanging the route restarts this demonstration at its start.\n\nSTANDARD ROUTE\n\nCANTEEN → CABA-403\n\nIndoor + outdoor\nElevator\n1 building entry\nGround Floor → Floor 4\nSteps\n7\nEdit Route\nStart Navigation\nClear",
+  "alternatives": 1,
+  "routeA": {
+    "geometry": [
+      "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+    ],
+    "pathCount": 1
+  },
+  "routeAIndoor": {
+    "floorNumber": "4",
+    "scene": "a9df9844-16b0-4544-a449-d699a5b5f596",
+    "geometry": [
+      "864,78 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+    ],
+    "renderState": {
+      "scene": {
+        "rect": [
+          -250.20001220703125,
+          341.6382141113281,
+          1525.341064453125,
+          695.2236328125
+        ],
+        "opacity": "0",
+        "visibility": "visible",
+        "display": "inline"
+      },
+      "line": {
+        "rect": [
+          582.14111328125,
+          463.9323425292969,
+          455.0823974609375,
+          329.0823669433594
+        ],
+        "opacity": "0.98",
+        "visibility": "visible",
+        "display": "inline"
+      },
+      "svg": {
+        "rect": [
+          0,
+          57,
+          1440,
+          843
+        ],
+        "opacity": "1",
+        "visibility": "visible",
+        "display": "block"
+      },
+      "sceneChildren": 2
+    }
+  },
+  "routeB": {
+    "geometry": [
+      "820,330 734,330 734,403 680,403 680,440 640,440 619,440 571,440 549,440 486,440 462,440 400,440 360,440 360,673 240,672"
+    ],
+    "pathCount": 1
+  },
+  "routeBSelected": "true",
+  "routeGeometryChanged": false,
+  "routeBIndoor": {
+    "floorNumber": "4",
+    "scene": "a9df9844-16b0-4544-a449-d699a5b5f596",
+    "geometry": [
+      "960,160 959,226 864,226 787,226 749,226 677,226 595,226 557,226 557,300"
+    ],
+    "renderState": {
+      "scene": {
+        "rect": [
+          -438.67059326171875,
+          341.6382141113281,
+          1525.341064453125,
+          695.2236328125
+        ],
+        "opacity": "1",
+        "visibility": "visible",
+        "display": "inline"
+      },
+      "line": {
+        "rect": [
+          393.6705627441406,
+          585.4852905273438,
+          597.38818359375,
+          207.5294189453125
+        ],
+        "opacity": "0.98",
+        "visibility": "visible",
+        "display": "inline"
+      },
+      "svg": {
+        "rect": [
+          0,
+          57,
+          1440,
+          843
+        ],
+        "opacity": "1",
+        "visibility": "visible",
+        "display": "block"
+      },
+      "sceneChildren": 2
+    }
+  },
+  "indoorRouteGeometryChanged": true
+}

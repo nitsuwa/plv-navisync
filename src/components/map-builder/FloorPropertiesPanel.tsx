@@ -1,4 +1,5 @@
 import { memo, useMemo, useRef, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Info, Palette, Settings2, AlertTriangle, Navigation, Copy, Eye, EyeOff, Lock, Unlock, Layers, FlipHorizontal, FlipVertical } from "lucide-react";
 import { NavigationRelationshipCard } from "./NavigationRelationshipCard";
 import { ObjectIssueSection, type ObjectIssueItem } from "./ObjectIssueSection";
@@ -7,10 +8,14 @@ import { ColorPicker } from "../ui/ColorPicker";
 import { ROOM_MAP, WALL_THICKNESSES, furnitureTypeSupportsColor } from "./constants";
 import { stairContinuationDirectionAllows, stairDirectionsForFloorInOrder } from "../../lib/floorManagement";
 import type {
+  Campus,
   FloorRoom, FloorWall, FloorDoor, FloorWindow,
   FloorFurniture, FloorStairs, FloorRamp, FloorElevatorItem,
   FloorLabel, FloorSelection, FloorEditorMode,
 } from "./types";
+import { RoomVideoAdminSection } from "./RoomVideoAdminSection";
+import { RoomPhotoAdminSection } from "./RoomPhotoAdminSection";
+import type { EmergencyRouteReviewRequirement } from "../../lib/roomEmergencyEvacuation";
 import { elevatorSystemNumberOf } from "./types";
 import { doorDisplayName, type EntranceIndoorLinkStatus } from "../../lib/entranceTransitions";
 import { rotationDisplayAngle } from "../../lib/campusSelection";
@@ -19,10 +24,12 @@ import { formatWallLength, wallLength, type WallLengthAnchor } from "../../lib/f
 import { roomVisualSetup } from "../../lib/roomSetup";
 import { CommittedNumberInput } from "./CommittedNumberInput";
 import type { FloorLayerActionAvailability } from "../../lib/floorRenderLayers";
+import type { FloorTextDraftTarget } from "./floorTextPreviewStore";
 
 type TabId = "basic" | "style" | "advanced";
 
 interface FloorPropertiesPanelProps {
+  campus?: Campus;
   selected: FloorSelection | null;
   mode: FloorEditorMode;
   /** B7 Phase 2: live validation issues for the currently selected object. */
@@ -36,6 +43,8 @@ interface FloorPropertiesPanelProps {
   ramps: FloorRamp[];
   elevators: FloorElevatorItem[];
   labels: FloorLabel[];
+  onTextDraftChange?: (target: FloorTextDraftTarget, value: string, composing: boolean) => void;
+  onTextDraftFlush?: () => void;
   onUpdateRoom: (id: string, changes: Partial<FloorRoom>) => void;
   onEditRoomShape?: (roomId: string) => void;
   onResetRoomShape?: (roomId: string) => void;
@@ -101,6 +110,8 @@ interface FloorPropertiesPanelProps {
   entranceConnectionStatus?: EntranceIndoorLinkStatus;
   onAddPhysicalToNavigation: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
   onViewPhysicalInNavigation: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
+  onInspectNavigationConnection?: (edgeId: string) => void;
+  onInspectEmergencyReviewRequirement?: (requirement: EmergencyRouteReviewRequirement) => void;
   onRemovePhysicalFromNavigation: (type: "room" | "door" | "stairs" | "elevator" | "ramp", id: string) => void;
   onLinkRoomDoor?: (roomId: string, mode?: "replace" | "add") => void;
   onSelectRoomDoor?: (doorId: string) => void;
@@ -258,6 +269,85 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** Keep native text editing local to the field. The Floor model is updated by
+ * a debounced parent transaction; blur/Enter flush that transaction at an
+ * intentional editing boundary. */
+function EditorTextDraftField({
+  target,
+  value,
+  onDraft,
+  onImmediate,
+  onFlush,
+  className,
+  placeholder,
+  rows,
+  autoFocus,
+  ariaLabel,
+  testId,
+  maxLength,
+  trimOnBlur = false,
+}: {
+  target: FloorTextDraftTarget;
+  value: string;
+  onDraft?: (target: FloorTextDraftTarget, value: string, composing: boolean) => void;
+  onImmediate?: (value: string) => void;
+  onFlush?: () => void;
+  className: string;
+  placeholder?: string;
+  rows?: number;
+  autoFocus?: boolean;
+  ariaLabel?: string;
+  testId?: string;
+  maxLength?: number;
+  trimOnBlur?: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+  const composingRef = useRef(false);
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+  const update = (next: string, composing = composingRef.current) => {
+    setDraft(next);
+    if (onDraft) onDraft(target, next, composing);
+    else onImmediate?.(next);
+  };
+  const common = {
+    value: draft,
+    autoFocus,
+    placeholder,
+    "aria-label": ariaLabel,
+    "data-testid": testId,
+    maxLength,
+    className,
+    onFocus: () => { focusedRef.current = true; },
+    onBlur: () => {
+      focusedRef.current = false;
+      const committed = trimOnBlur ? draft.trim() : draft;
+      if (committed !== draft) update(committed, false);
+      onFlush?.();
+    },
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const native = event.nativeEvent as InputEvent;
+      update(event.target.value, composingRef.current || native.isComposing === true);
+    },
+    onCompositionStart: () => { composingRef.current = true; },
+    onCompositionEnd: (event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      composingRef.current = false;
+      update(event.currentTarget.value, false);
+    },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (rows === undefined && event.key === "Enter" && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+    },
+  };
+  return rows === undefined
+    ? <input {...common} />
+    : <textarea {...common} rows={rows} />;
+}
+
 function SegmentControl<T extends string>({ value, options, onChange }: {
   value: T;
   options: Array<{ value: T; label: string; disabled?: boolean }>;
@@ -354,10 +444,12 @@ function WallOffsetInput({ value, wall, className, onCommit }: {
 }
 
 function FloorPropertiesPanelView({
+  campus,
   selected,
   mode,
   issueItems = [],
   rooms, walls, doors, windows, furniture, stairs, ramps, elevators, labels,
+  onTextDraftChange, onTextDraftFlush,
   onUpdateRoom, onEditRoomShape, onResetRoomShape, onFlipRoomShape, onFlipRoomSetup, roomShapeEditActive = false,
   onUpdateWall, onUpdateWallLength, wallLengthAnchor = "start", wallLengthAnchorRequiresChoice = false,
   onWallLengthAnchorChange, onBeginWallLengthMatch, wallLengthMatchActive = false, onStraightenWall,
@@ -1181,7 +1273,7 @@ function FloorPropertiesPanelView({
               <span aria-hidden="true" className="shrink-0 text-base font-extrabold leading-none text-primary">→</span>
             </button>
           )}
-          {open && type === "stairs" && (
+          {open && type === "stairs" && typeof document !== "undefined" ? createPortal(
             <div
               className="pointer-events-none fixed bottom-0 right-0 top-16 z-[160] flex w-[min(30rem,calc(100vw-1rem))] max-w-full p-2 sm:p-3"
               data-testid="stair-connections-side-panel"
@@ -1415,9 +1507,10 @@ function FloorPropertiesPanelView({
                   <button type="button" onClick={closeStairDialog} className="min-h-8 rounded-lg border border-border px-3 text-[10px] font-bold text-foreground hover:bg-muted">Done</button>
                 </div>
               </div>
-            </div>
-          )}
-          {open && type === "elevator" && (
+            </div>,
+            document.body,
+          ) : null}
+          {open && type === "elevator" && typeof document !== "undefined" ? createPortal(
             <div className="pointer-events-none fixed bottom-0 right-0 top-16 z-[160] flex w-[min(30rem,calc(100vw-1rem))] max-w-full p-2 sm:p-3" data-testid="elevator-connections-side-panel">
               <div className="pointer-events-auto ml-auto flex h-full max-h-screen w-full flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-sm dark:ring-white/5" data-testid="elevator-connections-manager" role="dialog" aria-labelledby="manage-elevator-connections-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
                 <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5 sm:py-4">
@@ -1503,8 +1596,9 @@ function FloorPropertiesPanelView({
                 </div>
                 <div className="space-y-2 border-t border-border px-5 py-3"><div className="flex justify-end"><button type="button" onClick={closeElevatorDialog} className="min-h-8 rounded-lg border border-border px-3 text-[10px] font-bold text-foreground hover:bg-muted">Done</button></div>{canonicalElevatorFloorCount > 1 && !elevatorDisconnectAllDraft && <button type="button" onClick={requestElevatorDisconnectAll} className="w-full rounded-lg border border-destructive/30 px-3 py-2 text-left text-[10px] font-bold text-destructive hover:bg-destructive/10">Disconnect All Floors</button>}</div>
               </div>
-            </div>
-          )}
+            </div>,
+            document.body,
+          ) : null}
         </div>
       </Field>
     );
@@ -1623,8 +1717,9 @@ function FloorPropertiesPanelView({
           <>
             <div className="space-y-3" data-testid="room-primary-properties">
                 <Field label="Name">
-                  <input value={selRoom.name} onChange={(e) => onUpdateRoom(selRoom.id, { name: e.target.value })}
-                    className={inputCls} placeholder="Room name" />
+                  <EditorTextDraftField key={`room-name-${selRoom.id}`} target={{ type: "room", id: selRoom.id, field: "name" }} value={selRoom.name}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateRoom(selRoom.id, { name: value })}
+                    testId="room-name-input" className={inputCls} placeholder="Room name" />
                 </Field>
                 <Field label="Color">
                   <ColorPicker
@@ -1632,11 +1727,37 @@ function FloorPropertiesPanelView({
                     onChange={(color) => onUpdateRoom(selRoom.id, { color })}
                   />
                 </Field>
-                <Field label="Description">
-                  <textarea value={selRoom.description ?? ""} rows={2} onChange={(e) => onUpdateRoom(selRoom.id, { description: e.target.value })}
-                    placeholder="Optional..." className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <div className="space-y-2 rounded-xl border border-border/70 bg-muted/10 p-3" data-testid="room-information-section">
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-foreground">Room Information</p>
+                    <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">Optional details students can see on the Student Map.</p>
+                  </div>
+                <Field label="Room Description">
+                  <EditorTextDraftField key={`room-description-${selRoom.id}`} target={{ type: "room", id: selRoom.id, field: "description" }} value={selRoom.description ?? ""}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateRoom(selRoom.id, { description: value })}
+                    rows={3} maxLength={500} trimOnBlur
+                    ariaLabel="Room description"
+                    testId="room-description-input"
+                    placeholder="Add a short description for this room..."
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-y focus:outline-none focus:ring-2 focus:ring-primary/30" />
                 </Field>
+                {campus && <RoomPhotoAdminSection
+                  key={`room-photo-${selRoom.id}`}
+                  campusId={campus.id}
+                  buildingId={selRoom.buildingId}
+                  floorId={selRoom.floorId}
+                  room={selRoom}
+                  onUpdateRoom={onUpdateRoom}
+                />}
+                </div>
             </div>
+            {campus && <RoomVideoAdminSection
+              key={`room-videos-${selRoom.id}`}
+              campusId={campus.id}
+              buildingId={selRoom.buildingId}
+              floorId={selRoom.floorId}
+              room={selRoom}
+            />}
             <div className="pt-3 border-t border-border space-y-3" data-testid="room-layout-section">
               <p className={labelCls}>Layout</p>
                 <PositionFields x={selRoom.x} y={selRoom.y} onChange={(k, v) => onUpdateRoom(selRoom.id, { [k]: v })} />
@@ -1992,7 +2113,8 @@ function FloorPropertiesPanelView({
             {(openingInspector || tab === "basic") && (
               <>
                 <Field label="Label">
-                  <input value={selDoor.label ?? ""} onChange={(e) => onUpdateDoor(selDoor.id, { label: e.target.value })}
+                  <EditorTextDraftField key={`door-label-${selDoor.id}`} target={{ type: "door", id: selDoor.id, field: "label" }} value={selDoor.label ?? ""}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateDoor(selDoor.id, { label: value })}
                     className={inputCls} placeholder="e.g. Main Entrance" />
                 </Field>
                 {selDoor.buildingEntranceId && (
@@ -2180,7 +2302,8 @@ function FloorPropertiesPanelView({
         {selFurniture && (
           <>
             <Field label="Name">
-              <input value={selFurniture.name} onChange={(e) => onUpdateFurniture(selFurniture.id, { name: e.target.value })}
+              <EditorTextDraftField key={`furniture-name-${selFurniture.id}`} target={{ type: "furniture", id: selFurniture.id, field: "name" }} value={selFurniture.name}
+                onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateFurniture(selFurniture.id, { name: value })}
                 className={inputCls} placeholder="Item name" />
             </Field>
             <Field label="Type">
@@ -2283,7 +2406,8 @@ function FloorPropertiesPanelView({
             {tab === "basic" && (
               <>
                 <Field label="Label">
-                  <input value={selStairs.label} onChange={(e) => onUpdateStairs(selStairs.id, { label: e.target.value })}
+                  <EditorTextDraftField key={`stairs-label-${selStairs.id}`} target={{ type: "stairs", id: selStairs.id, field: "label" }} value={selStairs.label}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateStairs(selStairs.id, { label: value })}
                     className={inputCls} placeholder="e.g. Staircase A" />
                 </Field>
                 {/* B5 Phase 2.3: compact custom Direction control (Up / Down /
@@ -2330,6 +2454,16 @@ function FloorPropertiesPanelView({
                     </Field>
                   );
                 })()}
+                {!selStairs.exteriorEmergencyStairId && <label className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl border border-border bg-background/70 p-2.5" data-testid="stair-emergency-use-control">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                    checked={selStairs.emergencySafe !== false}
+                    onChange={(event) => onUpdateStairs(selStairs.id, { emergencySafe: event.target.checked })}
+                    aria-label="Use this Stair for emergency evacuation" />
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-bold text-foreground">Use for emergency evacuation</span>
+                    <span className="mt-0.5 block text-[9px] leading-relaxed text-muted-foreground">Ordinary stairs are included by default. Clear this only when this stair is explicitly unsuitable for emergency use.</span>
+                  </span>
+                </label>}
                 <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-2" data-testid="stair-entry-side-control">
                   <div className="flex items-start gap-2">
                     <FlipHorizontal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -2427,7 +2561,8 @@ function FloorPropertiesPanelView({
             {tab === "basic" && (
               <>
                 <Field label="Label">
-                  <input value={selRamp.label} onChange={(e) => onUpdateRamp(selRamp.id, { label: e.target.value })}
+                  <EditorTextDraftField key={`ramp-label-${selRamp.id}`} target={{ type: "ramp", id: selRamp.id, field: "label" }} value={selRamp.label}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateRamp(selRamp.id, { label: value })}
                     className={inputCls} placeholder="e.g. Wheelchair Ramp" />
                 </Field>
                 {/* ── Shared ID (for linking the same ramp across floors) ── */}
@@ -2487,7 +2622,8 @@ function FloorPropertiesPanelView({
                   </div>
                 </Field>
                 <Field label="Display label (optional)">
-                  <input value={selElevator.label} onChange={(e) => onUpdateElevator(selElevator.id, { label: e.target.value })}
+                  <EditorTextDraftField key={`elevator-label-${selElevator.id}`} target={{ type: "elevator", id: selElevator.id, field: "label" }} value={selElevator.label}
+                    onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateElevator(selElevator.id, { label: value })}
                     className={inputCls} placeholder="e.g. East Elevator" />
                 </Field>
                 <div data-testid="elevator-identity-summary" className="rounded-xl border border-border bg-muted/20 px-3 py-2.5">
@@ -2557,8 +2693,9 @@ function FloorPropertiesPanelView({
         {selLabel && (
           <>
             <Field label="Text">
-              <textarea autoFocus aria-label="Label text" value={selLabel.text} rows={2} onChange={(e) => onUpdateLabel(selLabel.id, { text: e.target.value })}
-                placeholder="Type annotation text…"
+              <EditorTextDraftField key={`label-text-${selLabel.id}`} target={{ type: "label", id: selLabel.id, field: "text" }} value={selLabel.text}
+                onDraft={onTextDraftChange} onFlush={onTextDraftFlush} onImmediate={(value) => onUpdateLabel(selLabel.id, { text: value })}
+                autoFocus ariaLabel="Label text" rows={2} placeholder="Type annotation text…"
                 className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </Field>
             <Field label="Font Size">

@@ -1,11 +1,12 @@
 import { getSupabase } from "../lib/supabase";
-import { DEFAULT_FEATURES } from "../components/map-builder/constants";
+import { DEFAULT_FEATURES, genId } from "../components/map-builder/constants";
 import type { Campus, CampusBuilding } from "../components/map-builder/types";
 import type { Json, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import type { CampusCreationVisibility, CampusLifecycleStatus } from "../types/campusLifecycle";
 export type { CampusCreationVisibility, CampusLifecycleStatus } from "../types/campusLifecycle";
 import { serializeCampusStructure } from "./campusStructureService";
 import { validateCampusForPublish } from "../lib/campusPublication";
+import { reconcilePathwayNavigation } from "../lib/campusPathNavigation";
 
 export type CampusRow = Tables<"campuses">;
 export type CampusVersionRow = Tables<"campus_versions">;
@@ -65,7 +66,7 @@ export type CampusCreateInput = Pick<
 export type CampusUpdateInput = Pick<
   TablesUpdate<"campuses">,
   "name" | "code" | "description" | "address" | "city" | "province" | "postal_code" |
-  "latitude" | "longitude" | "logo_path" | "overview_image_path" | "theme_color" |
+  "latitude" | "longitude" | "logo_path" | "overview_image_path" | "theme_color" | "emergency_destination_policy" |
   "canvas_width" | "canvas_height" | "canvas_configured" | "map_scale_m_per_unit" | "is_default"
 >;
 
@@ -350,7 +351,10 @@ export async function toEditorCampus(row: CampusListRow, previewSummary?: Campus
     canvasW: row.canvas_width,
     canvasH: row.canvas_height,
     canvasConfigured: row.canvas_configured,
-    settings: { accessibility: true, emergency: true, eventLayer: true, gps: true },
+    settings: {
+      accessibility: true, emergency: true, eventLayer: true, gps: true,
+      emergencyDestinationPolicy: row.emergency_destination_policy ?? "fixed_primary",
+    },
     buildings, markers: [], paths: [], navNodes: [], navEdges: [], routes: [],
     previewBuildingCount: previewSummary?.buildings ?? (hasPreviewBuildings ? buildings.length : undefined),
     previewFloorCount: previewSummary?.floors,
@@ -473,6 +477,16 @@ export function mergePublishedCampusAppearance(campus: Campus, structure: unknow
   return merged;
 }
 
+/**
+ * Derive authored same-network walkway intersections in memory for immutable
+ * snapshots created before intersection compilation was introduced. This
+ * never writes back to the published version or changes pathway geometry or
+ * eligibility metadata.
+ */
+export function compilePublishedCampusPathways(campus: Campus): Campus {
+  return reconcilePathwayNavigation(campus, genId, { preserveAuthoredGeometry: true });
+}
+
 export async function listCampuses(): Promise<Campus[]> {
   const { data, error } = await getSupabase()
     .from("campuses")
@@ -512,13 +526,14 @@ export async function listPublishedCampusSnapshots(): Promise<Campus[]> {
       campus as Campus,
       (snapshot as { structure?: unknown }).structure,
     );
+    const compiled = compilePublishedCampusPathways(value);
     result.push({
-      ...value,
+      ...compiled,
       eventOverlays: [],
       publishStatus: "published",
       lifecycleStatus: "published",
       visibleToStudents: true,
-      publishedAt: row.published_at ?? value.publishedAt,
+      publishedAt: row.published_at ?? compiled.publishedAt,
     });
   }
   return result;
@@ -898,7 +913,42 @@ export async function uploadCampusImage(campusId: string, kind: "logo" | "overvi
  * Preview and the eventual public consumer share one immutable snapshot,
  * rather than relying on the editor's in-memory state.
  */
-export async function publishCampusVersion(
+export class CampusPublicationOutcomeUncertainError extends Error {
+  readonly campusId: string;
+  readonly versionId: string;
+
+  constructor(campusId: string, versionId: string) {
+    super("The publication request may have completed, but its status could not be confirmed. Check the connection and retry; the campus status will be checked before another version is published.");
+    this.name = "CampusPublicationOutcomeUncertainError";
+    this.campusId = campusId;
+    this.versionId = versionId;
+  }
+}
+
+interface UncertainPublicationAttempt {
+  versionId: string;
+  campus: Campus;
+}
+
+const publicationOperations = new Map<string, Promise<Campus>>();
+const uncertainPublicationAttempts = new Map<string, UncertainPublicationAttempt>();
+
+function campusWithPublishedState(campus: Campus, publishedAt?: string | null): Campus {
+  return {
+    ...campus,
+    publishStatus: "published",
+    lifecycleStatus: "published",
+    visibleToStudents: true,
+    publishedAt: publishedAt ?? undefined,
+  };
+}
+
+async function reconcilePublication(campusId: string, versionId: string) {
+  const statuses = await listPublishedCampusVersionStatus();
+  return statuses.find((status) => status.campus_id === campusId && status.latest_published_version_id === versionId) ?? null;
+}
+
+async function performCampusPublication(
   campus: Campus,
   validation: { errors: number; warnings: number; passed: number; total: number },
 ): Promise<Campus> {
@@ -910,6 +960,16 @@ export async function publishCampusVersion(
       : "Fix the blocking validation issues before publishing this campus.");
   }
   const userId = await requireCurrentUserId();
+
+  // If the last response was lost and even its status lookup failed, reconcile
+  // that exact version before constructing or publishing another snapshot.
+  const uncertainAttempt = uncertainPublicationAttempts.get(campus.id);
+  if (uncertainAttempt) {
+    const reconciled = await reconcilePublication(campus.id, uncertainAttempt.versionId);
+    uncertainPublicationAttempts.delete(campus.id);
+    if (reconciled) return campusWithPublishedState(uncertainAttempt.campus, reconciled.published_at);
+  }
+
   const existingVersions = await listCampusVersions(campus.id);
   const nextVersion = existingVersions.reduce((max, version) => Math.max(max, version.version_number), 0) + 1;
   const eventFreeCampus = { ...campus, eventOverlays: [] };
@@ -954,20 +1014,65 @@ export async function publishCampusVersion(
     });
   assertOk(validationError, "record campus publish validation");
 
-  const { data: publishedId, error: publishError } = await getSupabase()
-    .rpc("publish_campus_version", { p_version_id: version.id });
-  assertOk(publishError, "publish campus version");
-  if (typeof publishedId !== "string" || publishedId !== version.id) {
-    throw new Error("Publishing did not return an authoritative version confirmation.");
+  let publishedId: unknown;
+  let publishError: unknown;
+  try {
+    const result = await getSupabase().rpc("publish_campus_version", { p_version_id: version.id });
+    publishedId = result.data;
+    publishError = result.error;
+  } catch (error) {
+    publishError = error;
   }
-  const publishedAt = new Date().toISOString();
-  return {
-    ...campus,
-    publishStatus: "published",
-    lifecycleStatus: "published",
-    visibleToStudents: true,
-    publishedAt,
-  };
+  const rpcVersionId = typeof publishedId === "string"
+    ? publishedId
+    : publishedId && typeof publishedId === "object" && "version_id" in publishedId
+      ? (publishedId as { version_id?: unknown }).version_id
+      : undefined;
+  const confirmedByResponse = rpcVersionId === version.id;
+
+  if (publishError || !confirmedByResponse) {
+    let reconciled;
+    try {
+      reconciled = await reconcilePublication(campus.id, version.id);
+    } catch {
+      uncertainPublicationAttempts.set(campus.id, { versionId: version.id, campus });
+      throw new CampusPublicationOutcomeUncertainError(campus.id, version.id);
+    }
+    if (reconciled) return campusWithPublishedState(campus, reconciled.published_at);
+    if (publishError instanceof Error) throw publishError;
+    if (publishError) assertOk(publishError as SupabaseErrorLike, "publish campus version");
+    throw new Error("The campus publication was not confirmed. Refresh the campus status before trying again.");
+  }
+
+  let publishedAt = publishedId && typeof publishedId === "object" && "published_at" in publishedId
+    ? (publishedId as { published_at?: unknown }).published_at
+    : undefined;
+  if (typeof publishedAt !== "string") {
+    try {
+      const reconciled = await reconcilePublication(campus.id, version.id);
+      publishedAt = reconciled?.published_at ?? undefined;
+    } catch {
+      // The RPC already returned the exact version id. Timestamp hydration is
+      // optional and must not turn confirmed publication into a retryable fail.
+      publishedAt = undefined;
+    }
+  }
+  return campusWithPublishedState(campus, typeof publishedAt === "string" ? publishedAt : undefined);
+}
+
+export async function publishCampusVersion(
+  campus: Campus,
+  validation: { errors: number; warnings: number; passed: number; total: number },
+): Promise<Campus> {
+  const existing = publicationOperations.get(campus.id);
+  if (existing) return existing;
+  const operation = performCampusPublication(campus, validation);
+  publicationOperations.set(campus.id, operation);
+  try {
+    return await operation;
+  } finally {
+    if (publicationOperations.get(campus.id) === operation) publicationOperations.delete(campus.id);
+  }
 }
 
 export const campusService = {

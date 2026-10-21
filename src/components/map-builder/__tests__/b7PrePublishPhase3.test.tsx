@@ -3,7 +3,7 @@
  * resolution, and warning confirmation regression tests.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PrePublishDialog } from "../PrePublishDialog";
 import type { Campus, ValidationIssue } from "../types";
@@ -210,6 +210,29 @@ describe("PrePublishDialog — Warning confirmation UX", () => {
       makeIssue({ type: "missing_name", severity: "warning", message: "Missing name" }),
     ]);
     expect(screen.getByText("Review Warnings & Publish")).toBeTruthy();
+    expect(screen.getByText("Missing name")).toBeInTheDocument();
+    expect(screen.getByText("Warning", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Inspect/ })).toBeInTheDocument();
+  });
+
+  it("keeps the publish review open with an indeterminate status while publishing", () => {
+    const onClose = vi.fn();
+    const { container } = render(<PrePublishDialog
+      open
+      campus={makeCampus()}
+      errors={[makeIssue({ type: "missing_name", severity: "warning", message: "Review the building name" })]}
+      onClose={onClose}
+      onPublish={noop}
+      onReviewIssue={noop}
+      isPublishing
+    />);
+    const dialog = screen.getByRole("dialog", { name: "Pre-publish validation" });
+    expect(screen.getByRole("heading", { name: "Publishing Campus…" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Please wait for server confirmation");
+    expect(screen.queryByRole("button", { name: "Close publish review" })).not.toBeInTheDocument();
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.querySelector("[aria-modal='true']")).toBeTruthy();
   });
 
   it("21. info-only remains non-blocking (Publish Now button)", () => {
@@ -244,5 +267,18 @@ describe("PrePublishDialog — Passed checks display", () => {
     // Click on Navigation group (no issues)
     fireEvent.click(screen.getByText("Navigation"));
     expect(screen.getByText("All checks passed")).toBeTruthy();
+  });
+});
+
+describe("PrePublishDialog — Published SOS snapshot comparison", () => {
+  it("shows informational SOS differences from the currently published snapshot", () => {
+    const draft = makeCampus({ settings: {
+      accessibility: true, emergency: true, eventLayer: true, gps: true, emergencyDestinationPolicy: "nearest_eligible",
+    } });
+    renderDialog(draft, [], { publishedSnapshot: JSON.stringify(makeCampus()) });
+
+    expect(screen.getAllByTestId("sos-preflight-attention").some((item) => item.textContent?.includes("SOS destination policy"))).toBe(true);
+    expect(screen.getAllByText(/authorized publication/)).toHaveLength(2);
+    expect(screen.getByText("Ready to Publish")).toBeInTheDocument();
   });
 });

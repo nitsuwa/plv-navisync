@@ -1,0 +1,16 @@
+{
+    "baseline":  "verification-artifacts/sos-priority-audit-20261018/typescript-current.txt",
+    "current":  "verification-artifacts/assembly-point-connectivity-20261018/typescript-current.txt",
+    "baselineDiagnostics":  1029,
+    "currentDiagnostics":  1029,
+    "newDiagnosticIdentities":  2,
+    "resolvedDiagnosticIdentities":  2,
+    "newExamples":  [
+                        "src/services/database.ts|TS2352|Conversion of type \u0027({ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 29 more ... | { ...; })[]\u0027 to type \u0027T[]\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first.",
+                        "src/services/database.ts|TS2352|Conversion of type \u0027{ archived_at: string | null; campus_id: string; category: string; code: string; contact_information: string | null; created_at: string; created_by: string | null; description: string | null; ... 14 more ...; y: number; } | ... 29 more ... | { ...; }\u0027 to type \u0027T\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first."
+                    ],
+    "resolvedExamples":  [
+                             "src/services/database.ts|TS2352|Conversion of type \u0027({ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 29 more ... | { ...\u0027 to type \u0027T[]\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first.",
+                             "src/services/database.ts|TS2352|Conversion of type \u0027{ avatar_path: string | null; created_at: string; department: string | null; email: string; first_name: string; id: string; is_active: boolean; last_login_at: string | null; last_name: string; role: \"admin\" | ... 2 more ... | \"super_admin\"; student_number: string | null; updated_at: string; } | ... 29 more ... | { ....\u0027 to type \u0027T\u0027 may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to \u0027unknown\u0027 first."
+                         ]
+}

@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useCallback, useEffect, useMemo, type ElementType } from "react";
+import { Fragment, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, type ElementType } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -15,6 +15,7 @@ import { useCanvasControls, isSpacePressed, subscribeSpacePressedState } from ".
 import { Canvas, type CanvasGesturePreviewController, type CanvasTransformPreviewHint } from "./Canvas";
 import { HierarchyPanel } from "./HierarchyPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
+import { resolveTestRoutePanelLayout, TEST_ROUTE_PANEL_DESKTOP_WIDTH } from "./testRoutePanelLayout";
 import { exteriorEmergencyStairSafeOffsetRange, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
 import { RoutesPanel } from "./RoutesPanel";
 import { SaveScreen } from "./SaveScreen";
@@ -33,7 +34,7 @@ import { Tooltip } from "../ui/Tooltip";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 import { IssuesPopover } from "./IssuesPopover";
 import type {
-  Campus, CampusBuilding, CampusMarker, CampusSelection,
+  Campus, CampusBuilding, CampusMarker, CampusSelection, AssemblyPoint,
   SimpleTool, EditorLayer, RubberBand, CampusRoute, CampusPath,
   CampusDecorAsset, BuildingTypeDescriptor, CampusEntrance, NavigationNode, NavigationEdge, FloorSelection, ExteriorEmergencyStair,
 } from "./types";
@@ -52,6 +53,7 @@ import {
   createNavNode, createNavEdge, findDuplicateNavEdge, isSelfEdge, removeNavNode, findNavNodeAtPoint,
   findEntranceNavNode, navGraphSelectionIdsInRect, syncEntranceNodePositions, pruneOrphanedEntranceNodes,
   outdoorNavNodes, outdoorNavEdges, findNavEdgeAtPoint, nearestPointOnEdgePolyline, NAV_NODE_HIT_THRESHOLD,
+  createNavigationHitTestIndex, findIndexedNavEdgeAtPoint, findIndexedNavNodeAtPoint,
   translateSelectedNavGraph, navGroupSelectionBounds, applyBulkRoutingAction,
 } from "../../lib/navigationGraph";
 import type { GroupMoveMember } from "../../lib/campusGroupMove";
@@ -98,7 +100,7 @@ import {
   pruneOrphanedExteriorEmergencyStairNodes,
   syncExteriorEmergencyStairGraph,
 } from "../../lib/exteriorEmergencyStairs";
-import { cleanupDeletedPathwayNavigation, convertPathwaysToNavigation, joinPathwayVerticesExplicitly, pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
+import { cleanupDeletedPathwayNavigation, convertPathwaysToNavigation, isVisualOnlyPathAttachment, joinPathwayVerticesExplicitly, pathwayHasLegacyNavigationChain, pathwayHasOwnedNavigation, reconcilePathwayNavigation } from "../../lib/campusPathNavigation";
 import {
   isPathwayGeneratedEdge,
   isPathwayGeneratedNode,
@@ -107,6 +109,9 @@ import {
   pathNetworkSelectionIds,
 } from "../../lib/campusPathNetwork";
 import { alignCampusGateAnchor, campusGateSize, isCampusGate, syncCampusGateNavigation } from "../../lib/campusGates";
+import { isOutdoorAssemblyGraphNode, removeEmergencyAssemblyPoint, syncEmergencyAssemblyPointNavigation, syncEmergencyAssemblyPointPositionsFromNavigation } from "../../lib/emergencyAssemblyPoints";
+import { analyzeEmergencyOutdoorConnectivity, type EmergencyOutdoorConnectivityReport } from "../../lib/emergencyOutdoorConnectivity";
+import { useAdminAuth } from "../../hooks/useAdminAuth";
 import { campusContentBounds, resizeCampusCanvasFromHandle, campusObjectSafeBounds, CAMPUS_OBJECT_SAFE_INSET, type CanvasResizeHandle } from "../../lib/campusCanvas";
 import { collectOutdoorClipboardSelection, isFreeOutdoorWaypoint, type OutdoorClipboardEntry } from "../../lib/outdoorClipboard";
 import { didOutdoorWaypointDragStart, moveOutdoorWaypointLocally, OUTDOOR_WAYPOINT_DRAG_THRESHOLD_PX } from "../../lib/outdoorNavigationEditing";
@@ -269,7 +274,11 @@ function previewGeneratedPathNodePositions(
     }
     return node;
   });
-  return { ...campus, paths, ...(nodesChanged ? { navNodes } : {}) };
+  return syncEmergencyAssemblyPointPositionsFromNavigation({
+    ...campus,
+    paths,
+    ...(nodesChanged ? { navNodes } : {}),
+  });
 }
 
 const fitBuildingRectToCanvas = (rect: { x: number; y: number; width: number; height: number; rotation?: number }, canvasW: number, canvasH: number) => {
@@ -724,7 +733,7 @@ interface CampusEditorProps {
   onBack: () => void;
   onUpdate: (c: Campus, options?: { persistAsBaseline?: boolean }) => void;
   onSave?: (c: Campus) => Promise<Campus>;
-  onPublish: (c: Campus) => void;
+  onPublish: (c: Campus) => void | Promise<void>;
   /** Open the read-only Student Preview; the page handles Save & Preview. */
   onPreviewStudent?: (c: Campus, isDirty: boolean) => void | Promise<void>;
   publishingEnabled?: boolean;
@@ -747,6 +756,7 @@ interface CampusEditorProps {
 }
 
 export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPreviewStudent, publishingEnabled = true, onOpenFloor, onAddBuilding, onOpenCanvasSettings, savedSnapshot, publishedSnapshot, isDirty: isDirtyProp }: CampusEditorProps) {
+  const adminAuth = useAdminAuth();
   const campusRef = useRef(campus);
   useEffect(() => { campusRef.current = campus; }, [campus]);
   // Active canvas manipulation is held in this editor-local preview. The page
@@ -826,6 +836,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   }
   const [tool, setTool] = useState<SimpleTool>("select");
   const [selected, setSelected] = useState<CampusSelection | null>(null);
+  const [emergencyOutdoorConnectivityReport, setEmergencyOutdoorConnectivityReport] = useState<EmergencyOutdoorConnectivityReport | null>(null);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [propertiesDismissed, setPropertiesDismissed] = useState(false);
   const [hoveredPathId, setHoveredPathId] = useState<string | null>(null);
@@ -895,6 +906,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     /** Entrance-managed connectors are read-only; expose guidance instead of insertion. */
     helper?: string;
   } | null>(null);
+  const [assemblyPointPlacementSnap, setAssemblyPointPlacementSnap] = useState<{ x: number; y: number; kind: "waypoint" | "path" } | null>(null);
   // Connect-path hover captures the exact manual edge segment + projection so
   // the outdoor mouseup commits the same target the user saw, rather than
   // resolving a fresh nearest endpoint after the pointer has moved slightly.
@@ -963,6 +975,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   );
   // ── Publish confirmation dialog ──
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const outdoorTutorial = useEditorTutorial("outdoor", OUTDOOR_TUTORIAL_STEPS.length);
   // ── Unsaved changes guard (back/exit prompts + beforeunload) lives with
   // the shared useUnsavedChangesGuard hook below (defined after runSave).
@@ -970,6 +983,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   const saving = saveScreen.open && saveScreen.state === "saving";
   // ── Processing guard — prevents duplicate save/publish clicks ──
   const [isProcessing, setIsProcessing] = useState(false);
+  const operationLockRef = useRef(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const publishPromiseRef = useRef<Promise<void> | null>(null);
   const [snapGrid, setSnapGrid] = useState(true);
   const [edgeSnap, setEdgeSnap] = useState(true);
   const [canvasSettingsPopoverOpen, setCanvasSettingsPopoverOpen] = useState(false);
@@ -1007,6 +1023,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     setPropertiesOpen(Boolean(selected || multiSelected.length > 0));
   }, [selected?.type, selected?.id, multiSelected.join("|")]);
   const inspectorVisible = !propertiesDismissed && (propertiesOpen || Boolean(selected || multiSelected.length > 0));
+  const editorViewportRef = useRef<HTMLDivElement | null>(null);
+  const [editorViewportSize, setEditorViewportSize] = useState({ width: 0, propertiesWidth: 0 });
   const [rubberBand, setRubberBand] = useState<RubberBand | null>(null);
   const rubberBandRef = useRef<RubberBand | null>(null);
   const updateRubberBand = useCallback((next: RubberBand | null) => {
@@ -1079,7 +1097,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // presents an explicit owner choice instead of guessing from coordinates.
   const [pathChoiceMenu, setPathChoiceMenu] = useState<{ x: number; y: number; pathIds: string[]; nodeIds?: string[] } | null>(null);
   // ── Erase/delete confirmation ──
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset"; id: string; name: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "building" | "marker" | "path" | "decorAsset" | "assemblyPoint"; id: string; name: string } | null>(null);
   // Building Entrances own a generated Ground-floor Door. Keep their
   // cross-editor deletion behind the same custom confirmation affordance as
   // other canonical infrastructure, rather than deleting only one side.
@@ -1638,6 +1656,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     () => Object.fromEntries(outdoorNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
     [outdoorNodes],
   );
+  const assemblyPointSnapNodes = useMemo(
+    () => outdoorNodes.filter((node) => isOutdoorAssemblyGraphNode(node, campus.id)),
+    [campus.id, outdoorNodes],
+  );
+  const outdoorNodeById = useMemo(() => new Map(outdoorNodes.map((node) => [node.id, node])), [outdoorNodes]);
+  const assemblyPointSnapEdges = useMemo(() => outdoorEdges.filter((edge) => {
+    const start = outdoorNodeById.get(edge.startNodeId);
+    const end = outdoorNodeById.get(edge.endNodeId);
+    return !!start && !!end && isOutdoorAssemblyGraphNode(start, campus.id) && isOutdoorAssemblyGraphNode(end, campus.id)
+      && !edge.closed && edge.emergencySafe !== false && !edge.derivedOwnerType
+      && edge.type !== "room_door_transition" && edge.type !== "entrance_transition" && edge.type !== "floor_transition";
+  }), [campus.id, outdoorEdges, outdoorNodeById]);
+  const assemblyPointSnapIndex = useMemo(() => createNavigationHitTestIndex(
+    assemblyPointSnapNodes, assemblyPointSnapEdges, outdoorNodeMap,
+  ), [assemblyPointSnapEdges, assemblyPointSnapNodes, outdoorNodeMap]);
   // Outdoor route blockers use the same canonical obstacle validation as the
   // Issues panel and route builder.  Keep the Entrance-boundary exception
   // here because a legitimate connector is allowed to terminate at the
@@ -2374,6 +2407,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   const selectionForId = useCallback((id: string): CampusSelection | null => {
     if (buildings.some((b) => b.id === id)) return { type: "building", id };
+    if ((campus.assemblyPoints ?? []).some((point) => point.id === id)) return { type: "assemblyPoint", id };
     for (const b of buildings) {
       if ((b.entrances ?? []).some((entrance) => entrance.id === id)) return { type: "entrance", id, buildingId: b.id };
     }
@@ -2384,7 +2418,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (outdoorNodes.some((n) => n.id === id)) return { type: "navNode", id };
     if (outdoorEdges.some((e) => e.id === id)) return { type: "navEdge", id };
     return null;
-  }, [buildings, markers, decorAssets, paths, outdoorNodes, outdoorEdges]);
+  }, [buildings, campus.assemblyPoints, markers, decorAssets, paths, outdoorNodes, outdoorEdges]);
 
   const selectedOutdoorObjectCount = useMemo(
     () => selectedOutdoorCount(buildings, decorAssets, multiSelected, DECOR_ASSET_MAP)
@@ -2496,6 +2530,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         return;
       }
       placeCampusGate(clampedPt.x, clampedPt.y);
+      return;
+    }
+    if (tool === "assembly-point") {
+      if (layer !== "campus") {
+        toast.info("Emergency Assembly Point", "Switch to the Campus layer to place an Assembly Point.");
+        return;
+      }
+      placeEmergencyAssemblyPoint(clampedPt.x, clampedPt.y);
       return;
     }
     if (tool === "decor") {
@@ -3571,6 +3613,21 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     }
 
     const pt = getPoint(e, cw, ch);
+    if (tool === "assembly-point" && layer === "campus") {
+      const rawPoint = { x: Math.max(0, Math.min(cw, Math.round(pt.x))), y: Math.max(0, Math.min(ch, Math.round(pt.y))) };
+      let snap: { x: number; y: number; kind: "waypoint" | "path" } | null = null;
+      if (!(buildings ?? []).some((building) => pointInBuilding(building, rawPoint))) {
+        const node = findIndexedNavNodeAtPoint(assemblyPointSnapIndex, rawPoint, 6);
+        if (node) snap = { x: node.x, y: node.y, kind: "waypoint" };
+        else {
+          const hit = findIndexedNavEdgeAtPoint(assemblyPointSnapIndex, rawPoint);
+          if (hit) snap = { x: Math.round(hit.nearest.x), y: Math.round(hit.nearest.y), kind: "path" };
+        }
+      }
+      setAssemblyPointPlacementSnap((current) => current?.x === snap?.x && current?.y === snap?.y && current?.kind === snap?.kind ? current : snap);
+    } else if (assemblyPointPlacementSnap) {
+      setAssemblyPointPlacementSnap(null);
+    }
     // Cursor coordinates are useful in ordinary authoring, but they are not
     // part of an active transform. Avoid a component-wide state write on every
     // drag/resize frame; the canvas already has the live object preview.
@@ -4407,11 +4464,22 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           }))
         : undefined;
        const navAligned = navAlignSnap(topologyPoint, outdoorNodes.filter((node) => node.id !== drag.generatedNodeId), SNAP_DIST, connectedIds);
-       const nextPoint = visualTarget
+      const nextPoint = visualTarget
          ? { x: visualTarget.point.x, y: visualTarget.point.y }
          : joinCandidate
          ? { x: joinCandidate.point.x, y: joinCandidate.point.y }
          : { x: navAligned.x, y: navAligned.y };
+      const movingAssemblyPoint = drag.generatedNodeId
+        ? (campus.assemblyPoints ?? []).find((point) => point.navNodeId === drag.generatedNodeId)
+        : undefined;
+      if (movingAssemblyPoint) {
+        const proposedPath = path.points.map((point, index) => index === drag.pointIndex ? nextPoint : point);
+        if ((campus.buildings ?? []).some((building) => pointInBuilding(building, nextPoint))
+          || polylineCrossesObstacle(proposedPath, campus.buildings ?? [], campus.decorAssets ?? [])) {
+          toast.warning("Choose a clear outdoor location", "This move would place the Assembly Point or its authored path across a building or restricted obstacle.");
+          return;
+        }
+      }
       setGuides(navAligned.guides.length > 0 ? navAligned.guides : aligned.guides);
       gestureChangedRef.current = true;
       const oldPoint = drag.pointIndex !== undefined ? path.points[drag.pointIndex] : undefined;
@@ -4653,7 +4721,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
        setGuides(aligned.guides);
        const currentNode = (campusRef.current.navNodes ?? navNodes).find((candidate) => candidate.id === drag.id);
        if (currentNode && currentNode.x === aligned.point.x && currentNode.y === aligned.point.y) return;
-       gestureChangedRef.current = true;
        const baseNodes = campusRef.current.navNodes ?? navNodes;
        const nextNodes = baseNodes.map((n) =>
          n.id === drag.id
@@ -4664,11 +4731,34 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
        // incident edge's authored bends, endpoint IDs, and metadata while
        // refreshing only coordinate-derived distances.  In particular, do
        // not invoke connector/pathway reconciliation for a simple node drag.
-       const nextCampus = moveOutdoorWaypointLocally(
-         { ...campusRef.current, navNodes: nextNodes },
+       const currentCampus = campusRef.current;
+       const nextAssemblyPoints = node.assemblyPointId
+         ? (currentCampus.assemblyPoints ?? []).map((point) => point.id === node.assemblyPointId
+             ? { ...point, x: aligned.point.x, y: aligned.point.y }
+             : point)
+         : currentCampus.assemblyPoints;
+       if (node.assemblyPointId && (currentCampus.buildings ?? []).some((building) => pointInBuilding(building, aligned.point))) {
+         toast.warning("Choose an outdoor location", "The Assembly Point cannot be moved inside a building footprint.");
+         return;
+       }
+       if (node.assemblyPointId) {
+         const unsafeIncidentEdge = (currentCampus.navEdges ?? []).some((edge) => {
+           if (edge.startNodeId !== node.id && edge.endNodeId !== node.id) return false;
+           const points = edgePolylinePoints(edge, nextNodes);
+           return !points || polylineCrossesObstacle(points, currentCampus.buildings ?? [], currentCampus.decorAssets ?? []);
+         });
+         if (unsafeIncidentEdge) {
+           toast.warning("Connection blocked", "This move would carry an Assembly Point connection across a building or restricted obstacle.");
+           return;
+         }
+       }
+       gestureChangedRef.current = true;
+       const movedGraphCampus = moveOutdoorWaypointLocally(
+         { ...currentCampus, navNodes: nextNodes, ...(nextAssemblyPoints ? { assemblyPoints: nextAssemblyPoints } : {}) },
          drag.id,
          aligned.point,
        );
+       const nextCampus = node.assemblyPointId ? syncEmergencyAssemblyPointNavigation(movedGraphCampus, genId) : movedGraphCampus;
         campusRef.current = nextCampus;
         previewGestureCampus(nextCampus);
       return;
@@ -5532,6 +5622,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       );
       if (pendingReconcile.pathways && !explicitPathJoinPending) {
         nextCampus = reconcilePathwayNavigation(nextCampus, genId, { preserveAuthoredGeometry: true });
+        nextCampus = syncEmergencyAssemblyPointPositionsFromNavigation(nextCampus);
       }
       if (pendingReconcile.entranceConnections) {
         nextCampus = reconcileEntranceOutdoorConnections(nextCampus);
@@ -6221,11 +6312,68 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       : null;
   }, [navEdges, navNodes]);
 
-  const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "gate" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => {
+  const onItemDown = (e: React.MouseEvent, type: "building" | "marker" | "gate" | "assemblyPoint" | "decorAsset" | "navNode", id: string, ox: number, oy: number) => {
     latestCanvasPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
     e.stopPropagation();
     setPathChoiceMenu(null);
     if (startSpacePan(e)) return;
+    if (type === "assemblyPoint") {
+      const point = (campus.assemblyPoints ?? []).find((item) => item.id === id);
+      const anchor = point && navNodes.find((node) => node.id === point.navNodeId && node.assemblyPointId === point.id);
+      if (!point || !anchor) {
+        toast.warning("Assembly Point anchor is missing", "Recreate its linked waypoint before using it in the Walking Network.");
+        return;
+      }
+      if (testRoutePickKind) {
+        setTestRouteMapPick({ kind: testRoutePickKind, value: `node:${anchor.id}` });
+        setTestRoutePickKind(null);
+        setTestRoutePickHover(null);
+        toast.success("Assembly Point selected", `${point.name} set as the Test Route endpoint.`);
+        return;
+      }
+      if (tool === "connect" && layer === "navigation") {
+        onNavNodeClick(anchor.id);
+        return;
+      }
+      if (tool === "erase") {
+        const assignedCount = point.buildingAssignments?.length ?? 0;
+        setDeleteConfirm({ type: "assemblyPoint", id, name: point.name || "Emergency Assembly Point" });
+        toast.info("Review Assembly Point deletion", assignedCount
+          ? `This point is assigned to ${assignedCount} building${assignedCount === 1 ? "" : "s"}; the confirmation will remove those assignments.`
+          : "Its linked navigation anchor and authored connectors will also be handled safely.");
+        return;
+      }
+      if (tool === "pan") {
+        setMultiSelected([]);
+        setSelected({ type: "assemblyPoint", id });
+        return;
+      }
+      if (tool !== "select") return;
+      setMultiSelected([]);
+      setSelected({ type: "assemblyPoint", id });
+      setShowAlignTools(false);
+      setGuides([]);
+      gestureHistoryPushed.current = false;
+      gestureChangedRef.current = false;
+      const pt = getPoint(e, cw, ch);
+      const generatedRef = anchor.generatedFromPathVertices?.[0];
+      const generatedPath = generatedRef && paths.find((pathItem) => pathItem.id === generatedRef.pathId);
+      const generatedIndex = generatedRef && generatedPath
+        ? generatedPath.navigationVertexIds?.indexOf(generatedRef.vertexId) ?? -1
+        : -1;
+      if (generatedPath && generatedIndex >= 0) {
+        const generatedVertexRefs = anchor.generatedFromPathVertices?.map((ref) => {
+          const owner = paths.find((pathItem) => pathItem.id === ref.pathId);
+          const pointIndex = owner?.navigationVertexIds?.indexOf(ref.vertexId) ?? -1;
+          return owner && pointIndex >= 0 ? { pathId: owner.id, pointIndex } : null;
+        }).filter(Boolean) as { pathId: string; pointIndex: number }[] | undefined;
+        dragging.current = { type: "pathPoint", id: generatedPath.id, pointIndex: generatedIndex, sx: pt.x, sy: pt.y, ox: 0, oy: 0,
+          ...(generatedVertexRefs?.length ? { generatedVertexRefs, generatedNodeId: anchor.id } : {}), dragStarted: false };
+      } else {
+        dragging.current = { type: "navNode", id: anchor.id, sx: pt.x, sy: pt.y, ox: anchor.x, oy: anchor.y };
+      }
+      return;
+    }
     if (testRoutePickKind) {
       if (type === "building") {
         setTestRouteMapPick({ kind: testRoutePickKind, value: `building:${id}` });
@@ -7592,6 +7740,10 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     const currentCampus = campusRef.current;
     const path = (currentCampus.paths ?? []).find((candidate) => candidate.id === target.pathId);
     if (!path || path.locked) return false;
+    if (isVisualOnlyPathAttachment(path, currentCampus.navNodes, currentCampus.navEdges)) {
+      toast.warning("This line is visual only", "Choose a Walking Network path. Decorative attachments do not create navigable connections.");
+      return false;
+    }
     const pointIndex = target.segmentIndex + 1;
     const connectSource = (currentCampus.navNodes ?? []).find((node) => node.id === navConnectStart);
     const segmentStart = path.points[target.segmentIndex];
@@ -7634,9 +7786,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // Resolve the canonical node from the reconciled snapshot.  The fallback
     // by Stair identity handles the one-time legacy ID migration above while
     // keeping the generated discharge derived/non-draggable.
-    const startNode = reconciled.navNodes.find((node) => node.id === navConnectStart)
+    const startNode = (reconciled.navNodes ?? []).find((node) => node.id === navConnectStart)
       ?? (sourceNode?.exteriorEmergencyStairId && !sourceNode.floorId
-        ? reconciled.navNodes.find((node) => node.exteriorEmergencyStairId === sourceNode.exteriorEmergencyStairId
+        ? (reconciled.navNodes ?? []).find((node) => node.exteriorEmergencyStairId === sourceNode.exteriorEmergencyStairId
           && !node.floorId
           && (!sourceNode.buildingId || node.buildingId === sourceNode.buildingId))
         : undefined);
@@ -8376,6 +8528,286 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     toast.success("Campus Gate created", "Edit its name and emergency purpose in the properties panel.");
   }, [onUpdate, pushHistory, toast]);
 
+  const placeEmergencyAssemblyPoint = useCallback((x: number, y: number) => {
+    const live = campusRef.current;
+    const point = { x: Math.max(0, Math.min(live.canvasW, Math.round(x))), y: Math.max(0, Math.min(live.canvasH, Math.round(y))) };
+    if ((live.buildings ?? []).some((building) => pointInBuilding(building, point))) {
+      toast.warning("Choose an outdoor location", "Emergency Assembly Points must be outside building footprints.");
+      return;
+    }
+    const existingPoint = (live.assemblyPoints ?? []).find((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) <= 6);
+    if (existingPoint) {
+      setSelected({ type: "assemblyPoint", id: existingPoint.id });
+      setPropertiesOpen(true);
+      setTool("select");
+      toast.info("Assembly Point already here", "Selected the existing point so each destination keeps one linked navigation identity.");
+      return;
+    }
+
+    const id = genId("assembly");
+    let working: Campus = live;
+    let anchor: NavigationNode | undefined;
+    let connectionOrigin: AssemblyPoint["connectionOrigin"];
+    const outdoorNodesNow = outdoorNavNodes(live.navNodes ?? []);
+    const nearbyNode = findNavNodeAtPoint(outdoorNodesNow.filter((node) => isOutdoorAssemblyGraphNode(node, live.id)
+      && !node.assemblyPointId), point, 6);
+
+    if (nearbyNode) {
+      // Reuse a real outdoor graph node under the cursor; coordinate proximity
+      // is only used for identity reuse, never as proof of an edge connection.
+      anchor = { ...nearbyNode, type: "assembly", name: "Emergency Assembly Point", assemblyPointId: id };
+      connectionOrigin = { kind: "reused-node", previousType: nearbyNode.type, previousName: nearbyNode.name };
+      working = { ...live, navNodes: (live.navNodes ?? []).map((node) => node.id === nearbyNode.id ? anchor! : node) };
+    } else {
+      const graphNodeMap = Object.fromEntries(outdoorNodesNow.map((node) => [node.id, { x: node.x, y: node.y }]));
+      const eligibleEdges = outdoorNavEdges(live.navEdges ?? [], outdoorNodesNow).filter((edge) => {
+        const start = outdoorNodesNow.find((node) => node.id === edge.startNodeId);
+        const end = outdoorNodesNow.find((node) => node.id === edge.endNodeId);
+        return !!start && !!end && isOutdoorAssemblyGraphNode(start, live.id) && isOutdoorAssemblyGraphNode(end, live.id)
+          && !edge.closed && edge.emergencySafe !== false && !edge.derivedOwnerType
+          && edge.type !== "room_door_transition" && edge.type !== "entrance_transition" && edge.type !== "floor_transition";
+      });
+      const edgeHit = findNavEdgeAtPoint(eligibleEdges, graphNodeMap, point);
+      const edge = edgeHit?.edge;
+      const startNode = edge ? outdoorNodesNow.find((node) => node.id === edge.startNodeId) : undefined;
+      const endNode = edge ? outdoorNodesNow.find((node) => node.id === edge.endNodeId) : undefined;
+      const edgeCanCarryEmergencyRoute = Boolean(edge && startNode && endNode
+        && isOutdoorAssemblyGraphNode(startNode, live.id) && isOutdoorAssemblyGraphNode(endNode, live.id)
+        && !edge.closed && edge.emergencySafe !== false && !edge.derivedOwnerType
+        && edge.type !== "room_door_transition" && edge.type !== "entrance_transition" && edge.type !== "floor_transition");
+
+      if (edge && edgeHit && edgeCanCarryEmergencyRoute) {
+        const hitPoint = { x: Math.round(edgeHit.nearest.x), y: Math.round(edgeHit.nearest.y) };
+        const closeNode = findNavNodeAtPoint([startNode!, endNode!], hitPoint, 3);
+        if (closeNode) {
+          anchor = { ...closeNode, type: "assembly", name: "Emergency Assembly Point", assemblyPointId: id };
+          connectionOrigin = { kind: "reused-node", previousType: closeNode.type, previousName: closeNode.name };
+          working = { ...live, navNodes: (live.navNodes ?? []).map((node) => node.id === closeNode.id ? anchor! : node) };
+        } else if (isPathwayGeneratedEdge(edge)) {
+          // Generated path edges must be split at the physical Pathway source,
+          // then reconciled once so both graph halves inherit the real path.
+          const target = generatedEdgePathSegment(edge, hitPoint);
+          const sourcePath = target && (live.paths ?? []).find((path) => path.id === target.path.id);
+          if (target && sourcePath && !sourcePath.locked) {
+            const priorIds = sourcePath.navigationVertexIds?.length === sourcePath.points.length
+              ? [...sourcePath.navigationVertexIds]
+              : sourcePath.points.map(() => genId("pv"));
+            const vertexId = genId("pv");
+            const nextPath = {
+              ...sourcePath,
+              points: [...sourcePath.points.slice(0, target.segmentIndex + 1), hitPoint, ...sourcePath.points.slice(target.segmentIndex + 1)],
+              navigationVertexIds: [...priorIds.slice(0, target.segmentIndex + 1), vertexId, ...priorIds.slice(target.segmentIndex + 1)],
+            };
+            working = reconcilePathwayNavigation({
+              ...live,
+              paths: (live.paths ?? []).map((path) => path.id === sourcePath.id ? nextPath : path),
+            }, genId, { preserveAuthoredGeometry: true });
+            const generatedAnchor = (working.navNodes ?? []).find((node) => node.generatedFromPathVertices?.some((ref) => ref.pathId === sourcePath.id && ref.vertexId === vertexId));
+            if (generatedAnchor) {
+              anchor = { ...generatedAnchor, type: "assembly", name: "Emergency Assembly Point", assemblyPointId: id };
+              connectionOrigin = { kind: "path-vertex", pathId: sourcePath.id, vertexId };
+              working = { ...working, navNodes: (working.navNodes ?? []).map((node) => node.id === generatedAnchor.id ? anchor! : node) };
+            }
+          }
+        } else {
+          const splitNode: NavigationNode = {
+            id: genId("nn"), name: "Emergency Assembly Point", type: "assembly", x: hitPoint.x, y: hitPoint.y,
+            campusId: live.id, assemblyPointId: id, accessible: true, color: "#15803d",
+          };
+          const split = splitNavEdge(edge, splitNode, live.navNodes ?? [], edgeHit.nearest.segIndex);
+          if (split && split.newEdges.every((item) => item.distance > 0)) {
+            anchor = splitNode;
+            connectionOrigin = { kind: "split-edge", originalEdge: edge, splitEdges: split.newEdges };
+            working = {
+              ...live,
+              navNodes: [...(live.navNodes ?? []), splitNode],
+              navEdges: [...(live.navEdges ?? []).filter((item) => item.id !== edge.id), ...split.newEdges],
+            };
+          }
+        }
+      }
+
+      if (!anchor) {
+        anchor = {
+          id: genId("nn"), name: "Emergency Assembly Point", type: "assembly", x: point.x, y: point.y,
+          campusId: live.id, assemblyPointId: id, accessible: true, color: "#15803d",
+        };
+        working = { ...live, navNodes: [...(live.navNodes ?? []), anchor] };
+      }
+    }
+    if (!anchor) return;
+
+    const assemblyPoint: AssemblyPoint = {
+      id, name: "Emergency Assembly Point", x: anchor.x, y: anchor.y, campusId: live.id,
+      navNodeId: anchor.id, buildingAssignments: [], safetyReview: { status: "draft" },
+      ...(connectionOrigin ? { connectionOrigin } : {}),
+    };
+    const next = syncEmergencyAssemblyPointNavigation({
+      ...working,
+      assemblyPoints: [...(working.assemblyPoints ?? []), assemblyPoint],
+    }, genId);
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+    setSelected({ type: "assemblyPoint", id });
+    setMultiSelected([]);
+    setTool("select");
+    setAssemblyPointPlacementSnap(null);
+    setPropertiesOpen(true);
+    const connected = Boolean((next.navEdges ?? []).some((edge) => edge.startNodeId === anchor!.id || edge.endNodeId === anchor!.id));
+    toast.success("Emergency Assembly Point created", connected
+      ? "Snapped into the existing outdoor Walking Network. Assign buildings; complete SOS paths are checked automatically."
+      : "The point is not connected yet. Use Connect in Properties to connect it to a real Walking Network segment.");
+  }, [generatedEdgePathSegment, onUpdate, pushHistory, splitNavEdge, toast]);
+
+  const onUpdateAssemblyPoint = useCallback((id: string, changes: Partial<AssemblyPoint>) => {
+    const current = campusRef.current;
+    const existing = (current.assemblyPoints ?? []).find((point) => point.id === id);
+    if (!existing) return;
+    // Graph identity and review provenance are owned by the editor, never by
+    // generic form updates. Editing authored policy or name keeps the prior
+    // approval record so its dependency fingerprint can visibly go stale.
+    const { navNodeId: _navNodeId, campusId: _campusId, safetyReview: _safetyReview, connectionOrigin: _connectionOrigin, ...safeChanges } = changes;
+    if (safeChanges.buildingAssignments) {
+      const assignedBuildings = new Set<string>();
+      for (const assignment of safeChanges.buildingAssignments) {
+        if (!current.buildings.some((building) => building.id === assignment.buildingId)
+          || assignedBuildings.has(assignment.buildingId)) {
+          toast.warning("Building assignment was not saved", "Choose each existing campus building once.");
+          return;
+        }
+        assignedBuildings.add(assignment.buildingId);
+        // Buildings have one designated Primary, while any number of
+        // separately reviewed Alternates may be recorded for explicit
+        // contingency scenarios. The Properties panel applies this same
+        // rule; keep the authoritative editor update path aligned with it.
+        const conflict = assignment.designation === "primary"
+          && (current.assemblyPoints ?? []).some((other) => other.id !== id
+            && other.buildingAssignments?.some((candidate) => candidate.buildingId === assignment.buildingId
+              && candidate.designation === "primary"));
+        if (conflict) {
+          toast.warning("Primary Assembly Point already assigned", "This building already has a Primary Assembly Point. Keep one Primary or change this assignment to Alternate.");
+          return;
+        }
+      }
+    }
+    const next = syncEmergencyAssemblyPointNavigation({
+      ...current,
+      assemblyPoints: (current.assemblyPoints ?? []).map((point) => point.id === id ? { ...point, ...safeChanges } : point),
+    }, genId);
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+  }, [onUpdate, pushHistory, toast]);
+
+  const onReassignPrimaryAssemblyPoint = useCallback((fromPointId: string, toPointId: string, buildingId: string) => {
+    const current = campusRef.current;
+    const points = current.assemblyPoints ?? [];
+    const fromPoint = points.find((point) => point.id === fromPointId);
+    const toPoint = points.find((point) => point.id === toPointId);
+    const otherPrimaries = points.filter((point) => point.id !== fromPointId
+      && point.buildingAssignments?.some((assignment) => assignment.buildingId === buildingId && assignment.designation === "primary"));
+    if (!fromPoint || !toPoint
+      || !fromPoint.buildingAssignments?.some((assignment) => assignment.buildingId === buildingId && assignment.designation === "primary")
+      || otherPrimaries.length > 0
+      || !current.buildings.some((building) => building.id === buildingId)) {
+      toast.warning("Primary assignment changed", "Refresh the building assignments and resolve any existing Primary conflict before reassigning.");
+      return;
+    }
+    const next = syncEmergencyAssemblyPointNavigation({
+      ...current,
+      assemblyPoints: points.map((point) => {
+        if (point.id === fromPointId) return {
+          ...point,
+          buildingAssignments: (point.buildingAssignments ?? []).filter((assignment) => assignment.buildingId !== buildingId),
+        };
+        if (point.id === toPointId) return {
+          ...point,
+          buildingAssignments: [
+            ...(point.buildingAssignments ?? []).filter((assignment) => assignment.buildingId !== buildingId),
+            { buildingId, designation: "primary" as const },
+          ],
+        };
+        return point;
+      }),
+    }, genId);
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+  }, [genId, onUpdate, pushHistory, toast]);
+
+  const onConnectAssemblyPoint = useCallback((id: string) => {
+    const current = campusRef.current;
+    const point = (current.assemblyPoints ?? []).find((candidate) => candidate.id === id);
+    const anchor = point && (current.navNodes ?? []).find((node) => node.id === point.navNodeId && node.assemblyPointId === id);
+    if (!point || !anchor || !isOutdoorAssemblyGraphNode(anchor, current.id)) {
+      toast.warning("Linked waypoint unavailable", "Restore the Assembly Point's outdoor navigation anchor before connecting it.");
+      return;
+    }
+    setLayer("navigation");
+    setShowCampusNavOverlay(true);
+    setTool("connect");
+    setNavConnectStart(anchor.id);
+    setNavPreview({ x: anchor.x, y: anchor.y });
+    setNavPreviewPins([]);
+    setNavConnectBends([]);
+    setSelected({ type: "assemblyPoint", id });
+    setPropertiesOpen(true);
+    toast.info("Connect to the Walking Network", "Click a Walking Network waypoint or segment. A mid-segment connection creates a real junction; decorative attachments stay visual only.");
+  }, [toast]);
+
+  const inspectAssemblyPointOutdoorNetwork = useCallback((id: string) => {
+    const current = campusRef.current;
+    const point = (current.assemblyPoints ?? []).find((candidate) => candidate.id === id);
+    if (!point) return;
+    const report = analyzeEmergencyOutdoorConnectivity(current, point);
+    setEmergencyOutdoorConnectivityReport(report);
+    if (layer !== "navigation") switchLayer("navigation");
+    setShowCampusNavOverlay(true);
+    switchTool("pan");
+    setMultiSelected([]);
+    setSelected({ type: "assemblyPoint", id });
+    setPropertiesOpen(true);
+
+    const focusNodeIds = report.blockedEdges[0]
+      ? (() => {
+          const edge = (current.navEdges ?? []).find((candidate) => candidate.id === report.blockedEdges[0].edgeId);
+          return edge ? [edge.startNodeId, edge.endNodeId] : [];
+        })()
+      : report.nearestGap ? [report.nearestGap.assemblyNodeId, report.nearestGap.networkNodeId]
+        : [report.anchorNodeId].filter((nodeId): nodeId is string => Boolean(nodeId));
+    const focusNodes = (current.navNodes ?? []).filter((node) => focusNodeIds.includes(node.id));
+    if (focusNodes.length > 0) {
+      const minX = Math.min(...focusNodes.map((node) => node.x));
+      const minY = Math.min(...focusNodes.map((node) => node.y));
+      const maxX = Math.max(...focusNodes.map((node) => node.x));
+      const maxY = Math.max(...focusNodes.map((node) => node.y));
+      zoomToFit(minX - 48, minY - 48, Math.max(96, maxX - minX + 96), Math.max(96, maxY - minY + 96), 36);
+    }
+  }, [layer, switchLayer, switchTool, zoomToFit]);
+
+  const clearAssemblyPointOutdoorNetworkInspection = useCallback(() => {
+    setEmergencyOutdoorConnectivityReport(null);
+  }, []);
+
+  useEffect(() => {
+    setEmergencyOutdoorConnectivityReport((currentReport) => {
+      if (!currentReport) return null;
+      const point = (campus.assemblyPoints ?? []).find((candidate) => candidate.id === currentReport.pointId);
+      return point ? analyzeEmergencyOutdoorConnectivity(campus, point) : null;
+    });
+  }, [campus.id, campus.assemblyPoints, campus.navEdges, campus.navNodes]);
+
+  const onDeleteAssemblyPoint = useCallback((id: string) => {
+    const current = campusRef.current;
+    const next = removeEmergencyAssemblyPoint(current, id);
+    campusRef.current = next;
+    onUpdate(next);
+    pushHistory(next);
+    setSelected(null);
+    toast.success("Emergency Assembly Point deleted", "Assignments and owned links were cleaned up; shared pathway geometry was preserved.");
+  }, [onUpdate, pushHistory, toast]);
+
   const onUpdateDecorAsset = useCallback((id: string, changes: Partial<CampusDecorAsset>) => {
     const nextAssets = (campus.decorAssets ?? []).map((asset) => {
       if (asset.id !== id) return asset;
@@ -8750,37 +9182,86 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
   // changes guard can surface it inside the modal (state would be stale in
   // the same async tick; a ref is read reliably right after runSave resolves).
   const saveErrorRef = useRef<string | null>(null);
-  const runSave = useCallback(async (): Promise<boolean> => {
-    // Match the toolbar button's disabled semantics: nothing to save / already saving.
-    if (isProcessing || !isDirty) {
+  const runSave = useCallback((): Promise<boolean> => {
+    if (savePromiseRef.current) return savePromiseRef.current;
+    // The ref closes the same-tick gap before React commits the disabled state.
+    if (operationLockRef.current || isProcessing) {
+      toast.info("An operation is already in progress", "Wait for it to finish before saving again.");
+      return Promise.resolve(false);
+    }
+    if (!isDirty) {
       toast.success("Already saved", "All changes are up to date.");
-      return true;
+      return Promise.resolve(true);
     }
     // B7 Phase 2: SAVE DRAFT must never be blocked by map validation. A draft
     // is allowed to be incomplete — validation issues stay visible but never
     // stop the administrator from preserving unfinished work. Only genuine
     // persistence failures (below) can prevent a save.
+    operationLockRef.current = true;
     setIsProcessing(true);
     saveErrorRef.current = null;
     setSaveScreen({ open: true, state: "saving" });
-    try {
-      const candidate = { ...campus, updatedAt: new Date().toISOString() };
-      const saved = onSave ? await onSave(candidate) : candidate;
-      onUpdate(saved, { persistAsBaseline: true });
-      savedSnapshotRef.current = JSON.stringify(saved);
-      setSaveScreen({ open: true, state: "success" });
-      setIsProcessing(false);
-      return true;
-    } catch (error) {
-      console.error("[CampusEditor] Campus save failed", error);
-      const message = physicalSaveErrorMessage(error);
-      setSaveScreen({ open: true, state: "error" });
-      saveErrorRef.current = message;
-      toast.error("Could not save map", message);
-      setIsProcessing(false);
-      return false;
-    }
+    const operation = Promise.resolve().then(async () => {
+      try {
+        const candidate = { ...campus, updatedAt: new Date().toISOString() };
+        const saved = onSave ? await onSave(candidate) : candidate;
+        // A successful persistence call establishes a new history baseline for
+        // this editor scope. Do this only after onSave resolves so failures keep
+        // the user's undo/redo stack intact.
+        campusRef.current = saved;
+        historyRef.current = { snapshots: [structuredClone(saved)], idx: 0 };
+        transientGestureCampusRef.current = null;
+        transientCanvasPreviewRef.current?.clear();
+        imperativeGesturePreviewRef.current = false;
+        pendingPhysicalGestureObjectRef.current = null;
+        onUpdate(saved, { persistAsBaseline: true });
+        savedSnapshotRef.current = JSON.stringify(saved);
+        setSaveScreen({ open: true, state: "success" });
+        return true;
+      } catch (error) {
+        console.error("[CampusEditor] Campus save failed", error);
+        const message = physicalSaveErrorMessage(error);
+        setSaveScreen({ open: true, state: "error" });
+        saveErrorRef.current = message;
+        toast.error("Could not save map", message);
+        return false;
+      } finally {
+        operationLockRef.current = false;
+        setIsProcessing(false);
+      }
+    });
+    savePromiseRef.current = operation;
+    void operation.finally(() => {
+      if (savePromiseRef.current === operation) savePromiseRef.current = null;
+    });
+    return operation;
   }, [campus, onUpdate, onSave, isDirty, isProcessing, toast]);
+
+  const runPublish = useCallback((): Promise<void> => {
+    if (publishPromiseRef.current) return publishPromiseRef.current;
+    if (operationLockRef.current || isProcessing) return Promise.resolve();
+    operationLockRef.current = true;
+    setIsProcessing(true);
+    setPublishError(null);
+    const operation = (async () => {
+      try {
+        await onPublish(campus);
+        setShowPublishConfirm(false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Publishing did not complete. Check your connection and try again.";
+        setPublishError(message);
+        toast.error("Could not publish campus", message);
+      } finally {
+        operationLockRef.current = false;
+        setIsProcessing(false);
+      }
+    })();
+    publishPromiseRef.current = operation;
+    void operation.finally(() => {
+      if (publishPromiseRef.current === operation) publishPromiseRef.current = null;
+    });
+    return operation;
+  }, [campus, onPublish, isProcessing, toast]);
 
   // ── Shared unsaved-changes guard (back/exit prompts + native beforeunload) ──
   // The guard's onSave needs to surface runSave's failure message inside the
@@ -9244,6 +9725,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         } else if (selected.type === "marker" || selected.type === "gate") {
           onDeleteMarker(selected.id);
         }
+        else if (selected.type === "assemblyPoint") {
+          const point = (campus.assemblyPoints ?? []).find((item) => item.id === selected.id);
+          if (point) setDeleteConfirm({ type: "assemblyPoint", id: point.id, name: point.name || "Emergency Assembly Point" });
+          return;
+        }
         else if (selected.type === "path") {
           if (selectedPathPoint?.pathId === selected.id && pathPointIsJunction(selected.id, selectedPathPoint.pointIndex)) {
             toast.info("Disconnect Pathways first", "This shared point keeps its Pathways connected until you separate them.");
@@ -9364,6 +9850,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         groundEraseGesture.current = [];
         pathPaintStroke.current = null;
         setArmedDecorAssetType(null);
+        if (tool === "assembly-point") setTool("select");
         pathExtendRef.current = null;
         setGroundBrushPreview(null);
         setGroundErasePreview(null);
@@ -9763,6 +10250,42 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
 
   const isUnifiedCampusWorkspace = layer === "campus" || layer === "navigation";
   const navigationVisible = showCampusNavOverlay && layer !== "events";
+  const propertiesSidebarVisible = inspectorVisible && !canvasResizeMode;
+  useLayoutEffect(() => {
+    const viewport = editorViewportRef.current;
+    if (!viewport) return;
+
+    const measure = () => {
+      const propertiesPanel = viewport.querySelector<HTMLElement>('[data-testid="properties-panel"]');
+      const nextWidth = {
+        width: viewport.clientWidth,
+        // Round outward so the route card always clears the actual drawer edge.
+        propertiesWidth: propertiesPanel ? Math.ceil(propertiesPanel.getBoundingClientRect().width) : 0,
+      };
+      setEditorViewportSize((previous) => (
+        previous.width === nextWidth.width && previous.propertiesWidth === nextWidth.propertiesWidth
+          ? previous
+          : nextWidth
+      ));
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(viewport);
+    const propertiesPanel = viewport.querySelector<HTMLElement>('[data-testid="properties-panel"]');
+    if (propertiesPanel) observer?.observe(propertiesPanel);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [canvasResizeMode, inspectorVisible, multiSelected.length, selected?.id, selected?.type]);
+  const desktopTestRouteLayout = resolveTestRoutePanelLayout({
+    viewportWidth: editorViewportSize.width || 1280,
+    panelWidth: TEST_ROUTE_PANEL_DESKTOP_WIDTH,
+    propertiesVisible: propertiesSidebarVisible,
+    propertiesWidth: editorViewportSize.propertiesWidth,
+  });
 
   // ── Tool config for compact palette — contextual per active layer ──
   // Campus + Navigation share this one canonical rail. LAYER_TOOLS remains
@@ -10337,6 +10860,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                     // consumes the canonical live validation list and blocks on
                     // errors / requires explicit warning confirmation there —
                     // severity is the source of truth, never a type hard-code.
+                    setPublishError(null);
                     setShowPublishConfirm(true);
                   }}
                   aria-label="Review & Publish"
@@ -10447,7 +10971,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         )}
       </AnimatePresence>
 
-      <div className="flex flex-1 overflow-hidden min-h-0 h-full relative">
+      <div ref={editorViewportRef} className="flex flex-1 overflow-hidden min-h-0 h-full relative">
         {/* ── Left: Hierarchy Panel (collapsible) ── */}
         <div className="flex h-full min-h-0 items-stretch">
           <div
@@ -10504,6 +11028,14 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                       toast.info("Campus Gate", "Click the campus canvas to place the gate.");
                     }}
                     activeCampusGatePlacement={tool === "gate" && layer === "campus"}
+                    onSelectAssemblyPoint={() => {
+                      setArmedDecorAssetType(null);
+                      setAssemblyPointPlacementSnap(null);
+                      if (layer !== "campus") switchLayer("campus");
+                      switchTool("assembly-point");
+                      toast.info("Emergency Assembly Point", "Click an outdoor location. Existing routing paths are connected only when a real graph edge is present.");
+                    }}
+                    activeAssemblyPointPlacement={tool === "assembly-point" && layer === "campus"}
                     decorAssetCount={(campus.decorAssets ?? []).filter((asset) => asset.type !== "ground-area").length}
                     assetsEnabled={true}
                     tutorialPanelTab={tutorialPanelTab}
@@ -10545,10 +11077,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           navPreviewPins={navPreviewPins}
           armedDecorAssetType={armedDecorAssetType}
           armedCampusGatePlacement={tool === "gate" && layer === "campus"}
+          armedAssemblyPointPlacement={tool === "assembly-point" && layer === "campus"}
+          assemblyPointPlacementSnap={assemblyPointPlacementSnap}
           navPathTargetHover={navPathTargetHover}
           navEntranceHover={navEntranceHover}
           connectBlocked={connectBlocked}
           navBlockedEdgeIds={outdoorBlockedEdgeIds}
+          emergencyOutdoorConnectivityReport={emergencyOutdoorConnectivityReport}
           edgeSnapPreview={waypointEdgeSnap}
           onGroupSurfaceDown={onGroupSurfaceDown}
           onGroupResizeStart={onGroupResizeStart}
@@ -10908,8 +11443,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
         {null}
 
         {/* PART 3: Test Route — floating utility card over the canvas.
-            Always positioned absolute so it never steals canvas layout space.
-            Right offset dynamically accounts for the Properties sidebar (248px) when open. */}
+            Its right anchor stays fixed unless the visible Properties drawer overlaps it. */}
         <AnimatePresence initial={false}>
           {navigationVisible && testNavOpen && (
             <>
@@ -10920,26 +11454,25 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
               )}
               {/* Desktop: floating card — absolute inside the canvas wrapper */}
               <motion.div
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.97 }}
-                transition={{ type: "spring", stiffness: 350, damping: 32 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ opacity: { duration: 0.14 } }}
                 className={cn(
                   "absolute top-3 z-30 hidden lg:block",
                   testRouteCompact
-                    ? "h-auto max-h-none w-[420px] overflow-visible"
-                    : "h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] w-80 overflow-hidden rounded-xl border border-border",
+                    ? "h-auto max-h-none overflow-visible"
+                    : "h-[min(620px,calc(100%-24px))] max-h-[calc(100%-24px)] overflow-hidden rounded-xl border border-border",
                 )}
                 style={{
                   background: testRouteCompact ? "transparent" : "var(--card)",
                   boxShadow: testRouteCompact ? "none" : "0 8px 30px rgba(0,0,0,0.12)",
                   left: "auto",
                   bottom: "auto",
-                  right: inspectorVisible ? "260px" : "12px",
-                  transformOrigin: "top right",
-                  width: testRouteCompact ? "min(420px, calc(100% - 24px))" : "320px",
+                  right: `${desktopTestRouteLayout.right}px`,
+                  width: `${desktopTestRouteLayout.width}px`,
                   height: testRouteCompact ? "auto" : undefined,
-                  transition: "right 180ms cubic-bezier(0.16, 1, 0.3, 1), width 160ms cubic-bezier(0.16, 1, 0.3, 1), height 160ms cubic-bezier(0.16, 1, 0.3, 1)",
+                  transition: "right 180ms cubic-bezier(0.16, 1, 0.3, 1)",
                 }}
               >
                 <TestNavigationPanel
@@ -11161,6 +11694,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           entranceOutdoorLinkStatus={selectedEntranceOutdoorStatus}
           entranceDoorOptions={selectedEntranceDoorOptions}
           selNavNode={selected?.type === 'navNode' ? (campus.navNodes ?? []).find(n => n.id === selected.id) : undefined}
+          selAssemblyPoint={selected?.type === 'assemblyPoint' ? (campus.assemblyPoints ?? []).find(point => point.id === selected.id) : undefined}
+          onUpdateAssemblyPoint={onUpdateAssemblyPoint}
+          onReassignPrimaryAssemblyPoint={onReassignPrimaryAssemblyPoint}
+          onConnectAssemblyPoint={onConnectAssemblyPoint}
+          onInspectAssemblyPointOutdoorNetwork={inspectAssemblyPointOutdoorNetwork}
+          onClearAssemblyPointOutdoorNetworkInspection={clearAssemblyPointOutdoorNetworkInspection}
+          onDeleteAssemblyPoint={onDeleteAssemblyPoint}
           selNavEdge={selected?.type === 'navEdge' ? (campus.navEdges ?? []).find(e => e.id === selected.id) : undefined}
           navEdgeBlocked={selected?.type === 'navEdge' ? outdoorBlockedEdgeIds.has(selected.id) : undefined}
           selEventOverlay={selected?.type === 'eventOverlay' ? (campus.eventOverlays ?? []).find(ev => ev.id === selected.id) : undefined}
@@ -11407,13 +11947,11 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       <PrePublishDialog
         open={showPublishConfirm}
         campus={campus}
+        publishedSnapshot={publishedSnapshot}
         errors={validationIssues}
-        onClose={() => setShowPublishConfirm(false)}
-        onPublish={() => {
-          setShowPublishConfirm(false);
-          setIsProcessing(true);
-          onPublish(campus);
-        }}
+        onClose={() => { if (!isProcessing) setShowPublishConfirm(false); }}
+        onPublish={runPublish}
+        publishError={publishError}
         onReviewIssue={(issue) => {
           // Close the publish gate so the user can fix the issue on the canvas
           setShowPublishConfirm(false);
@@ -11572,12 +12110,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                   style={{ background: "color-mix(in srgb, var(--destructive) 12%, transparent)" }}>
                   <Trash2 className="h-6 w-6" style={{ color: "var(--destructive)" }} />
                 </div>
-                <h3 className="text-base font-extrabold text-foreground">Delete {deleteConfirm.type === "path" ? "Path" : deleteConfirm.type === "marker" ? "Marker" : deleteConfirm.type === "decorAsset" ? "Asset" : "Building"}?</h3>
+                <h3 className="text-base font-extrabold text-foreground">Delete {deleteConfirm.type === "path" ? "Path" : deleteConfirm.type === "marker" ? "Marker" : deleteConfirm.type === "decorAsset" ? "Asset" : deleteConfirm.type === "assemblyPoint" ? "Emergency Assembly Point" : "Building"}?</h3>
                 <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed max-w-[260px]">
                   {deleteConfirm.type === "building"
-                    ? `Are you sure you want to delete "${deleteConfirm.name}"? This will also remove all its floors and rooms. This action cannot be undone.`
-                    : `Are you sure you want to delete "${deleteConfirm.name}"? This action cannot be undone.`
-                  }
+                    ? `Delete "${deleteConfirm.name}" and its floors and rooms? This action cannot be undone.`
+                    : deleteConfirm.type === "assemblyPoint"
+                      ? (() => {
+                          const point = (campus.assemblyPoints ?? []).find((item) => item.id === deleteConfirm.id);
+                          const assigned = point?.buildingAssignments?.length ?? 0;
+                          return `Delete "${deleteConfirm.name}"${assigned ? ` and remove its assignments from ${assigned} building${assigned === 1 ? "" : "s"}` : ""}? Its linked waypoint and authored connectors will be cleaned up, while shared Pathway geometry is preserved.`;
+                        })()
+                      : `Delete "${deleteConfirm.name}"? This action cannot be undone.`}
                 </p>
               </div>
               <div className="flex gap-2.5 px-6 pb-6 pt-3">
@@ -11591,7 +12134,13 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                 <button
                   onClick={() => {
                     if (!deleteConfirm) return;
-                    if (deleteConfirm.type === "decorAsset") {
+                    if (deleteConfirm.type === "assemblyPoint") {
+                      const next = removeEmergencyAssemblyPoint(campusRef.current, deleteConfirm.id);
+                      campusRef.current = next;
+                      onUpdate(next);
+                      pushHistory(next);
+                      toast.success("Emergency Assembly Point deleted", "Its building assignments were removed; unrelated pathways were preserved.");
+                    } else if (deleteConfirm.type === "decorAsset") {
                       // Post-state history: exactly one correct undo/redo entry.
                       const next = { ...campus, decorAssets: decorAssets.filter((da) => da.id !== deleteConfirm.id) };
                       onUpdate(next);
@@ -11620,7 +12169,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
                   className="flex-1 h-10 rounded-xl text-xs font-extrabold text-white transition-colors shadow-sm hover:opacity-90"
                   style={{ background: "var(--destructive)" }}
                 >
-                  Delete
+                  {deleteConfirm.type === "assemblyPoint" ? "Delete Point" : "Delete"}
                 </button>
               </div>
             </motion.div>

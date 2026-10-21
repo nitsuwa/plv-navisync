@@ -81,6 +81,7 @@ export function campusDraftComparable(campus: Campus): Partial<Campus> {
     && !node.gateId
     && !node.derivedOwnerType
     && !(node.generatedFromPathVertices?.length)
+    && !(node.generatedFromPathIntersections?.length)
     && !generatedDoorIds.has(node.doorId ?? "")
   ));
   const derivedNodeIds = new Set(
@@ -92,6 +93,7 @@ export function campusDraftComparable(campus: Campus): Partial<Campus> {
         || node.gateId
         || node.derivedOwnerType
         || node.generatedFromPathVertices?.length
+        || node.generatedFromPathIntersections?.length
         || generatedDoorIds.has(node.doorId ?? "")
       ))
       .map((node) => node.id),
@@ -100,6 +102,7 @@ export function campusDraftComparable(campus: Campus): Partial<Campus> {
     edge.type !== "entrance_transition"
     && !edge.derivedOwnerType
     && !(edge.generatedFromPathIds?.length)
+    && !(edge.generatedFromPathIntersectionSegments?.length)
     && !derivedNodeIds.has(edge.startNodeId)
     && !derivedNodeIds.has(edge.endNodeId)
   ));
