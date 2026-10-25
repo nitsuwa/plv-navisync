@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Campus } from "../types";
 import type { ValidationIssue } from "../ValidationErrorsDialog";
-import { CampusPublicationOutcomeUncertainError } from "../../../services/campusService";
+import { CampusPublicationOutcomeUncertainError, CampusPublicationTimeoutError } from "../../../services/campusService";
 
 vi.mock("../../../pages/CampusMapPage", () => ({
   CampusMapPage: ({ previewCampus, fullScreenHeight }: { previewCampus: Campus; fullScreenHeight?: string }) => <div data-testid="student-map" data-fullscreen-height={fullScreenHeight}>{previewCampus.name}</div>,
@@ -54,14 +54,41 @@ describe("StudentPreview", () => {
     render(<StudentPreview campus={campusWithRoom} validationIssues={[warning]} onBack={vi.fn()} onPublish={vi.fn().mockResolvedValue(undefined)} />);
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    const dialog = screen.getByRole("dialog", { name: "Publish campus" });
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
+    expect(within(dialog).getByText("1 non-blocking warning")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Check the room label")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "View details" }));
     expect(within(dialog).getByText("Check the room label")).toBeInTheDocument();
-    expect(within(dialog).getByText("Warning", { exact: true })).toBeInTheDocument();
     expect(within(dialog).getByText("Main Hall · Ground Floor · Bookshop")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: /Hide details/ }));
     expect(within(dialog).queryByText("Check the room label")).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: /Show details/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "View details" }));
     expect(within(dialog).getByText("Check the room label")).toBeInTheDocument();
+  });
+
+  it("summarizes emergency-egress warnings and keeps the full authored detail available", () => {
+    const emergencyWarning: ValidationIssue = {
+      type: "no_emergency_exit_configured",
+      severity: "warning",
+      message: 'No dedicated emergency egress configured for Building "CAN". This Building has no designated Emergency Exit or Exterior Emergency Stair. Emergency routing may use a safe General Entrance as fallback.',
+      buildingId: "canteen-id",
+    };
+    const campusWithCanteen = {
+      ...campus,
+      buildings: [{ id: "canteen-id", name: "Canteen", code: "CAN", floors: [] }],
+    } as unknown as Campus;
+    render(<StudentPreview campus={campusWithCanteen} validationIssues={[emergencyWarning]} onBack={vi.fn()} onPublish={vi.fn().mockResolvedValue(undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
+
+    expect(within(dialog).getByText("1 non-blocking warning")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "View details" }));
+    expect(within(dialog).getByText("Canteen: No dedicated emergency exit")).toBeInTheDocument();
+    expect(within(dialog).getByText("Emergency routes may use a general entrance instead.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(emergencyWarning.message)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByText("Technical details"));
+    expect(within(dialog).getByText(emergencyWarning.message, { exact: false })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Publish Anyway" })).toBeEnabled();
   });
 
   it("locks dismissal and duplicate submissions while publishing, then reports confirmed success", async () => {
@@ -69,14 +96,16 @@ describe("StudentPreview", () => {
     const onPublish = vi.fn(() => new Promise<void>((resolve) => { resolvePublish = resolve; }));
     render(<StudentPreview campus={campus} validationIssues={[issue("warning")]} onBack={vi.fn()} onPublish={onPublish} />);
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
-    const dialog = screen.getByRole("dialog", { name: "Publish campus" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Publish Anyway" }));
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
+    const publishButton = within(dialog).getByRole("button", { name: "Publish Anyway" });
+    fireEvent.click(publishButton);
+    fireEvent.click(publishButton);
 
     expect(await screen.findByRole("heading", { name: "Publishing Campus…" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close publish dialog" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to editor" })).toBeDisabled();
-    expect(within(dialog).getByRole("status")).toHaveTextContent("Publishing campus data…");
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Publishing saved campus data…");
     fireEvent.click(dialog.parentElement!);
     expect(screen.getByRole("heading", { name: "Publishing Campus…" })).toBeInTheDocument();
     expect(onPublish).toHaveBeenCalledTimes(1);
@@ -92,13 +121,13 @@ describe("StudentPreview", () => {
     const onBack = vi.fn();
     render(<StudentPreview campus={campus} validationIssues={[]} onBack={onBack} onPublish={onPublish} />);
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
-    const dialog = screen.getByRole("dialog", { name: "Publish campus" });
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
     fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("status could not be confirmed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't confirm whether this campus was published");
     expect(screen.getByRole("button", { name: "Back to editor" })).toBeDisabled();
     expect(within(dialog).queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Check status & retry" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Verify status & retry" }));
     await waitFor(() => expect(onPublish).toHaveBeenCalledTimes(2));
     await screen.findByRole("heading", { name: "Campus Published" });
     expect(onBack).not.toHaveBeenCalled();
@@ -109,5 +138,32 @@ describe("StudentPreview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     const publishButtons = screen.getAllByRole("button", { name: "Publish" });
     expect(publishButtons[publishButtons.length - 1]).toBeDisabled();
+  });
+
+  it("shows a non-technical timeout message and permits retry only after status was confirmed", async () => {
+    const onPublish = vi.fn().mockRejectedValueOnce(
+      new CampusPublicationTimeoutError("publish campus version", true, { message: "canceling statement due to statement timeout" }),
+    );
+    render(<StudentPreview campus={campus} validationIssues={[]} onBack={vi.fn()} onPublish={onPublish} />);
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByRole("heading", { name: "Publishing took too long" })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("We confirmed this version was not published");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("statement timeout");
+    expect(within(dialog).getByRole("button", { name: "Retry Publish" })).toBeEnabled();
+    expect(within(dialog).queryByRole("button", { name: "Verify status & retry" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the dialog within the viewport and supports keyboard close and initial focus", async () => {
+    render(<StudentPreview campus={campus} validationIssues={[]} onBack={vi.fn()} onPublish={vi.fn().mockResolvedValue(undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const dialog = screen.getByRole("dialog", { name: /Publish Campus/ });
+    expect(dialog).toHaveClass("max-h-[calc(100dvh-1.5rem)]");
+    expect(dialog).toHaveClass("overflow-hidden");
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Publish Campus/ })).not.toBeInTheDocument());
   });
 });

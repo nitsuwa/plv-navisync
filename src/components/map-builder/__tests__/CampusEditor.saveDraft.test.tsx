@@ -77,25 +77,35 @@ function Harness({
   onSave,
   onBack,
   onCampusChange,
+  allowTestEdit = false,
 }: {
   initialCampus: Campus;
   savedSnapshot: string;
   onSave: (campus: Campus) => Promise<Campus>;
   onBack: () => void;
   onCampusChange?: (campus: Campus) => void;
+  allowTestEdit?: boolean;
 }) {
   const [campus, setCampus] = useState(initialCampus);
+  const commitTestEdit = () => {
+    const next = { ...campus, name: `${campus.name} updated` };
+    onCampusChange?.(next);
+    setCampus(next);
+  };
   return (
-    <CampusEditor
-      campus={campus}
-      onBack={onBack}
-      onUpdate={(next) => { onCampusChange?.(next); setCampus(next); }}
-      onSave={onSave}
-      onPublish={() => {}}
-      onOpenFloor={() => {}}
-      onAddBuilding={() => {}}
-      savedSnapshot={savedSnapshot}
-    />
+    <>
+      {allowTestEdit && <button type="button" onClick={commitTestEdit}>Commit test edit</button>}
+      <CampusEditor
+        campus={campus}
+        onBack={onBack}
+        onUpdate={(next) => { onCampusChange?.(next); setCampus(next); }}
+        onSave={onSave}
+        onPublish={() => {}}
+        onOpenFloor={() => {}}
+        onAddBuilding={() => {}}
+        savedSnapshot={savedSnapshot}
+      />
+    </>
   );
 }
 
@@ -255,6 +265,35 @@ describe("B7 Phase 2 — Save Draft is never blocked by validation", () => {
     const saveBtn = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
     expect(saveBtn.disabled).toBe(true);
     expect(saveBtn.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
+  });
+
+  it("keeps newer authoring edits made while a save is in flight", async () => {
+    const initialCampus = makeCampus();
+    let latestCampus = initialCampus;
+    let resolveSave!: (campus: Campus) => void;
+    const onSave = vi.fn((campus: Campus) => new Promise<Campus>((resolve) => { resolveSave = resolve; }));
+    render(<Harness
+      initialCampus={initialCampus}
+      savedSnapshot={JSON.stringify({ ...initialCampus, description: "previous saved description" })}
+      onSave={onSave}
+      onBack={() => {}}
+      onCampusChange={(campus) => { latestCampus = campus; }}
+      allowTestEdit
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const submitted = onSave.mock.calls[0][0];
+
+    // Simulate a committed editor update landing while the persistence promise
+    // is pending. The successful older response must not replace this state.
+    fireEvent.click(screen.getByRole("button", { name: "Commit test edit" }));
+    await waitFor(() => expect(latestCampus.name).toBe("Test Campus updated"));
+    await act(async () => { resolveSave(submitted); });
+
+    await screen.findByRole("heading", { name: "Campus Map Saved" });
+    expect(latestCampus.name).toBe("Test Campus updated");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("a real save failure preserves dirty edits and reports the failure", async () => {

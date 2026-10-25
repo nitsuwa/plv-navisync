@@ -160,6 +160,8 @@ function inMemoryQuery(table: string) {
   query.select = () => query;
   query.eq = () => query;
   query.order = () => query;
+  query.limit = () => query;
+  query.maybeSingle = async () => ({ data: null, error: null });
   query.insert = (value) => { operation = "insert"; payload = value as typeof payload; return query; };
   query.single = async () => {
     if (table === "campus_versions" && operation === "insert") {

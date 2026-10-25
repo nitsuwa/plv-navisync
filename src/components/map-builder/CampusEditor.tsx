@@ -117,7 +117,7 @@ import { collectOutdoorClipboardSelection, isFreeOutdoorWaypoint, type OutdoorCl
 import { didOutdoorWaypointDragStart, moveOutdoorWaypointLocally, OUTDOOR_WAYPOINT_DRAG_THRESHOLD_PX } from "../../lib/outdoorNavigationEditing";
 import { isDerivedExteriorApproachNode, reconcileExteriorApproachNavigation } from "../../lib/exteriorApproachNavigation";
 import { exteriorZoneCoversEntrance } from "../../lib/exteriorFloorZones";
-import { campusHasUnpublishedChanges, campusHasUnsavedChanges } from "../../lib/campusDraftPersistence";
+import { campusDraftsEqual, campusHasUnpublishedChanges, campusHasUnsavedChanges } from "../../lib/campusDraftPersistence";
 import {
   attachVisualPathEndpoint,
   detachVisualPathEndpoint,
@@ -731,7 +731,7 @@ const visualAttachmentTargetForSnap = (target: PathSnapTarget): VisualPathAttach
 interface CampusEditorProps {
   campus: Campus;
   onBack: () => void;
-  onUpdate: (c: Campus, options?: { persistAsBaseline?: boolean }) => void;
+  onUpdate: (c: Campus, options?: { persistAsBaseline?: boolean; compareAuthoringContent?: boolean }) => void;
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish: (c: Campus) => void | Promise<void>;
   /** Open the read-only Student Preview; the page handles Save & Preview. */
@@ -1531,7 +1531,9 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     exteriorGraphSyncRef.current = exteriorGraphSignature;
     if (!(campus.buildings ?? []).some((building) => canonicalExteriorEmergencyStairsForBuilding(building).length > 0)) return;
     const synced = syncExteriorEmergencyStairGraph(campus);
-    if (exteriorEmergencyGraphFingerprint(synced) !== exteriorGraphSignature) onUpdate(synced);
+    if (exteriorEmergencyGraphFingerprint(synced) !== exteriorGraphSignature) {
+      onUpdate(synced, { compareAuthoringContent: true });
+    }
   }, [campus, exteriorGraphSignature, onUpdate]);
 
   // Building Entrances own their Ground-floor Door relationship. Reconcile
@@ -1548,7 +1550,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (entranceDoorSyncRef.current === entranceDoorSignature) return;
     entranceDoorSyncRef.current = entranceDoorSignature;
     const reconciled = reconcileEntranceDoors(campus, genId);
-    if (reconciled !== campus) onUpdate(reconciled);
+    if (reconciled !== campus) onUpdate(reconciled, { compareAuthoringContent: true });
   }, [campus, entranceDoorSignature, onUpdate]);
 
   // ── B7 Phase 1: restrained on-canvas issue markers ──
@@ -1770,7 +1772,17 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       });
       for (let index = 0; index < path.points.length - 1; index += 1) {
         const projection = closestPointOnSegment(point, path.points[index], path.points[index + 1]);
-        if (projection.t <= 0.02 || projection.t >= 0.98) continue;
+        // Near a Pathway junction, the closest-point projection can land a
+        // few units down one incident segment and beat the authored endpoint
+        // by a fraction of a unit. Prefer the exact vertex inside the editor's
+        // small alignment radius so a Walking Point cannot land just off a
+        // shared junction, while preserving segment selection farther along a
+        // Pathway even when its broad painted hit radius overlaps the endpoint.
+        const endpointDistance = Math.min(
+          Math.hypot(projection.point.x - path.points[index].x, projection.point.y - path.points[index].y),
+          Math.hypot(projection.point.x - path.points[index + 1].x, projection.point.y - path.points[index + 1].y),
+        );
+        if (endpointDistance <= Math.min(8, threshold)) continue;
         if (projection.distance <= threshold && (!bestSegment || projection.distance < bestSegment.distance)) {
           bestSegment = {
             point: projection.point,
@@ -3785,7 +3797,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
             && rawPoint.y >= building.y - padding
             && rawPoint.y <= building.y + building.height + padding;
         });
-        const entranceHit = !hit && !hoveredPathTarget && (entranceElement || nearBuilding)
+        // The rendered Entrance hit surface owns Connect hover even when its
+        // canonical exterior graph node is co-located and also resolves as a
+        // node hit. Otherwise the node match suppresses the Entrance target
+        // cue, so students/admins see no clear visual indication that the
+        // Entrance is the selected connection target.
+        const entranceHit = !hoveredPathTarget && (entranceElement || nearBuilding)
           ? findEntranceAtPoint(buildings, rawPoint)
           : undefined;
         const nextEntranceHover = entranceHit
@@ -4140,6 +4157,12 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     // group bbox, clamped to the canvas). Internal spacing is never distorted. ──
     const group = dragGroupStartRef.current;
     if (group) {
+      const rawDx = pt.x - drag.sx;
+      const rawDy = pt.y - drag.sy;
+      // A pointer event at the original grab coordinate is not a drag. Skip
+      // snapping until there is actual movement so a click or a zero-delta
+      // mousemove cannot nudge the selected group to a nearby alignment target.
+      if (rawDx === 0 && rawDy === 0) return;
       const groupIds = new Set(group.map((m) => m.id));
       const otherPhysicalObjects = physicalAlignmentRefs(groupIds);
       const groupUsesBuildingSnap = group.some((member) => member.kind === "building" || member.kind === "marker");
@@ -4147,8 +4170,8 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       let { dx, dy } = computeGroupTranslation({
         members: group,
         draggedId: drag.id,
-        rawDx: pt.x - drag.sx,
-        rawDy: pt.y - drag.sy,
+        rawDx,
+        rawDy,
         canvasW: cw,
         canvasH: ch,
         snapGrid,
@@ -4444,11 +4467,19 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const existingVisualAttachment = isEndpoint && drag.pointIndex !== undefined
         ? visualPathAttachmentForPoint(paths, path.id, drag.pointIndex)
         : null;
+      const moveLinkedJunction = drag.pointIndex !== undefined
+        && !existingVisualAttachment
+        && pathPointIsJunction(path.id, drag.pointIndex);
       // A detached/new visual path can reattach to any CampusPath. Existing
       // generated Pathway endpoints retain the historical vertex-join route
       // unless that endpoint already carries our visual-only attachment.
       const sourceCanVisualAttach = !path.pathNetworkId && !path.navigationVertexIds?.length;
-      const visualTarget = (existingVisualAttachment || sourceCanVisualAttach) && isVisualPathTarget(visualSnap)
+      // Moving a legacy coordinate-shared junction moves every matching owner
+      // vertex together. Do not also attach that endpoint to a segment that
+      // contains the old shared coordinate: its saved segment fraction would
+      // be resolved against the moved segment and pull the source endpoint off
+      // the junction on pointer-up.
+      const visualTarget = (existingVisualAttachment || (sourceCanVisualAttach && !moveLinkedJunction)) && isVisualPathTarget(visualSnap)
         ? visualSnap
         : null;
        // A deliberate drop on another owned physical vertex is the sole path
@@ -4484,9 +4515,6 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       gestureChangedRef.current = true;
       const oldPoint = drag.pointIndex !== undefined ? path.points[drag.pointIndex] : undefined;
       const oldKey = oldPoint ? pathPointKey(oldPoint) : "";
-      const moveLinkedJunction = drag.pointIndex !== undefined
-        && !existingVisualAttachment
-        && pathPointIsJunction(path.id, drag.pointIndex);
       const explicitProxyRefs = drag.generatedVertexRefs;
       const proxyRefKeys = explicitProxyRefs
         ? new Set(explicitProxyRefs.map((ref) => `${ref.pathId}:${ref.pointIndex}`))
@@ -9160,7 +9188,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (h.idx <= 0) { toast.info("Nothing to undo", "No more actions in history."); return; }
     const newIdx = h.idx - 1;
     historyRef.current = { ...h, idx: newIdx };
-    onUpdate(restoreCampusHistoryReferences(campusRef.current, h.snapshots[newIdx]));
+    onUpdate(restoreCampusHistoryReferences(campusRef.current, h.snapshots[newIdx]), { compareAuthoringContent: true });
   }, [onUpdate, toast]);
 
   const redoEdit = useCallback(() => {
@@ -9168,7 +9196,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
     if (h.idx >= h.snapshots.length - 1) { toast.info("Nothing to redo", "No more actions to redo."); return; }
     const newIdx = h.idx + 1;
     historyRef.current = { ...h, idx: newIdx };
-    onUpdate(restoreCampusHistoryReferences(campusRef.current, h.snapshots[newIdx]));
+    onUpdate(restoreCampusHistoryReferences(campusRef.current, h.snapshots[newIdx]), { compareAuthoringContent: true });
   }, [onUpdate, toast]);
 
   // ── Undo/redo availability (for disabled buttons + tooltips) ──
@@ -9205,16 +9233,20 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       try {
         const candidate = { ...campus, updatedAt: new Date().toISOString() };
         const saved = onSave ? await onSave(candidate) : candidate;
-        // A successful persistence call establishes a new history baseline for
-        // this editor scope. Do this only after onSave resolves so failures keep
-        // the user's undo/redo stack intact.
-        campusRef.current = saved;
-        historyRef.current = { snapshots: [structuredClone(saved)], idx: 0 };
-        transientGestureCampusRef.current = null;
-        transientCanvasPreviewRef.current?.clear();
-        imperativeGesturePreviewRef.current = false;
-        pendingPhysicalGestureObjectRef.current = null;
-        onUpdate(saved, { persistAsBaseline: true });
+        const newerAuthoringChangesExist = !campusDraftsEqual(campusRef.current, candidate);
+        if (!newerAuthoringChangesExist) {
+          // A successful persistence call establishes a new history baseline
+          // only when the submitted snapshot is still the current authoring
+          // state. If editing continued during the request, keep that newer
+          // state and its history mounted against the newly persisted baseline.
+          campusRef.current = saved;
+          historyRef.current = { snapshots: [structuredClone(saved)], idx: 0 };
+          transientGestureCampusRef.current = null;
+          transientCanvasPreviewRef.current?.clear();
+          imperativeGesturePreviewRef.current = false;
+          pendingPhysicalGestureObjectRef.current = null;
+          onUpdate(saved, { persistAsBaseline: true });
+        }
         savedSnapshotRef.current = JSON.stringify(saved);
         setSaveScreen({ open: true, state: "success" });
         return true;
@@ -9280,7 +9312,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       if (isDirty) {
         try {
           const saved = JSON.parse(savedSnapshotRef.current) as Campus;
-          onUpdate(saved);
+          onUpdate(saved, { compareAuthoringContent: true });
         } catch { /* baseline unavailable — keep current state */ }
       }
     },

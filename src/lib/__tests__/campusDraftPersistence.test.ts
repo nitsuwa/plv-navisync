@@ -104,7 +104,7 @@ describe("campus draft recovery", () => {
 
   it("ignores generated entrance and navigation reconciliation records", () => {
     const base = campus({
-      buildings: [{ id: "b1", floors: [{ id: "f1", doors: [] }] } as Campus["buildings"][number]],
+      buildings: [{ id: "b1", floors: [{ id: "f1", doors: [] }] } as unknown as Campus["buildings"][number]],
       navNodes: [],
       navEdges: [],
     });
@@ -123,7 +123,7 @@ describe("campus draft recovery", () => {
           buildingEntranceId: "entrance-1",
         }],
       }],
-    } as Campus["buildings"][number]];
+      } as unknown as Campus["buildings"][number]];
     generated.navNodes = [{
       id: "generated-node",
       name: "Main Entrance",
@@ -151,6 +151,49 @@ describe("campus draft recovery", () => {
 
     expect(campusHasUnsavedChanges(generated, JSON.stringify(base))).toBe(false);
     expect(campusHasUnpublishedChanges(generated, base)).toBe(false);
+  });
+
+  it("treats an absent or empty generated exterior stair owner list as equivalent", () => {
+    const saved = campus({
+      buildings: [{ id: "b1", floors: [] } as unknown as Campus["buildings"][number]],
+    });
+    const reconciled = campus({
+      ...saved,
+      buildings: [{
+        ...saved.buildings[0],
+        exteriorEmergencyStairs: [],
+      }],
+    });
+
+    expect(campusHasUnsavedChanges(reconciled, JSON.stringify(saved))).toBe(false);
+    const authoredStair = campus({
+      ...saved,
+      buildings: [{
+        ...saved.buildings[0],
+        exteriorEmergencyStairs: [{ id: "stair-1" } as NonNullable<Campus["buildings"][number]["exteriorEmergencyStairs"]>[number]],
+      } as unknown as Campus["buildings"][number]],
+    });
+    expect(campusHasUnsavedChanges(authoredStair, JSON.stringify(saved))).toBe(true);
+  });
+
+  it("treats an absent or empty reconciled entrance list as equivalent", () => {
+    const saved = campus({
+      buildings: [{ id: "b1", floors: [] } as unknown as Campus["buildings"][number]],
+    });
+    const reconciled = campus({
+      ...saved,
+      buildings: [{ ...saved.buildings[0], entrances: [] }],
+    });
+
+    expect(campusHasUnsavedChanges(reconciled, JSON.stringify(saved))).toBe(false);
+    const authoredEntrance = campus({
+      ...saved,
+      buildings: [{
+        ...saved.buildings[0],
+        entrances: [{ id: "entrance-1" } as NonNullable<Campus["buildings"][number]["entrances"]>[number]],
+      } as unknown as Campus["buildings"][number]],
+    });
+    expect(campusHasUnsavedChanges(authoredEntrance, JSON.stringify(saved))).toBe(true);
   });
 
   it("does not treat a pre-hydration empty snapshot as a writable draft", () => {
@@ -217,7 +260,7 @@ describe("campus draft recovery", () => {
       previewBuildingsLoaded: true,
       buildings: [{ id: "b1", floors: [{ id: "f1", furniture: [{ id: "chair-1" }] }] } as Campus["buildings"][number]],
       paths: [{ id: "path-1" } as Campus["paths"][number]],
-      navNodes: [{ id: "node-1" } as Campus["navNodes"][number]],
+      navNodes: [{ id: "node-1" } as NonNullable<Campus["navNodes"]>[number]],
     });
     const completeLegacyDraft = campus({
       ...persisted,

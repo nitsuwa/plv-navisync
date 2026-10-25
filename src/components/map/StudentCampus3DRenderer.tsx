@@ -2336,8 +2336,10 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       maxY: 0.8,
       minZ: Math.min(first.z, second.z) - padding,
       maxZ: Math.max(first.z, second.z) + padding,
-    };
-  }, [campus]);
+    }, campus.canvasW, campus.canvasH, STUDENT_CAMPUS_3D_SCALE,
+    Boolean(props.previewCamera || props.eventFurniture?.length || props.eventLabels?.length),
+    props.previewCamera?.maxHeight);
+  }, [campus, props.previewCamera, props.eventFurniture?.length, props.eventLabels?.length]);
   const pointerStarts = useRef(new Map<number, { x: number; y: number; button: number; pointerType: string }>());
   const pointers = useRef(new Map<number, Student3dTouchPoint>());
   const touchGestureStart = useRef<readonly [Student3dTouchPoint, Student3dTouchPoint] | null>(null);
@@ -2581,7 +2583,8 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </group>
       : <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
-  <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} focusOnViewportChange={props.focusOnViewportChange} showcaseBuildingId={props.showcaseBuildingId} emergencyRouteSegments={props.emergencyRouteSegments} emergencyRouteOverview={props.emergencyRouteOverview} emergencyRouteOverviewNonce={props.emergencyRouteOverviewNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} recenterFollowOffset={props.recenterFollowOffset} onRecenterComplete={props.onRecenterComplete} surfaceRef={props.surfaceRef} onCameraPoseChange={props.onCameraPoseChange} cameraPoseRestore={props.cameraPoseRestore} cameraPoseRestoreNonce={props.cameraPoseRestoreNonce} onCameraPoseRestoreComplete={props.onCameraPoseRestoreComplete} />
+    <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
+    {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} focusOnViewportChange={props.focusOnViewportChange} showcaseBuildingId={props.showcaseBuildingId} emergencyRouteSegments={props.emergencyRouteSegments} emergencyRouteOverview={props.emergencyRouteOverview} emergencyRouteOverviewNonce={props.emergencyRouteOverviewNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} recenterFollowOffset={props.recenterFollowOffset} onRecenterComplete={props.onRecenterComplete} surfaceRef={props.surfaceRef} onCameraPoseChange={props.onCameraPoseChange} cameraPoseRestore={props.cameraPoseRestore} cameraPoseRestoreNonce={props.cameraPoseRestoreNonce} onCameraPoseRestoreComplete={props.onCameraPoseRestoreComplete} />}
   </>;
 }
 

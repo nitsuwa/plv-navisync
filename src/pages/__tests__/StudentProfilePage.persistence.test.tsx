@@ -53,7 +53,9 @@ describe("StudentProfilePage persistence", () => {
     render(<StudentProfilePage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
     await waitFor(() => expect(screen.getByRole("heading", { name: "Maria Santos" })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit display name" }));
+    const editNameButton = screen.getByRole("button", { name: "Edit display name" });
+    expect(editNameButton).toHaveClass("h-11", "w-11");
+    fireEvent.click(editNameButton);
     fireEvent.change(await screen.findByRole("textbox", { name: "Edit display name" }), { target: { value: "Ana Reyes" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -68,6 +70,7 @@ describe("StudentProfilePage persistence", () => {
     render(<StudentProfilePage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
     await waitFor(() => expect(screen.getByRole("heading", { name: "Maria Santos" })).toBeInTheDocument());
 
+    expect(screen.getByRole("button", { name: "Change profile photo" })).toHaveClass("h-11", "w-11");
     const input = screen.getByLabelText("Upload profile photo");
     fireEvent.change(input, { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
 

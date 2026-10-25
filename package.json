@@ -70,7 +70,7 @@
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
     "react-responsive-masonry": "2.7.1",
-    "react-router": "7.13.0",
+    "react-router": "7.18.2",
     "react-slick": "0.31.0",
     "recharts": "2.15.2",
     "sonner": "2.0.3",
@@ -91,7 +91,7 @@
     "jsdom": "^29.1.1",
     "tailwindcss": "4.1.12",
     "typescript": "^7.0.2",
-    "vite": "6.3.5",
+    "vite": "6.4.4",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
@@ -106,9 +106,13 @@
       "optional": true
     }
   },
+  "overrides": {
+    "react-router": "$react-router"
+  },
   "pnpm": {
     "overrides": {
-      "vite": "6.3.5"
+      "@figma/astraui-kit>react-router": "7.18.2",
+      "vite": "6.4.4"
     }
   }
 }

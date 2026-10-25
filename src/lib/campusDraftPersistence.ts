@@ -1,4 +1,5 @@
 import type { Campus } from "../components/map-builder/types";
+import { normalizeFloor } from "./floorPlanNormalization";
 
 /**
  * Draft recovery is intentionally session-scoped: it protects an in-progress
@@ -54,25 +55,49 @@ export function campusDraftComparable(campus: Campus): Partial<Campus> {
   ) as Partial<Campus>;
   const generatedDoorIds = new Set<string>();
   comparable.buildings = (campus.buildings ?? []).map((building) => {
-    const floors = (building.floors ?? []).map((floor) => ({
-      ...floor,
+    const floors = (building.floors ?? []).map((floor, index) => {
+      // Compare old and hydrated Floor records on the same canonical defaults.
+      // The deterministic fallback ID avoids turning an incomplete legacy
+      // record into a different random ID every time a dirty check runs.
+      const normalizedFloor = normalizeFloor(floor, {
+        buildingId: building.id,
+        id: floor.id ?? `${building.id}-floor-${index + 1}`,
+        number: floor.number ?? index + 1,
+      });
+      return {
+      ...normalizedFloor,
       // Exterior Emergency Stair occurrences are projections of the
       // Building-owned stair and are rebuilt during Floor hydration. The
       // authored stair definition remains on the Building; the per-Floor
       // occurrence must not make a saved Floor dirty merely because its
       // generated projection was remounted.
-      stairs: (floor.stairs ?? []).filter((stair) => !stair.exteriorEmergencyStairId),
+      stairs: normalizedFloor.stairs.filter((stair) => !stair.exteriorEmergencyStairId),
       // Entrance Doors are generated from Building-owned Entrances. Their
       // presence/position is reconciled during hydration and is not itself an
       // independent authoring edit.
-      doors: (floor.doors ?? []).filter((door) => {
+      doors: normalizedFloor.doors.filter((door) => {
         if (!door.buildingEntranceId) return true;
         generatedDoorIds.add(door.id);
         return false;
       }),
-    }));
+      };
+    });
     const { expanded: _expanded, ...authoredBuilding } = building;
-    return { ...authoredBuilding, floors };
+    const comparableBuilding = { ...authoredBuilding };
+    // Graph/occurrence reconciliation can materialize an empty owner list when
+    // an older saved building omitted it. The absent and empty forms author no
+    // different emergency stair data; non-empty authored owners remain fully
+    // significant in the comparison.
+    if (comparableBuilding.exteriorEmergencyStairs?.length === 0) {
+      delete comparableBuilding.exteriorEmergencyStairs;
+    }
+    // Entrance reconciliation can also materialize an empty list on legacy
+    // buildings that omitted the field. An absent list and an empty list both
+    // mean that no Building Entrances were authored.
+    if (comparableBuilding.entrances?.length === 0) {
+      delete comparableBuilding.entrances;
+    }
+    return { ...comparableBuilding, floors };
   });
   comparable.navNodes = (campus.navNodes ?? []).filter((node) => (
     !node.buildingEntranceId

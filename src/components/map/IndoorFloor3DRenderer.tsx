@@ -2406,6 +2406,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     </group>
     <OrbitControls ref={controls} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.12} minPolarAngle={0.2} maxPolarAngle={Math.PI / 3}
       enableRotate enablePan enableZoom maxDistance={Math.max(18, halfDepth * 2.7)} minDistance={4} />
+    <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: FLOOR_SCALE, originX: viewport.width / 2 - viewport.offsetX, originY: viewport.height / 2 - viewport.offsetY }} />
   </>;
 }
 

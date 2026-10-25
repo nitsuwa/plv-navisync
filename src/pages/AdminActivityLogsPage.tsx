@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { History, Clock, Search, RefreshCw, Filter, Trash2 } from "lucide-react";
+import { History, Clock, Search, RefreshCw, Filter, Trash2, Download } from "lucide-react";
 import { EmptyState } from "../components/ui/EmptyState";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
 import { cn } from "../lib/utils";
@@ -13,6 +13,9 @@ import {
 } from "../services/activityLogService";
 import { formatAdminActivity } from "../services/adminActivityPresentation";
 import type { Tables } from "../types/database.generated";
+import { downloadCsv } from "../lib/exporters";
+import { formatManilaDateStamp, toAdminActivityExportRows } from "../lib/adminCsvExports";
+import { useToast } from "../hooks/useToast";
 
 type LogRow = Tables<"activity_logs">;
 
@@ -40,6 +43,7 @@ export function AdminActivityLogsPage() {
   const [isClearing, setIsClearing] = useState(false);
   const [clearError, setClearError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const toast = useToast();
 
   const load = useCallback(async (entityType: string) => {
     const requestId = ++requestRef.current;
@@ -91,6 +95,16 @@ export function AdminActivityLogsPage() {
     }
   };
 
+  const exportDisplayedEntries = () => {
+    try {
+      const rows = toAdminActivityExportRows(logs, contexts);
+      const stamp = formatManilaDateStamp();
+      downloadCsv(rows, `PLV_NaviSync_Activity_Logs_${stamp}.csv`);
+    } catch {
+      toast.error("Export failed", "The displayed activity entries could not be exported. Please try again.");
+    }
+  };
+
   if (loading) return <TablePageSkeleton rows={6} />;
 
   if (error) {
@@ -120,6 +134,12 @@ export function AdminActivityLogsPage() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button onClick={exportDisplayedEntries} disabled={logs.length === 0}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-bold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title="Export only the entries currently displayed (up to 50)"
+            aria-label="Export displayed activity entries as CSV">
+            <Download className="h-3.5 w-3.5" /> <span>Export CSV</span>
+          </button>
           <button onClick={refresh} disabled={isRefreshing}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:bg-accent hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="Refresh activity logs">

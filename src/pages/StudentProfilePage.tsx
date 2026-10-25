@@ -331,7 +331,7 @@ export function StudentProfilePage() {
                   type="button"
                   onClick={() => avatarInputRef.current?.click()}
                   disabled={avatarUploading}
-                  className="absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-xl flex items-center justify-center border bg-card text-muted-foreground shadow-sm hover:bg-muted active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  className="absolute -bottom-1.5 -right-1.5 h-11 w-11 rounded-xl flex items-center justify-center border bg-card text-muted-foreground shadow-sm hover:bg-muted active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   aria-label="Change profile photo"
                 >
                   {avatarUploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
@@ -380,13 +380,13 @@ export function StudentProfilePage() {
                   {nameError && <p role="alert" className="mt-1 text-xs font-semibold text-destructive">{nameError}</p>}
                   </motion.div>
                 ) : (
-                  <motion.div key="name-display" className="flex items-center gap-2.5 justify-center sm:justify-start" initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0.01 : 0.2, ease: "easeOut" }}>
-                    <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+                  <motion.div key="name-display" className="flex min-w-0 items-center gap-2.5 justify-center sm:justify-start" initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0.01 : 0.2, ease: "easeOut" }}>
+                    <h1 className="min-w-0 break-words text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
                       {displayName}
                     </h1>
                     <button
                       onClick={() => { setEditingName(true); setNameInput(displayName); setNameError(null); }}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted/70 hover:text-foreground active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-11 w-11 shrink-0 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted/70 hover:text-foreground active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label="Edit display name"
                     >
                       <Pencil className="h-3.5 w-3.5" />

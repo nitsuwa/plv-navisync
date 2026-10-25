@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
 import type { Campus } from "../../components/map-builder/types";
-import { CampusPublicationOutcomeUncertainError, publishCampusVersion } from "../campusService";
+import { CampusPublicationOutcomeUncertainError, CampusPublicationTimeoutError, publishCampusVersion } from "../campusService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 vi.mock("../campusStructureService", () => ({ serializeCampusStructure: vi.fn(() => ({})) }));
@@ -24,6 +24,7 @@ function makeCampus(id: string): Campus {
 
 function setupClient() {
   let insertCount = 0;
+  let versionNumberOnlyQueryCount = 0;
   let latestPublishedId: string | null = null;
   let latestPublishedCampusId: string | null = null;
   let publishHandler: (versionId: string) => Promise<{ data: unknown; error: unknown }> = async (versionId) => {
@@ -35,7 +36,13 @@ function setupClient() {
   const from = vi.fn((table: string) => {
     if (table === "campus_versions") {
       return {
-        select: () => ({ eq: () => ({ order: async () => ({ data: versionRows, error: null }) }) }),
+        select: (columns: string) => {
+          if (columns === "version_number") {
+            versionNumberOnlyQueryCount += 1;
+            return { eq: () => ({ order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: versionRows.length ? { version_number: Math.max(...versionRows.map((row) => row.version_number)) } : null, error: null }) }) }) }) };
+          }
+          return { eq: () => ({ order: async () => ({ data: versionRows, error: null }) }) };
+        },
         insert: (values: { campus_id: string; version_number: number }) => ({ select: () => ({ single: async () => {
           insertCount += 1;
           const row = { id: `version-${insertCount}`, campus_id: values.campus_id, version_number: values.version_number };
@@ -61,9 +68,14 @@ function setupClient() {
   return {
     rpc,
     get insertCount() { return insertCount; },
+    get versionNumberOnlyQueryCount() { return versionNumberOnlyQueryCount; },
     get latestPublishedId() { return latestPublishedId; },
     setPublishHandler(handler: typeof publishHandler) { publishHandler = handler; },
     addStatusResult(result: { data: unknown; error: unknown }) { statusResults.push(result); },
+    setPublishedVersion(campusId: string, id: string) {
+      latestPublishedId = id;
+      latestPublishedCampusId = campusId;
+    },
     publishVersion(id: string) {
       latestPublishedId = id;
       latestPublishedCampusId = versionRows.find((row) => row.id === id)?.campus_id ?? null;
@@ -89,6 +101,7 @@ describe("publishCampusVersion operation safety", () => {
 
     await vi.waitFor(() => expect(client.rpc).toHaveBeenCalledWith("publish_campus_version", { p_version_id: "version-1" }));
     expect(client.insertCount).toBe(1);
+    expect(client.versionNumberOnlyQueryCount).toBe(1);
     resolveRpc({ data: "version-1", error: null });
     const [resultA, resultB] = await Promise.all([first, second]);
     expect(resultA.publishStatus).toBe("published");
@@ -107,6 +120,39 @@ describe("publishCampusVersion operation safety", () => {
     const result = await publishCampusVersion(makeCampus("lost-response-campus"), validation);
     expect(result.publishStatus).toBe("published");
     expect(result.publishedAt).toBe("2026-10-20T12:00:00.000Z");
+    expect(client.rpc.mock.calls.filter(([name]) => name === "publish_campus_version")).toHaveLength(1);
+  });
+
+  it("reports a statement timeout only after confirming that the attempted version is not published", async () => {
+    const client = setupClient();
+    const campus = makeCampus("timeout-campus");
+    client.setPublishedVersion(campus.id, "previous-published-version");
+    client.setPublishHandler(async () => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }));
+
+    await expect(publishCampusVersion(campus, validation))
+      .rejects.toMatchObject({
+        name: "CampusPublicationTimeoutError",
+        operation: "publish campus version",
+        confirmedNotPublished: true,
+        message: expect.stringContaining("We confirmed this version was not published"),
+      });
+    expect(client.rpc.mock.calls.filter(([name]) => name === "publish_campus_version")).toHaveLength(1);
+    expect(client.rpc).toHaveBeenCalledWith("list_published_campus_version_status");
+    expect(client.latestPublishedId).toBe("previous-published-version");
+    expect(campus.buildings[0].floors[0].rooms[0].name).toBe("Lobby");
+  });
+
+  it("keeps timeout status uncertain when the authoritative readback is unavailable", async () => {
+    const client = setupClient();
+    client.setPublishHandler(async () => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }));
+    client.addStatusResult({ data: null, error: { message: "status readback unavailable" } });
+
+    await expect(publishCampusVersion(makeCampus("uncertain-timeout-campus"), validation))
+      .rejects.toMatchObject({
+        name: "CampusPublicationOutcomeUncertainError",
+        timedOut: true,
+        message: expect.stringContaining("We couldn't confirm whether this campus was published"),
+      });
     expect(client.rpc.mock.calls.filter(([name]) => name === "publish_campus_version")).toHaveLength(1);
   });
 

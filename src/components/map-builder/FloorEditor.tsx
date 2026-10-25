@@ -3079,7 +3079,7 @@ interface FloorEditorProps {
   onOpenFloor?: (buildingId: string, floorId: string) => void;
   /** Switch the visible floor, optionally selecting an authored object there. */
   onSwitchFloor: (floorId: string, initialSelection?: FloorSelection) => void;
-  onUpdate: (c: Campus) => void;
+  onUpdate: (c: Campus, options?: { persistAsBaseline?: boolean; compareAuthoringContent?: boolean }) => void;
   onSave?: (c: Campus) => Promise<Campus>;
   onPublish?: (c: Campus) => void;
   onPreviewStudent?: (c: Campus, isDirty: boolean) => void | Promise<void>;
@@ -3486,7 +3486,9 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         .filter((edge) => (synced.navNodes ?? []).some((node) => node.exteriorEmergencyStairId && (node.id === edge.startNodeId || node.id === edge.endNodeId)))
         .map((edge) => [edge.id, edge.startNodeId, edge.endNodeId, edge.type, edge.bidirectional, edge.emergencySafe]),
     });
-    if (syncedSignature !== exteriorStairGraphSignature) onUpdate(synced);
+    if (syncedSignature !== exteriorStairGraphSignature) {
+      onUpdate(synced, { compareAuthoringContent: true });
+    }
   }, [building, campus, exteriorStairGraphSignature, onUpdate]);
 
   // ── Core state ──
@@ -5685,6 +5687,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
         pruneNavNodeIds?: ReadonlySet<string>;
         visualOnly?: boolean;
         transient?: boolean;
+        compareAuthoringContent?: boolean;
         preserveEntranceDoorGeometry?: boolean;
         validateBeforeDispatch?: (nextCampus: Campus) => void;
       } = {},
@@ -5724,7 +5727,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           }),
         };
         setTransientFloorPreview(null);
-        onUpdate(visualCampus);
+        onUpdate(visualCampus, graphOptions.compareAuthoringContent ? { compareAuthoringContent: true } : undefined);
         return visualCampus;
       }
       // B5 Phase 2: after a physical-object edit, re-sync + prune the indoor nav
@@ -5842,7 +5845,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       latestRenderedFloorRef.current = approachSynced.buildings
         .find((candidate) => candidate.id === buildingId)?.floors.find((candidate) => candidate.id === floorId)
         ?? latestRenderedFloorRef.current;
-      onUpdate(approachSynced);
+      onUpdate(approachSynced, graphOptions.compareAuthoringContent ? { compareAuthoringContent: true } : undefined);
       return approachSynced;
     },
     [campus, floor, buildingId, floorId, indoorEdges, indoorNodes, mergeFloorNavIntoCampus, onUpdate, rooms, doors, stairs, ramps, elevators, walls]
@@ -6859,7 +6862,10 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       activeTextPreviewKeyRef.current = null;
     }
     suppressHistoryRef.current = true;
-    buildFloorUpdates(entry, undefined, entry.visualOnly ? { visualOnly: true } : undefined);
+    buildFloorUpdates(entry, undefined, {
+      ...(entry.visualOnly ? { visualOnly: true } : {}),
+      compareAuthoringContent: true,
+    });
     suppressHistoryRef.current = false;
   }, [buildFloorUpdates]);
 
@@ -6973,7 +6979,7 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
       if (latestEditorMismatch) throw new Error(`A newer Floor edit is still pending. ${latestEditorMismatch}`);
       // Only replace the editor with the hydrated response after its full
       // physical Floor signature matches what was submitted.
-      onUpdate(savedCampus);
+      onUpdate(savedCampus, { persistAsBaseline: true });
       const savedFloor = normalizedPersistedFloor;
       const savedIndoorNodes = indoorNavNodes(savedCampus.navNodes, buildingId, floorId);
       const savedIndoorEdges = indoorNavEdges(savedCampus.navEdges, savedIndoorNodes, buildingId, floorId);
@@ -7057,14 +7063,14 @@ export function FloorEditor({ campus, buildingId, floorId, onBack, onOpenFloor, 
           setBaselineKey(floorDirtyKeyOf(normalizedFloor, restoredNodes, restoredEdges));
           setStructureBaselineKey(floorStructureKeyOf(restoredBuilding.floors));
           resetHistory(restoredEntry);
-          onUpdate(restored);
+          onUpdate(restored, { compareAuthoringContent: true });
           return;
         }
       }
       // Restore the FULL saved baseline — floor AND indoor nav graph — so a
       // Discard never leaves unsaved nav edits behind.
       const entry = baselineEntryRef.current ?? floorUndoEntryFromFloor(structuredClone(baselineFloorRef.current));
-      buildFloorUpdates(entry);
+      buildFloorUpdates(entry, undefined, { compareAuthoringContent: true });
       resetHistory(entry);
       baselineEntryRef.current = structuredClone(entry);
       setBaselineKey(JSON.stringify(baselineFloorRef.current) + "|" + JSON.stringify([entry.navNodes ?? [], entry.navEdges ?? []]));

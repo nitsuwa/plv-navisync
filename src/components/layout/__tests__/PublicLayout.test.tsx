@@ -124,4 +124,20 @@ describe("PublicLayout student entry", () => {
     expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
     expect(document.getElementById("main-content")).toHaveClass("min-h-0", "overflow-hidden");
   });
+
+  it("keeps the student events dashboard's horizontal overflow clipping and mobile navigation", () => {
+    render(
+      <MemoryRouter initialEntries={["/student/events"]}>
+        <Routes>
+          <Route element={<PublicLayout />}>
+            <Route path="/student/events" element={<div>Student events</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Student events")).toBeInTheDocument();
+    expect(document.getElementById("main-content")).toHaveClass("overflow-x-clip");
+    expect(screen.getByTestId("mobile-bottom-nav")).toBeInTheDocument();
+  });
 });
