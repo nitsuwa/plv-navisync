@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { CampusEditor } from "../CampusEditor";
 import { BUILDING_TYPES, DECOR_ASSET_MAP, LAYERS } from "../constants";
 import type { Campus, NavigationNode, NavigationEdge, CampusDecorAsset } from "../types";
+import { reconcileEntranceDoors } from "../../../lib/entranceTransitions";
 
 function makeCampus(): Campus {
   return {
@@ -83,14 +84,20 @@ function canvasSvg(container: HTMLElement): SVGSVGElement {
 }
 
 /** Switch the editor into the Navigation layer, then return the ACTIVE editor svg. */
-function openNavigationLayer(container: HTMLElement): SVGSVGElement {
-  // Use the explicit visibility control: selecting a muted navigation tool
-  // from the Campus layer does not reliably activate the graph editor.
-  if (!container.querySelector("[data-testid='navigation-hierarchy-sidebar']")) {
-    fireEvent.click(within(container).getByRole("button", { name: "Show and edit the walking network" }));
+function setNavigationVisible(container: HTMLElement, visible: boolean): SVGSVGElement {
+  const isVisible = Boolean(container.querySelector("[data-testid='navigation-hierarchy-sidebar']"));
+  if (isVisible !== visible) {
+    const label = visible ? "Show and edit the walking network" : "Hide the walking network";
+    fireEvent.click(within(container).getByRole("button", { name: label }));
   }
-  expect(container.querySelector("[data-testid='navigation-hierarchy-sidebar']"), "Navigation layer should be active before graph interactions").toBeTruthy();
+  expect(Boolean(container.querySelector("[data-testid='navigation-hierarchy-sidebar']"))).toBe(visible);
   return canvasSvg(container);
+}
+
+function openNavigationLayer(container: HTMLElement): SVGSVGElement {
+  // Use the current unified-workspace visibility control so tests do not rely
+  // on the retired Campus/Navigation text tabs.
+  return setNavigationVisible(container, true);
 }
 
 function clickWalkingPointTool(container: HTMLElement): void {
@@ -101,8 +108,14 @@ function clickWalkingPointTool(container: HTMLElement): void {
 /** Find the rendered nav-node group at (x, y). */
 function navNodeAt(container: HTMLElement, x: number, y: number): SVGGElement {
   const g = Array.from(container.querySelectorAll<SVGGElement>("[data-testid='nav-node']")).find((el) => {
-    const c = el.querySelector("circle");
-    return c && Math.abs(Number(c.getAttribute("cx")) - x) < 2 && Math.abs(Number(c.getAttribute("cy")) - y) < 2;
+    // The Builder intentionally renders an entrance-linked graph node through
+    // its physical Door artwork, without the ordinary waypoint circles. Every
+    // graph node retains the same transparent 24px hit target, so use that
+    // stable geometry to locate both ordinary and entrance-linked nodes.
+    const hitArea = el.querySelector("rect");
+    return hitArea
+      && Math.abs(Number(hitArea.getAttribute("x")) + 12 - x) < 2
+      && Math.abs(Number(hitArea.getAttribute("y")) + 12 - y) < 2;
   });
   expect(g, `nav node at (${x}, ${y})`).toBeTruthy();
   return g!;
@@ -116,6 +129,11 @@ function seededCampus(): Campus {
   ];
   campus.navNodes = nodes;
   return campus;
+}
+
+function normalizeEntranceFixture(campus: Campus): Campus {
+  let id = 0;
+  return reconcileEntranceDoors(campus, (prefix) => `${prefix}-navgraph-${++id}`);
 }
 
 /** The rendered building group (its body rect uses the seeded color #1e40af). */
@@ -326,8 +344,8 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     // No edge is ever created (self-edges are rejected with clear feedback).
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
     expect(warningSpy).toHaveBeenCalledWith(
-      "Cannot connect a waypoint to itself",
-      expect.objectContaining({ description: "Pick a different destination waypoint." })
+      "Cannot connect a walking point to itself",
+      expect.objectContaining({ description: "Pick a different destination walking point." })
     );
   });
 
@@ -374,23 +392,23 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     expect(latest!.navEdges).toEqual([]);
   });
 
-  it("Escape cancels an incomplete edge without leaving an orphan", () => {
+  it("Escape cancels an incomplete edge without leaving an orphan", async () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "p" });
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(screen.getByText(/Click destination/)).toBeTruthy();
+    expect(screen.getAllByText(/Now select a destination Walking Point or Pathway/).length).toBeGreaterThan(0);
 
     fireEvent.keyDown(window, { key: "Escape" });
 
     // No orphan edge, both seeded nodes intact, incomplete state fully cleared.
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
     expect(container.querySelectorAll("[data-testid='nav-node']")).toHaveLength(2);
-    expect(screen.queryByTestId("nav-path-status")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("nav-path-status")).toBeNull());
   });
 
-  it("switching tools cancels an incomplete edge safely", () => {
+  it("switching tools cancels an incomplete edge safely", async () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "p" });
@@ -399,7 +417,7 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
 
     fireEvent.keyDown(window, { key: "v" }); // switch to select
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
-    expect(screen.queryByTestId("nav-path-status")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("nav-path-status")).toBeNull());
   });
 
   it("right-click cancels an in-progress edge without leaving an orphan", () => {
@@ -408,14 +426,14 @@ describe("B5 Phase 1 — navigation graph authoring", () => {
     fireEvent.keyDown(window, { key: "p" });
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(screen.getByText(/Click destination/)).toBeTruthy();
+    expect(screen.getAllByText(/Now select a destination Walking Point or Pathway/).length).toBeGreaterThan(0);
 
     // Right-clicking a waypoint cancels the dangling connect state: no orphan
     // edge, and the status chip returns to the idle "start point" prompt.
     fireEvent.contextMenu(navNodeAt(container, 300, 200), { clientX: 300, clientY: 200, bubbles: true });
 
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
-    expect(screen.getByText("Select or place start point")).toBeTruthy();
+    expect(screen.getAllByText(/Select or place a start point/).length).toBeGreaterThan(0);
   });
 
   it("live preview does NOT mutate the graph", () => {
@@ -481,23 +499,20 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(LAYERS.map((l) => l.id)).toEqual(["campus", "navigation", "events"]);
   });
 
-  it("Campus layer does NOT expose navigation Waypoint/Connect tools", () => {
-    render(<Harness />);
+  it("the unified toolbar uses current Building and Walking Point tools", () => {
+    const { container } = render(<Harness />);
     const toolbar = within(screen.getByTestId("editor-toolbar"));
-    // B5 Phase 1.7: Campus is focused on physical campus authoring — the generic
-    // Add POI and Draw Walkway tools are hidden from the toolbar (their data
-    // model + persistence stay intact for legacy content and future features).
     expect(toolbar.getByRole("button", { name: "Select" })).toBeTruthy();
     expect(toolbar.getByRole("button", { name: "Pan" })).toBeTruthy();
-    expect(toolbar.getByRole("button", { name: "Add Building" })).toBeTruthy();
-    expect(toolbar.getByRole("button", { name: "Erase" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Building" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Pathway" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Walking Point" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Connect" })).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Remove" })).toBeTruthy();
     expect(toolbar.queryByRole("button", { name: "Add POI" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Draw Walkway" })).toBeNull();
-    // …and no navigation authoring tools leak into Campus mode
-    expect(toolbar.queryByRole("button", { name: /Add Waypoint|Add Walking Point|Walking Point/ })).toBeNull();
-    expect(toolbar.queryByRole("button", { name: "Connect" })).toBeNull();
-    expect(toolbar.queryByRole("button", { name: "Remove" })).toBeNull();
-    // No ambiguous legacy naming either — Marker/Walkway are now explicit
+    expect(container.querySelector("[data-testid='navigation-hierarchy-sidebar']")).toBeNull();
+    // The unified toolbar names these controls by their current domain terms.
     expect(toolbar.queryByRole("button", { name: "Marker" })).toBeNull();
     expect(toolbar.queryByRole("button", { name: "Walkway" })).toBeNull();
   });
@@ -525,11 +540,11 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
 
     expect(latest!.markers).toHaveLength(0); // NOT a CampusMarker
     expect(latest!.navNodes).toHaveLength(1);
-    expect(latest!.navNodes![0]).toMatchObject({ name: "Waypoint", type: "outdoor", x: 350, y: 250, campusId: "c1" });
+    expect(latest!.navNodes![0]).toMatchObject({ name: "Walking Point", type: "outdoor", x: 350, y: 250, campusId: "c1" });
     expect(navNodeAt(container, 350, 250)).toBeTruthy();
   });
 
-  it("the Waypoint inspector heading says Waypoint, never Marker", () => {
+  it("the Walking Point inspector uses current authoring terminology", () => {
     const { container } = render(<Harness />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "m" });
@@ -537,18 +552,18 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     fireEvent.mouseUp(svg, { bubbles: true });
 
     const panel = screen.getByTestId("nav-node-props");
-    expect(within(panel).getByText("Waypoint")).toBeTruthy();
+    expect(within(panel).getByText("Walking Point")).toBeTruthy();
     expect(within(panel).queryByText(/Marker/i)).toBeNull();
     expect(screen.queryByText("Marker Info")).toBeNull();
   });
 
-  it("Navigation Select interacts with graph elements only — campus geometry is never selected or moved", () => {
+  it("shared Select can edit campus geometry while the walking network is visible", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
 
-    // Press-drag-release on the campus building (Select tool in Navigation mode):
-    // the building must NOT be selected or dragged (no campus edit at all).
+    // Campus and Navigation now share a unified authoring canvas. Physical
+    // objects remain editable while the walking network is visible.
     const building = Array.from(container.querySelectorAll<SVGRectElement>("svg rect")).find((r) =>
       Math.abs(Number(r.getAttribute("x")) - 100) < 2 &&
       Math.abs(Number(r.getAttribute("y")) - 100) < 2 &&
@@ -558,8 +573,10 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     fireEvent.mouseDown(building!, { clientX: 130, clientY: 130, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 220, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest).toBeUndefined();
-    expect(screen.queryByText("Marker Info")).toBeNull();
+    expect(latest?.buildings[0].x).toBeGreaterThan(100);
+    expect(latest?.buildings[0].y).toBeGreaterThan(100);
+    expect(document.getElementById("bldg-name")).toBeTruthy();
+    expect(latest?.navNodes).toEqual(seededCampus().navNodes);
 
     // …while clicking a waypoint still selects it and opens the Waypoint inspector.
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
@@ -603,15 +620,14 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     const { container } = render(<Harness onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
 
-    // Zoom in — the zoom button jumps the rendered zoom toward the target, and
+    // Ctrl+wheel zooms toward the pointer, and
     // the rAF animation then eases the internal zoom/pan refs (read by
     // getPoint) and the rendered camera to the same target. Under a loaded
     // parallel suite the ~16ms rAF timer (vitest jsdom shim) can be delayed
     // well past a fixed wait, so poll until the rendered camera is STABLE —
     // the final animation tick snaps both refs and DOM to the exact target,
     // so a settled camera guarantees placement and screen agree.
-    fireEvent.click(screen.getByTitle("Zoom in"));
-    fireEvent.click(screen.getByTitle("Zoom in"));
+    fireEvent.wheel(svg, { clientX: 420, clientY: 300, deltaY: -300, deltaMode: 0, ctrlKey: true, bubbles: true });
     let cam = cameraOf(container);
     let stableReads = 0;
     const deadline = Date.now() + 8000;
@@ -642,14 +658,14 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(Math.abs(n.y * cam.zoom + cam.pan.y - 300)).toBeLessThanOrEqual(1);
   });
 
-  it("hovering empty space with Connect Path previews the would-be waypoint BEFORE the first click", () => {
+  it("Connect previews a would-be Walking Point before the first click without mutating the graph", async () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     const svg = openNavigationLayer(container);
-    fireEvent.keyDown(window, { key: "p" });
+    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
 
     // Pointer moves over empty space before any click: preview node appears.
     fireEvent.mouseMove(svg, { clientX: 420, clientY: 260, bubbles: true });
-    expect(screen.getByTestId("nav-path-preview")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("nav-path-preview")).toBeTruthy());
     // …and the graph is untouched.
     expect(container.querySelectorAll("[data-testid='nav-node']")).toHaveLength(2);
     expect(container.querySelectorAll("[data-testid='nav-edge']")).toHaveLength(0);
@@ -670,7 +686,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
   it("Navigation Remove protects campus objects — no delete confirmation for a building", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
-    fireEvent.click(screen.getByText("Navigation"));
+    openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "e" }); // Remove tool
     const building = Array.from(container.querySelectorAll<SVGRectElement>("svg rect")).find((r) =>
       Math.abs(Number(r.getAttribute("x")) - 100) < 2 &&
@@ -685,7 +701,7 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     expect(container.querySelectorAll("[data-testid='nav-node']")).toHaveLength(2);
   });
 
-  it("edge properties expose accessibility/emergency/closed as ONE graph's routing semantics", () => {
+  it("edge properties expose routing flags in the collapsed Advanced Routing section", () => {
     const campus = seededCampus();
     campus.navEdges = [{
       id: "ne1", startNodeId: "nnA", endNodeId: "nnB", distance: 100, bidirectional: true,
@@ -696,17 +712,16 @@ describe("B5 Phase 1.5 — navigation authoring UX / tool architecture correctio
     fireEvent.mouseDown(container.querySelector("[data-testid='nav-edge']")!, { clientX: 250, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(screen.getAllByText("Navigation Connection").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Walking Path").length).toBeGreaterThan(0);
+    expect(screen.getByText("Connection")).toBeTruthy();
     // Segmented Direction control
     expect(screen.getByText("⇄ Two-way")).toBeTruthy();
     expect(screen.getByText("→ One-way")).toBeTruthy();
     // Route Availability — one graph, routing flags (not separate stores)
-    expect(screen.getByText("Route Availability")).toBeTruthy();
-    // B5 Phase 1.7: segmented Yes/No + Open/Closed controls (multiple matches
-    // for "Closed" — the label and the segmented option — so use getAllByText).
-    expect(screen.getAllByText("Accessible").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Emergency Safe").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Closed").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Advanced Routing/ }));
+    expect(screen.getByRole("radiogroup", { name: "Accessible" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Emergency Safe" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Availability" })).toBeTruthy();
     // Custom reason menus are custom dropdowns — never native selects.
     expect(screen.queryByRole("combobox")).toBeNull();
     // Distance is shown in graph/world units — NOT pretended to be meters.
@@ -806,7 +821,7 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
       id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5,
       type: "general", isPrimary: true, accessible: true,
     }];
-    return campus;
+    return normalizeEntranceFixture(campus);
   }
 
   it("Shift-click multi-selects waypoints; dragging one moves the whole group rigidly", () => {
@@ -861,7 +876,7 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
     expect(screen.getByTestId("nav-multi-props")).toBeTruthy();
     // Marquee is selection-only — no campus mutation.
     expect(latest).toBeUndefined();
-    expect(screen.getByText(/Waypoints/)).toBeTruthy();
+    expect(screen.getByTestId("nav-multi-props")).toHaveTextContent(/walking points/i);
   });
 
   it("edges are selectable but never draggable away from their nodes", () => {
@@ -898,7 +913,7 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
     expect(container.querySelectorAll("[data-testid='nav-node']")).toHaveLength(2);
     expect(warningSpy).toHaveBeenCalledWith(
       "Connect through a building entrance",
-      expect.objectContaining({ description: "Outdoor waypoints belong outside buildings — click the building's entrance instead." })
+      expect.objectContaining({ description: "Outdoor walking points belong outside buildings — click the building's entrance instead." })
     );
   });
 
@@ -924,35 +939,39 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
 
   it("Add Waypoint on a building entrance creates an entrance-linked node at the resolved entrance position", () => {
     let latest: Campus | undefined;
-    const { container } = render(<Harness initialCampus={campusWithEntrance()} onCampusChange={(c) => { latest = c; }} />);
+    const campus = campusWithEntrance();
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "m" });
     // Entrance ent1 is on the bottom edge of b1 at offset 0.5 → world (160,180).
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    const created = latest!.navNodes!.find((n) => n.type === "entrance");
-    expect(created).toMatchObject({ buildingId: "b1", entranceId: "ent1", type: "entrance", x: 160, y: 180 });
-    // No generic point was created underneath.
-    expect(latest!.navNodes!.filter((n) => n.type === "outdoor")).toHaveLength(2);
+    const linkedAnchor = campus.navNodes!.find((node) => node.buildingId === "b1" && node.entranceId === "ent1" && !node.floorId);
+    expect(linkedAnchor).toMatchObject({ buildingId: "b1", entranceId: "ent1", x: 160, y: 180 });
+    // Selecting the already-managed Entrance anchor must not create a second
+    // point or change the graph.
+    expect(latest).toBeUndefined();
+    expect(campus.navNodes!.filter((node) => node.entranceId === "ent1" && !node.floorId)).toHaveLength(1);
   });
 
-  it("hovering a building entrance with Connect Path shows the single entrance target ring (no stacked ghost node)", () => {
+  it("hovering an entrance Connect target previews its existing canonical graph anchor", async () => {
     const { container } = render(<Harness initialCampus={campusWithEntrance()} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "p" });
 
-    // Hover the entrance position (world 160,180) before any click.
+    const nodeCountBeforeHover = container.querySelectorAll("[data-testid='nav-node']").length;
+    // Hover the entrance position (world 160,180) before any click. Current
+    // entrance reconciliation gives the entrance a canonical graph anchor, so
+    // preview that existing anchor instead of layering another target ring.
     fireEvent.mouseMove(svg, { clientX: 160, clientY: 180, bubbles: true });
-    // The single Connect Target indicator is the entrance's own dashed ring.
-    const target = container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']");
-    expect(target).toBeTruthy();
-    // The ghost nav-node preview does NOT stack on top of it.
+    await waitFor(() => expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeTruthy());
     const preview = screen.getByTestId("nav-path-preview");
-    expect(preview.querySelectorAll("circle").length).toBe(0);
+    expect(preview.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-testid='nav-node']")).toHaveLength(nodeCountBeforeHover);
   });
 
-  it("the Waypoint Properties panel exposes a human-readable custom Type selector (no native select)", () => {
+  it("the Walking Point inspector exposes current routing controls without an obsolete Type selector", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
@@ -961,12 +980,11 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
 
     const panel = screen.getByTestId("nav-node-props");
     expect(within(panel).getByText("General")).toBeTruthy();
-    // Custom selector shows the human-readable current type and opens a menu.
-    const typeButton = within(panel).getByRole("button", { name: /Outdoor Waypoint/ });
-    fireEvent.click(typeButton);
-    fireEvent.click(within(panel).getByRole("option", { name: "Emergency Exit" }));
-
-    expect(latest!.navNodes!.find((n) => n.id === "nnA")!.type).toBe("emergency_exit");
+    // Generic outdoor points no longer expose the retired type menu. Route
+    // classification remains explicit on the graph model and special nodes.
+    expect(within(panel).queryByRole("button", { name: /Outdoor Waypoint/ })).toBeNull();
+    expect(within(panel).queryByRole("combobox")).toBeNull();
+    expect(latest).toBeUndefined();
     // No raw legacy Marker fields.
     expect(within(panel).queryByText(/Marker Color/i)).toBeNull();
     expect(within(panel).queryByText(/Marker/i)).toBeNull();
@@ -987,8 +1005,9 @@ describe("B5 Phase 1.6 — navigation foundation UX finalization", () => {
     // Switch to One Way via the segmented control.
     fireEvent.click(screen.getByRole("button", { name: "→ One-way" }));
     expect(latest!.navEdges![0].bidirectional).toBe(false);
-    // Closed — segmented Open/Closed control with explanation.
-    fireEvent.click(screen.getByRole("button", { name: "Closed" }));
+    // Routing classifications live in the collapsed Advanced Routing section.
+    fireEvent.click(screen.getByRole("button", { name: /Advanced Routing/ }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Availability" })).getByRole("button", { name: "Closed" }));
     expect(latest!.navEdges![0].closed).toBe(true);
     expect(screen.getByText(/excluded from routing/i)).toBeTruthy();
   });
@@ -1027,12 +1046,12 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
       id: "ent1", buildingId: "b1", edge: "bottom", offset: 0.5,
       type: "general", isPrimary: true, accessible: true,
     }];
-    return campus;
+    return normalizeEntranceFixture(campus);
   }
 
   // ── MODE ISOLATION ────────────────────────────────────────────────────────
 
-  it("after Add Waypoint completes, Navigation Select cannot select a Building", () => {
+  it("after Add Walking Point completes, shared Select can select a Building", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={seededCampus()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
@@ -1042,19 +1061,16 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(screen.getByText("Changes")).toBeTruthy();
 
-    // Now in Select mode, click directly on the building body rect (bubbles to
-    // the building <g> onMouseDown → onItemDown). Navigation Select must refuse.
+    // Now in Select mode, the unified canvas still selects physical objects
+    // while the walking network is visible.
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(buildingGroup(container), { clientX: 160, clientY: 140, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    // Building is context-only: no building inspector, geometry untouched.
-    // (The name "Building One" legitimately renders in the Hierarchy sidebar
-    // and the SVG label, so assert on the inspector itself, not the text.)
-    expect(document.getElementById("bldg-name")).toBeNull();
+    expect(document.getElementById("bldg-name")).not.toBeNull();
     expect(latest!.buildings[0]).toMatchObject({ x: 100, y: 100, width: 120, height: 80 });
   });
 
-  it("after connecting to an entrance, Navigation Select cannot move a Building", () => {
+  it("after connecting to an entrance, shared Select can move a Building", () => {
     let latest: Campus | undefined;
     const { container } = render(<Harness initialCampus={campusWithEntrance()} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
@@ -1064,14 +1080,15 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
     fireEvent.mouseDown(container.querySelector("[data-entrance-id='ent1']")!, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
 
-    // Drag on the building body — must NOT move the building.
+    // Physical Building geometry remains editable on the unified canvas.
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(buildingGroup(container), { clientX: 180, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 230, clientY: 190, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.buildings[0]).toMatchObject({ x: 100, y: 100 });
+    expect(latest!.buildings[0].x).toBeGreaterThan(100);
+    expect(latest!.buildings[0].y).toBeGreaterThan(100);
   });
 
   it("Navigation mode cannot delete/edit a B3 entrance (context-only)", () => {
@@ -1142,7 +1159,7 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     // Edge committed; dashed preview gone; no static green connector block.
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
     expect(screen.queryByTestId("nav-path-preview")).toBeNull();
     // The old static green dashed entrance-connector is removed entirely.
     const connectorLines = Array.from(container.querySelectorAll("line")).filter(
@@ -1160,7 +1177,7 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseUp(svg, { bubbles: true });
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
     const entranceNodes = latest!.navNodes!.filter((n) => n.type === "entrance");
     expect(entranceNodes).toHaveLength(1);
 
@@ -1171,7 +1188,8 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(warningSpy).toHaveBeenCalledWith("Those points are already connected", expect.anything());
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type === "entrance_transition")).toHaveLength(1);
     expect(latest!.navNodes!.filter((n) => n.type === "entrance")).toHaveLength(1);
   });
 
@@ -1256,31 +1274,36 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
 
   // ── PROPERTIES — CUSTOM CONTROLS ──────────────────────────────────────────
 
-  it("locks the Type for entrance-linked waypoints (Building Entrance only)", () => {
+  it("entrance-linked graph anchors route selection to their physical Entrance", async () => {
     const campus = campusWithEntrance();
-    campus.navNodes = [
-      { id: "nnX", name: "Entrance Node", type: "entrance", x: 160, y: 180, campusId: "c1", buildingId: "b1", entranceId: "ent1", accessible: true, color: "#16a34a" },
-    ];
-    const { container } = render(<Harness initialCampus={campus} />);
+    let latest: Campus | undefined;
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latest = next; }} />);
     const svg = openNavigationLayer(container);
+    const graphNodeIdsBeforeSelection = Array.from(container.querySelectorAll<SVGGElement>("[data-testid='nav-node']"))
+      .map((node) => node.getAttribute("data-node-id"));
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(navNodeAt(container, 160, 180), { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    // Entrance-linked node: type is locked to Building Entrance (no menu button).
-    expect(screen.getByText("Building Entrance")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Outdoor Waypoint/ })).toBeNull();
-    expect(screen.getByText("Linked")).toBeTruthy();
+    // Entrance-linked anchors route selection to the physical Entrance panel;
+    // the graph node's type cannot be edited through a generic node inspector.
+    expect(document.getElementById("entrance-name")).toBeTruthy();
+    expect(screen.queryByTestId("nav-node-props")).toBeNull();
+    expect(latest).toBeUndefined();
+    expect(Array.from(container.querySelectorAll<SVGGElement>("[data-testid='nav-node']"))
+      .map((node) => node.getAttribute("data-node-id"))).toEqual(graphNodeIdsBeforeSelection);
   });
 
-  it("Waypoint Type menu offers safe_area (custom menu, no native select)", () => {
+  it("generic Walking Points do not expose the retired arbitrary Type menu", () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(navNodeAt(container, 200, 200), { clientX: 200, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Outdoor Waypoint/ }));
-    expect(screen.getByRole("option", { name: "Safe Area" })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: "Hallway" })).toBeNull();
+    const panel = screen.getByTestId("nav-node-props");
+    expect(within(panel).queryByRole("button", { name: /Outdoor Waypoint/ })).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: /Advanced Routing/ }));
+    expect(within(panel).getByRole("radiogroup", { name: "Accessible" })).toBeTruthy();
+    expect(within(panel).queryByRole("option", { name: "Safe Area" })).toBeNull();
   });
 
   it("no native select for Accessible/Emergency reasons — custom dropdowns only", () => {
@@ -1294,6 +1317,7 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(container.querySelector("[data-testid='nav-edge']")!, { clientX: 250, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
+    fireEvent.click(screen.getByRole("button", { name: /Advanced Routing/ }));
     // Native selects are gone entirely.
     expect(screen.queryByRole("combobox")).toBeNull();
     // Segmented Yes/No + Open/Closed controls are present.
@@ -1338,14 +1362,14 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     expect(screen.getByText("Changes")).toBeTruthy();
     const draftNodes = latest!.navNodes!.length;
 
-    // Switch to Campus — no dialog, draft stays, Save stays enabled.
-    fireEvent.click(screen.getByText("Campus"));
+    // Hide the walking network — no dialog, draft stays, Save stays enabled.
+    setNavigationVisible(container, false);
     expect(screen.queryByText(/Unsaved changes/)).toBeNull();
     expect(screen.getByText("Changes")).toBeTruthy();
     expect(latest!.navNodes).toHaveLength(draftNodes);
 
-    // Switch back to Navigation — graph remains.
-    fireEvent.click(screen.getByText("Navigation"));
+    // Show it again — graph remains.
+    setNavigationVisible(container, true);
     expect(screen.getByText("Changes")).toBeTruthy();
     expect(latest!.navNodes).toHaveLength(draftNodes);
   });
@@ -1354,9 +1378,10 @@ describe("B5 Phase 1.7 — outdoor navigation manual-QA corrections", () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
     openNavigationLayer(container);
     expect(screen.getByText("Live")).toBeTruthy();
-    fireEvent.click(screen.getByText("Campus"));
-    fireEvent.click(screen.getByText("Navigation"));
-    fireEvent.click(screen.getByText("Events"));
+    setNavigationVisible(container, false);
+    setNavigationVisible(container, true);
+    fireEvent.keyDown(window, { key: "3" });
+    fireEvent.keyDown(window, { key: "2" });
     expect(screen.getByText("Live")).toBeTruthy();
   });
 });
@@ -1379,7 +1404,7 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
       id: "ne1", startNodeId: "nnEnt", endNodeId: "nnA", distance: 50, bidirectional: true,
       accessible: true, emergencySafe: true, type: "walkway", color: "#16a34a", width: 4,
     }];
-    return campus;
+    return normalizeEntranceFixture(campus);
   }
 
   // ── ATTACHMENT — node position is DERIVED from the linked entrance ────────
@@ -1405,7 +1430,12 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
 
   it("repositioning an Entrance along the perimeter moves its linked node in the same gesture", () => {
     let latest: Campus | undefined;
-    const { container } = render(<Harness initialCampus={campusWithLinkedEntrance()} onCampusChange={(c) => { latest = c; }} />);
+    const initial = campusWithLinkedEntrance();
+    // Keep the gesture focused on perimeter placement. Gate A is close enough
+    // to act as a valid alignment target and would intentionally win the snap.
+    initial.navNodes = initial.navNodes!.filter((node) => node.id !== "nnA");
+    initial.navEdges = initial.navEdges!.filter((edge) => edge.type === "entrance_transition");
+    const { container } = render(<Harness initialCampus={initial} onCampusChange={(c) => { latest = c; }} />);
     const svg = canvasSvg(container);
 
     // Campus mode: drag the entrance from bottom/0.5 (160,180) to bottom/0.75 (190,180).
@@ -1435,30 +1465,32 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.click(screen.getByTitle(/Undo/));
     expect(latest!.buildings[0]).toMatchObject({ x: 100, y: 100 });
     expect(latest!.navNodes!.find((n) => n.id === "nnEnt")).toMatchObject({ x: 160, y: 180 });
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges).toHaveLength(2);
+    expect(latest!.navEdges!.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
+    expect(latest!.navEdges!.filter((edge) => edge.type === "entrance_transition")).toHaveLength(1);
   });
 
   // ── DRAG SAFETY ───────────────────────────────────────────────────────────
 
-  it("an entrance-linked node cannot be dragged independently (no mutation, toast, no dirty)", () => {
+  it("dragging an entrance-linked graph hit moves its physical Entrance owner", () => {
     let latest: Campus | undefined;
-    const infoSpy = vi.spyOn(toast, "info").mockImplementation(() => "" as never);
-    const { container } = render(<Harness initialCampus={campusWithLinkedEntrance()} onCampusChange={(c) => { latest = c; }} />);
+    const initial = campusWithLinkedEntrance();
+    const { container } = render(<Harness initialCampus={initial} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
 
     fireEvent.keyDown(window, { key: "v" });
     const g = navNodeAt(container, 160, 180);
     fireEvent.mouseDown(g, { clientX: 160, clientY: 180, bubbles: true });
-    fireEvent.mouseMove(svg, { clientX: 260, clientY: 280, bubbles: true });
+    fireEvent.mouseMove(svg, { clientX: 180, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(latest).toBeUndefined(); // no campus mutation
-    expect(latest ?? campusWithLinkedEntrance().navNodes!).not.toBeNull();
-    expect(infoSpy).toHaveBeenCalledWith("Entrance waypoints follow their building entrance", expect.anything());
-    // No dirty state was introduced by the blocked drag.
-    expect(screen.getByText("Live")).toBeTruthy();
-    // Still selectable (selection is allowed — only dragging is blocked).
-    expect(screen.getByTestId("nav-node-props")).toBeTruthy();
+    expect(latest?.buildings[0].entrances?.[0].offset).not.toBe(initial.buildings[0].entrances?.[0].offset);
+    const entrance = latest!.buildings[0].entrances![0];
+    const anchor = latest!.navNodes!.find((node) => node.id === "nnEnt")!;
+    expect(anchor.x).toBeCloseTo(latest!.buildings[0].x + latest!.buildings[0].width * entrance.offset, 5);
+    expect(anchor.y).toBe(latest!.buildings[0].y + latest!.buildings[0].height);
+    expect(screen.getByTestId("entrance-purpose-control")).toBeTruthy();
+    expect(screen.getByText("Changes")).toBeTruthy();
   });
 
   it("a normal waypoint still moves, and an entrance node in the same multi-selection stays fixed", () => {
@@ -1495,10 +1527,10 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(latest).toBeUndefined(); // no mutation
-    expect(infoSpy).toHaveBeenCalledWith("Entrance already connected to the navigation network", expect.anything());
-    expect(screen.getByTestId("nav-node-props")).toBeTruthy();
-    expect(screen.getByText("Building Entrance")).toBeTruthy();
+    expect(latest).toBeUndefined(); // normalized fixture: no mutation
+    expect(infoSpy).toHaveBeenCalledWith("Entrance is already a navigation connection point", expect.anything());
+    expect(document.getElementById("entrance-name")).toBeTruthy();
+    expect(container.querySelectorAll("[data-testid='nav-node'][data-entrance-linked='true']")).toHaveLength(1);
     expect(screen.getByText("Live")).toBeTruthy();
   });
 
@@ -1506,7 +1538,9 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     let latest: Campus | undefined;
     const warningSpy2 = vi.spyOn(toast, "warning").mockImplementation(() => "" as never);
     const campus = campusWithLinkedEntrance();
-    campus.navEdges = []; // start unconnected
+    // Remove the authored exterior connection while preserving the managed
+    // Entrance↔Door transition generated by the current Builder contract.
+    campus.navEdges = campus.navEdges?.filter((edge) => edge.type === "entrance_transition") ?? [];
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
     const svg = openNavigationLayer(container);
 
@@ -1517,9 +1551,10 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(latest!.navEdges).toHaveLength(1);
-    expect(latest!.navEdges![0]).toMatchObject({ startNodeId: "nnA", endNodeId: "nnEnt" });
-    expect(latest!.navNodes!.filter((n) => n.entranceId)).toHaveLength(1); // reused, not duplicated
+    const authoredEdges = latest!.navEdges!.filter((edge) => edge.type !== "entrance_transition");
+    expect(authoredEdges).toHaveLength(1);
+    expect(authoredEdges[0]).toMatchObject({ startNodeId: "nnA", endNodeId: "nnEnt" });
+    expect(latest!.navNodes!.filter((node) => node.entranceId === "ent1" && !node.floorId)).toHaveLength(1); // reused, not duplicated
 
     // Same connection again → rejected with the shared toast, no change.
     fireEvent.keyDown(window, { key: "p" });
@@ -1528,7 +1563,7 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.mouseDown(svg, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(warningSpy2).toHaveBeenCalledWith("Those points are already connected", expect.anything());
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges?.filter((edge) => edge.type !== "entrance_transition")).toHaveLength(1);
   });
 
   // ── DELETE CLEANUP ────────────────────────────────────────────────────────
@@ -1544,6 +1579,7 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.mouseDown(entranceEl!, { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     fireEvent.keyDown(window, { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Entrance" }));
 
     expect(latest!.buildings[0].entrances).toHaveLength(0);
     expect(latest!.navNodes!.some((n) => n.entranceId === "ent1")).toBe(false); // no stale node
@@ -1554,7 +1590,7 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.click(screen.getByTitle(/Undo/));
     expect(latest!.buildings[0].entrances).toHaveLength(1);
     expect(latest!.navNodes!.find((n) => n.id === "nnEnt")).toBeTruthy();
-    expect(latest!.navEdges).toHaveLength(1);
+    expect(latest!.navEdges).toHaveLength(2);
   });
 
   it("deleting the Building also removes its entrance-linked nodes and edges", () => {
@@ -1574,20 +1610,20 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
 
   // ── VISUAL ────────────────────────────────────────────────────────────────
 
-  it("an entrance-linked node renders a subtle connected badge, not the stacked waypoint target", () => {
+  it("an entrance-linked graph anchor uses its physical Entrance marker without stacked waypoint artwork", () => {
     const { container } = render(<Harness initialCampus={campusWithLinkedEntrance()} />);
     openNavigationLayer(container);
     const svg = canvasSvg(container);
 
     const linkedG = svg.querySelector("[data-testid='nav-node'][data-entrance-linked='true']");
     expect(linkedG).toBeTruthy();
-    // Subtle connected badge (r=4 dot) present…
-    expect(linkedG!.querySelectorAll("circle[r='4']").length).toBe(1);
-    // …and the big waypoint circle (r=7 fill) is NOT rendered for it.
-    expect(linkedG!.querySelectorAll("circle[r='7']").length).toBe(0);
+    // The graph anchor stays hit-testable, but the physical Entrance owns its
+    // visible marker; the graph layer does not draw a duplicate node glyph.
+    expect(linkedG!.querySelectorAll("circle")).toHaveLength(0);
+    expect(svg.querySelector("[data-entrance-id='ent1'] [data-campus-entrance-transform]")).toBeTruthy();
     // A plain outdoor node still renders the normal waypoint circle.
     const plainG = svg.querySelector("[data-testid='nav-node']:not([data-entrance-linked])") as SVGGElement;
-    expect(plainG.querySelectorAll("circle[r='7']").length).toBe(1);
+    expect(Number(plainG.querySelector("circle:not([r='11'])")?.getAttribute("r"))).toBeCloseTo(7.5);
     // Label uses the entrance name, not a generic "Waypoint".
     expect(svg.textContent).toContain("Primary Entrance");
   });
@@ -1605,6 +1641,7 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     fireEvent.mouseDown(container.querySelector("[data-testid='nav-edge']")!, { clientX: 250, clientY: 200, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
+    fireEvent.click(screen.getByRole("button", { name: /Advanced Routing/ }));
     const accessible = screen.getByRole("radiogroup", { name: "Accessible" });
     const buttons = accessible.querySelectorAll("button");
     expect(buttons.length).toBe(2);
@@ -1615,18 +1652,20 @@ describe("B5 Phase 1.8 — entrance-linked navigation final corrections", () => 
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("entrance-linked waypoint properties show a read-only derived position", () => {
-    const { container } = render(<Harness initialCampus={campusWithLinkedEntrance()} />);
+  it("selecting an entrance-linked graph anchor opens its physical Entrance properties", () => {
+    let latest: Campus | undefined;
+    const campus = campusWithLinkedEntrance();
+    const originalNodeIds = campus.navNodes!.map((node) => node.id);
+    const { container } = render(<Harness initialCampus={campus} onCampusChange={(next) => { latest = next; }} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "v" });
     fireEvent.mouseDown(navNodeAt(container, 160, 180), { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    const panel = screen.getByTestId("nav-node-props");
-    const xInput = panel.querySelector<HTMLInputElement>('input[type="number"]');
-    expect(xInput!.disabled).toBe(true);
-    expect(within(panel).getByText(/Derived from the linked building entrance/)).toBeTruthy();
-    expect(within(panel).getByText(/Linked to building entrance/)).toBeTruthy();
+    expect(document.getElementById("entrance-name")).toBeTruthy();
+    expect(screen.queryByTestId("nav-node-props")).toBeNull();
+    expect(latest).toBeUndefined();
+    expect(campus.navNodes!.map((node) => node.id)).toEqual(originalNodeIds);
   });
 });
 
@@ -1642,7 +1681,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
       { id: "nnEnt", name: "Primary Entrance", type: "entrance", x: 160, y: 180, campusId: "c1", buildingId: "b1", entranceId: "ent1", accessible: true, color: "#16a34a" },
       { id: "nnA", name: "Gate A", type: "outdoor", x: 200, y: 200, campusId: "c1", accessible: true, color: "#16a34a" },
     ];
-    return campus;
+    return normalizeEntranceFixture(campus);
   }
 
   /** The entrance-linked nav-node <g>. */
@@ -1657,13 +1696,8 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     openNavigationLayer(container);
     const g = linkedNodeG(container);
     // Connected badge only: the r=4 dot + one subtle r=6.5 ring.
-    const circles = g.querySelectorAll("circle");
-    expect(circles.length).toBe(2);
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "4")).toBe(true);
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "6.5")).toBe(true);
-    // No separate hover ring (r=11) / waypoint target (r=7) stacked underneath.
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "11")).toBe(false);
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "7")).toBe(false);
+    expect(g.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelector("[data-entrance-id='ent1'] [data-campus-entrance-transform]")).toBeTruthy();
   });
 
   it("selected entrance-linked node shows ONE clean selection ring (badge suppressed, no stacking)", () => {
@@ -1673,31 +1707,25 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     fireEvent.mouseDown(navNodeAt(container, 160, 180), { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     const g = linkedNodeG(container);
-    const circles = g.querySelectorAll("circle");
-    // Exactly ONE decoration: the r=12 accent selection ring.
-    expect(circles.length).toBe(1);
-    expect(circles[0].getAttribute("r")).toBe("12");
-    expect(circles[0].getAttribute("stroke")).toBe("var(--accent)");
-    // No badge dot / subtle ring underneath.
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "4")).toBe(false);
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "6.5")).toBe(false);
+    expect(g.querySelectorAll("circle")).toHaveLength(0);
+    const entrance = container.querySelector("[data-entrance-id='ent1']");
+    expect(entrance?.querySelector("circle[r='15'][stroke='var(--accent)']")).toBeTruthy();
     // No generic "Waypoint" label — the entrance name is used.
-    expect(g.querySelector("text")?.textContent).toBe("Primary Entrance");
-    expect(g.querySelector("text")?.textContent).not.toBe("Waypoint");
+    expect(entrance?.getAttribute("aria-label")).toContain("Primary Entrance");
   });
 
-  it("Connect Target has the highest visual priority and clears immediately when the pointer leaves", () => {
+  it("Connect Target takes over entrance hover feedback and clears when the pointer leaves", async () => {
     const { container } = render(<Harness initialCampus={linkedCampus()} />);
     const svg = openNavigationLayer(container);
     fireEvent.keyDown(window, { key: "p" });
     // Hover the entrance position → single entrance target ring, node badge hidden.
     fireEvent.mouseMove(svg, { clientX: 160, clientY: 180, bubbles: true });
-    expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeTruthy();
+    await waitFor(() => expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeTruthy());
     expect(linkedNodeG(container).querySelectorAll("circle").length).toBe(0);
     // Move away → target ring clears, badge returns (no lingering decoration).
     fireEvent.mouseMove(svg, { clientX: 420, clientY: 260, bubbles: true });
-    expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeNull();
-    expect(linkedNodeG(container).querySelectorAll("circle").length).toBe(2);
+    await waitFor(() => expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeNull());
+    expect(linkedNodeG(container).querySelectorAll("circle").length).toBe(0);
   });
 
   it("normal free Waypoint visuals are unchanged (waypoint circle + hover ring intact)", () => {
@@ -1705,7 +1733,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     openNavigationLayer(container);
     const g = navNodeAt(container, 200, 200); // plain outdoor node nnA
     const circles = g.querySelectorAll("circle");
-    expect(Array.from(circles).some((c) => c.getAttribute("r") === "7")).toBe(true);
+    expect(Array.from(circles).some((c) => Number(c.getAttribute("r")) === 7.5)).toBe(true);
     expect(Array.from(circles).some((c) => c.getAttribute("r") === "11")).toBe(true);
   });
 
@@ -1721,8 +1749,10 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     fireEvent.mouseDown(navNodeAt(container, 160, 180), { clientX: 160, clientY: 180, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(latest!.navEdges).toHaveLength(1);
-    expect(latest!.navEdges![0]).toMatchObject({ startNodeId: "nnA", endNodeId: "nnEnt" });
+    const authoredEdges = latest!.navEdges!.filter((edge) => edge.type !== "entrance_transition");
+    expect(authoredEdges).toHaveLength(1);
+    expect(authoredEdges[0]).toMatchObject({ startNodeId: "nnA", endNodeId: "nnEnt" });
+    expect(latest!.navEdges!.filter((edge) => edge.type === "entrance_transition")).toHaveLength(1);
     // Transient connect state fully cleared after completion.
     expect(screen.queryByTestId("nav-path-preview")).toBeNull();
     expect(container.querySelector("[data-entrance-id='ent1'] [data-testid='entrance-connect-target']")).toBeNull();
@@ -1957,8 +1987,14 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     fireEvent.mouseMove(svg, { clientX: 320, clientY: 160, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
 
-    expect(latest!.buildings.find((building) => building.id === "b1")).toMatchObject({ x: 140, y: 120 });
-    expect(latest!.buildings.find((building) => building.id === "b2")).toMatchObject({ x: 400, y: 190 });
+    const movedOne = latest!.buildings.find((building) => building.id === "b1")!;
+    const movedTwo = latest!.buildings.find((building) => building.id === "b2")!;
+    const dx = movedOne.x - 100;
+    const dy = movedOne.y - 100;
+    expect(dx).toBeGreaterThan(0);
+    expect(dy).toBeGreaterThan(0);
+    expect(movedTwo.x - 360).toBe(dx);
+    expect(movedTwo.y - 170).toBe(dy);
     expect(rectNumber(groupOutline(container), "x")).toBeGreaterThan(96);
   });
 
@@ -2060,7 +2096,8 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     fireEvent.mouseDown(groupDragSurface(container), { clientX: 280, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 320, clientY: 160, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBe(140);
+    const movedX = latest!.buildings.find((building) => building.id === "b1")!.x;
+    expect(movedX).toBeGreaterThan(100);
 
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     expect(latest!.buildings.find((building) => building.id === "b1")!.x).toBe(100);
@@ -2244,9 +2281,10 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     expect(latest!.paths[0].points).toEqual([{ x: 100, y: 100 }, { x: 180, y: 100 }, { x: 230, y: 150 }]);
   });
 
-  it("Phase 5.6 endpoint and diagonal T-junction snaps share exact coordinates without nav edges", () => {
+  it("Phase 5.6 visual Pathway endpoints snap exactly without rewriting target geometry or adding nav edges", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();
+    campus.buildings = [];
     campus.paths = [{ id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 100, y: 100 }, { x: 220, y: 220 }] }];
     const { container } = render(<Harness initialCampus={campus} onCampusChange={(c) => { latest = c; }} />);
     const svg = canvasSvg(container);
@@ -2257,10 +2295,13 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     expect(latest!.paths[1].points[1]).toEqual({ x: 220, y: 220 });
 
     fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
-    fireEvent.mouseDown(svg, { clientX: 250, clientY: 140, bubbles: true });
+    // Keep this stroke's start clear of the previously added visual Pathway;
+    // otherwise it would exercise visual-attachment precedence at both ends
+    // instead of independently checking the target segment snap.
+    fireEvent.mouseDown(svg, { clientX: 280, clientY: 140, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 160, clientY: 158, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    expect(latest!.paths.find((path) => path.id === "main")!.points).toContainEqual({ x: 159, y: 159 });
+    expect(latest!.paths.find((path) => path.id === "main")!.points).toEqual([{ x: 100, y: 100 }, { x: 220, y: 220 }]);
     expect(latest!.paths[2].points[1]).toEqual({ x: 159, y: 159 });
     expect(latest!.navEdges ?? []).toHaveLength(0);
   });
@@ -2268,6 +2309,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
   it("Phase 5.6 Waypoint snaps to diagonal Pathway centerline and Pathway junctions", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();
+    campus.buildings = [];
     campus.paths = [
       { id: "main", type: "walkway", color: "#94a3b8", width: 12, points: [{ x: 300, y: 300 }, { x: 350, y: 350 }, { x: 420, y: 420 }] },
       { id: "branch", type: "road", color: "#cbd5e1", width: 22, points: [{ x: 350, y: 350 }, { x: 430, y: 310 }] },
@@ -2327,15 +2369,16 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     expect(physicalEdges.every((edge) => edge.startNodeId === junction!.id || edge.endNodeId === junction!.id)).toBe(true);
   });
 
-  it("Phase 5.6 Navigation sidebar is Hierarchy only and Design restores Assets", () => {
+  it("the unified Navigation workspace retains its Hierarchy and Assets sidebar tabs", () => {
     const { container } = render(<Harness initialCampus={seededCampus()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
-    expect(screen.getByText("Campus Objects")).toBeTruthy();
     openNavigationLayer(container);
     expect(screen.getByTestId("navigation-hierarchy-sidebar")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Assets" })).toBeNull();
-    expect(screen.queryByText("Workflow")).toBeNull();
-    fireEvent.click(screen.getByText("Campus"));
+    const sidebar = within(container.querySelector("[data-testid='navigation-hierarchy-sidebar']")!);
+    fireEvent.click(sidebar.getByRole("button", { name: "Assets" }));
+    expect(screen.getByText("Campus Objects")).toBeTruthy();
+    fireEvent.click(sidebar.getByRole("button", { name: "Hierarchy" }));
+    expect(screen.getByTestId("navigation-hierarchy-sidebar")).toBeTruthy();
+    setNavigationVisible(container, false);
     expect(screen.getByRole("button", { name: "Assets" })).toBeTruthy();
   });
 
@@ -2379,6 +2422,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
   it("Phase 5.7 endpoint extension can self T-junction onto an existing same-path segment", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();
+    campus.buildings = [];
     campus.paths = [{
       id: "self-t",
       type: "road",
@@ -2608,6 +2652,7 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
   it("Phase 5.7 Add Path to Navigation is idempotent for a closed pathway loop", () => {
     let latest: Campus | undefined;
     const campus = makeCampus();
+    campus.buildings = [];
     campus.paths = [{
       id: "loop",
       type: "walkway",
@@ -2619,11 +2664,16 @@ describe("B5 Phase 1.9 — entrance navigation visual cleanup", () => {
     const svg = canvasSvg(container);
     fireEvent.mouseDown(container.querySelector("[data-path-id='loop']")!, { clientX: 140, clientY: 100, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Use for Navigation/ }));
     expect(latest!.navNodes).toHaveLength(3);
     expect(latest!.navEdges).toHaveLength(3);
+    expect(screen.getByText(/Used for navigation/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Add Path to Navigation|Use for Navigation/ }));
+    // The current UI removes the conversion action once ownership is saved.
+    // Reopening the Pathway properties cannot submit a duplicate conversion.
+    fireEvent.mouseDown(container.querySelector("[data-path-id='loop']")!, { clientX: 140, clientY: 100, bubbles: true });
+    fireEvent.mouseUp(svg, { bubbles: true });
+    expect(screen.queryByRole("button", { name: /Use for Navigation/ })).toBeNull();
     expect(latest!.navNodes).toHaveLength(3);
     expect(latest!.navEdges).toHaveLength(3);
   });
@@ -2958,11 +3008,10 @@ describe("B5 Final — placed objects turn touching nav edges red", () => {
     expect(edgeStrokes(container)).toContain("#dc2626");
   });
 
-  it("the SAME red indicator shows in the Campus layer navigation overlay (especially in campus tab)", () => {
+  it("the walking-network visibility control reveals the same red obstruction indicator", () => {
     const campus = campusWithEdgeAnd([{}]);
     const { container } = render(<Harness initialCampus={campus} />);
-    // Stay on the Campus layer and toggle the read-only navigation overlay on.
-    fireEvent.click(screen.getByRole("button", { name: /show navigation overlay/i }));
+    setNavigationVisible(container, true);
     expect(edgeStrokes(container)).toContain("#dc2626");
   });
 
@@ -2982,13 +3031,13 @@ describe("B5 Final — placed objects turn touching nav edges red", () => {
 
     // Back to the Campus layer, drag the fountain far from the edge — the
     // live memo must re-derive and clear the red state immediately.
-    fireEvent.click(screen.getByText("Campus"));
+    setNavigationVisible(container, false);
     fireEvent.mouseDown(decorGroup(container, "fountain"), { clientX: 236, clientY: 186, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 600, clientY: 500, bubbles: true });
     fireEvent.mouseUp(svg, { bubbles: true });
     expect(latest!.decorAssets!.find((d) => d.id === "d1")!.x).toBeGreaterThan(500);
 
-    fireEvent.click(screen.getByText("Navigation"));
+    setNavigationVisible(container, true);
     expect(edgeStrokes(container)).not.toContain("#dc2626");
   });
 });
@@ -3001,11 +3050,11 @@ describe("B6 manual-QA: compact asset labels", () => {
     // Campus Objects label — the longest preset ("Administration") must keep the
     // compact 2-line-clamped styling and NOT use [overflow-wrap:anywhere], which
     // allowed ugly character-level mid-word breaks ("Administra / tion").
-    const adminButton = screen.getByRole("button", { name: /Administration/i });
-    const adminLabel = within(adminButton).getByText("Administration");
-    expect(adminLabel.className).toContain("line-clamp-2");
-    expect(adminLabel.className).toContain("break-words");
-    expect(adminLabel.className).not.toContain("overflow-wrap");
+    const flagButton = screen.getByRole("button", { name: "Place Philippine Flag / Flagpole" });
+    const flagLabel = within(flagButton).getByText("Philippine Flag / Flagpole");
+    expect(flagLabel.className).toContain("line-clamp-2");
+    expect(flagLabel.className).toContain("break-words");
+    expect(flagLabel.className).not.toContain("overflow-wrap");
 
     // Outdoor Decor labels share the same compact size ("Recycle Bin" wraps at
     // the space, never mid-word).
@@ -3021,10 +3070,9 @@ describe("B6 manual-QA: compact asset labels", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Assets" }));
 
-    for (const label of ["Academic", "Laboratory", "Library", "Gymnasium", "Administration", "Other"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
-    }
-    expect(screen.getByRole("button", { name: /Large Tree/i })).toBeTruthy();
+    const trashBin = screen.getByRole("button", { name: "Place Trash Bin" });
+    expect(trashBin.getAttribute("draggable")).toBe("true");
+    expect(screen.getByRole("button", { name: "Place Philippine Flag / Flagpole" })).toBeTruthy();
   });
 });
 

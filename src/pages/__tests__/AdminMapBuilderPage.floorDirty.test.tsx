@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster, toast } from "sonner";
 import type { Campus, FloorPlan } from "../../components/map-builder/types";
 import { normalizeFloor } from "../../lib/floorPlanNormalization";
+import { campusDraftsEqual } from "../../lib/campusDraftPersistence";
+import { reconcileEntranceDoors } from "../../lib/entranceTransitions";
 
 // ── Mock the service boundary (the handlers themselves stay real) ──────────
 vi.mock("../../services/campusService", () => ({
@@ -123,6 +125,8 @@ const labelFloor = makeFloor("f1", "Ground Floor", 1, {
 beforeEach(() => {
   vi.clearAllMocks();
   toast.dismiss();
+  window.sessionStorage.clear();
+  (campusStructureService.save as ReturnType<typeof vi.fn>).mockImplementation(async (campus: Campus) => campus);
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 0));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
 });
@@ -175,7 +179,9 @@ async function clickUntil(appears: () => boolean, getTarget: () => HTMLElement, 
   for (;;) {
     if (appears()) return;
     if (Date.now() > deadline) {
-      throw new Error(`clickUntil timed out after ${timeout}ms (target never appeared)`);
+      const dialogs = screen.getAllByRole("dialog", { hidden: true })
+        .map((dialog) => dialog.getAttribute("aria-label") ?? dialog.getAttribute("aria-labelledby") ?? dialog.textContent?.slice(0, 80));
+      throw new Error(`clickUntil timed out after ${timeout}ms (target never appeared); dialogs=${JSON.stringify(dialogs)}`);
     }
     let el: HTMLElement | null = null;
     try {
@@ -198,17 +204,23 @@ async function openCampusEditor() {
   await screen.findByTitle("Back to campus list", {}, { timeout: 20000 });
 }
 
+function expectCampusSaved() {
+  const saveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+  expect(saveButton.disabled).toBe(true);
+  expect(saveButton.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
+}
+
 /** Click a floor row in the hierarchy and wait for the Floor Editor toolbar. */
-async function openFloor(rowLabel: string) {
+async function openFloor(rowLabel: string, timeout = 20000) {
   // The row's accessible name starts with its label (e.g. "Ground Floor0R");
-  // anchoring excludes the row's `Floor actions: <label>` button. "More tools"
-  // only exists in the Floor Editor toolbar, so it is a reliable mount signal
-  // (the hierarchy row `...` button shares the title "Floor actions").
+  // anchoring excludes the row's `Floor actions: <label>` button. The floor
+  // navigator appears only after FloorEditor mounts, so it is the mount signal.
   await clickUntil(
-    () => screen.queryByRole("button", { name: "More tools" }) !== null,
+    () => screen.queryByRole("button", { name: "Select floor" }) !== null,
     () => screen.getByRole("button", { name: new RegExp(`^${rowLabel}`) }),
+    timeout,
   );
-  await screen.findByRole("button", { name: "More tools" }, {}, { timeout: 20000 });
+  await screen.findByRole("button", { name: "Select floor" }, { timeout });
 }
 
 /** Floor Editor breadcrumb → back to the outdoor editor; wait for its Save button. */
@@ -237,7 +249,7 @@ async function backToCampus() {
   // stays mounted while exiting, so wait for a control that only exists in the
   // outdoor CampusEditor before asserting on the outer Save state.
   await screen.findByTitle("Back to campus list", {}, { timeout: 20000 });
-  await screen.findByRole("button", { name: /^(Save|Saved)$/ }, {}, { timeout: 20000 });
+  await screen.findByRole("button", { name: "Save" }, { timeout: 20000 });
 }
 
 function stubFloorSvg(container: HTMLElement, w = 600, h = 450): SVGSVGElement {
@@ -276,21 +288,27 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     await openCampusEditor();
 
     // No edits yet → outer Save disabled (label shows "Saved").
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    const saveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+    expect(saveButton.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
 
     await openFloor("Ground Floor");
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
-    // Wait for the floor switch transition to finish (the new floor's editor
-    // mounts after the old one exits) before leaving.
-    await screen.findByTitle("Floor 2", {}, { timeout: 20000 });
+    // The current UI first asks whether to start blank or from a template.
+    fireEvent.click(await screen.findByRole("button", { name: "Start Blank" }, { timeout: 20000 }));
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Floor 2"),
+      { timeout: 20000 },
+    );
     await flush();
     // Leaving the Floor Editor with the unsaved new floor prompts the shared
     // guard; backToCampus resolves it with Save Changes, which persists the
     // floor change together with the campus and clears the outer dirty state.
     await backToCampus();
 
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    const saveButtonAfterReturn = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(saveButtonAfterReturn.disabled).toBe(true);
+    expect(saveButtonAfterReturn.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
     expect(persisted).not.toBeNull();
     expect(persisted!.buildings[0].floors).toHaveLength(2);
 
@@ -304,28 +322,50 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
       () => screen.queryByTitle("Back to campus list") !== null,
       () => screen.getByRole("button", { name: /open editor/i }),
     );
-    await clickUntil(
-      () => screen.queryByRole("button", { name: "More tools" }) !== null,
-      () => screen.getByRole("button", { name: /^Floor 2/ }),
-    );
+    await openFloor("Floor 2");
     // Selector-first floor UI: the active floor is shown on the dropdown button
     // and the previous floor is one click away.
     expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Floor 2");
     expect(screen.getByRole("button", { name: "Previous floor" })).toBeInTheDocument();
   });
 
-  it("returning without any floor edit keeps the outer Save disabled", async () => {
-    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([makeCampusWithFloors([makeFloor("f1", "Ground Floor", 1)])]);
+  it("generated entrance Door reconciliation and entering a floor without edits keep the campus clean", async () => {
+    const savedCampus = makeCampusWithFloors([makeFloor("f1", "Ground Floor", 1)]);
+    const reconciledCampus = reconcileEntranceDoors(savedCampus, () => "generated-entrance-door");
+    expect(reconciledCampus).not.toBe(savedCampus);
+    expect(reconciledCampus.buildings[0].floors[0].doors?.some((door) => door.buildingEntranceId === "ent1")).toBe(true);
+    expect(campusDraftsEqual(reconciledCampus, savedCampus)).toBe(true);
+
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([savedCampus]);
     (campusStructureService.load as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => c);
+    (campusStructureService.save as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => c);
 
     renderPage();
     await flush();
     await openCampusEditor();
+    // The mount repair is derived Door projection only; it must not mark the
+    // page dirty or trigger the unsaved guard when entering the floor.
+    const initialSaveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(initialSaveButton.disabled).toBe(true);
+    expect(initialSaveButton.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
     await openFloor("Ground Floor");
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Unsaved Floor Changes" })).toBeNull();
     await backToCampus();
 
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    const returnedSaveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(returnedSaveButton.disabled).toBe(true);
+    expect(returnedSaveButton.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
+    expect(campusStructureService.save).not.toHaveBeenCalled();
+
+    await clickUntil(
+      () => screen.queryByRole("heading", { name: "Campus Management" }) !== null,
+      () => screen.getByTitle("Back to campus list"),
+    );
+    await openCampusEditor();
+    const reopenedSaveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(reopenedSaveButton.disabled).toBe(true);
+    expect(reopenedSaveButton.querySelector("[data-toolbar-lifecycle-label]")).toHaveTextContent("Saved");
   });
 
   it("editing a room in the Floor Editor enables the outer Save", async () => {
@@ -355,11 +395,14 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     // Exiting with unsaved edits resolves through the guard (Save Changes),
     // which persists the rename — nothing is left for the outer Save.
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
   });
 
   it("selection and zoom only do not enable the outer Save", async () => {
-    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([makeCampusWithFloors([makeFloor("f1", "Ground Floor", 1)])]);
+    const floor = makeFloor("f1", "Ground Floor", 1, {
+      rooms: [{ id: "r1", name: "Room 1", type: "classroom", x: 30, y: 30, w: 140, h: 90, floorId: "f1", buildingId: "b1" }],
+    });
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([makeCampusWithFloors([floor])]);
     (campusStructureService.load as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => c);
 
     const { container } = renderPage();
@@ -368,16 +411,44 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     await openFloor("Ground Floor");
     stubFloorSvg(container);
 
-    // Zoom in (view only) and rubber-band the empty canvas (selection only).
-    fireEvent.click(screen.getByTitle("Zoom In"));
-    // Scope the rubber-band to the floor canvas svg (not a toolbar lucide icon).
-    const canvasSvg = stubFloorSvg(container);
-    fireEvent.mouseDown(canvasSvg, { clientX: 20, clientY: 20, bubbles: true });
-    fireEvent.mouseUp(canvasSvg, { clientX: 60, clientY: 60, bubbles: true });
+    // Selecting a real room and zooming are view-only interactions.
+    const roomRect = Array.from(container.querySelectorAll("rect")).find(
+      (rect) => Number(rect.getAttribute("x")) === 30
+        && Number(rect.getAttribute("y")) === 30
+        && Number(rect.getAttribute("width")) === 140,
+    );
+    expect(roomRect).toBeTruthy();
+    fireEvent.mouseDown(roomRect!, { clientX: 100, clientY: 75, bubbles: true });
+    fireEvent.mouseUp(window);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom In" }));
 
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expectCampusSaved();
+    expect(campusStructureService.save).not.toHaveBeenCalled();
+  });
+
+  it("switching between saved floors without edits keeps the campus clean", async () => {
+    const savedCampus = makeCampusWithFloors([
+      makeFloor("f1", "Ground Floor", 1),
+      makeFloor("f2", "Floor 2", 2),
+    ]);
+    (campusService.list as ReturnType<typeof vi.fn>).mockResolvedValue([savedCampus]);
+    (campusStructureService.load as ReturnType<typeof vi.fn>).mockImplementation(async (c: Campus) => c);
+
+    renderPage();
+    await flush();
+    await openCampusEditor();
+    await openFloor("Ground Floor");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next floor" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Floor 2"));
+    fireEvent.click(screen.getByRole("button", { name: "Previous floor" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Select floor" })).toHaveTextContent("Ground Floor"));
+    expect(screen.queryByRole("dialog", { name: "Unsaved Floor Changes" })).toBeNull();
+
+    await backToCampus();
+    expectCampusSaved();
+    expect(campusStructureService.save).not.toHaveBeenCalled();
   });
 
   it("renaming a floor from the actions menu enables the outer Save", async () => {
@@ -397,7 +468,7 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     // which persists the rename — nothing is left for the outer Save.
     await backToCampus();
 
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
   });
 
   it("duplicating a floor enables the outer Save", async () => {
@@ -432,7 +503,7 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     // Exiting with unsaved edits resolves through the guard (Save Changes).
     await backToCampus();
 
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
   });
 
   it("deleting a floor enables the outer Save", async () => {
@@ -465,25 +536,25 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
 
     // Open the properties sidebar so the compact floor section is visible.
     fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
-    await screen.findByRole("button", { name: "Open Floor Settings" }, {}, { timeout: 20000 });
+    await screen.findByRole("button", { name: "Open Floor Settings" }, { timeout: 20000 });
 
     // Cancelling a settings change leaves the draft untouched.
     fireEvent.click(screen.getByRole("button", { name: "Open Floor Settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
 
     // Applying a settings change marks the draft dirty.
     await openFloor("Ground Floor");
     fireEvent.click(screen.getByTitle("Toggle Properties Panel"));
-    await screen.findByRole("button", { name: "Open Floor Settings" }, {}, { timeout: 20000 });
+    await screen.findByRole("button", { name: "Open Floor Settings" }, { timeout: 20000 });
     fireEvent.click(screen.getByRole("button", { name: "Open Floor Settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Grid size 40" }));
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     // Exiting with unsaved settings resolves through the guard (Save Changes).
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
   });
 
   it("a text edit enables the outer Save", async () => {
@@ -505,7 +576,7 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
 
     // Exiting with unsaved edits resolves through the guard (Save Changes).
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expectCampusSaved();
   });
 
   it("undoing a floor edit back to the saved baseline returns the outer Save to disabled", async () => {
@@ -526,10 +597,9 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     fireEvent.blur(inline);
 
     // Undo the single committed edit → the floor matches the saved baseline again.
-    fireEvent.click(screen.getByTitle("Undo (Ctrl+Z)"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await backToCampus();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expectCampusSaved();
   });
 
   it("discarding from the campus back dialog restores the last saved campus including floor edits", async () => {
@@ -543,6 +613,7 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
     await openCampusEditor();
     await openFloor("Ground Floor");
     fireEvent.click(screen.getByRole("button", { name: "Add Floor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start Blank" }, { timeout: 20000 }));
     await backToCampus();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
 
@@ -555,7 +626,7 @@ describe("AdminMapBuilderPage — B4 floor dirty-state integration", () => {
 
     // Discard restores the last saved campus (one floor) instead of keeping two.
     fireEvent.click(screen.getByRole("button", { name: /discard changes/i }));
-    await screen.findByRole("heading", { name: "Campus Management" }, {}, { timeout: 20000 });
+    await screen.findByRole("heading", { name: "Campus Management" }, { timeout: 20000 });
     await waitFor(() => expect(screen.getAllByTitle("Floors: 1").length).toBeGreaterThan(0));
   });
 }, 120000);

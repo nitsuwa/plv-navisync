@@ -6,22 +6,42 @@
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Release the object URL on the next tick so the download can finish.
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+  } finally {
+    a.remove();
+    // Release even if the browser rejects the click; allow a successful
+    // download to start before revoking its object URL.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+function protectSpreadsheetFormula(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+
+  // Spreadsheet applications may ignore leading whitespace/control characters
+  // before interpreting a formula. Prefix the original text with an apostrophe
+  // when its first significant character is a formula trigger. Non-string
+  // numeric cells (including negative numbers) keep their numeric meaning.
+  return /^[\s\u0000-\u001f\u007f\ufeff]*[=+\-@＝＋－＠]/u.test(value)
+    ? `'${value}`
+    : value;
 }
 
 function csvEscape(value: unknown): string {
-  const str = value == null ? "" : String(value);
-  // Wrap in quotes when the value contains a comma, quote, or newline.
-  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  const safeValue = protectSpreadsheetFormula(value);
+  const str = safeValue == null ? "" : String(safeValue);
+  const originalText = typeof value === "string" ? value : str;
+  // Quote delimiters, line breaks, controls and edge whitespace to preserve cell content.
+  return /[",\u0000-\u001f\u007f]/.test(str) || /^\s|\s$/u.test(originalText) || /^\s|\s$/u.test(str)
+    ? `"${str.replace(/"/g, '""')}"`
+    : str;
 }
 
-/** Build a CSV string from an array of row objects (keys become the header). */
+/** Build a CSV string from row objects using the first row's stable key order. */
 export function toCsv(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]);

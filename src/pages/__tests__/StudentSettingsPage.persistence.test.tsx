@@ -7,6 +7,7 @@ const authState = vi.hoisted(() => ({
   isStudent: true,
   username: "Maria Santos",
   role: "student" as const,
+  profile: { id: "student-a" } as { id: string } | null,
   signOut: vi.fn(),
 }));
 const preferenceService = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ import { StudentSettingsPage } from "../StudentSettingsPage";
 describe("StudentSettingsPage persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    authState.profile = { id: "student-a" };
     window.scrollTo = vi.fn();
     preferenceService.loadStudentPreferences.mockResolvedValue({
       mapUpdates: false,
@@ -77,6 +79,27 @@ describe("StudentSettingsPage persistence", () => {
     expect(reportToggle).toHaveAttribute("aria-checked", "true");
   });
 
+  it("reloads account-specific notification preferences when the active student changes", async () => {
+    preferenceService.loadStudentPreferences.mockClear();
+    preferenceService.loadStudentPreferences.mockImplementation(async () => ({
+      mapUpdates: true,
+      reportStatus: authState.profile?.id !== "student-a",
+      campusEvents: true,
+    }));
+    const { rerender } = render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Report status" })).toHaveAttribute("aria-checked", "false"));
+    const previousCalls = preferenceService.loadStudentPreferences.mock.calls.length;
+    authState.profile = { id: "student-b" };
+    rerender(<StudentSettingsPage />);
+
+    await waitFor(() => expect(preferenceService.loadStudentPreferences.mock.calls.length).toBeGreaterThan(previousCalls));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Report status" })).toHaveAttribute("aria-checked", "true"));
+  });
+
   it("verifies the current password before saving a new one", async () => {
     render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
     await act(async () => vi.advanceTimersByTime(600));
@@ -90,6 +113,25 @@ describe("StudentSettingsPage persistence", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Password" }));
 
     await waitFor(() => expect(passwordService.updateStudentPassword).toHaveBeenCalledWith("old-password", "new-password"));
+  });
+
+  it("provides a large, stateful password visibility control", async () => {
+    render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("tab", { name: "Security" }));
+    fireEvent.click(await screen.findByText("Change Password"));
+
+    const currentPassword = screen.getByLabelText("Current Password");
+    const showPassword = await screen.findByRole("button", { name: "Show current password" });
+    expect(showPassword).toHaveClass("h-11", "w-11");
+    expect(showPassword).toHaveAttribute("aria-pressed", "false");
+    expect(currentPassword).toHaveAttribute("type", "password");
+
+    fireEvent.click(showPassword);
+    const hidePassword = screen.getByRole("button", { name: "Hide current password" });
+    expect(hidePassword).toHaveAttribute("aria-pressed", "true");
+    expect(currentPassword).toHaveAttribute("type", "text");
   });
 
   it("offers System, Light, and Dark theme choices without a Support tab", async () => {

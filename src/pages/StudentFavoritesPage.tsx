@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Building2, Navigation, MapPin, Search, Bookmark, Trash2, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { motion, AnimatePresence } from "motion/react";
 import { Link, useNavigate } from "react-router";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { usePublishedCampus } from "../hooks";
+import { useAuthUserId } from "../contexts/StudentAuthContext";
 import { buildingsFromCampus } from "../lib/mapDataAdapter";
 import { StudentPageHeader } from "../components/ui/StudentPageHeader";
 import { PageTransition } from "../components/ui/PageTransition";
@@ -54,10 +55,13 @@ import { studentAccountService } from "../services/studentAccountService";
 
 export function StudentFavoritesPage() {
   const { loading: authLoading, isStudent } = useStudentAuth();
+  const userId = useAuthUserId() ?? "guest";
   const toast = useToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const { activeCampus } = usePublishedCampus();
+  const activeCampusId = activeCampus?.id ?? null;
+  const favoritesScope = JSON.stringify([userId, activeCampusId]);
   const campusBuildings: Building[] = useMemo(() => {
     if (activeCampus) return buildingsFromCampus(activeCampus) as Building[];
     return [];
@@ -65,10 +69,14 @@ export function StudentFavoritesPage() {
   const buildingScope = campusBuildings.map((building) => building.id).join("|");
   const [savedBuildings, setSavedBuildings] = useState<Building[]>([]);
   const [savedCampusPlaceIds, setSavedCampusPlaceIds] = useState<string[]>([]);
+  const [loadedFavoritesScope, setLoadedFavoritesScope] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [search, setSearch] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const removalPendingRef = useRef(false);
+  const favoriteScopeRef = useRef({ userId, campusId: activeCampus?.id ?? null });
+  favoriteScopeRef.current = { userId, campusId: activeCampus?.id ?? null };
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const savedCampusPlaces: CampusMarker[] = useMemo(() => (activeCampus?.markers ?? [])
     .filter((place) => savedCampusPlaceIds.includes(place.id)), [activeCampus?.markers, savedCampusPlaceIds]);
@@ -77,6 +85,11 @@ export function StudentFavoritesPage() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     let mounted = true;
+    setLoading(true);
+    setSavedBuildings([]);
+    setSavedCampusPlaceIds([]);
+    setLoadError(null);
+    setLoadedFavoritesScope(null);
     Promise.all([
       studentAccountService.getSavedBuildings(campusBuildings),
       studentAccountService.getSavedCampusPlaceIdsAsync(),
@@ -86,11 +99,13 @@ export function StudentFavoritesPage() {
           setSavedBuildings(res);
           setSavedCampusPlaceIds(placeIds);
           setLoadError(null);
+          setLoadedFavoritesScope(favoritesScope);
         }
       })
       .catch(() => {
         if (mounted) {
           setLoadError("Favorites are temporarily unavailable.");
+          setLoadedFavoritesScope(favoritesScope);
           toast.error("Favorites could not be loaded");
         }
       })
@@ -100,9 +115,9 @@ export function StudentFavoritesPage() {
     return () => {
       mounted = false;
     };
-  }, [buildingScope, activeCampus?.markers, retryNonce]);
+  }, [buildingScope, activeCampus?.markers, activeCampusId, retryNonce, userId, favoritesScope]);
 
-  if (authLoading || loading) return (
+  if (authLoading || loading || loadedFavoritesScope !== favoritesScope) return (
     <PageTransition>
       <div className="max-w-2xl mx-auto px-5 py-6">
         <SkeletonList count={4} />
@@ -125,43 +140,79 @@ export function StudentFavoritesPage() {
     : savedCampusPlaces;
 
   const remove = async (id: string) => {
+    if (removalPendingRef.current) return;
+    removalPendingRef.current = true;
+    const requestUserId = userId;
+    const requestCampusId = activeCampus?.id ?? null;
+    const stillInRequestScope = () => favoriteScopeRef.current.userId === requestUserId
+      && favoriteScopeRef.current.campusId === requestCampusId;
     const building = savedBuildings.find((b) => b.id === id);
     setRemovingId(id);
     try {
-      await studentAccountService.toggleSaveBuilding(id, activeCampus?.id);
+      await studentAccountService.toggleSaveBuilding(id, requestCampusId ?? undefined);
+      if (!stillInRequestScope()) {
+        setRemovingId(null);
+        removalPendingRef.current = false;
+        return;
+      }
       setTimeout(() => {
+        if (!stillInRequestScope()) {
+          setRemovingId(null);
+          removalPendingRef.current = false;
+          return;
+        }
         setSavedBuildings((prev) => prev.filter((x) => x.id !== id));
         setRemovingId(null);
+        removalPendingRef.current = false;
         toast.success(`${building?.name || "Location"} removed from Favorites`, {
           action: { label: "Undo", onClick: () => {
-            void studentAccountService.toggleSaveBuilding(id, activeCampus?.id).then(() => {
+            if (!stillInRequestScope()) return;
+            void studentAccountService.toggleSaveBuilding(id, requestCampusId ?? undefined).then(() => {
+              if (!stillInRequestScope()) return;
               if (building) setSavedBuildings((prev) => prev.some((item) => item.id === id) ? prev : [building, ...prev]);
-            }).catch(() => toast.error("Favorite could not be restored"));
+            }).catch(() => { if (stillInRequestScope()) toast.error("Favorite could not be restored"); });
           } },
         });
       }, 300);
     } catch {
       setRemovingId(null);
-      toast.error("Favorite could not be removed");
+      removalPendingRef.current = false;
+      if (stillInRequestScope()) toast.error("Favorite could not be removed");
     }
   };
 
   const removeCampusPlace = async (place: CampusMarker) => {
+    if (removalPendingRef.current) return;
+    removalPendingRef.current = true;
+    const requestUserId = userId;
+    const requestCampusId = activeCampus?.id ?? null;
+    const stillInRequestScope = () => favoriteScopeRef.current.userId === requestUserId
+      && favoriteScopeRef.current.campusId === requestCampusId;
     setRemovingId(place.id);
     try {
-      await studentAccountService.toggleSaveCampusPlace(place.id, activeCampus?.id ?? "");
+      await studentAccountService.toggleSaveCampusPlace(place.id, requestCampusId ?? "");
+      if (!stillInRequestScope()) {
+        setRemovingId(null);
+        return;
+      }
       setSavedCampusPlaceIds((current) => current.filter((id) => id !== place.id));
       setRemovingId(null);
+      removalPendingRef.current = false;
       toast.success(`${place.name || "Campus place"} removed from Favorites`, {
         action: { label: "Undo", onClick: () => {
-          void studentAccountService.toggleSaveCampusPlace(place.id, activeCampus?.id ?? "").then(() => {
+          if (!stillInRequestScope()) return;
+          void studentAccountService.toggleSaveCampusPlace(place.id, requestCampusId ?? "").then(() => {
+            if (!stillInRequestScope()) return;
             setSavedCampusPlaceIds((current) => current.includes(place.id) ? current : [place.id, ...current]);
-          }).catch(() => toast.error("Favorite could not be restored"));
+          }).catch(() => { if (stillInRequestScope()) toast.error("Favorite could not be restored"); });
         } },
       });
     } catch {
       setRemovingId(null);
-      toast.error("Favorite could not be removed");
+      removalPendingRef.current = false;
+      if (stillInRequestScope()) toast.error("Favorite could not be removed");
+    } finally {
+      removalPendingRef.current = false;
     }
   };
 
@@ -262,8 +313,8 @@ export function StudentFavoritesPage() {
                         <p className="mt-0.5 text-xs capitalize text-muted-foreground">{place.studentInfo?.gateType?.replaceAll("_", " ") || (place.type === "gate" ? "Gate" : "Landmark")} · {activeCampus?.name || "Campus"}</p>
                       </div>
                       <div className="flex w-full items-center justify-end gap-2 shrink-0 sm:w-auto">
-                        <Link to={`/map?campusId=${encodeURIComponent(activeCampus?.id ?? "")}&destinationPlaceId=${encodeURIComponent(place.id)}`} className="inline-flex h-10 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground"><Navigation className="h-3.5 w-3.5" />Navigate</Link>
-                        <button onClick={() => void removeCampusPlace(place)} aria-label={`Remove ${place.name} from favorites`} className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all" title="Remove from favorites"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <Link to={`/map?campusId=${encodeURIComponent(activeCampus?.id ?? "")}&destinationPlaceId=${encodeURIComponent(place.id)}`} className="inline-flex min-h-11 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><Navigation className="h-3.5 w-3.5" />Navigate</Link>
+                        <button onClick={() => void removeCampusPlace(place)} disabled={removingId !== null} aria-busy={removingId === place.id} aria-label={`Remove ${place.name} from favorites`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60" title="Remove from favorites"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </motion.div>
                   </Reveal>
@@ -316,15 +367,17 @@ export function StudentFavoritesPage() {
                       <div className="flex w-full items-center justify-end gap-2 shrink-0 sm:w-auto">
                         <Link
                           to={`/map?destinationBuildingId=${encodeURIComponent(b.id)}`}
-                          className="inline-flex h-10 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground"
+                          className="inline-flex min-h-11 min-w-28 items-center justify-center gap-1.5 rounded-xl border border-border px-3.5 text-xs font-bold transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         >
                           <Navigation className="h-3.5 w-3.5" />
                           <span>Navigate</span>
                         </Link>
                         <button
                           onClick={() => remove(b.id)}
+                          disabled={removingId !== null}
+                          aria-busy={removingId === b.id}
                           aria-label={`Remove ${b.name} from favorites`}
-                          className="flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all"
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                           title="Remove from favorites"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

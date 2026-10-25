@@ -7,7 +7,7 @@ import { createCampusClone } from "../lib/campusHelpers";
 import { campusService, CampusConflictError, CampusDeletionError, CampusServiceError, userFacingCampusMessage, type CampusCreateInput, type CampusUpdateInput } from "../services/campusService";
 import { campusStructureService } from "../services/campusStructureService";
 import { nextDefaultBuildingIdentity } from "../lib/buildingDefaults";
-import { canPersistCampusStructure, campusHasUnpublishedChanges, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
+import { canPersistCampusStructure, campusHasUnpublishedChanges, campusHasUnsavedChanges, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
 import {
   CampusHome,
   CampusWizard,
@@ -259,7 +259,7 @@ export function AdminMapBuilderPage() {
 
   // ── Campus CRUD ──────────────────────────────────────────────────────────
 
-  const updateCampus = useCallback((updated: Campus, options?: { persistAsBaseline?: boolean }) => {
+  const updateCampus = useCallback((updated: Campus, options?: { persistAsBaseline?: boolean; compareAuthoringContent?: boolean }) => {
     // Editor callbacks normally carry the complete hydrated structure. Keep a
     // defensive boundary here for startup/remount races where a lightweight
     // campus card or partial reconciliation could briefly emit empty arrays.
@@ -274,6 +274,7 @@ export function AdminMapBuilderPage() {
       if (code) reserved.add(code);
     }
     buildingCodeReservationsRef.current.set(updated.id, reserved);
+    campusesRef.current = campusesRef.current.map((campus) => campus.id === safeUpdated.id ? safeUpdated : campus);
     setCampuses((p) => p.map((c) => (c.id === safeUpdated.id ? safeUpdated : c)));
     if (hydratedCampusIdsRef.current.has(safeUpdated.id)) {
       setCanonicalCampuses((p) => ({ ...p, [safeUpdated.id]: safeUpdated }));
@@ -284,14 +285,29 @@ export function AdminMapBuilderPage() {
     const hydrationInProgress = campusHydrationRef.current.campusId === safeUpdated.id
       && campusHydrationRef.current.status !== "ready";
     if (!hydrationInProgress) {
-      const nextRevision = (campusEditRevisionRef.current.get(safeUpdated.id) ?? 0) + 1;
-      campusEditRevisionRef.current.set(safeUpdated.id, nextRevision);
-      if (options?.persistAsBaseline) campusSavedRevisionRef.current.set(safeUpdated.id, nextRevision);
-      if (!options?.persistAsBaseline) {
-        queueDraft(safeUpdated);
+      const savedSnapshot = savedSnapshotsRef.current[safeUpdated.id];
+      const shouldAdvanceAsEdit = options?.persistAsBaseline
+        || options?.compareAuthoringContent !== true
+        || !savedSnapshot
+        || campusHasUnsavedChanges(safeUpdated, savedSnapshot);
+      if (shouldAdvanceAsEdit) {
+        const nextRevision = (campusEditRevisionRef.current.get(safeUpdated.id) ?? 0) + 1;
+        campusEditRevisionRef.current.set(safeUpdated.id, nextRevision);
+        if (options?.persistAsBaseline) campusSavedRevisionRef.current.set(safeUpdated.id, nextRevision);
+        if (!options?.persistAsBaseline) queueDraft(safeUpdated);
+      } else {
+        // Reconciliation, undo/redo, and discard may return to the exact
+        // persisted authoring state. Keep the O(1) dirty path for ordinary
+        // edit commits, but let these infrequent boundaries restore the
+        // revision baseline using the canonical comparison.
+        campusEditRevisionRef.current.set(
+          safeUpdated.id,
+          campusSavedRevisionRef.current.get(safeUpdated.id) ?? 0,
+        );
+        clearDraft(safeUpdated.id);
       }
     }
-  }, [queueDraft]);
+  }, [clearDraft, queueDraft]);
 
   const updateCampusMetadata = useCallback((updated: Campus) => {
     setCampuses((p) => p.map((c) => (c.id === updated.id ? preserveStructureIfMissing(updated, c) : c)));
@@ -310,6 +326,21 @@ export function AdminMapBuilderPage() {
       clearDraft(stored.id);
     }
   }, [campuses, clearDraft]);
+
+  const updatePersistedCampusTimestamps = useCallback((persisted: Campus) => {
+    const mergeTimestamps = (current: Campus) => current.id === persisted.id
+      ? {
+          ...current,
+          updatedAt: persisted.updatedAt ?? current.updatedAt,
+          databaseUpdatedAt: persisted.databaseUpdatedAt ?? current.databaseUpdatedAt,
+        }
+      : current;
+    campusesRef.current = campusesRef.current.map(mergeTimestamps);
+    setCampuses((current) => current.map(mergeTimestamps));
+    setCanonicalCampuses((current) => current[persisted.id]
+      ? { ...current, [persisted.id]: mergeTimestamps(current[persisted.id]) }
+      : current);
+  }, []);
 
   const duplicateCampus = useCallback(async (id: string) => {
     const source = campuses.find((c) => c.id === id);
@@ -644,6 +675,7 @@ export function AdminMapBuilderPage() {
     const previous = savePromisesRef.current.get(campus.id);
     const revision = (saveRevisionRef.current.get(campus.id) ?? 0) + 1;
     saveRevisionRef.current.set(campus.id, revision);
+    const editRevisionAtStart = campusEditRevisionRef.current.get(campus.id) ?? 0;
 
     const operation = (async (): Promise<Campus> => {
     if (previous) await previous.catch(() => undefined);
@@ -710,8 +742,21 @@ export function AdminMapBuilderPage() {
     // A successful save is the canonical baseline for the outer dirty check.
     if (saveRevisionRef.current.get(campus.id) === revision) {
       savedSnapshotsRef.current = { ...savedSnapshotsRef.current, [saved.id]: JSON.stringify(savedWithPreviewCount) };
-      updateCampus(savedWithPreviewCount, { persistAsBaseline: true });
-      clearDraft(saved.id);
+      const latestEditRevision = campusEditRevisionRef.current.get(saved.id) ?? 0;
+      if (latestEditRevision === editRevisionAtStart) {
+        updateCampus(savedWithPreviewCount, { persistAsBaseline: true });
+        clearDraft(saved.id);
+      } else {
+        // The RPC persisted this exact request snapshot, but the editor may
+        // have accepted newer authoring changes while it was in flight. Keep
+        // those changes mounted and dirty against the newly saved baseline.
+        // Refresh only row timestamps needed for the next optimistic metadata
+        // write, then persist the current recovery draft against this baseline.
+        campusSavedRevisionRef.current.set(saved.id, editRevisionAtStart);
+        updatePersistedCampusTimestamps(savedWithPreviewCount);
+        const latestCampus = campusesRef.current.find((candidate) => candidate.id === saved.id);
+        if (latestCampus) queueDraft(latestCampus);
+      }
     }
     return savedWithPreviewCount;
     })();
@@ -721,7 +766,7 @@ export function AdminMapBuilderPage() {
     } finally {
       if (savePromisesRef.current.get(campus.id) === operation) savePromisesRef.current.delete(campus.id);
     }
-  }, [clearDraft, updateCampus]);
+  }, [clearDraft, queueDraft, updateCampus, updatePersistedCampusTimestamps]);
 
   const openStudentPreview = useCallback((campus: Campus, isDirty: boolean) => {
     if (isDirty) {

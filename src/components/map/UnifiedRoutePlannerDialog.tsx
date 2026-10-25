@@ -743,11 +743,11 @@ export function UnifiedRoutePlannerDialog({
       className="flex shrink-0 items-center rounded-full border border-primary/20 bg-card p-0.5">
       <button type="button" aria-label={exploreMode ? "Return to Follow mode" : "Switch to Follow mode"} aria-pressed={!exploreMode}
         onClick={() => onCameraModeChange?.("follow")}
-        className={cn("min-h-8 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+        className={cn("min-h-11 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8",
           !exploreMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>FOLLOW</button>
       <button type="button" aria-label="Switch to Explore mode" aria-pressed={exploreMode}
         onClick={() => onCameraModeChange?.("explore")}
-        className={cn("min-h-8 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+        className={cn("min-h-11 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8",
           exploreMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>EXPLORE</button>
     </div>
   );
@@ -937,7 +937,7 @@ export function UnifiedRoutePlannerDialog({
             <div data-testid="mobile-route-preview-collapsed-summary" className="flex min-h-0 flex-1 flex-col justify-center gap-1 px-3 pb-2">
               {emergencyRouteOverview ? (
                 <>
-                  <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route</p>
+                  <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route preview</p>
                   <p className="shrink-0 truncate text-[10px] font-extrabold text-foreground">From {fromDisplay.label}</p>
                   <p className="shrink-0 truncate text-[10px] font-semibold text-muted-foreground">Destination · {activeDestinationName}</p>
                   {emergencyRoutes.length > 1 && <div data-testid="mobile-emergency-route-overview-choices" className="min-h-0">{emergencyRouteChoiceButtons(true)}</div>}
@@ -945,7 +945,7 @@ export function UnifiedRoutePlannerDialog({
               ) : (
                 <>
                   {mode === "emergency" ? <>
-                    <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route</p>
+                    <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route preview</p>
                     <p className="shrink-0 truncate text-[10px] font-semibold text-muted-foreground">From {fromDisplay.label}</p>
                     <p title={activeDestinationName} className="shrink-0 truncate text-[11px] font-extrabold">{activeDestinationName}</p>
                     {showEmergencyRouteChoices && emergencyRouteChoiceButtons(true)}

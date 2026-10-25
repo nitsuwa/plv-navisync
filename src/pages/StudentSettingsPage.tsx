@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Moon, Sun, Lock, Bell, ChevronDown, Shield, CheckCircle2,
   Sparkles, Monitor, Eye, EyeOff,
@@ -61,7 +61,7 @@ type SettingsSection = "appearance" | "notifications" | "security";
 
 export function StudentSettingsPage() {
   const navigate = useNavigate();
-  const { loading: authLoading, isStudent, username, role, signOut } = useStudentAuth();
+  const { loading: authLoading, isStudent, username, role, signOut, profile } = useStudentAuth();
   const { theme, themePreference, setThemePreference } = useTheme();
   const reducedMotion = useReducedMotion();
   const { success, error: showError } = useToast();
@@ -78,6 +78,9 @@ export function StudentSettingsPage() {
   const [pwSaved, setPwSaved] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSaving, setPwSaving] = useState(false);
+  const preferenceScope = profile?.id ?? "guest";
+  const preferenceScopeRef = useRef(preferenceScope);
+  preferenceScopeRef.current = preferenceScope;
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -87,6 +90,9 @@ export function StudentSettingsPage() {
 
   useEffect(() => {
     let mounted = true;
+    setPreferencesLoading(true);
+    setPreferencesError(null);
+    setPreferences(DEFAULT_STUDENT_PREFERENCES);
     void loadStudentPreferences()
       .then((loaded) => {
         if (!mounted) return;
@@ -101,7 +107,7 @@ export function StudentSettingsPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [preferenceScope]);
 
 
 
@@ -139,6 +145,7 @@ export function StudentSettingsPage() {
   }
 
   const handlePreferenceChange = async (key: keyof StudentNotificationPreferences, value: boolean) => {
+    const requestScope = preferenceScopeRef.current;
     const previous = preferences;
     const next = { ...preferences, [key]: value };
     setPreferences(next);
@@ -146,11 +153,13 @@ export function StudentSettingsPage() {
     setPreferencesError(null);
     try {
       await saveStudentPreferences(next);
-      success("Preferences saved");
+      if (preferenceScopeRef.current === requestScope) success("Preferences saved");
     } catch {
-      setPreferences(previous);
-      setPreferencesError("Could not save this preference. Please try again.");
-      showError("Preference not saved");
+      if (preferenceScopeRef.current === requestScope) {
+        setPreferences(previous);
+        setPreferencesError("Could not save this preference. Please try again.");
+        showError("Preference not saved");
+      }
     } finally {
       setSavingPreferences(false);
     }
@@ -364,9 +373,9 @@ export function StudentSettingsPage() {
                                       onChange={e => { setPwForm(p => ({ ...p, [f.key]: e.target.value })); setPwError(null); }}
                                       placeholder={f.placeholder}
                                       autoComplete={f.key === "current" ? "current-password" : "new-password"}
-                                      className="w-full rounded-xl border border-border/60 bg-input-background px-3 py-2.5 pr-11 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/25"
+                                      className="w-full rounded-xl border border-border/60 bg-input-background px-3 py-2.5 pr-14 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/25"
                                     />
-                                    <button type="button" onClick={() => setPwVisibility((v) => ({ ...v, [f.key]: !v[f.key] }))} aria-label={`${pwVisibility[f.key] ? "Hide" : "Show"} ${f.label.toLowerCase()}`} className="absolute inset-y-0 right-2 inline-flex w-8 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                                    <button type="button" onClick={() => setPwVisibility((v) => ({ ...v, [f.key]: !v[f.key] }))} aria-label={`${pwVisibility[f.key] ? "Hide" : "Show"} ${f.label.toLowerCase()}`} aria-pressed={Boolean(pwVisibility[f.key])} className="absolute right-1 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
                                       {pwVisibility[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                     </button>
                                   </div>

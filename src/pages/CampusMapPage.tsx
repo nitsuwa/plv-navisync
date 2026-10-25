@@ -100,7 +100,7 @@ import type {
   NavigationNode,
 } from "../components/map-builder/types";
 import { canEnterOutdoorBuilding, ReadonlyOutdoorCampusScene } from "../components/map-builder/ReadonlyOutdoorVisuals";
-import { ReadonlyFloorPlanScene, readonlyFloorPlanViewport } from "../components/map-builder/ReadonlyFloorPlanVisuals";
+import { readonlyFloorPlanViewport } from "../components/map-builder/readonlyFloorPlanViewport";
 import { StudentRouteTransitionMarker, studentRouteTransitionViewportFromCamera } from "../components/map/StudentRouteTransitionMarker";
 import { StudentMapModeToggle } from "../components/map/StudentMapControls";
 import { EventPreviewLayer } from "../components/map/EventPreviewLayer";
@@ -124,6 +124,7 @@ function studentRouteTargetPoints(route: PlannedRoute, target: ReturnType<typeof
 
 const LazyStudentCampus3DRenderer = lazy(() => import("../components/map/StudentCampus3DRenderer"));
 const LazyIndoorFloor3DRenderer = lazy(() => import("../components/map/IndoorFloor3DRenderer"));
+const LazyReadonlyFloorPlanScene = lazy(() => import("../components/map-builder/ReadonlyFloorPlanVisuals").then((module) => ({ default: module.ReadonlyFloorPlanScene })));
 const EMPTY_MAP_POINTS: Pt[] = [];
 const EMPTY_FLOOR_FURNITURE: FloorPlan["furniture"] = [];
 const EMPTY_FLOOR_LABELS: FloorPlan["labels"] = [];
@@ -9392,6 +9393,12 @@ const buildingFill = (id: string) =>
               selectedPlaceId={discoverTour.active ? null : selectedCampusPlaceId}
               showEvents={!discoverTour.active && showEventMaps}
               eventVenues={discoverTour.active ? [] : campus3DEventVenues}
+              eventFurniture={!discoverTour.active && showEventMaps && selectedLocationIsVisible && selectedEventLocationData?.location.locationRef.type === "campus"
+                ? selectedEventLocationData.location.eventFurniture
+                : EMPTY_FLOOR_FURNITURE}
+              eventLabels={!discoverTour.active && showEventMaps && selectedLocationIsVisible && selectedEventLocationData?.location.locationRef.type === "campus"
+                ? selectedEventLocationData.location.eventLabels
+                : EMPTY_FLOOR_LABELS}
               selectedEventLocationId={discoverTour.active ? null : currentEventLocationId}
               darkMode={darkMode}
               reducedMotion={reducedMotion}
@@ -9642,7 +9649,8 @@ const buildingFill = (id: string) =>
                     transformOrigin: "center",
                   }}
                 >
-                <ReadonlyFloorPlanScene
+                <Suspense fallback={<text data-testid="student-floor-scene-loading" role="status" aria-label="Loading floor map" x={viewCX} y={viewCY} textAnchor="middle" dominantBaseline="middle" fill="currentColor" fontSize={14}>Loading floor map…</text>}>
+                <LazyReadonlyFloorPlanScene
                   floor={activeFloorPlan}
                   routeOverlay={indoorRouteLineOverlay}
                   floorIndex={activeFloorOrdinal.index}
@@ -9666,6 +9674,7 @@ const buildingFill = (id: string) =>
                   onRoomHoverEnd={handleFloorRoomHoverEnd}
                   onDoorClick={handleStudentFloorDoorClick}
                 />
+                </Suspense>
                 {showEventMaps && isFloorMode && selectedLocationIsVisible && selectedEventOverlay && <EventPreviewLayer events={[selectedEventOverlay]} onSelect={() => {}} />}
                 {/* Indoor navigation path (entrance → active room) */}
                 {visibleIndoorRoute && visibleIndoorRoute.waypoints.length >= 2 && indoorRouteMatchesVisibleFloor && (
@@ -10852,8 +10861,8 @@ const buildingFill = (id: string) =>
             {arrived && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-black text-white" aria-hidden="true">✓</span>}
             <ArrivalSoundToggle enabled={arrivalSound.enabled} onChange={arrivalSound.setEnabled} />
             {navigating && <div role="group" aria-label="Route mode" className="flex shrink-0 rounded-full border border-primary/20 bg-muted/40 p-0.5">
-              <button type="button" aria-label={exploring ? "Return to Follow" : "Follow mode"} aria-pressed={!exploring} onClick={() => { setFollowCameraDetached(false); if (exploring) recenterCurrentRouteStep(); }} className={cn("min-h-8 rounded-full px-2 text-[9px] font-extrabold", !exploring ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>FOLLOW</button>
-              <button type="button" aria-label="Explore route" aria-pressed={exploring} onClick={enterRouteExplore} className={cn("min-h-8 rounded-full px-2 text-[9px] font-extrabold", exploring ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>EXPLORE</button>
+              <button type="button" aria-label={exploring ? "Return to Follow" : "Follow mode"} aria-pressed={!exploring} onClick={() => { setFollowCameraDetached(false); if (exploring) recenterCurrentRouteStep(); }} className={cn("min-h-11 rounded-full px-1.5 text-[10px] font-extrabold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8 lg:px-2 lg:text-[9px]", !exploring ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>FOLLOW</button>
+              <button type="button" aria-label="Explore route" aria-pressed={exploring} onClick={enterRouteExplore} className={cn("min-h-11 rounded-full px-1.5 text-[10px] font-extrabold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8 lg:px-2 lg:text-[9px]", exploring ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>EXPLORE</button>
             </div>}
           </div>
           {navigating && (exploring

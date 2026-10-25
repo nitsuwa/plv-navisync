@@ -106,11 +106,20 @@ vi.mock("../../services/usageAnalyticsService", () => ({
 vi.mock("../../components/map/IndoorFloor3DRenderer", async () => {
   const React = await import("react");
   return {
-    default: ({ floor }: { floor: { id: string; label: string } }) => React.createElement("div", {
-      "data-testid": "student-indoor-floor-3d-renderer",
-      "data-floor-id": floor.id,
-      "aria-label": `${floor.label} 3D map`,
-    }),
+    default: ({ floor, recenterNonce = 0, onRecenterComplete }: {
+      floor: { id: string; label: string };
+      recenterNonce?: number;
+      onRecenterComplete?: (nonce: number) => void;
+    }) => {
+      React.useEffect(() => {
+        if (recenterNonce > 0) onRecenterComplete?.(recenterNonce);
+      }, [onRecenterComplete, recenterNonce]);
+      return React.createElement("div", {
+        "data-testid": "student-indoor-floor-3d-renderer",
+        "data-floor-id": floor.id,
+        "aria-label": `${floor.label} 3D map`,
+      });
+    },
   };
 });
 
@@ -125,6 +134,12 @@ vi.mock("../../services/settingsService", async (importOriginal) => {
 describe("CampusMapPage event overlays", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom's RAF timestamp and Node's global performance clock have different
+    // time origins. CampusMapPage measures its camera tweens with the latter,
+    // so keep this suite's RAF callbacks on the same clock under parallel load.
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+      window.setTimeout(() => callback(performance.now()), 16));
+    vi.stubGlobal("cancelAnimationFrame", (frame: number) => window.clearTimeout(frame));
     settingsMocks.getPublicPlatformSettings.mockResolvedValue({
       defaultCampusId: "",
       defaultLandingPage: "home",
@@ -151,6 +166,14 @@ describe("CampusMapPage event overlays", () => {
     const scale = transform.match(/scale\(([^)]+)\)/)?.[1];
     return scale ? Number(scale) : Number.NaN;
   };
+
+  it("keeps camera animation frame timestamps on the performance clock", async () => {
+    const timestamps = await new Promise<{ frame: number; current: number }>((resolve) => {
+      requestAnimationFrame((frame) => resolve({ frame, current: performance.now() }));
+    });
+
+    expect(Math.abs(timestamps.frame - timestamps.current)).toBeLessThan(20);
+  });
 
   it("renders the initial Student Map with doorway transition state initialized", async () => {
     renderCampusMap({ previewCampus });
@@ -1074,6 +1097,9 @@ describe("CampusMapPage event overlays", () => {
 
     await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toBeInTheDocument());
     expect(screen.getByTestId("collapsed-route-card")).toHaveTextContent("Guided navigation");
+    const routeMode = screen.getByRole("group", { name: "Route mode" });
+    expect(within(routeMode).getByRole("button", { name: "Follow mode" })).toHaveClass("min-h-11", "focus-visible:ring-2");
+    expect(within(routeMode).getByRole("button", { name: "Explore route" })).toHaveClass("min-h-11", "focus-visible:ring-2");
     expect(screen.queryByTestId("route-recenter")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /recenter on (?:current route position|inspected route context)/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/\S/);

@@ -186,6 +186,34 @@ export function StudentHomePage() {
               day: "numeric",
             })}
           </p>
+          <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground">
+            Find campus buildings, locate rooms, and plan your next route.
+          </p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.04 }}
+        >
+          <Link
+            to="/map"
+            aria-label="Open campus map to find a building, room, or route"
+            className="group flex min-h-[88px] items-center gap-3 rounded-2xl border border-primary/20 bg-primary/[0.04] p-4 transition-colors hover:bg-primary/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Compass className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-foreground">Find your next stop</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                Search buildings and rooms, then get directions.
+              </p>
+            </div>
+            <span className="inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground">
+              Open map <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          </Link>
         </motion.div>
 
         {/* ══ QUICK ACTIONS ══ */}
@@ -193,10 +221,9 @@ export function StudentHomePage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.08 }}
-          className="grid grid-cols-4 gap-2"
+          className="grid grid-cols-3 gap-2 sm:gap-3"
         >
           {[
-            { icon: Compass, label: "Navigate", color: "bg-primary/10 text-primary", target: "map" },
             { icon: Building2, label: "Buildings", color: "bg-primary/10 text-primary", target: "buildings" },
             { icon: Bookmark, label: "Saved", color: "bg-green-500/10 text-green-600 dark:text-green-400", target: "saved" },
             { icon: Flag, label: "Report", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400", target: "reports" },
@@ -204,16 +231,12 @@ export function StudentHomePage() {
             const content = (
               <>
                 <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", action.color)}>
-                  <action.icon className="h-4.5 w-4.5" />
+                  <action.icon className="h-4.5 w-4.5" aria-hidden="true" />
                 </div>
-                <span className="text-[10px] font-bold text-muted-foreground">{action.label}</span>
+                <span className="text-xs font-bold text-muted-foreground">{action.label}</span>
               </>
             );
-            const className = "flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-card border border-border/40 hover:border-primary/20 hover:bg-primary/5 transition-all";
-
-            if (action.target === "map") {
-              return <Link key={action.target} to="/map" className={className}>{content}</Link>;
-            }
+            const className = "flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-2xl border border-border/50 bg-card px-2 py-3 transition-colors hover:border-primary/25 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
             return (
               <button
                 key={action.target}

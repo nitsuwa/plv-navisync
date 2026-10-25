@@ -20,6 +20,7 @@ import {
 } from "../services/reportService";
 import type { Tables } from "../types/database.generated";
 import { downloadCsv } from "../lib/exporters";
+import { formatManilaDateStamp, toAdminReportExportRows } from "../lib/adminCsvExports";
 
 const CampusMapPage = lazy(() => import("./CampusMapPage").then(module => ({ default: module.CampusMapPage })));
 
@@ -56,14 +57,6 @@ function formatDateTime(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function formatExportDateTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, {
-    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-  });
 }
 
 function friendlyAction(action: string): string {
@@ -454,20 +447,13 @@ export function AdminReportsPage() {
 
   /** Export the currently filtered reports as a readable CSV. */
   const exportReports = () => {
-    const rows = reports.map((r) => ({
-      "Report Title": r.title,
-      Description: r.description,
-      "Issue Type": formatCategoryLabel(r.category),
-      Priority: formatCategoryLabel(r.priority),
-      Status: STATUS_CONFIG[r.status as ReportStatus]?.label ?? formatCategoryLabel(r.status),
-      "Building / Location": r.campusPlaceName ?? r.buildingName ?? r.buildingId ?? "Campus",
-      Floor: r.floorLabel ?? "",
-      Room: r.roomName ?? "",
-      "Submitted At": formatExportDateTime(r.createdAt),
-      Reporter: r.reporterName ?? r.reporterEmail ?? r.reporterId,
-    }));
-    const stamp = new Date().toISOString().slice(0, 10);
-    downloadCsv(rows, `reports-${stamp}.csv`);
+    try {
+      const rows = toAdminReportExportRows(reports);
+      const stamp = formatManilaDateStamp();
+      downloadCsv(rows, `PLV_NaviSync_Reports_${stamp}.csv`);
+    } catch {
+      toast.error("Export failed", "The reports CSV could not be generated. Please try again.");
+    }
   };
 
   const counts: Record<string, number> = {
@@ -521,8 +507,10 @@ export function AdminReportsPage() {
         <div className="flex items-center gap-2">
           <button onClick={exportReports}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-            title="Download the current list as CSV" disabled={reports.length === 0}>
-            <Download className="h-3.5 w-3.5" /> CSV
+            title="Export the currently loaded filtered reports as CSV"
+            aria-label="Export currently loaded filtered reports as CSV"
+            disabled={reports.length === 0}>
+            <Download className="h-3.5 w-3.5" /> Export CSV
           </button>
         </div>
       </div>

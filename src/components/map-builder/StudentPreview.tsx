@@ -5,7 +5,7 @@ import { CampusMapPage } from "../../pages/CampusMapPage";
 import type { Campus } from "./types";
 import type { ValidationIssue } from "./ValidationErrorsDialog";
 import { cn } from "../../lib/utils";
-import { CampusPublicationOutcomeUncertainError } from "../../services/campusService";
+import { CampusPublicationOutcomeUncertainError, CampusPublicationTimeoutError } from "../../services/campusService";
 
 interface StudentPreviewProps {
   campus: Campus;
@@ -25,10 +25,12 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<{ title: string; message: string } | null>(null);
   const [publishOutcomeUncertain, setPublishOutcomeUncertain] = useState(false);
-  const [warningsExpanded, setWarningsExpanded] = useState(true);
+  const [warningsExpanded, setWarningsExpanded] = useState(false);
   const publishingRef = useRef(false);
+  const publishDialogRef = useRef<HTMLDivElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setPreparing(false));
@@ -37,12 +39,25 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
 
   const blockers = useMemo(() => validationIssues.filter((issue) => issue.severity === "error"), [validationIssues]);
   const warnings = useMemo(() => validationIssues.filter((issue) => issue.severity === "warning"), [validationIssues]);
+  useEffect(() => {
+    if (confirmOpen) cancelButtonRef.current?.focus();
+  }, [confirmOpen]);
+
   const issueLocation = (issue: ValidationIssue) => {
     const building = issue.buildingId ? campus.buildings.find((item) => item.id === issue.buildingId) : undefined;
     const floor = building && issue.floorId ? building.floors.find((item) => item.id === issue.floorId) : undefined;
     const room = floor && issue.roomId ? floor.rooms.find((item) => item.id === issue.roomId) : undefined;
     return [building?.name || building?.code, floor?.label, room?.name].filter(Boolean).join(" · ") || null;
   };
+  const warningTitle = (issue: ValidationIssue) => {
+    if (issue.type === "no_emergency_exit_configured") {
+      return `${issueLocation(issue) || "Building"}: No dedicated emergency exit`;
+    }
+    return issue.message.length > 120 ? `${issue.message.slice(0, 117).trimEnd()}…` : issue.message;
+  };
+  const warningDescription = (issue: ValidationIssue) => issue.type === "no_emergency_exit_configured"
+    ? "Emergency routes may use a general entrance instead."
+    : issue.message;
   const previewLabel = campus.lifecycleStatus === "coming_soon"
     ? "Coming Soon Preview"
     : campus.publishStatus === "published" ? "Published Map Preview" : "Draft Preview";
@@ -58,8 +73,22 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
       setPublished(true);
       setPublishOutcomeUncertain(false);
     } catch (error) {
-      setPublishError(error instanceof Error ? error.message : "Publishing failed. Try again.");
-      setPublishOutcomeUncertain(error instanceof CampusPublicationOutcomeUncertainError);
+      console.error("[StudentPreview] Campus publication failed", error);
+      const uncertain = error instanceof CampusPublicationOutcomeUncertainError
+        || (error instanceof CampusPublicationTimeoutError && !error.confirmedNotPublished);
+      setPublishOutcomeUncertain(uncertain);
+      if (error instanceof CampusPublicationTimeoutError) {
+        setPublishError({ title: "Publishing took too long", message: error.message });
+      } else if (error instanceof CampusPublicationOutcomeUncertainError) {
+        setPublishError({ title: error.timedOut ? "Publishing took too long" : "Publication status is unclear", message: error.message });
+      } else if (error instanceof Error && error.message.startsWith("Campus isn't ready to publish")) {
+        setPublishError({ title: "Campus isn't ready to publish", message: error.message });
+      } else {
+        setPublishError({
+          title: "Campus couldn't be published",
+          message: "We couldn't publish this saved version. Your draft remains unchanged. Review the issue and try again.",
+        });
+      }
     } finally {
       publishingRef.current = false;
       setPublishing(false);
@@ -142,31 +171,88 @@ export function StudentPreview({ campus, validationIssues, onBack, onPublish, on
 
       <AnimatePresence>
         {confirmOpen && !published && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[360] flex items-center justify-center bg-black/35 p-4" onClick={() => { if (!publishing && !publishOutcomeUncertain) setConfirmOpen(false); }}>
-            <motion.div initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Publish campus">
-              <div className="flex items-start gap-3">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[360] flex items-center justify-center overflow-y-auto bg-black/35 p-3 sm:p-4" onClick={() => { if (!publishing && !publishOutcomeUncertain) setConfirmOpen(false); }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !publishing && !publishOutcomeUncertain) {
+                  event.stopPropagation();
+                  setConfirmOpen(false);
+                  return;
+                }
+                if (event.key !== "Tab") return;
+                const focusable = publishDialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex='-1'])");
+                if (!focusable?.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                  event.preventDefault();
+                  last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                  event.preventDefault();
+                  first.focus();
+                }
+              }}
+              ref={publishDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="publish-campus-dialog-title"
+              aria-busy={publishing}
+            >
+              <div className="flex shrink-0 items-start gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
                 <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", blockers.length ? "bg-red-100 text-red-600" : warnings.length ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600")}>
-                  {blockers.length ? <AlertTriangle className="h-4 w-4" /> : <Globe2 className="h-4 w-4" />}
+                  {blockers.length || warnings.length ? <AlertTriangle className="h-4 w-4" aria-hidden="true" /> : <Globe2 className="h-4 w-4" aria-hidden="true" />}
                 </div>
-                <div className="min-w-0 flex-1"><h2 className="text-base font-extrabold text-foreground">{publishing ? "Publishing Campus…" : blockers.length ? "Campus isn’t ready to publish yet" : "Publish Campus?"}</h2><p className="mt-0.5 text-xs text-muted-foreground">{publishing ? "Publishing the saved version for students. Please wait for server confirmation." : `Students will see this saved version of ${campus.name}.`}</p></div>
-                {!publishing && !publishOutcomeUncertain && <button onClick={() => setConfirmOpen(false)} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" aria-label="Close publish dialog"><X className="h-4 w-4" /></button>}
+                <div className="min-w-0 flex-1">
+                  <h2 id="publish-campus-dialog-title" className="text-base font-extrabold text-foreground">
+                    {publishing ? "Publishing Campus…" : publishError?.title ?? (blockers.length ? "Campus isn’t ready to publish yet" : "Publish Campus?")}
+                  </h2>
+                  <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                    {publishing ? "Publishing the saved version for students. Please wait for server confirmation." : `Students will see this saved version of ${campus.name}.`}
+                  </p>
+                </div>
+                {!publishing && !publishOutcomeUncertain && <button onClick={() => setConfirmOpen(false)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" aria-label="Close publish dialog"><X className="h-4 w-4" /></button>}
               </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 pt-4 sm:px-5">
               {(blockers.length > 0 || warnings.length > 0) && (
-                <div className="mt-4 space-y-2 rounded-xl border border-border/70 bg-muted/20 p-3">
-                  {blockers.length > 0 && <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-red-600">What needs attention ({blockers.length})</p><ul className="mt-1.5 max-h-32 overflow-y-auto space-y-2 text-xs text-muted-foreground">{blockers.slice(0, 6).map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-red-200/70 bg-background/60 px-2.5 py-2"><span className="mr-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-red-700">Error</span>{issue.message}{issueLocation(issue) && <span className="mt-1 block text-[10px]">{issueLocation(issue)}</span>}</li>)}</ul>{blockers.length > 6 && <p className="mt-1 text-[10px] text-muted-foreground">And {blockers.length - 6} more blocking issues.</p>}</div>}
+                <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3 sm:p-4">
+                  {blockers.length > 0 && <div><p className="text-xs font-bold text-red-700 dark:text-red-300">Publishing blocked · {blockers.length} {blockers.length === 1 ? "issue" : "issues"}</p><ul className="mt-2 max-h-32 space-y-2 overflow-y-auto text-sm text-muted-foreground">{blockers.slice(0, 6).map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-red-200/70 bg-background/60 px-3 py-2"><span className="mb-1 block text-[10px] font-extrabold uppercase tracking-wide text-red-700">Blocking error</span>{issue.message}{issueLocation(issue) && <span className="mt-1 block text-xs text-muted-foreground">{issueLocation(issue)}</span>}</li>)}</ul>{blockers.length > 6 && <p className="mt-1 text-xs text-muted-foreground">And {blockers.length - 6} more blocking issues.</p>}</div>}
                   {warnings.length > 0 && <section>
-                    <button type="button" onClick={() => setWarningsExpanded((expanded) => !expanded)} aria-expanded={warningsExpanded} className="flex w-full items-center justify-between text-left">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Warnings ({warnings.length})</span>
-                      <span className="text-[10px] font-bold text-muted-foreground">{warningsExpanded ? "Hide details" : "Show details"}</span>
-                    </button>
-                    <p className="mt-1 text-xs text-muted-foreground">Warnings do not prevent publishing, but review each finding before continuing.</p>
-                    {warningsExpanded && <ul className="mt-2 max-h-36 overflow-y-auto space-y-2" aria-label="Publication warnings">{warnings.map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-amber-200/70 bg-background/60 px-2.5 py-2 text-xs text-foreground"><span className="mr-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-amber-800">Warning</span>{issue.message}{issueLocation(issue) && <span className="mt-1 block text-[10px] text-muted-foreground">{issueLocation(issue)}</span>}</li>)}</ul>}
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-amber-800 dark:text-amber-300">{warnings.length} non-blocking {warnings.length === 1 ? "warning" : "warnings"}</p>
+                        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">Review these findings before continuing. They do not prevent publishing.</p>
+                      </div>
+                      <button type="button" onClick={() => setWarningsExpanded((expanded) => !expanded)} aria-expanded={warningsExpanded} className="shrink-0 rounded-md px-1 py-1 text-xs font-bold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                        {warningsExpanded ? "Hide details" : "View details"}
+                      </button>
+                    </div>
+                    {warningsExpanded && <ul className="mt-3 space-y-2" aria-label="Publication warning details">{warnings.map((issue, index) => <li key={`${issue.type}-${index}`} className="rounded-lg border border-amber-200/70 bg-background/60 px-3 py-2.5 text-sm text-foreground dark:border-amber-800/60">
+                      <p className="font-semibold leading-5">{warningTitle(issue)}</p>
+                      {issue.type === "no_emergency_exit_configured" && <p className="mt-1 text-xs leading-5 text-muted-foreground">{warningDescription(issue)}</p>}
+                      {issue.type !== "no_emergency_exit_configured" && issueLocation(issue) && <p className="mt-1 text-xs leading-5 text-muted-foreground">{issueLocation(issue)}</p>}
+                      {(issue.type === "no_emergency_exit_configured" || warningTitle(issue) !== issue.message) && <details className="mt-2 border-t border-border/70 pt-2 text-xs">
+                        <summary className="cursor-pointer font-semibold text-muted-foreground">Technical details</summary>
+                        <p className="mt-2 break-words leading-5 text-muted-foreground">{issue.message}{issueLocation(issue) && ` · ${issueLocation(issue)}`}</p>
+                      </details>}
+                    </li>)}</ul>}
                   </section>}
                 </div>
               )}
-              {publishError && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300" role="alert">{publishError}</p>}
-              {publishing && <div className="mt-4 flex items-center gap-2 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2.5 text-xs font-semibold text-primary" role="status" aria-live="polite"><Loader2 className="h-4 w-4 animate-spin" />Publishing campus data…</div>}
-              <div className="mt-5 flex justify-end gap-2">{!publishing && !publishOutcomeUncertain && <button onClick={() => setConfirmOpen(false)} className="h-9 rounded-lg border border-border px-3 text-xs font-bold text-foreground hover:bg-muted">Cancel</button>}<button onClick={submitPublish} disabled={publishing || blockers.length > 0} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{publishing ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Publishing…</> : publishOutcomeUncertain ? "Check status & retry" : warnings.length > 0 ? "Publish Anyway" : "Publish"}</button></div>
+              {publishError && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm leading-5 text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200" role="alert">{publishError.message}</p>}
+              {publishing && <div className="mt-3 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm font-semibold text-primary" role="status" aria-live="polite"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Publishing saved campus data…</div>}
+              </div>
+              <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-4 py-3 sm:flex-row sm:justify-end sm:px-5">
+                {!publishing && !publishOutcomeUncertain && <button ref={cancelButtonRef} onClick={() => setConfirmOpen(false)} className="inline-flex h-10 items-center justify-center rounded-lg border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Cancel</button>}
+                <button onClick={submitPublish} disabled={publishing || blockers.length > 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card">
+                  {publishing ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Publishing…</> : publishOutcomeUncertain ? "Verify status & retry" : publishError ? "Retry Publish" : warnings.length > 0 ? "Publish Anyway" : "Publish"}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

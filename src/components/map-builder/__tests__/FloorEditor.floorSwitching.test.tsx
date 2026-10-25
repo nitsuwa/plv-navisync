@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useState } from "react";
 import { FloorEditor } from "../FloorEditor";
 import type { Campus } from "../types";
+import { campusDraftsEqual } from "../../../lib/campusDraftPersistence";
 
 function makeCampus(initialWall = false): Campus {
   return {
@@ -255,13 +256,15 @@ describe("FloorEditor floor switching", () => {
 
     drawWall(container);
     expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     await waitFor(() => {
       expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByRole("button", { name: "Redo" }) as HTMLButtonElement).disabled).toBe(true);
     });
+    await screen.findByText("Floor Changes Saved");
+    await waitFor(() => expect(screen.queryByText("Floor Changes Saved")).toBeNull(), { timeout: 3000 });
     drawWall(container, 220, 100, 300, 100);
     expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
@@ -286,28 +289,28 @@ describe("FloorEditor floor switching", () => {
     );
 
     drawWall(container);
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(screen.getByTestId("remount-floor"));
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
     });
 
     drawWall(container, 220, 80, 300, 80);
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^Save$/i }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(false);
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
-    expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(screen.getByTestId("remount-floor"));
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
     });
   });
 
@@ -336,21 +339,22 @@ describe("FloorEditor floor switching", () => {
     );
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
     });
     expect(floorOne(latestCampus!).stairs).toHaveLength(1);
     expect(floorOne(latestCampus!).stairs[0].exteriorEmergencyStairId).toBe("stair-1");
 
     fireEvent.click(screen.getByTestId("remount-floor"));
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /^(Save|Saved)$/i }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Save floor draft" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
     });
   });
 
   it("does not treat selection-only changes or clean panning as unsaved floor edits", () => {
+    const initialCampus = makeCampus(true);
     const { container } = render(
-      <Harness initialCampus={makeCampus(true)} onCampusChange={(c) => { latestCampus = c; }} onFloorChange={(id) => { activeFloorId = id; }} />
+      <Harness initialCampus={initialCampus} onCampusChange={(c) => { latestCampus = c; }} onFloorChange={(id) => { activeFloorId = id; }} />
     );
     const svg = stubSvgRect(container);
     const wall = container.querySelector('g line[stroke="#64748b"]')!.closest("g")!;
@@ -367,7 +371,7 @@ describe("FloorEditor floor switching", () => {
 
     expect(activeFloorId).toBe("f2");
     expect(screen.queryByText("Unsaved Floor Changes")).toBeNull();
-    expect(latestCampus).toBeNull();
+    if (latestCampus) expect(campusDraftsEqual(latestCampus, initialCampus)).toBe(true);
   });
 
   it("clears incomplete drawing state while switching floors", () => {
@@ -400,7 +404,7 @@ describe("FloorEditor floor switching", () => {
     );
 
     drawWall(container);
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save floor draft" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(floorOne(latestCampus!).walls).toHaveLength(1);
 

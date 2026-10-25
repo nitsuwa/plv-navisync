@@ -117,7 +117,7 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
       )}
       {isGate && showGateQR && <CampusGateQR gate={place} campusId={campusId} locationId={qrLocationId || place.navNodeId || place.id} />}
       {!canRouteTo && !canStartAt && showSecondary && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
-      {!mobile && schedule && <p className="text-[11px] text-muted-foreground"><span className="font-bold text-foreground">Hours</span> · {schedule}</p>}
+      {!mobile && schedule && <p className="text-[11px] text-muted-foreground"><span className="font-bold text-foreground">Operating hours</span> · {schedule}</p>}
     </div>
   );
 

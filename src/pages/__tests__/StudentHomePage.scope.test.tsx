@@ -51,6 +51,11 @@ describe("StudentHomePage in-scope content", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
+    expect(screen.getByText("Find campus buildings, locate rooms, and plan your next route.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open campus map to find a building, room, or route" })).toHaveAttribute("href", "/map");
+    expect(screen.getByRole("button", { name: "Buildings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument();
     expect(screen.queryByText("Today's Schedule")).not.toBeInTheDocument();
     expect(screen.queryByText("NEXT CLASS")).not.toBeInTheDocument();
     expect(screen.queryByText("All classes done!")).not.toBeInTheDocument();

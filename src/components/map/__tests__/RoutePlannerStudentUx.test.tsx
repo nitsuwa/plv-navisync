@@ -164,6 +164,8 @@ describe("RoutePlannerDialog student accessibility", () => {
     // Obvious FOLLOW | EXPLORE segmented control with a clearly active state.
     expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toHaveClass("min-h-11", "focus-visible:ring-2");
+    expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveClass("min-h-11", "focus-visible:ring-2");
     // Seeking while playing is allowed; the page pauses and retargets its
     // canonical playback cursor atomically in the seek handler.
     expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();

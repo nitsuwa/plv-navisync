@@ -660,6 +660,21 @@ export async function listCampusVersions(campusId: string): Promise<CampusVersio
   return data ?? [];
 }
 
+async function nextCampusVersionNumber(campusId: string): Promise<number> {
+  // Publication only needs the newest sequence number. Selecting every version
+  // also fetched each full JSONB snapshot, even though none of those snapshots
+  // were used here.
+  const { data, error } = await getSupabase()
+    .from("campus_versions")
+    .select("version_number")
+    .eq("campus_id", campusId)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  assertOk(error, "load latest campus version number");
+  return (data?.version_number ?? 0) + 1;
+}
+
 const CAMPUS_STORAGE_BUCKETS = ["campus-images", "floor-plans"] as const;
 const STORAGE_LIST_PAGE_SIZE = 100;
 const STORAGE_REMOVE_BATCH_SIZE = 1000;
@@ -916,18 +931,52 @@ export async function uploadCampusImage(campusId: string, kind: "logo" | "overvi
 export class CampusPublicationOutcomeUncertainError extends Error {
   readonly campusId: string;
   readonly versionId: string;
+  readonly timedOut: boolean;
+  readonly originalError?: unknown;
 
-  constructor(campusId: string, versionId: string) {
-    super("The publication request may have completed, but its status could not be confirmed. Check the connection and retry; the campus status will be checked before another version is published.");
+  constructor(campusId: string, versionId: string, timedOut = false, originalError?: unknown) {
+    super("We couldn't confirm whether this campus was published. Check its publishing status before trying again.");
     this.name = "CampusPublicationOutcomeUncertainError";
     this.campusId = campusId;
     this.versionId = versionId;
+    this.timedOut = timedOut;
+    this.originalError = originalError;
   }
+}
+
+export class CampusPublicationTimeoutError extends Error {
+  readonly operation: string;
+  readonly confirmedNotPublished: boolean;
+  readonly originalError: unknown;
+
+  constructor(operation: string, confirmedNotPublished: boolean, originalError: unknown) {
+    super(confirmedNotPublished
+      ? "Publishing took too long. We confirmed this version was not published. Your saved draft is unchanged, and you can retry."
+      : "Publishing took too long. We couldn't confirm whether this campus was published. Check its publishing status before trying again.");
+    this.name = "CampusPublicationTimeoutError";
+    this.operation = operation;
+    this.confirmedNotPublished = confirmedNotPublished;
+    this.originalError = originalError;
+  }
+}
+
+function isStatementTimeout(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; message?: unknown };
+  return value.code === "57014"
+    || (typeof value.message === "string" && /canceling statement due to statement timeout|statement timeout/i.test(value.message));
+}
+
+function publicationErrorForTimeout(error: unknown, operation: string, confirmedNotPublished = true): unknown {
+  return isStatementTimeout(error)
+    ? new CampusPublicationTimeoutError(operation, confirmedNotPublished, error)
+    : error;
 }
 
 interface UncertainPublicationAttempt {
   versionId: string;
   campus: Campus;
+  timedOut?: boolean;
 }
 
 const publicationOperations = new Map<string, Promise<Campus>>();
@@ -959,19 +1008,33 @@ async function performCampusPublication(
       ? `Campus isn't ready to publish yet. ${reasons.join(" ")}`
       : "Fix the blocking validation issues before publishing this campus.");
   }
-  const userId = await requireCurrentUserId();
+  let userId: string;
+  try {
+    userId = await requireCurrentUserId();
+  } catch (error) {
+    throw publicationErrorForTimeout(error, "verify administrator session");
+  }
 
   // If the last response was lost and even its status lookup failed, reconcile
   // that exact version before constructing or publishing another snapshot.
   const uncertainAttempt = uncertainPublicationAttempts.get(campus.id);
   if (uncertainAttempt) {
-    const reconciled = await reconcilePublication(campus.id, uncertainAttempt.versionId);
+    let reconciled: Awaited<ReturnType<typeof reconcilePublication>>;
+    try {
+      reconciled = await reconcilePublication(campus.id, uncertainAttempt.versionId);
+    } catch (statusError) {
+      throw new CampusPublicationOutcomeUncertainError(campus.id, uncertainAttempt.versionId, uncertainAttempt.timedOut, statusError);
+    }
     uncertainPublicationAttempts.delete(campus.id);
     if (reconciled) return campusWithPublishedState(uncertainAttempt.campus, reconciled.published_at);
   }
 
-  const existingVersions = await listCampusVersions(campus.id);
-  const nextVersion = existingVersions.reduce((max, version) => Math.max(max, version.version_number), 0) + 1;
+  let nextVersion: number;
+  try {
+    nextVersion = await nextCampusVersionNumber(campus.id);
+  } catch (error) {
+    throw publicationErrorForTimeout(error, "load the latest campus version");
+  }
   const eventFreeCampus = { ...campus, eventOverlays: [] };
   const snapshot = {
     version: 1,
@@ -983,36 +1046,46 @@ async function performCampusPublication(
   const score = validation.total > 0
     ? Math.round((passed / validation.total) * 100)
     : 100;
-  const { data: version, error: versionError } = await getSupabase()
-    .from("campus_versions")
-    .insert({
-      campus_id: campus.id,
-      version_number: nextVersion,
-      state: "draft",
-      snapshot,
-      validation_score: score,
-      change_summary: "Published from Admin Student Preview",
-      created_by: userId,
-    })
-    .select("id")
-    .single();
-  assertOk(versionError, "create campus publish version");
+  let version: { id: string } | null;
+  try {
+    const result = await getSupabase()
+      .from("campus_versions")
+      .insert({
+        campus_id: campus.id,
+        version_number: nextVersion,
+        state: "draft",
+        snapshot,
+        validation_score: score,
+        change_summary: "Published from Admin Student Preview",
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    assertOk(result.error, "create campus publish version");
+    version = result.data;
+  } catch (error) {
+    throw publicationErrorForTimeout(error, "create the campus version");
+  }
   if (!version?.id) throw new Error("The publish version was not created.");
 
   const status = warnings > 0 ? "warning" : "passed";
-  const { error: validationError } = await getSupabase()
-    .from("validation_runs")
-    .insert({
-      campus_id: campus.id,
-      campus_version_id: version.id,
-      status,
-      score,
-      errors_count: validation.errors,
-      warnings_count: warnings,
-      passed_count: passed,
-      run_by: userId,
-    });
-  assertOk(validationError, "record campus publish validation");
+  try {
+    const { error: validationError } = await getSupabase()
+      .from("validation_runs")
+      .insert({
+        campus_id: campus.id,
+        campus_version_id: version.id,
+        status,
+        score,
+        errors_count: validation.errors,
+        warnings_count: warnings,
+        passed_count: passed,
+        run_by: userId,
+      });
+    assertOk(validationError, "record campus publish validation");
+  } catch (error) {
+    throw publicationErrorForTimeout(error, "record publication validation");
+  }
 
   let publishedId: unknown;
   let publishError: unknown;
@@ -1034,11 +1107,14 @@ async function performCampusPublication(
     let reconciled;
     try {
       reconciled = await reconcilePublication(campus.id, version.id);
-    } catch {
-      uncertainPublicationAttempts.set(campus.id, { versionId: version.id, campus });
-      throw new CampusPublicationOutcomeUncertainError(campus.id, version.id);
+    } catch (statusError) {
+      uncertainPublicationAttempts.set(campus.id, { versionId: version.id, campus, timedOut: isStatementTimeout(publishError) });
+      throw new CampusPublicationOutcomeUncertainError(campus.id, version.id, isStatementTimeout(publishError), { publishError, statusError });
     }
     if (reconciled) return campusWithPublishedState(campus, reconciled.published_at);
+    if (isStatementTimeout(publishError)) {
+      throw new CampusPublicationTimeoutError("publish campus version", true, publishError);
+    }
     if (publishError instanceof Error) throw publishError;
     if (publishError) assertOk(publishError as SupabaseErrorLike, "publish campus version");
     throw new Error("The campus publication was not confirmed. Refresh the campus status before trying again.");
