@@ -1,4 +1,6 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
+import fs from 'fs'
+import { createHash } from 'crypto'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -13,6 +15,34 @@ function figmaAssetResolver() {
         const filename = id.replace('figma:asset/', '')
         return path.resolve(__dirname, 'src/assets', filename)
       }
+    },
+  }
+}
+
+// Stamps public/sw.js with a per-build id and the hashed assets index.html
+// loads up front, so the installed app shell opens offline and each deploy
+// gets fresh cache buckets without a manual version bump.
+function pwaServiceWorkerPlugin(): Plugin {
+  let outDir = 'dist'
+  return {
+    name: 'plv-pwa-service-worker',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
+    closeBundle() {
+      const swPath = path.join(outDir, 'sw.js')
+      const indexPath = path.join(outDir, 'index.html')
+      if (!fs.existsSync(swPath) || !fs.existsSync(indexPath)) return
+      const html = fs.readFileSync(indexPath, 'utf8')
+      const assets = [...new Set(
+        [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]),
+      )].sort()
+      const buildId = createHash('sha256').update(html).digest('hex').slice(0, 12)
+      const source = fs.readFileSync(swPath, 'utf8')
+        .replace('"__PLV_BUILD_ID__"', JSON.stringify(buildId))
+        .replace('/* __PLV_PRECACHE_ASSETS__ */ []', JSON.stringify(assets))
+      fs.writeFileSync(swPath, source)
     },
   }
 }
@@ -61,6 +91,7 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     figmaAssetResolver(),
+    pwaServiceWorkerPlugin(),
     // The React and Tailwind plugins are both required for Make, even if
     // Tailwind is not being actively used – do not remove them
     react(),

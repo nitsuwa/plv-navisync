@@ -2,6 +2,8 @@ import { getSupabase } from "../lib/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "../types/database.generated";
 import { logActivity } from "./activityLogService";
+import { REOPEN_REASON_MIN_LENGTH, validateTransition } from "../lib/reportWorkflow";
+import { STUDENT_REPORT_SUBMITTED_EVENT } from "../lib/studentReportNotifications";
 
 export type ReportRow = Tables<"reports">;
 
@@ -364,30 +366,89 @@ export async function listAllReports(filters: ReportFilters = {}): Promise<Issue
   return reports;
 }
 
-/** Advance a report through the admin workflow and append an audit entry. */
+/** PostgREST's "function not found" — the workflow migration isn't applied yet. */
+function isMissingRpc(error: unknown, name: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  return candidate.code === "PGRST202"
+    || (typeof candidate.message === "string" && candidate.message.includes(name) && candidate.message.toLowerCase().includes("could not find"));
+}
+
+/**
+ * Advance a report through the admin workflow. The database function
+ * `transition_report` enforces the allowed steps and required reasons and
+ * records the reason in the reporter-visible history.
+ *
+ * `from` (the report's current status) lets the client explain a refused step
+ * before calling the server.
+ */
 export async function updateReportStatus(
   id: string,
   status: ReportStatus,
-  resolutionNotes?: string
+  note?: string,
+  from?: ReportStatus,
 ): Promise<void> {
   const supabase = getSupabase();
-  if (status === "resolved" && !resolutionNotes?.trim()) throw new Error("Resolution notes are required.");
-  const updates: TablesUpdate<"reports"> = {
-    status,
-    updated_at: new Date().toISOString(),
-  };
-  updates.resolved_at = status === "resolved" ? new Date().toISOString() : null;
-  if (resolutionNotes !== undefined) updates.resolution_notes = resolutionNotes || null;
+  const cleanNote = note?.trim() ?? "";
+  if (from) {
+    const problem = validateTransition(from, status, cleanNote);
+    if (problem) throw new Error(problem);
+  }
+  if ((status === "resolved" || status === "rejected") && !cleanNote) {
+    throw new Error(status === "resolved" ? "Resolution notes are required." : "A dismissal reason is required.");
+  }
 
-  const { data, error } = await supabase.from("reports").update(updates).eq("id", id).select("id").single();
-  if (error || !data) throw new Error(error?.message || "Report not found or update not permitted.");
+  // `transition_report` is newer than the generated client types.
+  const rpc = supabase.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
+  const { error: rpcError } = await rpc.call(supabase, "transition_report", {
+    p_report_id: id,
+    p_status: status,
+    p_note: cleanNote || null,
+  });
+
+  if (rpcError && !isMissingRpc(rpcError, "transition_report")) {
+    throw new Error(rpcError.message || "The report status could not be changed.");
+  }
+
+  if (rpcError) {
+    // Legacy path until migration 20261026120000 is applied: the client-side
+    // checks above are the only guard here.
+    const updates: TablesUpdate<"reports"> = {
+      status,
+      updated_at: new Date().toISOString(),
+      resolved_at: status === "resolved" ? new Date().toISOString() : null,
+    };
+    if (status === "resolved" || status === "rejected") updates.resolution_notes = cleanNote;
+    else if (from === "resolved" || from === "rejected") updates.resolution_notes = null;
+    const { data, error } = await supabase.from("reports").update(updates).eq("id", id).select("id").single();
+    if (error || !data) throw new Error(error?.message || "Report not found or update not permitted.");
+  }
 
   await logActivity({
     action: `report.${status}`,
     entityType: "report",
     entityId: id,
-    metadata: resolutionNotes ? { resolutionNotes } : null,
+    metadata: cleanNote ? { note: cleanNote } : null,
   });
+}
+
+/**
+ * Reporter: reopen your own resolved or dismissed report because the problem
+ * is still there. The database limits this to twice, within 30 days.
+ */
+export async function reopenOwnReport(id: string, reason: string): Promise<void> {
+  const clean = reason.trim();
+  if (clean.length < REOPEN_REASON_MIN_LENGTH) {
+    throw new Error(`Tell us what is still wrong in at least ${REOPEN_REASON_MIN_LENGTH} characters.`);
+  }
+  const supabase = getSupabase();
+  const rpc = supabase.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
+  const { error } = await rpc.call(supabase, "reopen_own_report", { p_report_id: id, p_reason: clean });
+  if (error) {
+    if (isMissingRpc(error, "reopen_own_report")) throw new Error("Reopening reports isn't available yet. Please submit a new report.");
+    throw new Error(error.message || "The report could not be reopened.");
+  }
+  window.dispatchEvent(new Event(STUDENT_REPORT_SUBMITTED_EVENT));
 }
 
 /** Save private admin notes on a report. */
@@ -432,6 +493,7 @@ export const reportService = {
   countPendingReports,
   listAllReports,
   updateReportStatus,
+  reopenOwnReport,
   updateReportInternalNotes,
   archiveReport,
   getReportHistory,

@@ -5,6 +5,7 @@ import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ScrollToTop } from "./ScrollToTop";
+import { InstallAppBanner } from "./PwaPrompts";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { cn } from "../../lib/utils";
 import { motion } from "motion/react";
@@ -65,6 +66,14 @@ export function PublicLayout() {
     };
   }, [pathname]);
 
+  const allowPullToRefresh = pathname !== "/map" && !isEventEditor;
+  useEffect(() => {
+    document.documentElement.classList.toggle("allow-pull-refresh", allowPullToRefresh);
+    return () => {
+      document.documentElement.classList.remove("allow-pull-refresh");
+    };
+  }, [allowPullToRefresh]);
+
   if (!authLoading && isStudent && pathname === "/") {
     return <div className="min-h-[50vh] bg-background" aria-busy="true" aria-label="Opening NaviSync" />;
   }
@@ -114,6 +123,7 @@ export function PublicLayout() {
 
       {showFooter && <div className="hidden md:block"><Footer /></div>}
       {!isEventEditor && <MobileBottomNav />}
+      <InstallAppBanner />
     </div>
   );
 }

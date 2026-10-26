@@ -207,7 +207,7 @@ export function AdminLayout() {
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top bar */}
-        <header className="h-16 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0 shadow-sm">
+        <header className="h-16 box-content pt-[env(safe-area-inset-top,0px)] border-b border-border bg-card flex items-center px-4 gap-3 shrink-0 shadow-sm">
           <button
             onClick={() => (isMobile ? setMobileNavOpen(true) : setCollapsed(!collapsed))}
             className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

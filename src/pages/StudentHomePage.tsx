@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Link, Navigate } from "react-router";
 import {
   GraduationCap, Building2, Bookmark, ArrowUpRight, CalendarDays,
-  Compass, Flag, MapPin, Plus, RefreshCw,
+  Flag, MapPin, Plus, RefreshCw,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useStudentAuth } from "../hooks/useStudentAuth";
@@ -189,31 +189,6 @@ export function StudentHomePage() {
           <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground">
             Find campus buildings, locate rooms, and plan your next route.
           </p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.04 }}
-        >
-          <Link
-            to="/map"
-            aria-label="Open campus map to find a building, room, or route"
-            className="group flex min-h-[88px] items-center gap-3 rounded-2xl border border-primary/20 bg-primary/[0.04] p-4 transition-colors hover:bg-primary/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Compass className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-foreground">Find your next stop</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                Search buildings and rooms, then get directions.
-              </p>
-            </div>
-            <span className="inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground">
-              Open map <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
-          </Link>
         </motion.div>
 
         {/* ══ QUICK ACTIONS ══ */}
