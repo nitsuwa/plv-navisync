@@ -16,10 +16,14 @@ vi.mock("../../../hooks/usePublishedCampus", () => ({
 vi.mock("../../../services/eventOverlayService", () => ({
   eventOverlayService: { listPublishedEventPreviews: mocks.listPublishedEventPreviews },
 }));
-vi.mock("../../../services/reportService", () => ({
-  normalizeReportStatus: (status: string) => status,
-  reportService: { getStudentReports: mocks.getStudentReports },
-}));
+vi.mock("../../../services/reportService", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/reportService")>("../../../services/reportService");
+  return {
+    // The real mapping, so legacy values such as "dismissed" resolve as in the app.
+    normalizeReportStatus: actual.normalizeReportStatus,
+    reportService: { getStudentReports: mocks.getStudentReports },
+  };
+});
 vi.mock("../../../services/studentPreferencesService", () => ({
   loadStudentPreferences: mocks.loadStudentPreferences,
 }));
@@ -209,5 +213,89 @@ describe("student event notifications", () => {
     } finally {
       Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: originalScrollIntoView });
     }
+  });
+  it("previews the newest notifications on Home and expands to the full list on request", async () => {
+    const reports = Array.from({ length: 4 }, (_, index) => ({
+      id: `report-${index}`,
+      campusId: "campus-a",
+      reporterId: "student-preview",
+      category: "maintenance",
+      priority: "low",
+      title: `Report ${index + 1}`,
+      description: "Details",
+      status: "pending",
+      updates: [{ text: "Report submitted", date: `2026-10-0${index + 1}T00:00:00.000Z` }],
+      createdAt: `2026-10-0${index + 1}T00:00:00.000Z`,
+      updatedAt: `2026-10-0${index + 1}T00:00:00.000Z`,
+    }));
+    render(
+      <MemoryRouter>
+        <StudentNotificationsSection
+          ownerId="student-preview"
+          isStudentOrg={false}
+          eventUpdates={[]}
+          unreadEventIds={new Set()}
+          markEventRead={vi.fn()}
+          refreshEventUpdates={vi.fn().mockResolvedValue(undefined)}
+          campusId="campus-a"
+          reportsSnapshot={reports}
+          reportsSnapshotLoading={false}
+          reportsSnapshotError={false}
+          onRetryReports={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    // Two campus events + four reports: only the newest three render at first.
+    const list = await screen.findByRole("list", { name: "All notifications" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Show all 6 notifications/ })).toBeInTheDocument());
+    expect(list.querySelectorAll("li")).toHaveLength(3);
+
+    const toggle = screen.getByRole("button", { name: /Show all 6 notifications/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", list.id);
+    fireEvent.click(toggle);
+    expect(list.querySelectorAll("li")).toHaveLength(6);
+
+    fireEvent.click(screen.getByRole("button", { name: /Show fewer/ }));
+    expect(list.querySelectorAll("li")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /Show all 6 notifications/ })).toHaveAttribute("aria-expanded", "false");
+  });
+  it("labels every report notification with the report's current status", async () => {
+    render(
+      <MemoryRouter>
+        <StudentNotificationsSection
+          ownerId="student-status"
+          isStudentOrg={false}
+          eventUpdates={[]}
+          unreadEventIds={new Set()}
+          markEventRead={vi.fn()}
+          refreshEventUpdates={vi.fn().mockResolvedValue(undefined)}
+          campusId={null}
+          reportsSnapshot={[{
+            id: "report-dismissed",
+            campusId: "campus-a",
+            reporterId: "student-status",
+            category: "maintenance",
+            priority: "low",
+            title: "Flooded Area",
+            description: "Water on the walkway.",
+            status: "dismissed",
+            // Only the submission entry exists; the dismissal itself added no update row.
+            updates: [{ text: "Report submitted", date: "2026-10-13T01:35:00.000Z" }],
+            createdAt: "2026-10-13T01:35:00.000Z",
+            updatedAt: "2026-10-14T00:00:00.000Z",
+          }]}
+          reportsSnapshotLoading={false}
+          reportsSnapshotError={false}
+          onRetryReports={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const row = await screen.findByRole("link", { name: /Flooded Area/ });
+    expect(row).toHaveTextContent("Report submitted");
+    expect(screen.getByLabelText("Report status: Dismissed")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Report status: Pending")).not.toBeInTheDocument();
   });
 });

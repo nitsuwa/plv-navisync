@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   ArrowLeft, MapPin, Clock, Phone, Building2, Navigation, Layers, Users,
   ChevronRight, ChevronDown, Bookmark, Share2, Flag, Info, CheckCircle2,
-  Accessibility, DoorOpen,
+  Accessibility, DoorOpen, Map as MapIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -117,6 +117,8 @@ export function BuildingDetailsPage() {
   const mapHref = building
     ? `/map?${campusQuery}buildingId=${encodeURIComponent(building.id)}`
     : "/map";
+  const roomMapHref = (floorId: string, roomId: string) =>
+    `${mapHref}&floorId=${encodeURIComponent(floorId)}&roomId=${encodeURIComponent(roomId)}`;
   const campusLocationLabel = [buildingCampus?.name, buildingCampus?.address, buildingCampus?.city]
     .filter(Boolean)
     .join(", ") || "Campus";
@@ -481,7 +483,7 @@ export function BuildingDetailsPage() {
                                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                                     <MapPin className="h-4 w-4" />
                                   </span>
-                                  <span className="min-w-0">
+                                  <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold text-foreground">
                                       {room.name}
                                     </span>
@@ -489,6 +491,16 @@ export function BuildingDetailsPage() {
                                       {room.type.replace(/[_-]+/g, " ")}
                                     </span>
                                   </span>
+                                  {building && (
+                                    <Link
+                                      to={roomMapHref(floor.id, room.id)}
+                                      aria-label={`View ${room.name} on the map`}
+                                      title="View on map"
+                                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/70 text-primary transition-colors hover:border-primary/40 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                    >
+                                      <MapIcon className="h-4 w-4" aria-hidden="true" />
+                                    </Link>
+                                  )}
                                 </li>
                               ))}
                             </ul>

@@ -218,7 +218,7 @@ export function AdminSidebar({
       {/* Logo */}
       <div
         className={cn(
-          "flex items-center h-16 border-b border-sidebar-border shrink-0",
+          "flex items-center h-16 box-content pt-[env(safe-area-inset-top,0px)] border-b border-sidebar-border shrink-0",
           collapsed ? "justify-center px-2" : "gap-3 px-4"
         )}
       >

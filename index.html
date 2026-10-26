@@ -7,7 +7,6 @@
     <meta name="theme-color" content="#0a0f1e" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-touch-fullscreen" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="application-name" content="PLV NaviSync" />
     <meta name="format-detection" content="telephone=no" />
@@ -16,13 +15,11 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32x32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192x192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icon-512x512.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>PLV NaviSync — Smart Campus Navigator</title>
     <meta name="description" content="Interactive campus map and navigation for Pamantasan ng Lungsod ng Valenzuela. Find buildings, get directions, and explore the campus." />
     <meta name="robots" content="index, follow" />
-    <!-- Apple splash screen meta -->
     <meta name="apple-mobile-web-app-title" content="PLV NaviSync" />
-    <!-- iOS splash screen detection -->
     <script>
       (function () {
         var stored = localStorage.getItem("plv-theme");
@@ -30,33 +27,24 @@
         if (dark) document.documentElement.classList.add("dark");
         document.documentElement.style.background = dark ? "#070d1a" : "#eef2fa";
 
-        // ── PWA Install Prompt (deferred—no UI shown) ───────────────
-        var deferredPrompt = null;
+        // ── PWA install prompt ─────────────────────────────────────
+        // Captured before React boots; src/lib/pwa.ts picks it up and
+        // owns the install UI.
         window.addEventListener('beforeinstallprompt', function (e) {
           e.preventDefault();
-          deferredPrompt = e;
-          // Store the event so the React app can retrieve it later
           window.__plvInstallPrompt = e;
         });
 
-        window.addEventListener('appinstalled', function () {
-          window.__plvInstallPrompt = null;
-          deferredPrompt = null;
-        });
-
-        // ── Service Worker Registration ────────────────────────────
-        // A production service worker must never sit in front of the Vite
-        // editor during local development: its cache/update lifecycle can
-        // make a working Map Builder appear to refresh or remount. Unregister
-        // only this origin's stale worker in local dev; production retains the
-        // non-blocking update notification contract below.
-        if ('serviceWorker' in navigator) {
-          var isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        // ── Dev-only service worker cleanup ───────────────────────
+        // Production registers /sw.js from src/lib/pwa.ts. A worker left
+        // behind by a production build must never sit in front of the Vite
+        // dev server: its cache/update lifecycle can make a working Map
+        // Builder appear to refresh or remount. `vite preview` builds keep
+        // their worker so the PWA can be tested locally.
+        var isProdBuild = '%PROD%' === 'true';
+        var isLocalDev = !isProdBuild && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+        if (isLocalDev && 'serviceWorker' in navigator) {
           var clearLocalServiceWorkers = function () {
-            if (!isLocalDev) return;
-            // Run before the React/Vite module boots as well as on load. A
-            // worker left behind by a previous production build must not get
-            // a chance to serve stale editor HTML or participate in HMR.
             navigator.serviceWorker.getRegistrations().then(function (registrations) {
               return Promise.all(registrations.map(function (registration) {
                 return registration.unregister();
@@ -70,28 +58,8 @@
               });
             }).catch(function () {});
           };
-          if (isLocalDev) {
-            clearLocalServiceWorkers();
-            window.addEventListener('load', clearLocalServiceWorkers, { once: true });
-          } else {
-            var swUrl = '/sw.js';
-            navigator.serviceWorker.register(swUrl).then(function (reg) {
-              // Listen for updates, but do not force a reload while an editor
-              // may contain unsaved work. The React shell may offer an update
-              // action explicitly when one is needed.
-              reg.addEventListener('updatefound', function () {
-                var newWorker = reg.installing;
-                if (!newWorker) return;
-                newWorker.addEventListener('statechange', function () {
-                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    window.dispatchEvent(new CustomEvent('plv-sw-update', { detail: { registration: reg } }));
-                  }
-                });
-              });
-            }).catch(function () {
-              // SW registration failed silently — app continues to work without it
-            });
-          }
+          clearLocalServiceWorkers();
+          window.addEventListener('load', clearLocalServiceWorkers, { once: true });
         }
       })();
     </script>
@@ -103,10 +71,13 @@
       /* Prevent tap highlight on mobile */
       * { -webkit-tap-highlight-color: transparent; }
       /* Smooth iOS momentum scrolling */
-      body { 
-        -webkit-overflow-scrolling: touch; 
+      body {
+        -webkit-overflow-scrolling: touch;
         overscroll-behavior-y: contain;
       }
+      /* Regular scrolling pages keep Android's pull-to-refresh, the only
+         refresh gesture in an installed app. Map/editor views keep it off. */
+      html.allow-pull-refresh body { overscroll-behavior-y: auto; }
     </style>
   </head>
   <body>

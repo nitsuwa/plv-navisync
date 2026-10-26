@@ -858,6 +858,9 @@ export interface CampusMapPageProps {
   initialCampusId?: string;
   initialBuildingId?: string;
   initialPlaceId?: string;
+  /** Open on this room (within initialBuildingId) instead of just its building. */
+  initialRoomId?: string;
+  initialFloorId?: string;
   /** Remove the public-layout header offset when embedded full-screen. */
   fullScreen?: boolean;
   /** Allow an admin preview shell to reserve space for its own toolbar. */
@@ -893,7 +896,7 @@ interface DiscoverMapSnapshot {
   indoorCameraPose: Student3dCameraPose | null;
 }
 
-export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, fullScreen = false, fullScreenHeight, locationPreviewPanel }: CampusMapPageProps = {}) {
+export function CampusMapPage({ previewCampus = null, initialCampusId, initialBuildingId, initialPlaceId, initialRoomId, initialFloorId, fullScreen = false, fullScreenHeight, locationPreviewPanel }: CampusMapPageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme } = useTheme();
@@ -1329,6 +1332,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [showQR,         setShowQR]         = useState(false);
   const [locationScannerOpen, setLocationScannerOpen] = useState(false);
   const [pendingLocationScan, setPendingLocationScan] = useState<(CampusLocationQrPayload & { campusId: string }) | null>(null);
+  // A "view on map" link to a room (Building details → Rooms). Resolved once
+  // the search-selection handler exists so it reuses the exact search flow.
+  const [pendingRoomLink, setPendingRoomLink] = useState<{ buildingId: string; floorId?: string; roomId: string } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -4645,6 +4651,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const placeId = params.get("placeId");
     const destinationPlaceId = params.get("destinationPlaceId");
     const destinationBuildingId = params.get("destinationBuildingId");
+    // A room target from props (admin report preview) or a ?roomId= link.
+    const roomLinkId = initialRoomId ?? params.get("roomId");
+    const roomLinkFloorId = initialRoomId ? initialFloorId : params.get("floorId") ?? undefined;
     const hasExplicitTarget = Boolean(initialBuildingId || initialPlaceId);
     const campusHint = initialCampusId ?? locationPayload?.campusId ?? params.get("campusId");
     const targetPlaceId = initialPlaceId ?? (destinationPlaceId || placeId);
@@ -4733,6 +4742,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       dispatchStudentRouteUi({ type: "OPEN_PLAN" });
       setDirectionsMode(true);
       setUseMyLocation(Boolean(youAreHere));
+    } else if (roomLinkId) {
+      setPendingRoomLink({ buildingId: building.id, floorId: roomLinkFloorId, roomId: roomLinkId });
     } else {
       searchFocusRef.current = { buildingId: building.id };
       setSearchFocusNonce((nonce) => nonce + 1);
@@ -4740,7 +4751,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }
     initialSelectionRef.current = true;
     if (!initialBuildingId) window.history.replaceState(window.history.state, "", window.location.pathname);
-  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError, youAreHere, initialCampusId, initialBuildingId, initialPlaceId]);
+  }, [isCampusLoading, availableCampuses, activeCampus, MOCK_BUILDINGS, setSelectedCampusId, applyCampusLocationQr, showError, youAreHere, initialCampusId, initialBuildingId, initialPlaceId, initialRoomId, initialFloorId]);
 
   useEffect(() => {
     if (!pendingLocationScan || isCampusLoading || !activeCampus || activeCampus.id !== pendingLocationScan.campusId) return;
@@ -5745,6 +5756,40 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setSearch(item.name);
     dismissSearch();
   }, [activeCampus, MOCK_BUILDINGS, dismissSearch, navigableRoomKeys, prepareRouteForContextInspection, route, selectBuilding, selectCampusPlace, studentRouteUi.phase]);
+
+  useEffect(() => {
+    if (!pendingRoomLink || !activeCampus) return;
+    const { buildingId, floorId, roomId } = pendingRoomLink;
+    setPendingRoomLink(null);
+    const campusBuilding = activeCampus.buildings.find((candidate) => candidate.id === buildingId);
+    const floor = campusBuilding?.floors.find((candidate) => candidate.id === floorId)
+      ?? campusBuilding?.floors.find((candidate) => candidate.rooms?.some((room) => room.id === roomId));
+    const room = floor?.rooms?.find((candidate) => candidate.id === roomId);
+    const building = MOCK_BUILDINGS.find((candidate) => candidate.id === buildingId);
+    if (!campusBuilding || !floor || !room || !building) {
+      if (building) handleSelectSearchResult({ id: building.id, name: building.name, kind: "building", buildingId: building.id, accessible: false, keywords: [] });
+      return;
+    }
+    if (navigableRoomKeys.has(authoredRoomNavigationKey(campusBuilding.id, floor.id, room.id))) {
+      handleSelectSearchResult({
+        id: room.id,
+        name: room.name,
+        kind: "room",
+        buildingId: campusBuilding.id,
+        buildingName: building.name,
+        floorId: floor.id,
+        floorNumber: floor.number,
+        floorLabel: floor.label,
+        accessible: false,
+        keywords: [],
+      });
+      return;
+    }
+    // Rooms outside the navigation graph can't be selected like search
+    // results; still open their building on the right floor.
+    handleSelectSearchResult({ id: building.id, name: building.name, kind: "building", buildingId: building.id, accessible: false, keywords: [] });
+    setFloorView({ building, floor: floor.number });
+  }, [pendingRoomLink, activeCampus, MOCK_BUILDINGS, handleSelectSearchResult, navigableRoomKeys]);
 
   const startDirectionsTo = useCallback((b: Building) => {
     setShowBuildingDetailsDuringRoutePlanner(false);
@@ -9544,7 +9589,9 @@ const buildingFill = (id: string) =>
       {isFloorMode && selectedRoomContext
         && selectedRoomContext.buildingId === floorView?.building.id
         && selectedRoomContext.floorNumber === floorView?.floor
-        && (!directionsMode || discoverTour.active) && !stairLoading && navigationPhase === "idle" && (
+        && (!directionsMode || discoverTour.active) && !stairLoading && navigationPhase === "idle"
+        // The admin report preview panel already describes the room; the highlight on the plan is enough.
+        && !locationPreviewPanel && (
         <StudentSelectedPlaceCard
           key={`${selectedRoomContext.buildingId}:${selectedRoomContext.floorNumber}:${selectedRoomContext.roomId}`}
           room={selectedRoomContext}
