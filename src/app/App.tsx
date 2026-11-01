@@ -11,6 +11,8 @@ import { OfflineIndicator, PwaUpdateNotifier } from "../components/layout/PwaPro
 function AppRuntime() {
   const auth = useAuthBootstrap();
   const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
+  const authFailed = auth.status === "error";
+  const { retryBootstrap } = auth;
   const [appStarted, setAppStarted] = useState(false);
   const [loadingScreenVisible, setLoadingScreenVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
@@ -21,10 +23,7 @@ function AppRuntime() {
     setExiting(true);
   }, [authReady, appStarted]);
 
-  // An installed app opened offline stops at "needs a connection"; retry as
-  // soon as the device is back online instead of waiting for a tap.
-  const authFailed = auth.status === "error";
-  const { retryBootstrap } = auth;
+  // Retry session restoration automatically when an offline app reconnects.
   useEffect(() => {
     if (!authFailed) return;
     const retry = () => { void retryBootstrap(); };
@@ -50,13 +49,15 @@ function AppRuntime() {
             position="top-right"
             toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
           />
+          <PwaUpdateNotifier />
+          <OfflineIndicator />
         </CampusDataProvider>
       )}
       {loadingScreenVisible && (
         <LoadingScreen
           exiting={exiting}
-          error={!appStarted && auth.status === "error" ? auth.error : null}
-          onRetry={() => void auth.retryBootstrap()}
+          error={!appStarted && authFailed ? auth.error : null}
+          onRetry={() => void retryBootstrap()}
         />
       )}
     </>
