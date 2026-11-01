@@ -83,6 +83,27 @@ function RendererToggleFixture() {
 }
 
 describe("StudentMapControls", () => {
+  it("omits the dedicated viewing-angle control while retaining map, recenter, and QR actions", () => {
+    const onToggleCampusViewMode = vi.fn();
+    const onResetView = vi.fn();
+    const onScanLocation = vi.fn();
+    render(<StudentMapControls {...props({
+      campusViewMode: "3d",
+      campusViewToggleVisible: true,
+      onToggleCampusViewMode,
+      onResetView,
+      onScanLocation,
+    })} />);
+
+    expect(screen.queryByRole("button", { name: /viewing angle/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to 2D view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recenter map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Scan location QR" }));
+    expect(onToggleCampusViewMode).toHaveBeenCalledOnce();
+    expect(onResetView).toHaveBeenCalledOnce();
+    expect(onScanLocation).toHaveBeenCalledOnce();
+  });
+
   it("offers Discover PLV and removes ordinary controls while the tour is active", () => {
     const onOpenDiscover = vi.fn();
     const view = render(<StudentMapControls {...props({ onOpenDiscover })} />);
@@ -293,6 +314,23 @@ describe("StudentMapControls", () => {
     expect(rail).toHaveAttribute("data-anchor", "map-bottom-right");
     expect(rail).toContainElement(screen.getByRole("button", { name: "Switch to 2D view" }));
     expect(screen.queryByTestId("student-map-utility-actions")).not.toBeInTheDocument();
+  });
+
+  it("shows a mobile Back to campus action when indoor route controls hide the search bar", () => {
+    const onBackToCampus = vi.fn();
+    render(<StudentMapControls {...props({
+      isFloorMode: true,
+      directionsMode: true,
+      navigationActive: true,
+      onBackToCampus,
+    })} />);
+
+    const backButton = screen.getByRole("button", { name: "Back to campus" });
+    expect(backButton).toHaveAttribute("data-testid", "student-map-back-campus-mobile");
+    expect(backButton).toHaveClass("min-h-11", "md:hidden");
+    expect(screen.queryByTestId("student-map-search-panel")).not.toBeInTheDocument();
+    fireEvent.click(backButton);
+    expect(onBackToCampus).toHaveBeenCalledOnce();
   });
 
   it("keeps the view switch in its bottom-right rail during Follow and floor changes", () => {

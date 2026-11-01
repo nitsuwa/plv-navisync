@@ -96,6 +96,34 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onFindRoute).toHaveBeenCalledOnce();
   });
 
+  it.each(["planning", "preview", "arrived"] as const)("offers an explicit mobile minimize action during %s without changing route controls", (phase) => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onMinimizePanel = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("coed", "COED", "COED"),
+        route: phase === "planning" ? null : route(),
+        phase,
+        onMinimizePanel,
+      })} />);
+
+      const header = screen.getByTestId("route-planner-header");
+      const minimize = screen.getByRole("button", { name: "Minimize route panel" });
+      expect(header).toHaveClass("py-3");
+      expect(minimize).toHaveClass("h-11", "w-11");
+      const soundToggle = header.querySelector('[data-testid="arrival-sound-toggle"]');
+      if (soundToggle) expect(soundToggle).toHaveClass("min-h-11", "min-w-11");
+      fireEvent.click(minimize);
+      expect(onMinimizePanel).toHaveBeenCalledOnce();
+      if (phase === "preview") expect(screen.getByRole("button", { name: "Start Navigation" })).toBeInTheDocument();
+      if (phase === "arrived") expect(screen.getByRole("button", { name: "Restart Route" })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
   it("shows a separate route preview after planning and offers edit/start actions", () => {
     render(<RoutePlannerDialog {...plannerProps({
       from: building("ceit", "CEIT", "CEIT Building"),
@@ -178,6 +206,350 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onPause).toHaveBeenCalledOnce();
     expect(onNextStep).toHaveBeenCalledOnce();
     expect(onEndNavigation).toHaveBeenCalledOnce();
+  });
+
+  it("places Edit Route beside the destination in expanded navigation without adding a control row", () => {
+    for (const cameraMode of ["follow", "explore"] as const) {
+      const onEditRoute = vi.fn();
+      const onEndNavigation = vi.fn();
+      const { unmount } = render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+        cameraMode,
+        collapsed: false,
+        onEditRoute,
+        onEndNavigation,
+      })} />);
+
+      const editRoute = screen.getByRole("button", { name: "Edit route to Canteen" });
+      expect(editRoute).toHaveAttribute("title", "Edit route to Canteen");
+      expect(editRoute).toHaveClass("h-11", "w-11", "lg:h-8", "lg:w-8");
+      expect(screen.getAllByTestId("active-route-edit")).toHaveLength(1);
+      if (cameraMode === "follow") {
+        const destinationName = screen.getByRole("button", { name: "Show full destination name: Canteen" });
+        expect(destinationName).toHaveClass("min-h-11", "lg:min-h-8");
+        expect(screen.getByTestId("guided-destination")).toHaveTextContent("Canteen");
+        expect(editRoute.parentElement).toContainElement(destinationName);
+        expect(editRoute).not.toContainElement(destinationName);
+        expect(screen.getByTestId("guided-destination-row")).toContainElement(editRoute);
+      } else {
+        const originName = screen.getByRole("button", { name: "Show full origin name: Campus Gate" });
+        expect(originName).toHaveClass("min-h-11", "lg:min-h-8");
+        expect(screen.queryByTestId("guided-destination")).not.toBeInTheDocument();
+        expect(editRoute.parentElement).toContainElement(originName);
+        expect(editRoute).not.toContainElement(originName);
+        expect(screen.getByTestId("explore-route-summary")).toContainElement(editRoute);
+      }
+      const end = screen.getByRole("button", { name: "End Navigation" });
+      expect(screen.getByRole("button", { name: /steps/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: cameraMode === "follow" ? "Switch to Explore mode" : "Return to Follow mode" })).toBeInTheDocument();
+      if (cameraMode === "follow") {
+        expect(screen.getByRole("button", { name: "Previous" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Playback speed/ })).toBeInTheDocument();
+      } else {
+        expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+      }
+      expect(end).toBeInTheDocument();
+      fireEvent.click(editRoute);
+      expect(onEditRoute).toHaveBeenCalledOnce();
+      unmount();
+    }
+  });
+
+  it("gives Explore a clear start point with full-name access and an adjacent edit action", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const origin = "Primary Entrance";
+    const destination = "College of Engineering and Information Technology";
+    const onEditRoute = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", origin),
+        to: building("ceit", "CEIT", destination),
+        route: route({ fromCode: "GATE", toCode: "CEIT" }),
+        phase: "navigating",
+        cameraMode: "explore",
+        navigationSteps: ["Start at the entrance.", "Cross the courtyard.", "Arrive at CEIT."],
+        inspectionContextLabel: "Campus",
+        collapsed: false,
+        onEditRoute,
+      })} />);
+
+      const summary = screen.getByTestId("explore-route-summary");
+      expect(within(summary).getByText("From:")).toBeInTheDocument();
+      expect(within(summary).getByRole("button", { name: `Show full origin name: ${origin}` })).toBeInTheDocument();
+      expect(within(summary).queryByText("To:")).not.toBeInTheDocument();
+      expect(within(summary).queryByRole("button", { name: `Show full destination name: ${destination}` })).not.toBeInTheDocument();
+      const originName = within(summary).getByRole("button", { name: `Show full origin name: ${origin}` });
+      const editRoute = within(summary).getByRole("button", { name: `Edit route to ${destination}` });
+      expect(within(summary).getByTestId("explore-route-origin")).toContainElement(originName);
+      expect(editRoute.parentElement).toContainElement(originName);
+      expect(originName).toHaveClass("flex-[0_1_auto]");
+      expect(within(summary).getByTestId("explore-origin-marker")).toBeInTheDocument();
+      expect(within(summary).queryByTestId("guided-inspection-context")).not.toBeInTheDocument();
+      expect(within(summary).queryByText(/Map context:/)).not.toBeInTheDocument();
+      expect(within(summary).queryByText(/Move the map or select a step/)).not.toBeInTheDocument();
+      expect(screen.getByTestId("guided-explore-steps-toggle")).toHaveTextContent("Steps (3)");
+      expect(screen.getByTestId("guided-explore-steps-toggle")).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("button", { name: "Return to Follow mode" })).toBeInTheDocument();
+
+      fireEvent.click(originName);
+      expect(await screen.findByRole("dialog", { name: "Origin details" })).toHaveTextContent(origin);
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Origin details" })).not.toBeInTheDocument());
+
+      fireEvent.click(editRoute);
+      expect(onEditRoute).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("opens full-name details on keyboard focus and desktop hover, and dismisses outside", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+        cameraMode: "follow",
+        collapsed: false,
+      })} />);
+      const name = screen.getByRole("button", { name: "Show full destination name: Canteen" });
+
+      fireEvent.focus(name);
+      expect(await screen.findByRole("dialog", { name: "Destination details" })).toHaveTextContent("Canteen");
+      fireEvent.blur(name);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Destination details" })).not.toBeInTheDocument());
+
+      fireEvent.mouseEnter(name);
+      expect(await screen.findByRole("dialog", { name: "Destination details" })).toHaveTextContent("Canteen");
+      fireEvent.pointerDown(document.body);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Destination details" })).not.toBeInTheDocument());
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps opening destination details separate from Edit Route", async () => {
+    const onEditRoute = vi.fn();
+    const longDestination = "College of Engineering and Information Technology";
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("gate", "GATE", "Campus Gate"),
+      to: building("ceit", "CEIT", longDestination),
+      route: route(),
+      phase: "navigating",
+      cameraMode: "follow",
+      collapsed: false,
+      onEditRoute,
+    })} />);
+    const name = screen.getByRole("button", { name: `Show full destination name: ${longDestination}` });
+    const editRoute = screen.getByRole("button", { name: `Edit route to ${longDestination}` });
+
+    fireEvent.click(name);
+    expect(await screen.findByRole("dialog", { name: "Destination details" })).toHaveTextContent(longDestination);
+    expect(onEditRoute).not.toHaveBeenCalled();
+    expect(screen.getByTestId("current-route-instruction")).toBeInTheDocument();
+    fireEvent.click(editRoute);
+    expect(onEditRoute).toHaveBeenCalledOnce();
+  });
+
+  it("shows only the marked starting point with its 44px Edit Route target in compact mobile Explore", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    const onEditRoute = vi.fn();
+    const origin = "COLLEGE OF ACCOUNTANCY AND BUSINESS ADMINISTRATION";
+    const destination = "COLLEGE OF ENGINEERING AND INFORMATION TECHNOLOGY";
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("caba", "CABA", origin),
+        to: building("ceit", "CEIT", destination),
+        route: route({ fromCode: "CABA", toCode: "CEIT" }),
+        phase: "navigating",
+        cameraMode: "explore",
+        collapsed: true,
+        onEditRoute,
+      })} />);
+      await waitFor(() => expect(screen.getByTestId("mobile-route-collapsed-summary")).toBeInTheDocument());
+      const summary = screen.getByTestId("mobile-route-collapsed-summary");
+      const editRoute = within(summary).getByRole("button", { name: `Edit route to ${destination}` });
+      const originName = within(summary).getByRole("button", { name: `Show full origin name: ${origin}` });
+      expect(within(summary).getByText("From:")).toBeInTheDocument();
+      expect(within(summary).queryByText("To:")).not.toBeInTheDocument();
+      expect(originName).toBeInTheDocument();
+      expect(within(summary).queryByText(/Map context|Move the map/)).not.toBeInTheDocument();
+      expect(within(summary).getByTestId("compact-explore-route-meta")).toHaveTextContent("Standard route · Best route");
+      expect(editRoute).toHaveClass("h-11", "w-11");
+      expect(within(summary).queryByTestId("guided-destination")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: `Show full destination name: ${destination}` })).not.toBeInTheDocument();
+      expect(editRoute.parentElement).toContainElement(originName);
+      expect(editRoute).not.toContainElement(originName);
+      expect(within(summary).getByTestId("explore-origin-marker")).toBeInTheDocument();
+      fireEvent.click(originName);
+      expect(await screen.findByRole("dialog", { name: "Origin details" })).toHaveAttribute("data-side", "top");
+      expect(screen.getAllByTestId("active-route-edit")).toHaveLength(1);
+      expect(screen.getByTestId("collapsed-explore-route")).toContainElement(editRoute);
+      expect(screen.getByTestId("route-planner-header")).toHaveClass("py-1.5");
+      expect(screen.getByRole("button", { name: "Return to Follow mode" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Route details" })).toBeInTheDocument();
+      expect(within(summary).queryByText(/Move the map/)).not.toBeInTheDocument();
+      expect(within(summary).getByTestId("compact-explore-route-meta")).toHaveTextContent("Standard route · Best route");
+      expect(screen.getByRole("button", { name: "Route details" }).parentElement).toContainElement(screen.getByRole("button", { name: "Return to Follow mode" }));
+      expect(screen.queryByRole("button", { name: "Previous step" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Next step" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Playback speed/ })).not.toBeInTheDocument();
+      fireEvent.click(editRoute);
+      expect(onEditRoute).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps Edit Route visible and the full destination available for long mobile labels", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    const destinationName = "College of Engineering and Information Technology";
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("ceit", "CEIT", destinationName),
+        route: route(),
+        phase: "navigating",
+        cameraMode: "follow",
+        collapsed: true,
+        onEditRoute: vi.fn(),
+      })} />);
+
+      const panel = await screen.findByTestId("mobile-route-collapsed-summary");
+      const fullDestination = within(panel).getByTitle(destinationName);
+      const destinationTrigger = within(panel).getByRole("button", { name: `Show full destination name: ${destinationName}` });
+      const editRoute = within(panel).getByRole("button", { name: `Edit route to ${destinationName}` });
+      expect(fullDestination).toHaveClass("min-w-0", "truncate");
+      expect(fullDestination).toHaveTextContent(destinationName);
+      expect(within(panel).getByTestId("compact-step-progress")).toContainElement(editRoute);
+      expect(editRoute).toHaveClass("h-11", "w-11");
+      fireEvent.click(destinationTrigger);
+      expect(await screen.findByRole("dialog", { name: "Destination details" })).toHaveAttribute("data-side", "top");
+      expect(within(panel).getByText("1/1 ·")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps compact transition instructions readable and gives the primary action its own space", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onContinueTransition = vi.fn();
+    const onEditRoute = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+        collapsed: true,
+        transitionAwaitingAction: true,
+        transitionActionLabel: "Continue to Floor 3",
+        transitionPrompt: "Tap the Left Stair or press Continue.",
+        currentStepIndex: 1,
+        navigationSteps: ["Start at Campus Gate.", "Take the Left Stair down to Floor 3."],
+        onContinueTransition,
+        onEditRoute,
+      })} />);
+
+      const panel = await screen.findByTestId("mobile-route-collapsed-summary");
+      expect(within(panel).getByTestId("compact-step-progress")).toHaveTextContent("Step 2 of 2");
+      expect(within(panel).getByTestId("compact-current-route-instruction")).toHaveClass("line-clamp-2", "text-muted-foreground");
+      expect(within(panel).getByTestId("compact-transition-prompt")).toHaveTextContent("Tap the Left Stair");
+      expect(within(panel).getByTestId("compact-playback-controls")).toHaveClass("grid-cols-[44px_minmax(0,1fr)_44px]");
+      expect(within(panel).getByRole("button", { name: "Switch to Follow mode" })).toBeInTheDocument();
+      expect(within(panel).getByRole("button", { name: "Switch to Explore mode" })).toBeInTheDocument();
+      const editRoute = within(panel).getByRole("button", { name: "Edit route to Canteen" });
+      expect(editRoute).toHaveClass("h-11", "w-11");
+      expect(within(panel).getAllByTestId("active-route-edit")).toHaveLength(1);
+      fireEvent.click(within(panel).getByRole("button", { name: "Continue to Floor 3" }));
+      expect(onContinueTransition).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("requires explicit confirmation for a proposed edit and retains a Cancel action", () => {
+    const onConfirmRouteEdit = vi.fn();
+    const onCancelEditRoute = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("gate", "GATE", "Campus Gate"),
+      to: building("canteen", "CANT", "Canteen"),
+      route: route(),
+      phase: "preview",
+      editingCompletedRoute: true,
+      onConfirmRouteEdit,
+      onCancelEditRoute,
+    })} />);
+
+    expect(screen.getByText("Proposed Standard route")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use This Route" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Start Navigation" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelEditRoute).toHaveBeenCalledOnce();
+  });
+
+  it("uses the existing confirmation callback exactly once for an edited route", () => {
+    const onConfirmRouteEdit = vi.fn();
+    const onStartNavigation = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("gate", "GATE", "Campus Gate"),
+      to: building("canteen", "CANT", "Canteen"),
+      route: route(),
+      phase: "preview",
+      editingCompletedRoute: true,
+      onConfirmRouteEdit,
+      onStartNavigation,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use This Route" }));
+    expect(onConfirmRouteEdit).toHaveBeenCalledOnce();
+    expect(onStartNavigation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the inline editor available for Accessible navigation", () => {
+    const onEditRoute = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      mode: "accessible",
+      phase: "navigating",
+      route: route({ mode: "accessible" }),
+      onEditRoute,
+    })} />);
+
+    const dialog = screen.getByTestId("route-planner-dialog");
+    expect(dialog).toHaveAttribute("data-route-mode", "accessible");
+    fireEvent.click(screen.getByRole("button", { name: /^Edit route to / }));
+    expect(onEditRoute).toHaveBeenCalledOnce();
+    expect(dialog).toHaveAttribute("data-route-mode", "accessible");
+  });
+
+  it("keeps the historical active SOS panel free of route-edit controls", () => {
+    render(<RoutePlannerDialog {...plannerProps({
+      mode: "emergency",
+      phase: "navigating",
+      route: route({ mode: "emergency", emergencyDestinationLabel: "Test Assembly Point" }),
+      routeEditUnavailableReason: "Route editing is unavailable during SOS navigation.",
+    })} />);
+
+    expect(screen.queryByRole("button", { name: /Edit Route|Route editing is unavailable/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("guided-destination")).toHaveTextContent("Test Assembly Point");
+    expect(screen.getByRole("button", { name: "End Navigation" })).toBeInTheDocument();
   });
 
   it("enables deterministic Follow step seeking only while paused and outside transitions", () => {
@@ -313,9 +685,14 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("guided-inspection-context")).toHaveTextContent("Science Hall · Floor 4");
-    expect(screen.getByTestId("explore-route-guidance")).toHaveTextContent("Move the map");
+    expect(screen.queryByText(/Map context:/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("explore-route-guidance")).not.toBeInTheDocument();
+    expect(screen.getByTestId("guided-explore-steps-toggle")).toHaveTextContent("Steps (3)");
+    expect(screen.getByTestId("guided-explore-steps-toggle")).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("explore-route-summary")).toHaveTextContent("Standard route");
-    expect(screen.getByTestId("explore-route-summary")).toHaveTextContent("Campus Gate → Canteen");
+    expect(screen.getByTestId("explore-route-origin")).toHaveTextContent(/From:.*Campus Gate/);
+    expect(screen.queryByTestId("explore-route-destination")).not.toBeInTheDocument();
+    expect(screen.queryByText("To:")).not.toBeInTheDocument();
     expect(screen.getByTestId("guided-route-steps").children).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
@@ -348,6 +725,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     const toggle = screen.getByRole("button", { name: "Switch to Explore mode" });
     expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toHaveAttribute("aria-pressed", "true");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("guided-navigation-summary")).toHaveAttribute("data-camera-mode", "follow");
     fireEvent.click(toggle);
     expect(onCameraModeChange).toHaveBeenCalledWith("explore");
     expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
@@ -364,6 +742,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Return to Follow mode" })).toBeInTheDocument();
+    expect(screen.getByTestId("guided-navigation-summary")).toHaveAttribute("data-camera-mode", "explore");
     expect(screen.queryByRole("button", { name: "Return to Follow" })).not.toBeInTheDocument();
   });
 
@@ -381,7 +760,8 @@ describe("RoutePlannerDialog student accessibility", () => {
       onExpand,
     })} />);
 
-    expect(screen.getByTestId("desktop-route-collapsed-summary")).toHaveTextContent("Route context");
+      expect(screen.getByTestId("desktop-route-collapsed-summary")).toHaveTextContent("Standard route · Best route");
+    expect(screen.getByTestId("desktop-route-collapsed-summary")).not.toHaveTextContent("Map context");
     expect(screen.queryByRole("button", { name: "Previous step" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next step" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Return to Follow mode" }));
@@ -406,9 +786,13 @@ describe("RoutePlannerDialog student accessibility", () => {
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
       await waitFor(() => expect(screen.getByTestId("mobile-route-collapsed-summary")).toBeInTheDocument());
       expect(screen.queryByTestId("guided-navigation-summary")).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Expand navigation panel" }));
+      const expand = screen.getByRole("button", { name: "Expand navigation panel" });
+      expect(expand).toHaveClass("h-11", "w-11");
+      expect(expand).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(expand);
       await waitFor(() => expect(screen.getByTestId("guided-navigation-summary")).toBeInTheDocument());
       expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(screen.getByRole("button", { name: "Collapse navigation panel" })).toHaveAttribute("aria-expanded", "true");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -492,7 +876,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onRetryContextRecovery).toHaveBeenCalledOnce();
   });
 
-  it("keeps Start Navigation visible in the first collapsed mobile route preview", async () => {
+  it("opens directly into the complete mobile Route Preview without a collapse affordance", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const onStartNavigation = vi.fn();
@@ -505,16 +889,12 @@ describe("RoutePlannerDialog student accessibility", () => {
         onStartNavigation,
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      await waitFor(() => expect(screen.getByTestId("mobile-route-preview-collapsed-summary")).toBeInTheDocument());
-      expect(dialog.style.height).toBe("236px");
-      expect(screen.queryByTestId("route-summary")).not.toBeInTheDocument();
-      const compactStart = screen.getByTestId("mobile-route-preview-start-navigation");
-      expect(compactStart).toBeVisible();
-      expect(screen.getByRole("button", { name: "Expand route panel" })).toBeVisible();
-      expect(screen.queryByTestId("route-planner-responsive-header-controls")).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-      await waitFor(() => expect(screen.getByTestId("route-summary")).toBeInTheDocument());
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      expect(dialog.style.height).toBe("fit-content");
+      expect(screen.getByTestId("route-summary")).toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-route-preview-collapsed-summary")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
       const scrollRegion = screen.getByTestId("route-planner-scroll-region");
       expect(scrollRegion).toHaveClass("min-h-0", "overflow-y-auto", "overscroll-contain");
       expect(scrollRegion.style.flex).toBe("0 1 auto");
@@ -523,6 +903,8 @@ describe("RoutePlannerDialog student accessibility", () => {
       expect(startNavigation).toBeVisible();
       fireEvent.click(startNavigation);
       expect(onStartNavigation).toHaveBeenCalledOnce();
+      const closePreview = screen.getByRole("button", { name: "Close Preview" });
+      expect(closePreview).toBeVisible();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -544,7 +926,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(within(selector).getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("shows Start immediately and eligible SOS alternatives after expanding the mobile preview", async () => {
+  it("shows complete SOS preview actions and eligible alternatives immediately on mobile", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const emergencyRoutes = [
@@ -562,16 +944,13 @@ describe("RoutePlannerDialog student accessibility", () => {
         headerUtility: <div data-testid="preview-tools"><button type="button">Floor 4</button><button type="button">Sound On</button></div>,
       })} />);
 
-      await screen.findByTestId("mobile-route-preview-collapsed-summary");
-      expect(screen.getByTestId("emergency-route-selector")).toBeVisible();
-      expect(screen.getByTestId("mobile-route-preview-start-navigation")).toBeVisible();
-      expect(screen.queryByTestId("route-planner-responsive-header-controls")).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId("emergency-route-selector")).toBeVisible());
+      expect(screen.getByRole("button", { name: "Start" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Close Preview" })).toBeVisible();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
       expect(screen.getByTestId("header-renderer-toggle")).toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-      await waitFor(() => expect(screen.getByTestId("route-planner-dialog")).toHaveAttribute("data-mobile-sheet-state", "expanded"));
-      expect(await screen.findByTestId("emergency-route-selector")).toHaveTextContent("Route B");
-      expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+      expect(screen.getByTestId("emergency-route-selector")).toHaveTextContent("Route B");
       expect(screen.getByTestId("route-planner-responsive-header-controls")).toContainElement(screen.getByTestId("preview-tools"));
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -579,7 +958,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("keeps a longer Assembly Point name readable in the compact and expanded mobile preview", async () => {
+  it("keeps a long Assembly Point name accessible in the complete mobile preview", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
     const destinationName = "North Campus Emergency Assembly Point";
@@ -594,16 +973,12 @@ describe("RoutePlannerDialog student accessibility", () => {
         emergencyAvailability: { state: "approved", destinationName, details: [] },
       })} />);
 
-      const collapsed = await screen.findByTestId("mobile-route-preview-collapsed-summary");
-      expect(collapsed).toHaveTextContent(destinationName);
-      expect(collapsed.querySelector("[title]")).toHaveAttribute("title", destinationName);
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-
       const destination = await screen.findByTestId("emergency-route-summary-destination");
       expect(destination).toHaveTextContent(destinationName);
       expect(destination).toHaveAttribute("title", destinationName);
       expect(destination).toHaveClass("line-clamp-2", "break-words");
       expect(screen.getByRole("button", { name: "Start" })).toBeVisible();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -622,9 +997,7 @@ describe("RoutePlannerDialog student accessibility", () => {
         phase: "preview",
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
       expect(screen.getByTestId("route-summary")).toBeInTheDocument();
       expect(dialog.style.height).toBe("fit-content");
       expect(screen.getByTestId("route-planner-scroll-region").getAttribute("style")).toContain("44dvh");
@@ -636,7 +1009,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("keeps the CABA SOS origin, destination, Route A/B, and Start visible in the collapsed preview", async () => {
+  it("keeps the CABA SOS origin, destination, Route A/B, and Start visible in the complete preview", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const onStartNavigation = vi.fn();
@@ -656,18 +1029,17 @@ describe("RoutePlannerDialog student accessibility", () => {
         onSelectEmergencyRoute,
         onStartNavigation,
       })} />);
-      const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      const summary = await screen.findByTestId("mobile-route-preview-collapsed-summary");
+      const summary = await screen.findByTestId("route-summary");
       expect(summary).toHaveTextContent("CABA-403");
       expect(summary).toHaveTextContent("PLV Assembly Point");
-      expect(summary).toHaveTextContent("SOS · Emergency route");
-      expect(within(summary).getByTestId("emergency-route-tab-0")).toBeVisible();
-      expect(within(summary).getByTestId("emergency-route-tab-1")).toBeVisible();
-      expect(within(summary).getByRole("button", { name: "Start Navigation" })).toBeVisible();
-      fireEvent.click(within(summary).getByTestId("emergency-route-tab-1"));
+      await waitFor(() => expect(screen.getByTestId("emergency-route-tab-0")).toBeVisible());
+      await waitFor(() => expect(screen.getByTestId("emergency-route-tab-1")).toBeVisible());
+      expect(screen.getByRole("button", { name: "Start" })).toBeVisible();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("emergency-route-tab-1"));
       expect(onSelectEmergencyRoute).toHaveBeenCalledWith("route-b");
-      fireEvent.click(within(summary).getByRole("button", { name: "Start Navigation" }));
+      expect(onStartNavigation).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
       expect(onStartNavigation).toHaveBeenCalledOnce();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -675,72 +1047,166 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("gives a compact SOS preview room for Route A/B and synchronizes handle snaps", async () => {
+  it("tracks Guided Navigation sheet height during drag and settles safely on release", async () => {
     const originalWidth = window.innerWidth;
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const onExpand = vi.fn();
     const onCollapse = vi.fn();
-    const onSelectEmergencyRoute = vi.fn();
-    const onCameraModeChange = vi.fn();
     const props = plannerProps({
-      from: building("caba", "CABA", "CABA"),
-      fromRoom: room("caba-201", "CABA-201", "caba"),
-      mode: "emergency",
-      phase: "preview",
-      cameraMode: "explore",
-      route: route({ mode: "emergency", fromCode: "CABA-201", emergencyDestinationLabel: "PLV Assembly Point" }),
-      emergencyRoutes: [
-        { id: "route-a", label: "Route A", doorLabel: "Room door", exitLabel: "Exterior Stair 1" },
-        { id: "route-b", label: "Route B", doorLabel: "Room door 2", exitLabel: "Exterior Stair 2" },
-      ],
-      activeEmergencyRouteId: "route-a",
-      onSelectEmergencyRoute,
-      onCameraModeChange,
+      from: building("gate", "GATE", "Campus Gate"),
+      to: building("caba", "CABA", "CABA"),
+      phase: "navigating",
+      collapsed: true,
+      cameraMode: "follow",
+      currentStepIndex: 1,
+      navigationSteps: ["First step", "Second step", "Third step"],
+      route: route(),
       onExpand,
       onCollapse,
     });
 
     try {
-      const view = render(<RoutePlannerDialog {...props} />);
+      render(<RoutePlannerDialog {...props} />);
       const dialog = screen.getByTestId("route-planner-dialog");
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      const summary = await screen.findByTestId("mobile-route-preview-collapsed-summary");
-      expect(dialog.style.height).toBe("268px");
-      expect(summary).toHaveTextContent("Emergency route");
-      expect(summary).toHaveTextContent("CABA-201");
-      expect(summary).toHaveTextContent("PLV Assembly Point");
-      expect(within(summary).getByTestId("emergency-route-tab-0")).toBeVisible();
-      expect(within(summary).getByTestId("emergency-route-tab-1")).toBeVisible();
-      expect(within(summary).getByRole("button", { name: "Start Navigation" })).toBeVisible();
-
-      fireEvent.click(within(summary).getByTestId("emergency-route-tab-1"));
-      expect(onSelectEmergencyRoute).toHaveBeenCalledWith("route-b");
-      view.rerender(<RoutePlannerDialog {...props} activeEmergencyRouteId="route-b" />);
-
+      Object.defineProperty(dialog, "scrollHeight", { configurable: true, value: 560 });
+      Object.defineProperty(dialog, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({
+          x: 0, y: 0, top: 0, left: 0, right: 358, bottom: Number.parseFloat(dialog.style.height) || 224,
+          width: 358, height: Number.parseFloat(dialog.style.height) || 224, toJSON: () => ({}),
+        }),
+      });
       const handle = screen.getByTestId("route-planner-resize-handle");
-      fireEvent.pointerDown(handle, { pointerId: 31, pointerType: "touch", clientY: 250 });
-      fireEvent.pointerMove(handle, { pointerId: 31, pointerType: "touch", clientY: 180 });
-      fireEvent.pointerUp(handle, { pointerId: 31, pointerType: "touch", clientY: 180 });
+      expect(handle).toHaveClass("h-4", "before:h-11", "before:w-11");
+      fireEvent.pointerDown(handle, { pointerId: 31, pointerType: "touch", isPrimary: true, clientY: 250 });
+      expect(dialog).toHaveAttribute("data-sheet-motion-active", "true");
+      fireEvent.pointerMove(handle, { pointerId: 31, pointerType: "touch", isPrimary: true, clientY: 210 });
+      await waitFor(() => expect(dialog.style.height).toBe("264px"));
+      expect(dialog).toHaveAttribute("data-sheet-dragging", "true");
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
+      expect(handle).toHaveAttribute("aria-valuenow", "264");
+      expect(screen.getByTestId("current-route-instruction")).toHaveTextContent("Second step");
+      fireEvent.pointerMove(handle, { pointerId: 31, pointerType: "touch", isPrimary: true, clientY: 110 });
+      await waitFor(() => expect(dialog.style.height).toBe("364px"));
+      fireEvent.pointerUp(handle, { pointerId: 31, pointerType: "touch", isPrimary: true, clientY: 110 });
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      expect(dialog).toHaveAttribute("data-sheet-motion-active", "true");
       expect(onExpand).toHaveBeenCalledOnce();
-      expect(screen.getByTestId("emergency-route-tab-1")).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "false");
 
-      fireEvent.pointerDown(handle, { pointerId: 32, pointerType: "touch", clientY: 180 });
-      fireEvent.pointerMove(handle, { pointerId: 32, pointerType: "touch", clientY: 250 });
-      fireEvent.pointerUp(handle, { pointerId: 32, pointerType: "touch", clientY: 250 });
+      fireEvent.pointerDown(handle, { pointerId: 32, pointerType: "touch", isPrimary: true, clientY: 250 });
+      fireEvent.pointerMove(handle, { pointerId: 32, pointerType: "touch", isPrimary: true, clientY: 400 });
+      await waitFor(() => expect(dialog.style.height).toBe("410px"));
+      fireEvent.pointerUp(handle, { pointerId: 32, pointerType: "touch", isPrimary: true, clientY: 400 });
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
       expect(onCollapse).toHaveBeenCalledOnce();
-      expect(within(screen.getByTestId("mobile-route-preview-collapsed-summary")).getByTestId("emergency-route-tab-1")).toHaveAttribute("aria-pressed", "true");
-      expect(within(screen.getByTestId("mobile-route-preview-collapsed-summary")).getByRole("button", { name: "Start Navigation" })).toBeVisible();
-      expect(onCameraModeChange).not.toHaveBeenCalled();
+
+      fireEvent.pointerDown(handle, { pointerId: 33, pointerType: "touch", isPrimary: true, clientY: 250 });
+      fireEvent.pointerMove(handle, { pointerId: 33, pointerType: "touch", isPrimary: true, clientY: 248 });
+      fireEvent.pointerUp(handle, { pointerId: 33, pointerType: "touch", isPrimary: true, clientY: 248 });
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
+
+      fireEvent.pointerDown(handle, { pointerId: 34, pointerType: "touch", isPrimary: true, clientY: 250 });
+      fireEvent.pointerMove(handle, { pointerId: 34, pointerType: "touch", isPrimary: true, clientY: 190 });
+      await waitFor(() => expect(dialog).toHaveAttribute("data-sheet-dragging", "true"));
+      fireEvent.pointerCancel(handle, { pointerId: 34, pointerType: "touch", isPrimary: true, clientY: 190 });
+      await waitFor(() => expect(dialog).not.toHaveAttribute("data-sheet-dragging"));
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
+      expect(screen.getByTestId("compact-instruction-summary")).toHaveTextContent("Step 2 of 3");
+      expect(screen.getByTestId("compact-current-route-instruction")).toHaveTextContent("Second step");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
     }
   });
 
-  it("shows eligible SOS choices from the collapsed overview", async () => {
+  it("docks the mobile panel to the separate map bottom navigation and gives the header controls breathing room", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+    const bottomNavigation = document.createElement("nav");
+    bottomNavigation.dataset.testid = "mobile-bottom-navigation";
+    bottomNavigation.dataset.layoutMode = "map-row";
+    Object.defineProperty(bottomNavigation, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0, y: 707, top: 707, left: 0, right: 390, bottom: 768,
+        width: 390, height: 61, toJSON: () => ({}),
+      }),
+    });
+    document.body.append(bottomNavigation);
+    let view: ReturnType<typeof render> | null = null;
+
+    try {
+      view = render(<RoutePlannerDialog {...plannerProps({
+        phase: "navigating",
+        collapsed: false,
+        cameraMode: "explore",
+        route: route(),
+      })} />);
+      const dialog = screen.getByTestId("route-planner-dialog");
+      await waitFor(() => expect(dialog.style.bottom).toBe("61px"));
+      expect(dialog).toHaveClass("inset-x-0", "rounded-t-[24px]", "rounded-b-none");
+      expect(dialog).not.toHaveClass("transition-[height]");
+      expect(dialog).toHaveAttribute("data-layout-animated", "true");
+      expect(bottomNavigation).not.toContainElement(dialog);
+      expect(screen.getByTestId("route-planner-header")).toHaveClass("py-1.5");
+    } finally {
+      view?.unmount();
+      bottomNavigation.remove();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("lets a collapse button take over from an in-progress drag settle", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const props = plannerProps({
+      phase: "navigating",
+      collapsed: true,
+      cameraMode: "follow",
+      route: route(),
+    });
+    try {
+      render(<RoutePlannerDialog {...props} />);
+      const dialog = screen.getByTestId("route-planner-dialog");
+      Object.defineProperty(dialog, "scrollHeight", { configurable: true, value: 252 });
+      Object.defineProperty(dialog, "getBoundingClientRect", {
+        configurable: true,
+        value: () => {
+          const height = Number.parseFloat(dialog.style.height) || 224;
+          return { x: 0, y: 0, top: 0, left: 0, right: 358, bottom: height, width: 358, height, toJSON: () => ({}) };
+        },
+      });
+      const handle = screen.getByTestId("route-planner-resize-handle");
+      fireEvent.pointerDown(handle, { pointerId: 41, pointerType: "touch", isPrimary: true, clientY: 300 });
+      const scrollRegion = await screen.findByTestId("route-planner-scroll-region");
+      Object.defineProperty(scrollRegion, "scrollHeight", { configurable: true, value: 452 });
+      Object.defineProperty(scrollRegion, "clientHeight", { configurable: true, value: 100 });
+      fireEvent.pointerMove(handle, { pointerId: 41, pointerType: "touch", isPrimary: true, clientY: 100 });
+      await waitFor(() => expect(dialog.style.height).toBe("424px"));
+      fireEvent.pointerUp(handle, { pointerId: 41, pointerType: "touch", isPrimary: true, clientY: 100 });
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      expect(dialog.style.height).toBe("604px");
+
+      fireEvent.click(screen.getByRole("button", { name: "Collapse navigation panel" }));
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
+      expect(dialog).toHaveAttribute("data-sheet-motion-active", "true");
+      await new Promise((resolve) => setTimeout(resolve, 360));
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
+      expect(dialog).not.toHaveAttribute("data-sheet-motion-active");
+      expect(screen.getByTestId("compact-instruction-summary")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("shows eligible SOS choices in the complete route overview", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const onSelectEmergencyRoute = vi.fn();
@@ -759,9 +1225,9 @@ describe("RoutePlannerDialog student accessibility", () => {
         onSelectEmergencyRoute,
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      expect(await screen.findByTestId("mobile-emergency-route-overview-choices")).toBeVisible();
-      fireEvent.click(screen.getByTestId("emergency-route-tab-0"));
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      await waitFor(() => expect(screen.getByTestId("emergency-route-overview")).toBeVisible());
+      fireEvent.click(screen.getByTestId("emergency-route-choice-0"));
       expect(onSelectEmergencyRoute).toHaveBeenCalledWith("route-a");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -769,13 +1235,13 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("centers the choose-on-map sheet handle on mobile and removes it on desktop", () => {
+  it("keeps choose-on-map complete without a misleading sheet resize handle", () => {
     const originalWidth = window.innerWidth;
     try {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
       const mobile = render(<RoutePlannerDialog {...plannerProps()} />);
-      const handle = screen.getByTestId("route-planner-resize-handle");
-      expect(handle).toHaveClass("mx-auto", "w-full", "items-center", "justify-center");
+      expect(screen.getByTestId("route-planner-scroll-region")).toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
       mobile.unmount();
 
       Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
@@ -787,7 +1253,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     }
   });
 
-  it("reopens a minimized mobile preview in the expanded state when the parent route dock requests it", async () => {
+  it("keeps Route Preview complete regardless of the navigation collapsed prop", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const baseProps = plannerProps({
@@ -800,23 +1266,25 @@ describe("RoutePlannerDialog student accessibility", () => {
     const view = render(<RoutePlannerDialog {...baseProps} />);
     const dialog = screen.getByTestId("route-planner-dialog");
     try {
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
-      fireEvent.click(screen.getByRole("button", { name: "Collapse route preview" }));
-      view.rerender(<RoutePlannerDialog {...baseProps} collapsed mobilePreviewExpanded={false} />);
-      view.rerender(<RoutePlannerDialog {...baseProps} collapsed={false} mobilePreviewExpanded />);
-
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      expect(screen.getByTestId("route-summary")).toBeInTheDocument();
       expect(screen.getByTestId("route-planner-footer")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Start Navigation" })).toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-route-preview-collapsed-summary")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+
+      view.rerender(<RoutePlannerDialog {...baseProps} collapsed />);
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(screen.getByTestId("route-summary")).toBeInTheDocument();
+      expect(screen.getByTestId("route-planner-footer")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
     }
   });
 
-  it("snaps the mobile route sheet only to Compact or Expanded from handle drags", async () => {
+  it("does not expose mobile drag or compact controls in Route Preview", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
@@ -827,21 +1295,13 @@ describe("RoutePlannerDialog student accessibility", () => {
         phase: "preview",
       })} />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      const handle = screen.getByTestId("route-planner-resize-handle");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-
-      fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "touch", clientY: 250 });
-      fireEvent.pointerMove(handle, { pointerId: 1, pointerType: "touch", clientY: 180 });
-      fireEvent.pointerUp(handle, { pointerId: 1, pointerType: "touch", clientY: 180 });
       await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
       expect(dialog.style.height).toBe("fit-content");
-
-      fireEvent.pointerDown(handle, { pointerId: 2, pointerType: "touch", clientY: 180 });
-      fireEvent.pointerMove(handle, { pointerId: 2, pointerType: "touch", clientY: 250 });
-      fireEvent.pointerUp(handle, { pointerId: 2, pointerType: "touch", clientY: 250 });
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      expect(dialog.style.height).toBe("236px");
-      await waitFor(() => expect(screen.getByTestId("mobile-route-preview-start-navigation")).toBeVisible());
+      expect(screen.getByTestId("route-summary")).toBeInTheDocument();
+      expect(screen.getByTestId("route-planner-footer")).toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-route-preview-collapsed-summary")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -870,6 +1330,33 @@ describe("RoutePlannerDialog student accessibility", () => {
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps Exit Building in the primary slot and disables it while the handoff is processing", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("science", "SCI", "Science Hall"),
+        to: building("science", "SCI", "Science Hall"),
+        route: route(),
+        phase: "navigating",
+        collapsed: false,
+        playbackPaused: true,
+        primaryAction: "continue-transition",
+        primaryActionDisabled: true,
+        transitionBusy: true,
+        transitionAwaitingAction: true,
+        transitionActionLabel: "Exit Building",
+        onContinueTransition: vi.fn(),
+      })} />);
+
+      const exitButton = screen.getByRole("button", { name: "Exit Building" });
+      expect(exitButton).toBeInTheDocument();
+      expect(exitButton).toBeDisabled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
     }
   });
 
@@ -986,7 +1473,11 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByTestId("route-arrival-state")).toHaveTextContent("You've arrived");
     expect(screen.getByRole("button", { name: "Previous step from arrival" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Edit Route" })).toBeInTheDocument();
-    expect(screen.getByTestId("route-arrival-state").querySelector(".grid.grid-cols-2")).toBeInTheDocument();
+    expect(screen.getByTestId("route-arrival-state")).toHaveClass("min-h-40", "p-5");
+    expect(screen.getByTestId("route-arrival-actions")).toHaveClass("flex-col");
+    const arrivalActions = screen.getByTestId("route-arrival-actions");
+    const arrivalButtons = within(arrivalActions).getAllByRole("button");
+    expect(arrivalButtons.map((button) => button.textContent)).toEqual(["Previous step", "Restart Route", "Edit Route", "Done"]);
     fireEvent.click(screen.getByRole("button", { name: "Edit Route" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: "Restart Route" }));
@@ -998,7 +1489,20 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onClear).not.toHaveBeenCalled();
   });
 
-  it("keeps collapsed mobile arrival actions in a full-width primary row and a separate secondary row", async () => {
+  it("shows the authored same-building exit wording in the existing arrival panel", () => {
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("science", "SCI", "Science Hall"),
+      to: building("science", "SCI", "Science Hall"),
+      route: route(),
+      phase: "arrived",
+      arrivalSubtitle: "You've reached SCI exit.",
+    })} />);
+
+    expect(screen.getByTestId("route-arrival-title")).toHaveTextContent("You've arrived");
+    expect(screen.getByTestId("route-arrival-state")).toHaveTextContent("You've reached SCI exit.");
+  });
+
+  it("keeps mobile Arrival complete and nondraggable when the parent requests a collapsed panel", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const onPreviousStep = vi.fn();
@@ -1013,11 +1517,16 @@ describe("RoutePlannerDialog student accessibility", () => {
         navigationSteps: ["Start at Campus Gate.", "Follow the route.", "Arrive at Canteen."],
         onPreviousStep,
       })} />);
-      fireEvent.click(screen.getByRole("button", { name: "Collapse route preview" }));
-      const arrival = await screen.findByTestId("mobile-route-arrival-compact");
-      expect(within(arrival).getByRole("button", { name: "Restart Route" })).toHaveClass("w-full");
-      expect(within(arrival).getByRole("button", { name: "Edit Route" })).toHaveClass("min-h-11");
-      expect(within(arrival).getByRole("button", { name: "Done" })).toHaveClass("min-h-11");
+      const dialog = screen.getByTestId("route-planner-dialog");
+      const arrival = await screen.findByTestId("route-arrival-state");
+      const actions = within(arrival).getByTestId("route-arrival-actions");
+      const actionButtons = within(actions).getAllByRole("button");
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Collapse navigation panel" })).not.toBeInTheDocument();
+      expect(actionButtons.map((button) => button.textContent)).toEqual(["Previous step", "Restart Route", "Edit Route", "Done"]);
+      expect(within(arrival).getByText("Canteen")).toBeInTheDocument();
+      expect(actionButtons.every((button) => button.className.includes("min-h-11"))).toBe(true);
       fireEvent.click(within(arrival).getByRole("button", { name: "Previous step from arrival" }));
       expect(onPreviousStep).toHaveBeenCalledOnce();
     } finally {
@@ -1226,7 +1735,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByRole("button", { name: "End Route Preview" })).not.toBeInTheDocument();
   });
 
-  it("gives mobile Guided Navigation a bounded independent step scroller while keeping the panel actions available", async () => {
+  it("gives mobile Guided Navigation one Steps scroller while keeping the panel actions available", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     const view = render(<RoutePlannerDialog {...plannerProps({
@@ -1240,30 +1749,318 @@ describe("RoutePlannerDialog student accessibility", () => {
 
     const scrollRegion = screen.getByTestId("route-planner-scroll-region");
     const steps = await screen.findByTestId("guided-route-steps");
-    expect(scrollRegion).toHaveClass("overflow-hidden");
-    expect(steps).toHaveClass("flex-1", "overflow-y-auto", "touch-pan-y");
-    expect(steps).not.toHaveClass("shrink-0");
-    expect(screen.getByTestId("guided-navigation-summary")).toHaveClass("flex-1", "min-h-0");
+    expect(scrollRegion).toHaveClass("overflow-y-auto", "touch-pan-y");
+    expect(steps).toHaveClass("max-h-none", "shrink-0", "overflow-visible");
+    expect(steps).not.toHaveClass("overflow-y-auto");
+    expect(screen.getByTestId("guided-navigation-summary")).toHaveClass("flex-none", "min-h-0");
     expect(screen.getByTestId("explore-route-facts")).toHaveClass("hidden", "md:flex");
     expect(screen.getByRole("button", { name: "End Navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause navigation" })).not.toBeInTheDocument();
 
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     act(() => fireEvent(window, new Event("resize")));
-    await waitFor(() => expect(scrollRegion).toHaveClass("overflow-y-auto"));
+    await waitFor(() => expect(scrollRegion).toHaveClass("overflow-hidden"));
+    expect(steps).toHaveClass("overflow-y-auto");
     expect(steps).toHaveClass("shrink-0");
 
     view.unmount();
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
   });
 
-  it("labels preview cleanup as Close Preview", () => {
-    render(<RoutePlannerDialog {...plannerProps({
-      mode: "emergency",
-      phase: "preview",
-      route: route({ mode: "emergency", emergencyDestinationLabel: "Test Assembly Point" }),
+  it("keeps expanded mobile navigation content-sized until the student opens Steps", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+    const onPause = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        phase: "navigating",
+        collapsed: false,
+        route: route(),
+        currentStepIndex: 1,
+        navigationSteps: ["Start at the Campus Gate.", "Follow the campus path toward CABA."],
+        onPause,
+      })} />);
+
+      const dialog = screen.getByTestId("route-planner-dialog");
+      const scrollRegion = screen.getByTestId("route-planner-scroll-region");
+      const summary = screen.getByTestId("guided-navigation-summary");
+      expect(dialog.style.height).toBe("fit-content");
+      expect(scrollRegion.style.flex).toBe("0 1 auto");
+      expect(summary).not.toHaveClass("flex-1");
+      expect(screen.getByRole("button", { name: "End Navigation" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Steps" }));
+      expect(dialog.style.height).toContain("student-map-search-safe-top");
+      expect(dialog.style.maxHeight).toContain("student-map-search-safe-top");
+      expect(scrollRegion.style.flex).toBe("1 1 0%");
+      expect(scrollRegion).toHaveClass("overflow-y-auto");
+      expect(summary).toHaveClass("flex-none");
+      expect(screen.getByTestId("guided-route-steps")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Hide steps" }));
+      expect(dialog.style.height).toBe("fit-content");
+      expect(summary).not.toHaveClass("flex-1");
+      expect(onPause).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps the historical inline Steps list on short screens without changing navigation state", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 568 });
+    const onContinueTransition = vi.fn();
+    const onEditRoute = vi.fn();
+    const onPause = vi.fn();
+    const onPreviousStep = vi.fn();
+    const onNextStep = vi.fn();
+    const onInspectStep = vi.fn();
+    try {
+      const view = render(<RoutePlannerDialog {...plannerProps({
+        phase: "navigating",
+        route: route(),
+        currentStepIndex: 1,
+        navigationSteps: ["Walk through the hallway.", "Take the Right Stair down to Ground Floor.", "Exit the building."],
+        transitionAwaitingAction: true,
+        transitionActionLabel: "Continue to Ground Floor",
+        transitionPrompt: "Tap the Right Stair or press Continue.",
+        primaryAction: "continue-transition",
+        cameraMode: "follow",
+        onContinueTransition,
+        onEditRoute,
+        onPause,
+        onPreviousStep,
+        onNextStep,
+        onInspectStep,
+      })} />);
+
+      const scrollRegion = screen.getByTestId("route-planner-scroll-region");
+      const dialog = screen.getByTestId("route-planner-dialog");
+      const controls = screen.getByTestId("guided-playback-controls");
+      expect(dialog.style.height).toBe("fit-content");
+      expect(scrollRegion).toHaveClass("overflow-y-auto", "touch-pan-y");
+      expect(controls).toHaveClass("grid-cols-4");
+      expect(screen.getByTestId("current-route-instruction")).toHaveTextContent("Take the Right Stair down to Ground Floor.");
+      fireEvent.click(screen.getByRole("button", { name: "Continue to Ground Floor" }));
+      expect(onContinueTransition).toHaveBeenCalledOnce();
+
+      fireEvent.click(screen.getByRole("button", { name: "Steps" }));
+      const summary = screen.getByTestId("guided-navigation-summary");
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(within(summary).getByTestId("guided-route-steps")).toBeInTheDocument();
+      expect(dialog.style.height).toContain("student-map-search-safe-top");
+      expect(dialog.style.maxHeight).toContain("student-map-search-safe-top");
+      expect(scrollRegion).toHaveClass("overflow-y-auto");
+      const steps = within(summary).getByTestId("guided-route-steps");
+      expect(steps).toHaveClass("max-h-none", "shrink-0", "overflow-visible");
+      expect(steps).not.toHaveClass("overflow-y-auto");
+      expect(steps).not.toHaveClass("min-h-[9rem]");
+      expect(within(steps).getByTestId("guided-active-step")).toHaveTextContent("Take the Right Stair down to Ground Floor.");
+      expect(within(summary).getByTestId("current-route-instruction")).toHaveTextContent("Take the Right Stair down to Ground Floor.");
+      expect(within(summary).getByRole("button", { name: "Continue to Ground Floor" })).toBeInTheDocument();
+      expect(within(summary).getByRole("button", { name: "Switch to Explore mode" })).toBeInTheDocument();
+      expect(within(summary).getByRole("button", { name: /^Edit route to / })).toBeInTheDocument();
+      const footer = screen.getByTestId("route-planner-footer");
+      expect(scrollRegion.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(footer).getByRole("button", { name: "End Navigation" })).toBeInTheDocument();
+      expect(onContinueTransition).toHaveBeenCalledOnce();
+      expect(onPause).not.toHaveBeenCalled();
+      expect(onPreviousStep).not.toHaveBeenCalled();
+      expect(onNextStep).not.toHaveBeenCalled();
+      expect(onInspectStep).not.toHaveBeenCalled();
+
+      fireEvent.click(within(summary).getByRole("button", { name: "Hide steps" }));
+      await waitFor(() => expect(screen.queryByTestId("guided-route-steps")).not.toBeInTheDocument());
+      expect(screen.getByTestId("current-route-instruction")).toHaveTextContent("Take the Right Stair down to Ground Floor.");
+      expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Continue to Ground Floor" })).toBeInTheDocument();
+      view.unmount();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => fireEvent(window, new Event("resize")));
+    }
+  });
+
+  it("compacts the mobile instruction card while the expanded step list is open", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const view = render(<RoutePlannerDialog {...plannerProps({
+      phase: "navigating",
+      route: route(),
+      currentStepIndex: 0,
+      navigationSteps: ["Walk through the hallway toward the exit.", "Exit the building to Campus Path.", "Follow the campus path to CEIT."],
     })} />);
-    expect(screen.getByRole("button", { name: "Close Preview" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Steps" }));
+
+    expect(screen.getByTestId("guided-navigation-summary")).toHaveClass("gap-2");
+    expect(screen.getByTestId("guided-navigation-summary").firstElementChild).toHaveClass("p-3");
+    expect(screen.getByTestId("current-route-instruction")).toHaveTextContent("Walk through the hallway toward the exit.");
+    expect(screen.getByText(/^Next:/)).toBeInTheDocument();
+    expect(screen.getByTestId("guided-route-steps")).toHaveClass("max-h-none", "shrink-0", "overflow-visible");
+    expect(screen.getByTestId("route-planner-scroll-region")).toHaveClass("overflow-y-auto");
+    expect(screen.getByRole("button", { name: "End Navigation" })).toBeInTheDocument();
+
+    view.unmount();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  });
+
+  it("preserves Explore mode and the following position with the historical inline Steps list", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 568 });
+    const onInspectStep = vi.fn();
+    const onCameraModeChange = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        phase: "navigating",
+        route: route(),
+        cameraMode: "explore",
+        currentStepIndex: 2,
+        followStepIndex: 1,
+        navigationSteps: ["Start at Campus Gate.", "Enter CEIT.", "Take stairs to Floor 2."],
+        onInspectStep,
+        onCameraModeChange,
+      })} />);
+
+      const steps = screen.getByTestId("guided-route-steps");
+      expect(within(steps).getByTestId("explore-inspected-step")).toHaveTextContent("Take stairs to Floor 2.");
+      expect(steps.querySelector('li[data-step-state="active"]')).toHaveTextContent("Enter CEIT.");
+      expect(onInspectStep).not.toHaveBeenCalled();
+      expect(onCameraModeChange).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId("guided-explore-steps-toggle"));
+      await waitFor(() => expect(screen.queryByTestId("guided-route-steps")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Return to Follow mode" })).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(screen.getByTestId("guided-explore-steps-toggle"));
+      const reopenedSteps = screen.getByTestId("guided-route-steps");
+      expect(reopenedSteps.querySelector('li[data-step-state="active"]')).toHaveTextContent("Enter CEIT.");
+      fireEvent.click(screen.getByTestId("guided-explore-steps-toggle"));
+      expect(onInspectStep).not.toHaveBeenCalled();
+      expect(onCameraModeChange).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("restores the centered Arrival card and keeps every short-screen action directly reachable", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 568 });
+    const onDone = vi.fn();
+    const onStartNavigation = vi.fn();
+    const onPreviousStep = vi.fn();
+    const onEditRoute = vi.fn();
+    const onClose = vi.fn();
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        phase: "arrived",
+        route: route(),
+        currentStepIndex: 1,
+        navigationSteps: ["Start walking.", "Reach the destination."],
+        arrivalSubtitle: "You've reached the College of Accountancy and Business Administration.",
+        onDone,
+        onStartNavigation,
+        onPreviousStep,
+        onEditRoute,
+        onClose,
+      })} />);
+
+      const dialog = screen.getByTestId("route-planner-dialog");
+      const scrollRegion = screen.getByTestId("route-planner-scroll-region");
+      const arrival = screen.getByTestId("route-arrival-state");
+      expect(arrival).toHaveClass("min-h-40", "p-5", "text-center");
+      expect(dialog.style.maxHeight).toContain("student-map-search-safe-top");
+      expect(scrollRegion).toHaveClass("overflow-y-auto");
+      expect(scrollRegion.style.maxHeight).toContain("student-map-search-safe-top");
+      expect(arrival.querySelector(".lucide-check")).toBeInTheDocument();
+      expect(within(arrival).getByText("You've reached the College of Accountancy and Business Administration.")).toBeInTheDocument();
+      fireEvent.click(within(arrival).getByRole("button", { name: "Done" }));
+      fireEvent.click(within(arrival).getByRole("button", { name: "Restart Route" }));
+      fireEvent.click(within(arrival).getByRole("button", { name: "Previous step from arrival" }));
+      fireEvent.click(within(arrival).getByRole("button", { name: "Edit Route" }));
+
+      expect(onDone).toHaveBeenCalledOnce();
+      expect(onStartNavigation).toHaveBeenCalledOnce();
+      expect(onPreviousStep).toHaveBeenCalledOnce();
+      expect(onEditRoute).toHaveBeenCalledOnce();
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("keeps Arrival complete instead of suspending it into a compact state for the floor picker", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 568 });
+    const onPreviousStep = vi.fn();
+    const onEditRoute = vi.fn();
+    try {
+      const arrivalProps = plannerProps({
+        phase: "arrived",
+        collapsed: true,
+        suspendedForFloorPicker: true,
+        route: route(),
+        currentStepIndex: 1,
+        navigationSteps: ["Start walking.", "Reach the destination."],
+        arrivalSubtitle: "You've reached the College of Accountancy and Business Administration.",
+        onPreviousStep,
+        onEditRoute,
+      });
+      const view = render(<RoutePlannerDialog {...arrivalProps} phase="navigating" />);
+      await screen.findByTestId("route-planner-floor-picker-suspended");
+      view.rerender(<RoutePlannerDialog {...arrivalProps} />);
+
+      const dialog = screen.getByTestId("route-planner-dialog");
+      const arrival = await screen.findByTestId("route-arrival-state");
+      const actions = within(arrival).getByTestId("route-arrival-actions");
+      expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+      expect(screen.queryByTestId("route-planner-floor-picker-suspended")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      const buttons = within(actions).getAllByRole("button");
+      expect(buttons.map((button) => button.textContent)).toEqual(["Previous step", "Restart Route", "Edit Route", "Done"]);
+      expect(buttons.every((button) => button.className.includes("min-h-11"))).toBe(true);
+      expect(within(actions).queryByText("More options")).not.toBeInTheDocument();
+      fireEvent.click(within(actions).getByRole("button", { name: "Previous step from arrival" }));
+      fireEvent.click(within(actions).getByRole("button", { name: "Edit Route" }));
+      expect(onPreviousStep).toHaveBeenCalledOnce();
+      expect(onEditRoute).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
+  });
+
+  it("labels preview cleanup as Close Preview", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        mode: "emergency",
+        phase: "preview",
+        route: route({ mode: "emergency", emergencyDestinationLabel: "Test Assembly Point" }),
+      })} />);
+      expect(screen.getByRole("button", { name: "Close Preview" })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      act(() => window.dispatchEvent(new Event("resize")));
+    }
   });
 
   it("gives SOS alternatives distinct Route A/B labels even when they share a fallback destination label", () => {
@@ -1330,7 +2127,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
   });
 
-  it("keeps Explore free of redundant playback controls and exposes only required handoffs", () => {
+  it("keeps Explore free of redundant playback controls and exposes only required handoffs", async () => {
     const onPause = vi.fn();
     const onPreviousStep = vi.fn();
     const onNextStep = vi.fn();
@@ -1364,7 +2161,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onPreviousStep).not.toHaveBeenCalled();
     expect(onNextStep).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("guided-explore-steps-toggle"));
-    expect(screen.queryByTestId("guided-route-steps")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("guided-route-steps")).not.toBeInTheDocument());
   });
 
   it("does not render a Continue action for an Explore walking step", () => {
@@ -1385,19 +2182,20 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByRole("button", { name: /Pause|Resume/ })).not.toBeInTheDocument();
   });
 
-  it("shows the sheet resize affordance only on mobile", () => {
+  it("shows the sheet resize affordance only for mobile Guided Navigation", () => {
     const originalWidth = window.innerWidth;
     try {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-      const view = render(<RoutePlannerDialog {...plannerProps({ route: route(), phase: "preview" })} />);
+      const view = render(<RoutePlannerDialog {...plannerProps({ route: null, phase: "planning" })} />);
       fireEvent(window, new Event("resize"));
       expect(screen.queryByRole("slider", { name: "Resize route planner" })).not.toBeInTheDocument();
       view.unmount();
 
       Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
-      render(<RoutePlannerDialog {...plannerProps({ route: route(), phase: "preview" })} />);
+      render(<RoutePlannerDialog {...plannerProps({ route: null, phase: "planning" })} />);
       fireEvent(window, new Event("resize"));
-      expect(screen.getByRole("slider", { name: "Resize route planner" })).toBeInTheDocument();
+      expect(screen.queryByRole("slider", { name: "Resize route planner" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("route-planner-footer")).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       fireEvent(window, new Event("resize"));
@@ -1523,6 +2321,9 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByTestId("route-endpoint-card-destination")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Find Route" })).toBeInTheDocument();
+    expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
+    expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse navigation panel" })).not.toBeInTheDocument();
     expect(screen.getByTestId("route-planner-scroll-region").style.maxHeight).toContain("--student-map-mobile-panel-max-height");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   });
@@ -1690,7 +2491,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
   });
 
-  it("keeps unresolved SOS eligibility blocked after expanding the mobile preview", async () => {
+  it("keeps unresolved SOS eligibility blocked in the complete mobile preview", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
@@ -1706,11 +2507,11 @@ describe("RoutePlannerDialog student accessibility", () => {
         },
       })} />);
 
-      await waitFor(() => expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument());
-      expect(await screen.findByTestId("mobile-route-preview-collapsed-summary")).toHaveTextContent("Route needs review");
-      fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
-      const start = await screen.findByRole("button", { name: "Start" });
-      expect(start).toBeDisabled();
+      expect(await screen.findByTestId("emergency-route-status")).toHaveAttribute("data-status", "review-required");
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+      expect(screen.queryByTestId("mobile-route-preview-collapsed-summary")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       act(() => window.dispatchEvent(new Event("resize")));
@@ -1758,12 +2559,16 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByTestId("emergency-route-selector")).toHaveTextContent("Route B");
   });
 
-  it("snaps the mobile sheet between compact and expanded states", async () => {
+  it("snaps the mobile Guided Navigation sheet between compact and expanded states", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
-    render(<RoutePlannerDialog {...plannerProps()} />);
+    render(<RoutePlannerDialog {...plannerProps({
+      phase: "navigating",
+      route: route(),
+      navigationSteps: ["Walk to the destination."],
+    })} />);
     fireEvent(window, new Event("resize"));
 
-    const handle = screen.getByRole("slider", { name: "Resize route planner" });
+    const handle = screen.getByRole("slider", { name: "Resize navigation panel" });
     const dialog = screen.getByRole("dialog", { name: "Route planner" });
     expect(handle).toHaveAttribute("aria-valuenow", "736");
     expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
@@ -1774,9 +2579,9 @@ describe("RoutePlannerDialog student accessibility", () => {
 
     fireEvent.keyDown(handle, { key: "Home" });
     expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact");
-    expect(handle).toHaveAttribute("aria-valuenow", "140");
+    expect(handle).toHaveAttribute("aria-valuenow", "224");
     await waitFor(() => expect(screen.queryByTestId("route-planner-scroll-region")).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Expand route panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand navigation panel" }));
     expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
     fireEvent(window, new Event("resize"));

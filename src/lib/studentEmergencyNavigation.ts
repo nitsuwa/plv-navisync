@@ -14,7 +14,7 @@ import {
 } from "./emergencyAssemblyPoints";
 import type { Destination } from "./combinedPathfinding";
 import { isAutomaticStudentEvacuationCandidateEligible, resolveAutomaticStudentEvacuationRoutes } from "./studentEmergencyEvacuation";
-import { plannedRouteFromAuthoredPath, type PlannedRoute } from "./routePlanner";
+import { plannedRouteFromAuthoredPath, type PlannedRoute, type Pt } from "./routePlanner";
 import { assessEmergencyAuthoredPath } from "./emergencyPathEligibility";
 import { doorNodeForEdge, findEntranceTransitionForEntrance } from "./entranceTransitions";
 
@@ -179,11 +179,71 @@ export function isStudentEmergencyRouteCurrentAndEligible(
   origin: Destination | { type: "point"; x: number; y: number } | null,
 ): boolean {
   if (!route?.isAuthoredGraph || !origin) return false;
+  // Graph IDs remain stable when an editor moves an authored node or changes
+  // a bend point. Compare the rendered route geometry as well, allowing only
+  // sub-hundredth-unit coordinate or route-cost drift from calculations.
+  const geometryTolerance = 0.01;
+  const samePoints = (left: readonly Pt[] | undefined, right: readonly Pt[] | undefined): boolean => {
+    const a = left ?? [];
+    const b = right ?? [];
+    return a.length === b.length && a.every((point, index) => {
+      const other = b[index];
+      return Boolean(other && Number.isFinite(point.x) && Number.isFinite(point.y)
+        && Number.isFinite(other.x) && Number.isFinite(other.y)
+        && Math.abs(point.x - other.x) <= geometryTolerance
+        && Math.abs(point.y - other.y) <= geometryTolerance);
+    });
+  };
+  const sameDistance = (left: number | undefined, right: number | undefined): boolean =>
+    left === undefined || right === undefined
+      ? left === right
+      : Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= geometryTolerance;
   const sameAuthoredPath = (candidate: PlannedRoute) =>
     JSON.stringify(candidate.authoredGraphNodeIds ?? []) === JSON.stringify(route.authoredGraphNodeIds ?? [])
     && JSON.stringify(candidate.authoredGraphEdgeIds ?? []) === JSON.stringify(route.authoredGraphEdgeIds ?? [])
     && candidate.emergencyAssemblyPointId === route.emergencyAssemblyPointId
-    && candidate.emergencyDestinationFallback === route.emergencyDestinationFallback;
+    && candidate.emergencyDestinationFallback === route.emergencyDestinationFallback
+    && samePoints(candidate.points, route.points)
+    && samePoints(candidate.campusPoints, route.campusPoints)
+    && sameDistance(candidate.dist, route.dist)
+    && (candidate.indoorSegments ?? []).length === (route.indoorSegments ?? []).length
+    && (candidate.indoorSegments ?? []).every((segment, index) => {
+      const other = route.indoorSegments?.[index];
+      return Boolean(other
+        && segment.buildingId === other.buildingId
+        && segment.floorId === other.floorId
+        && segment.floorNumber === other.floorNumber
+        && segment.contextLegIndex === other.contextLegIndex
+        && segment.afterOutdoor === other.afterOutdoor
+        && samePoints(segment.waypoints, other.waypoints)
+        && sameDistance(segment.distanceM, other.distanceM));
+    })
+    && (candidate.contextLegs ?? []).length === (route.contextLegs ?? []).length
+    && (candidate.contextLegs ?? []).every((leg, index) => {
+      const other = route.contextLegs?.[index];
+      return Boolean(other
+        && leg.kind === other.kind
+        && leg.buildingId === other.buildingId
+        && leg.floorId === other.floorId
+        && leg.floorNumber === other.floorNumber
+        && leg.segmentIndex === other.segmentIndex
+        && samePoints(leg.waypoints, other.waypoints)
+        && sameDistance(leg.distanceM, other.distanceM));
+    })
+    && (candidate.contextHandoffs ?? []).length === (route.contextHandoffs ?? []).length
+    && (candidate.contextHandoffs ?? []).every((handoff, index) => {
+      const other = route.contextHandoffs?.[index];
+      return Boolean(other
+        && handoff.fromContextLegIndex === other.fromContextLegIndex
+        && handoff.toContextLegIndex === other.toContextLegIndex
+        && handoff.kind === other.kind
+        && handoff.buildingId === other.buildingId
+        && handoff.nodeId === other.nodeId
+        && Math.abs(handoff.sourcePoint.x - other.sourcePoint.x) <= geometryTolerance
+        && Math.abs(handoff.sourcePoint.y - other.sourcePoint.y) <= geometryTolerance
+        && Math.abs(handoff.targetPoint.x - other.targetPoint.x) <= geometryTolerance
+        && Math.abs(handoff.targetPoint.y - other.targetPoint.y) <= geometryTolerance);
+    });
 
   if (origin.type === "room") {
     const resolution = resolveAutomaticStudentEvacuationRoutes(campus, origin);

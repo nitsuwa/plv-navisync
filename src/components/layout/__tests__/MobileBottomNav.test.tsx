@@ -30,9 +30,12 @@ describe("MobileBottomNav", () => {
     expect(nav).toHaveClass("relative", "w-full", "shrink-0", "map-layer-bottom-nav");
     expect(nav).not.toHaveClass("fixed", "bottom-0");
     expect(nav).toHaveClass("pb-[env(safe-area-inset-bottom)]");
+    expect(screen.getByTestId("mobile-bottom-navigation-content")).toHaveClass("min-h-[60px]");
     expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
     expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("href", "/map");
     expect(within(nav).getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Home" })).toHaveClass("min-h-11");
+    expect(within(nav).getByRole("link", { name: "Map" })).toHaveClass("min-h-11");
   });
 
   it("keeps the navigation fixed over ordinary scrolling pages", () => {

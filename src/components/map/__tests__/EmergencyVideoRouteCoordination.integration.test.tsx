@@ -191,7 +191,7 @@ describe("integrated student video and emergency route handoff", () => {
     expect(screen.queryByTestId("emergency-route-status")).not.toBeInTheDocument();
   });
 
-  it("keeps the compact mobile preview focused on the route and destination", async () => {
+  it("keeps the complete mobile preview focused on the route and destination", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
@@ -204,11 +204,14 @@ describe("integrated student video and emergency route handoff", () => {
         emergencyAvailability={{ state: "approved", destinationName: "TEST ONLY Main Assembly Point A", details: ["Assembly point: approved and connected.", "Complete emergency-safe route: available.", "Admin review: current."] }}
       />);
       const dialog = screen.getByTestId("route-planner-dialog");
-      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
-      await screen.findByTestId("mobile-route-preview-collapsed-summary");
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
       expect(screen.queryByTestId("emergency-route-status")).not.toBeInTheDocument();
-      expect(screen.getByTestId("mobile-route-preview-collapsed-summary")).toHaveTextContent(/route preview/i);
-      expect(screen.getByTestId("mobile-route-preview-collapsed-summary")).toHaveTextContent("TEST ONLY Main Assembly Point A");
+      expect(screen.getByTestId("route-summary")).toHaveTextContent(/emergency route/i);
+      expect(screen.getByTestId("emergency-route-summary-destination")).toHaveTextContent("TEST ONLY Main Assembly Point A");
+      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close Preview" })).toBeInTheDocument();
+      expect(screen.queryByTestId("route-planner-resize-handle")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
       expect(screen.queryByText("Assembly point: approved and connected.")).not.toBeInTheDocument();
       expect(screen.queryByText("Details")).not.toBeInTheDocument();
     } finally {

@@ -10,37 +10,44 @@ import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 function AppRuntime() {
   const auth = useAuthBootstrap();
   const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
-  const [minimumElapsed, setMinimumElapsed] = useState(false);
+  const [appStarted, setAppStarted] = useState(false);
+  const [loadingScreenVisible, setLoadingScreenVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
-  const [started, setStarted] = useState(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setMinimumElapsed(true), 500);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!authReady || !minimumElapsed || started) return;
+    if (!authReady || appStarted) return;
+    setAppStarted(true);
     setExiting(true);
-    const timer = window.setTimeout(() => setStarted(true), 260);
-    return () => window.clearTimeout(timer);
-  }, [authReady, minimumElapsed, started]);
+  }, [authReady, appStarted]);
 
-  if (!started) {
-    return <LoadingScreen exiting={exiting} error={auth.status === "error" ? auth.error : null} onRetry={() => void auth.retryBootstrap()} />;
-  }
+  useEffect(() => {
+    if (!exiting) return;
+    const timer = window.setTimeout(() => setLoadingScreenVisible(false), 260);
+    return () => window.clearTimeout(timer);
+  }, [exiting]);
 
   return (
-    <CampusDataProvider>
-      <ErrorBoundary>
-        <RouterProvider router={router} />
-      </ErrorBoundary>
-      <Toaster
-        closeButton
-        position="top-right"
-        toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
-      />
-    </CampusDataProvider>
+    <>
+      {appStarted && (
+        <CampusDataProvider>
+          <ErrorBoundary>
+            <RouterProvider router={router} />
+          </ErrorBoundary>
+          <Toaster
+            closeButton
+            position="top-right"
+            toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
+          />
+        </CampusDataProvider>
+      )}
+      {loadingScreenVisible && (
+        <LoadingScreen
+          exiting={exiting}
+          error={!appStarted && auth.status === "error" ? auth.error : null}
+          onRetry={() => void auth.retryBootstrap()}
+        />
+      )}
+    </>
   );
 }
 

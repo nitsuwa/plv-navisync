@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FloorEditor } from "../FloorEditor";
@@ -189,7 +189,7 @@ describe("Floor Editor walking networks inside Rooms", () => {
     expect(container.querySelectorAll('[data-testid="nav-linked-node"]')).toHaveLength(0);
   });
 
-  it("keeps the Connect preview under the cursor in a Room with a linked Room node", () => {
+  it("keeps the Connect preview under the cursor in a Room with a linked Room node", async () => {
     const campus = makeCampus();
     campus.buildings[0].floors[0].rooms = [{
       id: "library", name: "CABA Library", type: "library", x: 20, y: 20, w: 180, h: 120, buildingId: "building", floorId: "floor",
@@ -206,7 +206,13 @@ describe("Floor Editor walking networks inside Rooms", () => {
     fireEvent.mouseUp(svg, { clientX: 30, clientY: 30, bubbles: true });
     fireEvent.mouseMove(svg, { clientX: 150, clientY: 80, bubbles: true });
 
-    const line = container.querySelector('[data-testid="floor-nav-connect-preview"] polyline');
+    // Navigation hover previews are intentionally coalesced into one frame.
+    // Wait for that scheduled update before asserting the rendered cursor.
+    await act(async () => {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    const line = container.querySelector('[data-testid="floor-nav-connect-live-preview"] [data-connect-line]');
     const points = (line?.getAttribute("points") ?? "").trim().split(/\s+/).map((value) => value.split(",").map(Number));
     expect(points[points.length - 1]).toEqual([150, 80]);
     expect(points[points.length - 1]).not.toEqual([110, 50]);

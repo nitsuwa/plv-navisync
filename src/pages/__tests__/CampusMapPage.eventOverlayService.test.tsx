@@ -89,6 +89,48 @@ function withNavigableRooms(campus: EditorCampus, rooms: { buildingId: string; f
   };
 }
 
+function roomToSameBuildingExitCampus(): EditorCampus {
+  const buildingId = "same-building-exit";
+  const floorId = "same-building-ground";
+  const roomId = "same-building-room";
+  return {
+    ...previewCampus,
+    buildings: [{
+      ...previewCampus.buildings[0],
+      id: buildingId,
+      name: "Science Hall",
+      code: "SCI",
+      entranceNodeId: "same-building-exit-node",
+      floors: [{
+        id: floorId,
+        buildingId,
+        number: 1,
+        label: "Ground Floor",
+        rooms: [{ id: roomId, name: "Navigation Test Room", type: "classroom", floorId, buildingId, x: 10, y: 10, w: 60, h: 60, accessDoorId: "same-building-room-door" }],
+        paths: [],
+        walls: [],
+        doors: [{ id: "same-building-room-door", x: 40, y: 70, width: 20, direction: "left", color: "#a16207" }],
+        windows: [],
+        furniture: [],
+        stairs: [],
+        ramps: [],
+        elevators: [],
+        labels: [],
+      }],
+    }],
+    navNodes: [
+      { id: "same-building-room-access", name: "Navigation Test Room", type: "room_access", roomId, x: 40, y: 50, buildingId, floorId, accessible: true, color: "#2563eb" },
+      { id: "same-building-door", name: "Room Door", type: "hallway", x: 40, y: 70, buildingId, floorId, doorId: "same-building-room-door", accessible: true, color: "#2563eb" },
+      { id: "same-building-hall", name: "Hall", type: "hallway", x: 40, y: 150, buildingId, floorId, accessible: true, color: "#2563eb" },
+      { id: "same-building-exit-node", name: "Main Exit", type: "entrance", x: 200, y: 220, buildingId, accessible: true, color: "#2563eb" },
+    ],
+    navEdges: [
+      { id: "same-building-indoor-walk", startNodeId: "same-building-door", endNodeId: "same-building-hall", distance: 50, bidirectional: true, accessible: true, type: "walkway", color: "#2563eb", width: 3 },
+      { id: "same-building-exit-handoff", startNodeId: "same-building-hall", endNodeId: "same-building-exit-node", distance: 10, bidirectional: true, accessible: true, type: "entrance_transition", color: "#2563eb", width: 3 },
+    ],
+  };
+}
+
 const settingsMocks = vi.hoisted(() => ({ getPublicPlatformSettings: vi.fn() }));
 
 vi.mock("../../services/eventOverlayService", () => ({
@@ -106,8 +148,9 @@ vi.mock("../../services/usageAnalyticsService", () => ({
 vi.mock("../../components/map/IndoorFloor3DRenderer", async () => {
   const React = await import("react");
   return {
-    default: ({ floor, recenterNonce = 0, onRecenterComplete }: {
+    default: ({ floor, focusRoomId, recenterNonce = 0, onRecenterComplete }: {
       floor: { id: string; label: string };
+      focusRoomId?: string | null;
       recenterNonce?: number;
       onRecenterComplete?: (nonce: number) => void;
     }) => {
@@ -117,6 +160,7 @@ vi.mock("../../components/map/IndoorFloor3DRenderer", async () => {
       return React.createElement("div", {
         "data-testid": "student-indoor-floor-3d-renderer",
         "data-floor-id": floor.id,
+        "data-focus-room-id": focusRoomId ?? "",
         "aria-label": `${floor.label} 3D map`,
       });
     },
@@ -159,6 +203,17 @@ describe("CampusMapPage event overlays", () => {
         <CampusMapPage {...props} />
       </MemoryRouter>,
     );
+
+  const startSameBuildingExitNavigation = async () => {
+    renderCampusMap({ previewCampus: roomToSameBuildingExitCampus() });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Navigation Test Room, Room/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Find Route" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start Navigation" }));
+  };
 
   const readStudentMapCameraScale = (surface: HTMLElement) => {
     const camera = surface.querySelector<SVGGElement>("svg > g");
@@ -257,6 +312,30 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.queryByTestId("route-arrival-state")).not.toBeInTheDocument();
     expect(screen.queryByTestId("campus-route-context-legs")).not.toBeInTheDocument();
   }, 15_000);
+
+  it("keeps compact mobile Guided Navigation mounted with its draggable panel handle", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      await startSameBuildingExitNavigation();
+      const dialog = await screen.findByTestId("route-planner-dialog");
+      const resizeHandle = screen.getByTestId("route-planner-resize-handle");
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
+      expect(screen.queryByTestId("collapsed-route-card")).not.toBeInTheDocument();
+
+      fireEvent.keyDown(resizeHandle, { key: "ArrowUp" });
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "expanded"));
+      expect(screen.queryByTestId("collapsed-route-card")).not.toBeInTheDocument();
+
+      fireEvent.keyDown(resizeHandle, { key: "ArrowDown" });
+      await waitFor(() => expect(dialog).toHaveAttribute("data-mobile-sheet-state", "compact"));
+      expect(screen.getByTestId("route-planner-resize-handle")).toBeInTheDocument();
+      expect(screen.queryByTestId("collapsed-route-card")).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+      fireEvent(window, new Event("resize"));
+    }
+  });
 
   it("toggles event preview without changing the navigation camera", async () => {
     renderCampusMap({ previewCampus });
@@ -391,8 +470,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Find Route" }));
 
     expect(await screen.findByTestId("campus-route-context-legs")).toBeInTheDocument();
-    const expand = screen.queryByRole("button", { name: "Expand route panel" });
-    if (expand) fireEvent.click(expand);
+    expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Edit Route" }));
     expect(screen.queryByTestId("campus-route-context-legs")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Change start" }));
@@ -583,6 +661,39 @@ describe("CampusMapPage event overlays", () => {
       expect(within(sheet).getByLabelText("QR code for Science Hall")).toBeInTheDocument();
       expect(screen.getAllByText("Science Hall").length).toBeGreaterThan(1);
       expect(window.location.search).toBe("");
+    } finally {
+      window.history.replaceState({}, "", originalUrl);
+    }
+  });
+
+  it("uses a room QR as the planner origin without starting navigation", async () => {
+    const floorId = "qr-ground-floor";
+    const roomId = "qr-navigation-room";
+    const campus = withNavigableRooms({
+      ...previewCampus,
+      buildings: [{
+        ...previewCampus.buildings[0],
+        floors: [{
+          id: floorId,
+          buildingId: "building-test",
+          number: 1,
+          label: "Ground Floor",
+          rooms: [{ id: roomId, name: "QR Test Room", type: "classroom", floorId, buildingId: "building-test", x: 10, y: 10, w: 60, h: 60 }],
+          paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+        }],
+      }],
+    }, [{ buildingId: "building-test", floorId, roomId }]);
+    const originalUrl = window.location.href;
+    window.history.replaceState({}, "", `/map?locationId=${roomId}&locationType=room&buildingId=building-test&floorId=${floorId}&floorNumber=1&campusId=campus-test`);
+    try {
+      renderCampusMap({ previewCampus: campus });
+
+      const planner = await screen.findByTestId("route-planner-dialog");
+      expect(await screen.findByTestId("student-indoor-current-location")).toHaveAttribute("aria-label", expect.stringContaining("You are here: Science Hall"));
+      expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("QR Test Room");
+      expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Choose destination");
+      expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "idle");
+      expect(screen.queryByTestId("collapsed-route-card")).not.toBeInTheDocument();
     } finally {
       window.history.replaceState({}, "", originalUrl);
     }
@@ -817,6 +928,40 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Floor 3" }));
     fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Floor 2/ }));
     expect(screen.getByTestId("student-floor-scene")).toHaveAttribute("data-floor-id", "second");
+  });
+
+  it("does not restore a searched Room as the 3D camera target after changing Floors", async () => {
+    const room = { id: "camera-room", name: "Study Lounge", type: "lounge", x: 20, y: 20, w: 70, h: 50 };
+    const campus = withNavigableRooms({ ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [
+        { id: "camera-ground", buildingId: "building-test", number: 1, label: "Ground Floor", rooms: [{ ...room, floorId: "camera-ground", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+        { id: "camera-second", buildingId: "building-test", number: 2, label: "Floor 2", rooms: [{ ...room, id: "camera-room-second", name: "Study Lounge 2", floorId: "camera-second", buildingId: "building-test" }], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [] },
+      ],
+    }] }, [
+      { buildingId: "building-test", floorId: "camera-ground", roomId: "camera-room" },
+      { buildingId: "building-test", floorId: "camera-second", roomId: "camera-room-second" },
+    ]);
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.focus(await screen.findByRole("searchbox", { name: "Search campus map" }));
+    fireEvent.click(screen.getByRole("option", { name: /Science Hall, Building/i }));
+    fireEvent.click(screen.getAllByTestId("building-enter")[0]!);
+    fireEvent.click(await screen.findByRole("button", { name: "Switch to 3D view" }));
+
+    const search = screen.getByRole("searchbox", { name: "Search campus map" });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: "Study Lounge" } });
+    fireEvent.click(screen.getAllByRole("option", { name: /Study Lounge, Room/i })[0]!);
+    const groundRenderer = await screen.findByTestId("student-indoor-floor-3d-renderer");
+    expect(groundRenderer).toHaveAttribute("data-focus-room-id", "camera-room");
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Ground Floor" }));
+    fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Floor 2/ }));
+    expect(await screen.findByTestId("student-indoor-floor-3d-renderer")).toHaveAttribute("data-focus-room-id", "");
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose floor. Current floor: Floor 2" }));
+    fireEvent.click(within(screen.getByTestId("student-floor-picker-menu")).getByRole("option", { name: /Ground Floor/ }));
+    expect(await screen.findByTestId("student-indoor-floor-3d-renderer")).toHaveAttribute("data-focus-room-id", "");
   });
 
   it("keeps the settled Student scene as vector SVG instead of a cached CSS-scaled layer", async () => {
@@ -1097,6 +1242,26 @@ describe("CampusMapPage event overlays", () => {
 
     await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toBeInTheDocument());
     expect(screen.getByTestId("collapsed-route-card")).toHaveTextContent("Guided navigation");
+    const destinationProgress = screen.getByTestId("collapsed-route-progress");
+    expect(destinationProgress.textContent).toMatch(/^Step \d+ of \d+ ·\d+\/\d+ · CEIT$/);
+    const destinationName = within(destinationProgress).getByRole("button", { name: "Show full destination name: CEIT" });
+    const editDestination = within(destinationProgress).getByRole("button", { name: "Edit route to CEIT" });
+    expect(editDestination).toHaveAttribute("title", "Edit route to CEIT");
+    expect(destinationProgress).toHaveClass("flex", "items-center");
+    fireEvent.click(destinationName);
+    expect(await screen.findByRole("dialog", { name: "Destination details" })).toHaveTextContent("CEIT");
+    expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "navigating");
+    expect(screen.queryByTestId("route-endpoint-card-start")).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Destination details" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("collapsed-current-instruction")).toHaveClass("line-clamp-2", "text-foreground");
+    const playbackControls = screen.getByTestId("collapsed-playback-controls");
+    expect(within(playbackControls).getByRole("button", { name: "Previous step" })).toBeDisabled();
+    expect(within(playbackControls).getByRole("button", { name: "Pause navigation" })).toBeInTheDocument();
+    expect(within(playbackControls).getByRole("button", { name: "Next step" })).toBeInTheDocument();
+    expect(within(playbackControls).getByRole("button", { name: /Playback speed/ })).toBeInTheDocument();
+    expect(within(playbackControls).queryByTestId("active-route-edit")).not.toBeInTheDocument();
+    expect(within(playbackControls).getByRole("button", { name: "Expand navigation panel" })).toBeInTheDocument();
     const routeMode = screen.getByRole("group", { name: "Route mode" });
     expect(within(routeMode).getByRole("button", { name: "Follow mode" })).toHaveClass("min-h-11", "focus-visible:ring-2");
     expect(within(routeMode).getByRole("button", { name: "Explore route" })).toHaveClass("min-h-11", "focus-visible:ring-2");
@@ -1112,6 +1277,28 @@ describe("CampusMapPage event overlays", () => {
     );
     consoleError.mockRestore();
     expect(runtimeWarnings).toHaveLength(0);
+
+    fireEvent.click(editDestination);
+    await waitFor(() => expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("CABA-103"));
+    expect(screen.getByTestId("route-endpoint-card-destination")).toHaveTextContent("CEIT");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByTestId("collapsed-route-card")).toBeInTheDocument());
+    expect(screen.getByTestId("collapsed-route-progress")).toHaveTextContent("CEIT");
+    expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit route to CEIT" }));
+    await waitFor(() => expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("CABA-103"));
+    fireEvent.click(screen.getByRole("button", { name: "Find Route" }));
+    const useThisRoute = await screen.findByRole("button", { name: "Use This Route" });
+    expect(screen.queryByRole("button", { name: "Start Navigation" })).not.toBeInTheDocument();
+    fireEvent.click(useThisRoute);
+
+    const mapSurface = screen.getByTestId("student-map-surface");
+    await waitFor(() => expect(mapSurface).toHaveAttribute("data-route-phase", "navigating"));
+    expect(screen.getByTestId("collapsed-route-card")).toHaveTextContent("Guided navigation");
+    expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/\S/);
+    expect(screen.queryByRole("button", { name: "Use This Route" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Navigation" })).not.toBeInTheDocument();
   });
 
   it("consumes a short room-to-Campus building exit with one Continue action", async () => {
@@ -1181,6 +1368,12 @@ describe("CampusMapPage event overlays", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Explore route" }));
     expect(screen.getByRole("button", { name: "Continue Outside" })).toBeInTheDocument();
+    const exploreOrigin = screen.getByTestId("collapsed-route-progress");
+    expect(exploreOrigin).toContainElement(screen.getByTestId("collapsed-explore-origin-marker"));
+    expect(within(exploreOrigin).getByRole("button", { name: "Show full origin name: Navigation Test Room" })).toBeInTheDocument();
+    expect(within(exploreOrigin).getByRole("button", { name: "Edit route to Campus Gate" })).toBeInTheDocument();
+    expect(screen.queryByTestId("collapsed-explore-guidance")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Viewing Campus|Map context: Campus/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Return to Follow" }));
     expect(screen.getByText("Returning to the current route position…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Continue Outside" })).not.toBeInTheDocument();
@@ -1197,6 +1390,57 @@ describe("CampusMapPage event overlays", () => {
     });
     expect(screen.getByTestId("collapsed-current-instruction")).not.toHaveTextContent(/Exit SCI building\./i);
   }, 20_000);
+
+  it("shows Exit Building only at a final same-building handoff and arrives as soon as Campus is ready", async () => {
+    await startSameBuildingExitNavigation();
+
+    expect(screen.queryByRole("button", { name: "Exit Building" })).not.toBeInTheDocument();
+    const pause = await screen.findByRole("button", { name: "Pause navigation" });
+    fireEvent.click(pause);
+    expect(screen.queryByRole("button", { name: "Exit Building" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Resume navigation" }));
+
+    await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/Exit SCI building\./i), { timeout: 20_000 });
+    const exitAction = await screen.findByRole("button", { name: "Exit Building" });
+    expect(exitAction).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();
+
+    fireEvent.click(exitAction);
+    fireEvent.click(exitAction);
+    await waitFor(() => expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument(), { timeout: 3_000 });
+    const campusReadyAt = performance.now();
+    await waitFor(() => expect(screen.getByTestId("route-arrival-state")).toBeInTheDocument(), { timeout: 3_000 });
+
+    expect(performance.now() - campusReadyAt).toBeLessThan(100);
+    expect(screen.getByTestId("route-arrival-title")).toHaveTextContent("You've arrived");
+    expect(screen.getByTestId("route-arrival-state")).toHaveTextContent("You've reached SCI exit.");
+    expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "arrived");
+    expect(screen.getAllByTestId("route-arrival-title")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse navigation panel" }));
+    const collapsedArrival = await screen.findByTestId("collapsed-route-card");
+    expect(collapsedArrival).toHaveTextContent("You've arrived");
+    expect(within(collapsedArrival).getByTestId("compact-arrival-destination")).toHaveTextContent("You've reached SCI exit.");
+    const arrivalActions = within(collapsedArrival).getByTestId("collapsed-arrival-actions");
+    expect(arrivalActions).toHaveClass("grid-cols-2");
+    expect(within(arrivalActions).getByRole("button", { name: "Restart Route" })).toHaveClass("bg-primary");
+    expect(within(arrivalActions).getByRole("button", { name: "Done" })).toHaveClass("border-border");
+    expect(within(arrivalActions).getByRole("button", { name: "Previous step" })).toBeEnabled();
+    expect(within(arrivalActions).getByRole("button", { name: "Edit Route" })).toBeInTheDocument();
+  }, 25_000);
+
+  it("completes the same-building exit from Explore without requiring Follow or Resume", async () => {
+    await startSameBuildingExitNavigation();
+    await waitFor(() => expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(/Exit SCI building\./i), { timeout: 20_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Explore route" }));
+
+    const exitAction = await screen.findByRole("button", { name: "Exit Building" });
+    expect(exitAction).toBeEnabled();
+    fireEvent.click(exitAction);
+    await waitFor(() => expect(screen.getByTestId("route-arrival-state")).toBeInTheDocument(), { timeout: 3_000 });
+    expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "arrived");
+    expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();
+  }, 25_000);
 
   it("zooms the student map when a two-finger pinch spreads", async () => {
     renderCampusMap({ previewCampus });
@@ -1384,6 +1628,30 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.queryByTestId("route-endpoint-card-start")).not.toBeInTheDocument();
   });
 
+  it("hides and restores a minimized route pill around higher-priority Building details", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 575 });
+    try {
+      renderCampusMap({ previewCampus });
+      fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+      const planner = screen.getByTestId("route-planner-dialog");
+
+      fireEvent.click(screen.getByRole("button", { name: "Minimize route panel" }));
+      expect(screen.getByTestId("restore-route-panel")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("readonly-building"));
+      const details = await screen.findByTestId("mobile-building-sheet");
+      expect(planner).toHaveAttribute("data-suspended-for-building", "true");
+      expect(screen.queryByTestId("restore-route-panel")).not.toBeInTheDocument();
+
+      fireEvent.click(within(details).getByRole("button", { name: "Close building details" }));
+      await waitFor(() => expect(screen.getByTestId("restore-route-panel")).toBeInTheDocument());
+      expect(screen.getByTestId("route-planner-dialog")).toBe(planner);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
   it("shows building actions in a sheet positioned above the mobile navigation", async () => {
     renderCampusMap({ previewCampus });
 
@@ -1461,27 +1729,60 @@ describe("CampusMapPage event overlays", () => {
 
     const instruction = await screen.findByTestId("collapsed-current-instruction");
     const initialInstruction = instruction.textContent;
-    expect(screen.getByTestId("readonly-floor-plan-scene")).toBeInTheDocument();
+    const routeSurface = screen.getByTestId("student-map-surface");
+    const initialProgress = screen.getByTestId("collapsed-route-progress").textContent;
+    expect(screen.getByTestId("collapsed-route-destination")).toHaveTextContent("Campus Gate");
+    expect(routeSurface).toHaveAttribute("data-route-phase", "navigating");
+    await screen.findByTestId("readonly-floor-plan-scene");
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    // The indoor scene is code-split. Wait for it to resolve before exercising
+    // the mobile Back control so this test checks navigation behavior, not the
+    // transient Suspense fallback used while the fixture loads the SVG scene.
+    fireEvent.click(screen.getByRole("button", { name: /Back to campus map from SCI/i }));
     expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
+    expect(screen.getByTestId("route-paused-for-inspection-dock")).toBeInTheDocument();
     expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(initialInstruction ?? "");
+    expect(screen.getByTestId("collapsed-route-progress")).toHaveTextContent(initialProgress ?? "");
+    expect(screen.getByTestId("collapsed-route-destination")).toHaveTextContent("Campus Gate");
+    expect(routeSurface).toHaveAttribute("data-route-phase", "navigating");
 
     fireEvent.click(screen.getByRole("button", { name: "Resume navigation" }));
     await waitFor(() => expect(screen.getByTestId("readonly-floor-plan-scene")).toBeInTheDocument());
     expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(initialInstruction ?? "");
 
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume navigation" }));
+    await waitFor(() => expect(screen.getByTestId("readonly-floor-plan-scene")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore route" }));
+    expect(screen.getByRole("button", { name: "Explore route" })).toHaveAttribute("aria-pressed", "true");
+    const exploreProgress = screen.getByTestId("collapsed-route-progress").textContent;
+    expect(screen.getByRole("button", { name: "Show full origin name: Navigation Test Room" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit route to Campus Gate" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Back to campus map from SCI/i }));
 
     expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
-    expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(initialInstruction ?? "");
+    expect(routeSurface).toHaveAttribute("data-route-phase", "navigating");
+    expect(screen.getByRole("button", { name: "Explore route" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("collapsed-route-progress")).toHaveTextContent(exploreProgress ?? "");
+    expect(screen.getByRole("button", { name: "Edit route to Campus Gate" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resume navigation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to Follow" }));
     await waitFor(() => expect(screen.getByTestId("readonly-floor-plan-scene")).toBeInTheDocument());
-    expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(initialInstruction ?? "");
     await waitFor(() => expect(screen.queryByTestId("route-context-recovery-status-dock")).not.toBeInTheDocument(), { timeout: 3_000 });
     expect(screen.getByRole("button", { name: /Pause navigation|Resume navigation|Continue/ })).toBeInTheDocument();
+
+    const instructionBeforeEdit = screen.getByTestId("collapsed-current-instruction").textContent;
+    const progressBeforeEdit = screen.getByTestId("collapsed-route-progress").textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Edit route to Campus Gate" }));
+    await waitFor(() => expect(screen.getByTestId("route-endpoint-card-start")).toHaveTextContent("Navigation Test Room"));
+    expect(screen.getByTestId("route-endpoint-card-destination")).toHaveTextContent("Campus Gate");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(routeSurface).toHaveAttribute("data-route-phase", "navigating"));
+    expect(screen.getByTestId("collapsed-current-instruction")).toHaveTextContent(instructionBeforeEdit ?? "");
+    expect(screen.getByTestId("collapsed-route-progress")).toHaveTextContent(progressBeforeEdit ?? "");
   }, 20_000);
 });

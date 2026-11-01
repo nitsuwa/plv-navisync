@@ -1,9 +1,177 @@
-import type { CampusBuilding, CampusDecorAsset, CampusMarker, FloorEntranceRamp } from "../components/map-builder/types";
+import type { BuildingEntranceEdge, CampusBuilding, CampusDecorAsset, CampusMarker, ExteriorZoneType, FloorEntranceRamp, FloorEntranceSteps } from "../components/map-builder/types";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "./readonlyOutdoorCampus";
 import { entranceWorldPosition } from "./buildingEntrances";
 
 /** Small offset keeps grounded meshes clear of the ground plane without a visible gap. */
 export const STUDENT_CAMPUS_3D_GROUND_EPSILON = 0.002;
+
+/** Student 3D only: the authored veranda has no elevation field, so render it
+ * as a modest raised porch using the same rise as legacy unattached steps. */
+export const STUDENT_VERANDA_3D_RISE = 0.42;
+
+/** Keep exterior zones recognizable while giving the Student 3D veranda a
+ * thin, integrated platform treatment. Access ramps and steps are separate
+ * authored features and are not affected by this surface styling. */
+export function studentExteriorZone3dPresentation(type: ExteriorZoneType) {
+  if (type === "veranda") return { thickness: 0.035, color: "#cbbb9f", sideRails: false } as const;
+  return {
+    thickness: 0.08,
+    color: "#c9d2d1",
+    sideRails: type !== "entrance_landing",
+  } as const;
+}
+
+/** Keep the zone surface's rendered center and top elevations in one place so
+ * attached access features meet the same platform that the Student renderer draws. */
+export function studentExteriorZone3dHeights(type: ExteriorZoneType, floorSurfaceY: number) {
+  const { thickness } = studentExteriorZone3dPresentation(type);
+  const centerY = type === "veranda"
+    ? floorSurfaceY + STUDENT_VERANDA_3D_RISE - thickness / 2
+    : floorSurfaceY + 0.03;
+  return { centerY, topY: centerY + thickness / 2 };
+}
+
+export interface StudentEntranceStairFlightLayout {
+  stepCount: number;
+  fromZ: number;
+  toZ: number;
+  treadDepth: number;
+  stepRise: number;
+  treadSurfaceHeights: readonly number[];
+  treadThickness: number;
+  lowerLandingDepth: number;
+  lowerLandingCenterZ: number;
+}
+
+/** Lay out an attached entrance stair from ground to its actual parent-zone
+ * surface. The veranda itself supplies the upper landing, avoiding a second
+ * coplanar slab at the stair junction. */
+export function studentEntranceStairFlightLayout(
+  depth: number,
+  rise: number,
+  requestedSteps: number,
+): StudentEntranceStairFlightLayout {
+  const safeDepth = Number.isFinite(depth) ? Math.max(0, depth) : 0;
+  const safeRise = Number.isFinite(rise) ? Math.max(0, rise) : 0;
+  const stepCount = Number.isFinite(requestedSteps) ? Math.max(3, Math.floor(requestedSteps)) : 3;
+  const fromZ = safeDepth / 2;
+  const toZ = -safeDepth / 2;
+  const stepRise = safeRise / stepCount;
+  const lowerLandingDepth = Math.min(0.34, safeDepth * 0.28);
+  return {
+    stepCount,
+    fromZ,
+    toZ,
+    treadDepth: safeDepth / stepCount,
+    stepRise,
+    // The final tread is the walking surface that meets the veranda. Keep
+    // elevations at the upper edge of each physical riser, with the last
+    // tread exactly flush to the parent platform.
+    treadSurfaceHeights: Array.from({ length: stepCount }, (_, index) => safeRise * ((index + 1) / stepCount)),
+    treadThickness: Math.min(0.07, Math.max(0.025, stepRise * 0.84)),
+    lowerLandingDepth,
+    lowerLandingCenterZ: fromZ + lowerLandingDepth / 2,
+  };
+}
+
+export interface StudentEntranceStairPlacement {
+  center: StudentMapDirection;
+  width: number;
+  depth: number;
+  rise: number;
+  yaw: number;
+  outwardDirection?: StudentMapDirection;
+}
+
+export interface StudentEntranceRampPlacement {
+  center: StudentMapDirection;
+  width: number;
+  depth: number;
+  /** Rise above the ramp's small ground clearance, in renderer world units. */
+  rise: number;
+  yaw: number;
+  /** Attached ramps descend along local +Z, outward from their parent zone. */
+  direction: -1;
+  outwardDirection: StudentMapDirection;
+}
+
+/** Resolve a veranda/landing ramp from its authored attachment, so its high
+ * edge meets the rendered parent surface and its low edge faces outward. The
+ * authored floor record has no elevation, therefore this uses the same
+ * renderer-only zone elevation as Student 3D. */
+export function resolveStudentEntranceRampPlacement(input: {
+  authored: Pick<FloorEntranceRamp, "x" | "y" | "width" | "height" | "rotation">;
+  attachment: { x: number; y: number; width: number; height: number; side?: BuildingEntranceEdge } | null | undefined;
+  floorSurfaceY: number;
+  platformTopY: number;
+}): StudentEntranceRampPlacement | null {
+  const attachment = input.attachment;
+  if (!attachment || ![attachment.x, attachment.y, attachment.width, attachment.height, input.floorSurfaceY, input.platformTopY].every(Number.isFinite)) return null;
+  const side = attachment.side;
+  const outwardDirection = side === "top" ? { x: 0, y: -1 }
+    : side === "bottom" ? { x: 0, y: 1 }
+      : side === "left" ? { x: -1, y: 0 }
+        : side === "right" ? { x: 1, y: 0 }
+          : null;
+  if (!outwardDirection) return null;
+  const sideMounted = side === "left" || side === "right";
+  const rise = Math.max(0, input.platformTopY - input.floorSurfaceY - STUDENT_CAMPUS_3D_GROUND_EPSILON);
+  return {
+    center: { x: attachment.x + attachment.width / 2, y: attachment.y + attachment.height / 2 },
+    width: sideMounted ? attachment.height : attachment.width,
+    depth: sideMounted ? attachment.width : attachment.height,
+    rise,
+    yaw: Math.atan2(outwardDirection.x, outwardDirection.y),
+    direction: -1,
+    outwardDirection,
+  };
+}
+
+/** Resolve Student 3D stairs from their authored parent attachment when one
+ * exists. The exterior edge owns the outward direction; a sibling ramp cannot
+ * turn an edge-mounted stair sideways along the facade. Legacy unattached stairs
+ * retain their saved coordinates and use the established 0.42-unit rise. */
+export function resolveStudentEntranceStairPlacement(input: {
+  authored: Pick<FloorEntranceSteps, "x" | "y" | "width" | "height" | "rotation">;
+  attachment?: { x: number; y: number; width: number; height: number; side?: BuildingEntranceEdge } | null;
+  floorSurfaceY: number;
+  platformTopY?: number;
+  connectionDirection?: StudentMapDirection;
+}): StudentEntranceStairPlacement {
+  const attachment = input.attachment ?? null;
+  const side = attachment?.side;
+  const sideMounted = side === "left" || side === "right";
+  const center = attachment
+    ? { x: attachment.x + attachment.width / 2, y: attachment.y + attachment.height / 2 }
+    : { x: input.authored.x + input.authored.width / 2, y: input.authored.y + input.authored.height / 2 };
+  const width = attachment
+    ? sideMounted ? attachment.height : attachment.width
+    : input.authored.width;
+  const depth = attachment
+    ? sideMounted ? attachment.width : attachment.height
+    : input.authored.height;
+  const outwardDirection = side === "top" ? { x: 0, y: -1 }
+    : side === "bottom" ? { x: 0, y: 1 }
+      : side === "left" ? { x: -1, y: 0 }
+        : side === "right" ? { x: 1, y: 0 }
+          : undefined;
+  const platformTopY = Number.isFinite(input.platformTopY)
+    ? input.platformTopY!
+    : input.floorSurfaceY + 0.42;
+  const yaw = resolveStudentEntranceStairYaw({
+    authoredRotation: input.authored.rotation,
+    connectionDirection: outwardDirection ? undefined : input.connectionDirection,
+    outwardDirection,
+  });
+  return {
+    center,
+    width,
+    depth,
+    rise: Math.max(0, platformTopY - input.floorSurfaceY),
+    yaw,
+    outwardDirection,
+  };
+}
 
 export interface CampusParkingMarkingSegment {
   x1: number;

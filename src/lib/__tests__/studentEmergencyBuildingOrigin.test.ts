@@ -188,6 +188,37 @@ describe("building-origin Student SOS", () => {
     expect(route?.authoredGraphNodeIds).toContain(stairLanding?.id);
     expect(route?.authoredGraphNodeIds).toContain(stairDischarge?.id);
     expect(isStudentEmergencyRouteCurrentAndEligible(campus, route, origin)).toBe(true);
+
+    const roundedCampusPoints = route!.campusPoints?.map((point) => ({ x: point.x + 0.001, y: point.y - 0.001 }));
+    expect(isStudentEmergencyRouteCurrentAndEligible(campus, {
+      ...route!,
+      points: roundedCampusPoints ?? route!.points,
+      campusPoints: roundedCampusPoints,
+    }, origin)).toBe(true);
+  });
+
+  it("invalidates a building-origin SOS route when its Assembly Point moves without changing graph identities", () => {
+    const campus = buildingOriginCampus();
+    const origin = { type: "building" as const, buildingId: "building-coed", label: "COED", code: "COED" };
+    const route = planStudentEmergencyRoute(campus, origin);
+
+    expect(route).not.toBeNull();
+    expect(isStudentEmergencyRouteCurrentAndEligible(campus, route, origin)).toBe(true);
+
+    const originalNodeIds = route?.authoredGraphNodeIds;
+    const originalEdgeIds = route?.authoredGraphEdgeIds;
+    campus.navNodes = campus.navNodes?.map((node) => node.id === "assembly-anchor"
+      ? { ...node, x: node.x + 80, y: node.y + 40 }
+      : node);
+    campus.assemblyPoints = campus.assemblyPoints?.map((point) => point.id === "coed-assembly"
+      ? { ...point, x: point.x + 80, y: point.y + 40 }
+      : point);
+
+    const refreshed = planStudentEmergencyRoute(campus, origin);
+    expect(refreshed?.authoredGraphNodeIds).toEqual(originalNodeIds);
+    expect(refreshed?.authoredGraphEdgeIds).toEqual(originalEdgeIds);
+    expect(refreshed?.campusPoints).not.toEqual(route?.campusPoints);
+    expect(isStudentEmergencyRouteCurrentAndEligible(campus, route, origin)).toBe(false);
   });
 
   it("does not revive a prohibited exterior stair through the indoor-entrance fallback", () => {

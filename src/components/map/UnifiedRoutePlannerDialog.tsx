@@ -1,5 +1,5 @@
-import { Accessibility, ArrowLeft, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, Compass, List, MapPin, Navigation, Pause, Play, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { Accessibility, ArrowLeft, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, List, MapPin, Minimize2, Navigation, Pause, Pencil, Play, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
 import { searchDestinationResults, type DestinationFilter } from "../../lib/destinationSearch";
@@ -11,6 +11,7 @@ import { useEscToClose } from "../../hooks/useEscToClose";
 import { cn } from "../../lib/utils";
 import { CampusDestinationSearch } from "./CampusDestinationSearch";
 import { RouteErrorState } from "./RouteErrorState";
+import { RouteNamePopover } from "./RouteNamePopover";
 import { EmergencyRouteStatus, type EmergencyRouteStatusCardModel } from "./EmergencyRouteStatus";
 import type { EmergencyPlannerAvailability } from "../../lib/emergencyRouteStatus";
 
@@ -43,7 +44,6 @@ export interface UnifiedRoutePlannerDialogProps {
   onCameraModeChange?: (mode: StudentCameraMode) => void;
   collapsed?: boolean;
   /** Parent-owned expansion state for a mobile preview reopened from its dock. */
-  mobilePreviewExpanded?: boolean;
   playbackPaused?: boolean;
   primaryAction?: StudentRoutePrimaryAction;
   primaryActionDisabled?: boolean;
@@ -53,6 +53,8 @@ export interface UnifiedRoutePlannerDialogProps {
   transitionAwaitingAction?: boolean;
   transitionActionLabel?: string;
   transitionPrompt?: string | null;
+  /** Route-specific completion note for terminal same-building exits. */
+  arrivalSubtitle?: string;
   onContinueTransition?: () => void;
   contextRecoveryPending?: boolean;
   contextRecoveryFailed?: boolean;
@@ -79,6 +81,8 @@ export interface UnifiedRoutePlannerDialogProps {
   onSelectEmergencyRoute?: (routeId: string) => void;
   onReturnToEmergencyOverview?: () => void;
   onEditRoute?: () => void;
+  routeEditUnavailableReason?: string;
+  onConfirmRouteEdit?: () => void;
   onCancelEditRoute?: () => void;
   onPause?: () => void;
   onResume?: () => void;
@@ -86,6 +90,8 @@ export interface UnifiedRoutePlannerDialogProps {
   onNextStep?: () => void;
   onEndNavigation?: () => void;
   onDone?: () => void;
+  /** Explicit mobile minimization; independent of Guided/Explore sheet dragging. */
+  onMinimizePanel?: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
   routeAttempted?: boolean;
@@ -180,7 +186,8 @@ function RouteInstructionRow({
 const ROUTE_PLANNER_MIN_HEIGHT = 96;
 const ROUTE_PLANNER_DEFAULT_HEIGHT = 374;
 const ROUTE_PLANNER_MAX_HEIGHT = 760;
-const MOBILE_SHEET_HEIGHTS = { compact: 140, preview: 236, previewWithAlternatives: 268 } as const;
+const MOBILE_SHEET_HEIGHTS = { compact: 140 } as const;
+const MOBILE_SHEET_SETTLE_DURATION_MS = 300;
 
 function searchResultEndpointKey(result: SearchResult, roomOptions: readonly RoomDest[] = []): string | null {
   if (result.kind === "building") return `building:${result.buildingId ?? result.id}`;
@@ -257,15 +264,16 @@ export function UnifiedRoutePlannerDialog({
   standardPreference = "best", onStandardPreferenceChange,
   mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, onChooseOnMap, onConfirmMapSelection, onClearMapSelectionCandidate, selectionError = null,
   suspendedForBuilding = false, suspendedForFloorPicker = false,
-  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, mobilePreviewExpanded = false, playbackPaused = true, transitionBusy = false, pauseDuringVerticalRun = false, verticalRunPausePending = false, transitionAwaitingAction = false, transitionActionLabel = "Continue", primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
-  transitionPrompt = null, onContinueTransition, contextRecoveryPending = false, contextRecoveryFailed = false, onRetryContextRecovery, inspectionPaused = false,
+  phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, pauseDuringVerticalRun = false, verticalRunPausePending = false, transitionAwaitingAction = false, transitionActionLabel = "Continue", primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
+  transitionPrompt = null, arrivalSubtitle, onContinueTransition, contextRecoveryPending = false, contextRecoveryFailed = false, onRetryContextRecovery, inspectionPaused = false,
   currentStepIndex = 0, seekTargetIndex = null, followStepIndex = currentStepIndex, navigationSteps = [], inspectionContextLabel = "Route context", editingCompletedRoute = false,
   playbackSpeed = 1, onPlaybackSpeedChange, onStartNavigation, onEditRoute, onCancelEditRoute,
+  onConfirmRouteEdit, routeEditUnavailableReason,
   emergencyRoutes = [], automaticRouteChoices = [], activeAutomaticRouteId = null, onSelectAutomaticRoute,
   activeEmergencyRouteId = null, emergencyRouteOverview = false,
   onSelectEmergencyRoute, onReturnToEmergencyOverview,
   onPause, onResume, onPreviousStep, onNextStep, onInspectStep,
-  onEndNavigation, onDone, onCollapse, onExpand, routeAttempted = false, emergencyAvailability = null,
+  onEndNavigation, onDone, onMinimizePanel, onCollapse, onExpand, routeAttempted = false, emergencyAvailability = null,
 }: UnifiedRoutePlannerDialogProps) {
   const [compactPanelLayout, setCompactPanelLayout] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
   const [isMobileViewport, setIsMobileViewport] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -279,6 +287,44 @@ export function UnifiedRoutePlannerDialog({
   }, []);
   const isSuspendedForBuilding = suspendedForBuilding && compactPanelLayout;
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!isMobileViewport) {
+      dialog.style.removeProperty("bottom");
+      return;
+    }
+
+    const bottomNavigation = document.querySelector<HTMLElement>(
+      '[data-testid="mobile-bottom-navigation"][data-layout-mode="map-row"]',
+    );
+    if (!bottomNavigation) {
+      dialog.style.removeProperty("bottom");
+      return;
+    }
+
+    const alignSheetToNavigation = () => {
+      const navigationTop = bottomNavigation.getBoundingClientRect().top;
+      const nextBottom = `${Math.max(0, window.innerHeight - navigationTop)}px`;
+      if (dialog.style.bottom !== nextBottom) dialog.style.bottom = nextBottom;
+    };
+
+    alignSheetToNavigation();
+    const navigationObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(alignSheetToNavigation)
+      : null;
+    navigationObserver?.observe(bottomNavigation);
+    window.addEventListener("resize", alignSheetToNavigation);
+    window.visualViewport?.addEventListener("resize", alignSheetToNavigation);
+    return () => {
+      navigationObserver?.disconnect();
+      window.removeEventListener("resize", alignSheetToNavigation);
+      window.visualViewport?.removeEventListener("resize", alignSheetToNavigation);
+      dialog.style.removeProperty("bottom");
+    };
+  }, [isMobileViewport]);
+
   const [uncontrolledEndpoint, setUncontrolledEndpoint] = useState<RoutePlannerEndpoint | null>(null);
   const activeEndpoint = controlledEndpoint === undefined ? uncontrolledEndpoint : controlledEndpoint;
   const setActiveEndpoint = (endpoint: RoutePlannerEndpoint | null) => {
@@ -297,9 +343,30 @@ export function UnifiedRoutePlannerDialog({
   const hadPendingEmergencyRouteRef = useRef(false);
   const [failedRouteAttempt, setFailedRouteAttempt] = useState(false);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
-  const [mobileSheetState, setMobileSheetState] = useState<"compact" | "expanded">("expanded");
+  const [mobileSheetState, setMobileSheetState] = useState<"compact" | "expanded">(() =>
+    collapsed && phase === "navigating" ? "compact" : "expanded",
+  );
+  const [isSheetDragging, setIsSheetDragging] = useState(false);
+  const [isSheetSettling, setIsSheetSettling] = useState(false);
   const floorPickerRestoreRef = useRef<{ sheetState: "compact" | "expanded"; panelHeight: number | null } | null>(null);
-  const resizeStartRef = useRef<{ y: number; state: "compact" | "expanded" } | null>(null);
+  const resizeStartRef = useRef<{
+    pointerId: number;
+    handle: HTMLDivElement;
+    y: number;
+    lastY: number;
+    lastTime: number;
+    velocityUp: number;
+    state: "compact" | "expanded";
+    startHeight: number;
+    currentHeight: number;
+    minHeight: number;
+    maxHeight: number;
+    measuredExpandedHeight: boolean;
+  } | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const pendingResizeYRef = useRef<number | null>(null);
+  const settlePanelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const compactMobileHeightRef = useRef<number>(MOBILE_SHEET_HEIGHTS.compact);
   const reducedMotion = useReducedMotion();
   useEscToClose(onClose, !isSuspendedForBuilding && pendingEmergencyRouteId === null);
 
@@ -373,64 +440,230 @@ export function UnifiedRoutePlannerDialog({
     if (panelHeight !== null) return panelHeight;
     const measured = dialogRef.current?.getBoundingClientRect().height ?? 0;
     if (measured > 0) return measured;
-    if (mobileSheetState === "compact") return MOBILE_SHEET_HEIGHTS.compact;
+    const contentHeight = dialogRef.current?.scrollHeight ?? 0;
+    if (contentHeight > 0) return contentHeight;
+    if (mobileSheetState === "compact") return compactMobileHeightRef.current;
     if (mobileSheetState === "expanded") return Math.min(ROUTE_PLANNER_MAX_HEIGHT, (typeof window !== "undefined" ? (window.visualViewport?.height || window.innerHeight) : 768) - 32);
     return panelHeight ?? ROUTE_PLANNER_DEFAULT_HEIGHT;
   };
   const resizeBounds = panelHeightBounds();
 
+  const updateDraggedSheetHeight = (pointerY: number) => {
+    const drag = resizeStartRef.current;
+    const panel = dialogRef.current;
+    if (!drag || !panel) return;
+    if (!drag.measuredExpandedHeight) {
+      const scrollRegion = panel.querySelector<HTMLElement>('[data-testid="route-planner-scroll-region"]');
+      const clippedContentHeight = scrollRegion
+        ? Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight)
+        : 0;
+      drag.maxHeight = clampPanelHeight(Math.max(drag.startHeight, panel.scrollHeight + clippedContentHeight));
+      drag.measuredExpandedHeight = true;
+    }
+    const height = Math.min(drag.maxHeight, Math.max(drag.minHeight, drag.startHeight + drag.y - pointerY));
+    drag.currentHeight = height;
+    panel.style.height = `${height}px`;
+    panel.style.transition = "none";
+    drag.handle.setAttribute("aria-valuenow", String(Math.round(height)));
+  };
+
+  const cancelResizeFrame = () => {
+    if (resizeFrameRef.current !== null) {
+      cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = null;
+    }
+  };
+
+  const clearPanelSettleTimer = () => {
+    if (settlePanelTimerRef.current) clearTimeout(settlePanelTimerRef.current);
+    settlePanelTimerRef.current = null;
+  };
+
+  const finishResizeGesture = (pointerY: number, cancelled: boolean, pointerId?: number, handle?: HTMLDivElement) => {
+    const drag = resizeStartRef.current;
+    const panel = dialogRef.current;
+    if (!drag) return;
+    cancelResizeFrame();
+    pendingResizeYRef.current = null;
+    const releaseCapturedPointer = () => {
+      if (pointerId !== undefined && handle?.hasPointerCapture?.(pointerId)) {
+        handle.releasePointerCapture?.(pointerId);
+      }
+    };
+
+    if (cancelled) {
+      resizeStartRef.current = null;
+      releaseCapturedPointer();
+      clearPanelSettleTimer();
+      drag.currentHeight = drag.startHeight;
+      if (panel) {
+        panel.style.transition = reducedMotion ? "none" : "";
+        panel.style.height = `${drag.startHeight}px`;
+      }
+      setMobileSheetState(drag.state);
+      setPanelHeight(drag.startHeight);
+      setIsSheetDragging(false);
+      setIsSheetSettling(!reducedMotion);
+      settlePanelTimerRef.current = setTimeout(() => {
+        settlePanelTimerRef.current = null;
+        if (panel) panel.style.transition = "";
+        setPanelHeight(null);
+        setIsSheetSettling(false);
+      }, reducedMotion ? 0 : MOBILE_SHEET_SETTLE_DURATION_MS);
+      return;
+    }
+
+    updateDraggedSheetHeight(pointerY);
+    resizeStartRef.current = null;
+    releaseCapturedPointer();
+    const moved = Math.abs(drag.y - pointerY);
+    const midpoint = drag.minHeight + (drag.maxHeight - drag.minHeight) / 2;
+    const projectedHeight = drag.currentHeight + drag.velocityUp * 140;
+    const nextState = moved < 10
+      ? drag.state
+      : Math.abs(drag.velocityUp) >= 0.65 && moved >= 14
+        ? projectedHeight >= midpoint ? "expanded" : "compact"
+        : drag.currentHeight >= midpoint ? "expanded" : "compact";
+    const targetHeight = nextState === "expanded" ? drag.maxHeight : drag.minHeight;
+    if (panel) {
+      panel.style.height = `${drag.currentHeight}px`;
+      panel.style.transition = reducedMotion ? "none" : "";
+    }
+    setIsSheetDragging(false);
+    setIsSheetSettling(!reducedMotion);
+    setMobileSheetState(nextState);
+    setPanelHeight(targetHeight);
+    if (nextState !== drag.state) {
+      if (nextState === "expanded") onExpand?.();
+      else onCollapse?.();
+    }
+    clearPanelSettleTimer();
+    settlePanelTimerRef.current = setTimeout(() => {
+      settlePanelTimerRef.current = null;
+      if (panel) panel.style.transition = "";
+      setPanelHeight(null);
+      setIsSheetSettling(false);
+    }, reducedMotion ? 0 : MOBILE_SHEET_SETTLE_DURATION_MS);
+  };
+
   const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (resizeStartRef.current || event.isPrimary === false || (event.pointerType === "mouse" && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
-    resizeStartRef.current = { y: event.clientY, state: mobileSheetState };
+    const startHeight = clampPanelHeight(currentPanelHeight());
+    const minHeight = clampPanelHeight(compactMobileHeightRef.current);
+    resizeStartRef.current = {
+      pointerId: event.pointerId,
+      handle: event.currentTarget,
+      y: event.clientY,
+      lastY: event.clientY,
+      lastTime: event.timeStamp,
+      velocityUp: 0,
+      state: mobileSheetState,
+      startHeight,
+      currentHeight: startHeight,
+      minHeight,
+      maxHeight: resizeBounds.max,
+      measuredExpandedHeight: false,
+    };
+    pendingResizeYRef.current = event.clientY;
+    clearPanelSettleTimer();
+    setIsSheetSettling(false);
+    setPanelHeight(startHeight);
+    setIsSheetDragging(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   const handleResizePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const start = resizeStartRef.current;
-    if (!start) return;
+    const drag = resizeStartRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
+    const elapsed = Math.max(1, event.timeStamp - drag.lastTime);
+    drag.velocityUp = (drag.lastY - event.clientY) / elapsed;
+    drag.lastY = event.clientY;
+    drag.lastTime = event.timeStamp;
+    pendingResizeYRef.current = event.clientY;
+    if (resizeFrameRef.current !== null) return;
+    resizeFrameRef.current = requestAnimationFrame(() => {
+      resizeFrameRef.current = null;
+      const pointerY = pendingResizeYRef.current;
+      if (pointerY !== null) updateDraggedSheetHeight(pointerY);
+    });
   };
 
   const handleResizePointerEnd = (event: PointerEvent<HTMLDivElement>) => {
-    const start = resizeStartRef.current;
-    if (!start) return;
-    const deltaY = start.y - event.clientY;
-    resizeStartRef.current = null;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    const nextState = deltaY <= -36 ? "compact" : deltaY >= 36 ? "expanded" : start.state;
-    setMobileSheetState(nextState);
+    const drag = resizeStartRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const elapsed = Math.max(1, event.timeStamp - drag.lastTime);
+    if (elapsed > 100) drag.velocityUp = 0;
+    else if (event.clientY !== drag.lastY) drag.velocityUp = (drag.lastY - event.clientY) / elapsed;
+    finishResizeGesture(event.clientY, event.type === "pointercancel", event.pointerId, event.currentTarget);
+  };
+
+  const handleResizeLostPointerCapture = (event: PointerEvent<HTMLDivElement>) => {
+    if (resizeStartRef.current?.pointerId === event.pointerId) {
+      finishResizeGesture(resizeStartRef.current.y, true, event.pointerId, event.currentTarget);
+    }
+  };
+
+  const cancelActiveResizeGesture = () => {
+    const drag = resizeStartRef.current;
+    if (!drag) return;
+    const handle = dialogRef.current?.querySelector<HTMLDivElement>('[data-testid="route-planner-resize-handle"]') ?? undefined;
+    finishResizeGesture(drag.y, true, drag.pointerId, handle);
+  };
+
+  const transitionToMobileSheetState = (nextState: "compact" | "expanded", notifyWhenUnchanged = false) => {
+    clearPanelSettleTimer();
     setPanelHeight(null);
-    if (nextState !== start.state) {
+    setMobileSheetState(nextState);
+    setIsSheetSettling(!reducedMotion);
+    settlePanelTimerRef.current = setTimeout(() => {
+      settlePanelTimerRef.current = null;
+      setIsSheetSettling(false);
+    }, reducedMotion ? 0 : MOBILE_SHEET_SETTLE_DURATION_MS);
+    if (nextState !== mobileSheetState || notifyWhenUnchanged) {
       if (nextState === "expanded") onExpand?.();
       else onCollapse?.();
     }
   };
 
+  useEffect(() => {
+    if (!isSheetDragging) return;
+    window.addEventListener("resize", cancelActiveResizeGesture);
+    window.visualViewport?.addEventListener("resize", cancelActiveResizeGesture);
+    window.addEventListener("blur", cancelActiveResizeGesture);
+    return () => {
+      window.removeEventListener("resize", cancelActiveResizeGesture);
+      window.visualViewport?.removeEventListener("resize", cancelActiveResizeGesture);
+      window.removeEventListener("blur", cancelActiveResizeGesture);
+    };
+  }, [isSheetDragging]);
+
+  useEffect(() => {
+    if (!resizeStartRef.current) return;
+    cancelActiveResizeGesture();
+    clearPanelSettleTimer();
+  }, [phase, route?.fromCode, route?.toCode, mode, activeEmergencyRouteId, activeAutomaticRouteId]);
+
+  useEffect(() => () => {
+    cancelResizeFrame();
+    if (settlePanelTimerRef.current) clearTimeout(settlePanelTimerRef.current);
+    resizeStartRef.current = null;
+  }, []);
+
   const handleResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setMobileSheetState("expanded");
-      setPanelHeight(null);
-      onExpand?.();
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setMobileSheetState("compact");
-      setPanelHeight(null);
-      onCollapse?.();
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      setMobileSheetState("compact");
-      setPanelHeight(null);
-      onCollapse?.();
-    } else if (event.key === "End") {
-      event.preventDefault();
-      setMobileSheetState("expanded");
-      setPanelHeight(null);
-      onExpand?.();
-    }
+    const nextState = event.key === "ArrowUp" || event.key === "End"
+      ? "expanded"
+      : event.key === "ArrowDown" || event.key === "Home"
+        ? "compact"
+        : null;
+    if (!nextState) return;
+    event.preventDefault();
+    transitionToMobileSheetState(nextState);
   };
 
   useEffect(() => {
@@ -440,31 +673,20 @@ export function UnifiedRoutePlannerDialog({
   }, []);
 
   useEffect(() => {
-    const nextSheetState = mapSelectionEndpoint
-      || (isMobileViewport && phase === "preview" && !mobilePreviewExpanded)
-      || (isMobileViewport && phase === "navigating")
-      ? "compact"
-      : "expanded";
+    const nextSheetState = isMobileViewport && phase === "navigating" && collapsed ? "compact" : "expanded";
+    clearPanelSettleTimer();
+    setIsSheetSettling(false);
     setMobileSheetState((current) => current === nextSheetState ? current : nextSheetState);
     setPanelHeight((current) => current === null ? current : null);
-  }, [mapSelectionEndpoint, isMobileViewport, mobilePreviewExpanded, phase]);
+  }, [collapsed, isMobileViewport, phase]);
 
   useEffect(() => {
     setShowAllSteps(phase === "navigating" && cameraMode === "explore");
   }, [cameraMode, phase]);
 
-  // The compact Follow dock lives in CampusMapPage, outside this dialog. Keep
-  // its Expand/Collapse actions in sync with the dialog's one-step sheet state.
   useEffect(() => {
-    if (!isMobileViewport || phase !== "navigating") return;
-    const next = collapsed ? "compact" : "expanded";
-    setMobileSheetState((current) => current === next ? current : next);
-    setPanelHeight(null);
-  }, [collapsed, isMobileViewport, phase]);
-
-  useEffect(() => {
-    if (!isMobileViewport) return;
-    if (suspendedForFloorPicker) {
+    const shouldSuspendForFloorPicker = isMobileViewport && suspendedForFloorPicker && phase !== "arrived";
+    if (shouldSuspendForFloorPicker) {
       if (!floorPickerRestoreRef.current) {
         floorPickerRestoreRef.current = { sheetState: mobileSheetState, panelHeight };
         setMobileSheetState("compact");
@@ -475,10 +697,10 @@ export function UnifiedRoutePlannerDialog({
     const previous = floorPickerRestoreRef.current;
     if (previous) {
       floorPickerRestoreRef.current = null;
-      setMobileSheetState(previous.sheetState);
-      setPanelHeight(previous.panelHeight);
+      setMobileSheetState(phase === "arrived" ? "expanded" : previous.sheetState);
+      setPanelHeight(phase === "arrived" ? null : previous.panelHeight);
     }
-  }, [isMobileViewport, mobileSheetState, panelHeight, suspendedForFloorPicker]);
+  }, [isMobileViewport, mobileSheetState, panelHeight, phase, suspendedForFloorPicker]);
 
   const fromKey = useMyLocation && youAreHere
     ? `pin:${youAreHere.x}:${youAreHere.y}`
@@ -540,7 +762,7 @@ export function UnifiedRoutePlannerDialog({
     const endpoint = activeEndpoint;
     setQuery("");
     setPanelHeight(null);
-    setMobileSheetState("compact");
+    setMobileSheetState("expanded");
     setActiveEndpoint(null);
     onChooseOnMap?.(endpoint);
   };
@@ -607,28 +829,40 @@ export function UnifiedRoutePlannerDialog({
   const emergencyRouteBlocked = mode === "emergency" && !route
     && (emergencyAvailability?.state === "unavailable" || failedRouteAttempt || routeAttempted);
   const canCalculateRoute = canStart && !emergencyRouteBlocked;
-  const floorPickerSuspended = isMobileViewport && suspendedForFloorPicker;
+  const floorPickerSuspended = isMobileViewport && suspendedForFloorPicker && phase !== "arrived";
   const preferenceLabel = mode === "standard"
     ? standardPreference === "stairs" ? "Prefer stairs" : standardPreference === "elevator" ? "Prefer elevator" : "Best route"
     : MODES.find((item) => item.key === mode)?.label ?? "Route";
   const nextPlaybackSpeed = playbackSpeed === 1 ? 1.5 : playbackSpeed === 1.5 ? 2 : 1;
   const speedControl = (compact = false) => <button type="button" data-testid="route-playback-speed" title="Change playback speed" aria-label={`Playback speed ${playbackSpeed} times. Change speed`} onClick={() => onPlaybackSpeedChange?.(nextPlaybackSpeed)} className={cn("shrink-0 rounded-xl border border-border bg-card px-2 font-extrabold text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", compact ? "h-10 min-w-11 text-[10px]" : "min-h-11 min-w-14 text-xs")}>{playbackSpeed}×</button>;
-  const compactNavigation = navigatingPhase && (isMobileViewport ? mobileSheetState === "compact" : collapsed);
+  const isCompactMobilePresentation = isMobileViewport && floorPickerSuspended && mobileSheetState === "compact" && !isSheetDragging;
+  const compactNavigation = navigatingPhase && (isMobileViewport ? mobileSheetState === "compact" && !isSheetDragging : collapsed);
   const compactMobileHeight = floorPickerSuspended ? MOBILE_SHEET_HEIGHTS.compact
     : mapSelectionEndpoint ? (mapSelectionCandidateLabel ? 196 : 148)
-      : navigatingPhase ? (transitionAwaitingAction ? 252 : 224)
-        : previewPhase ? mode === "emergency" && emergencyRoutes.length > 1
-          ? MOBILE_SHEET_HEIGHTS.previewWithAlternatives
-          : MOBILE_SHEET_HEIGHTS.preview
-          : phase === "arrived" ? 192
-          : MOBILE_SHEET_HEIGHTS.compact;
+      : navigatingPhase ? (transitionAwaitingAction || inspectionPaused || contextRecoveryPending || contextRecoveryFailed ? 252 : 224)
+        : MOBILE_SHEET_HEIGHTS.compact;
+  compactMobileHeightRef.current = compactMobileHeight;
+  const mobileStepsPanelMaxHeight = "calc(100dvh - var(--student-map-search-safe-top, 3rem) - 5.75rem - var(--student-map-safe-area-bottom, 0px))";
+  const mobileArrivalContentMaxHeight = "calc(100dvh - var(--student-map-search-safe-top, 3rem) - 11.75rem - var(--student-map-safe-area-bottom, 0px))";
   const canShowMainForm = !floorPickerSuspended && activeEndpoint === null && !mapSelectionEndpoint
-    && !(isMobileViewport && mobileSheetState === "compact") && !compactNavigation;
+    && !isCompactMobilePresentation && !compactNavigation && phase !== "arrived";
   const arrivedPhase = phase === "arrived";
   const phaseTitle = phase === "planning" ? "Plan your route"
     : previewPhase ? "Route preview"
       : arrivedPhase ? "Arrival"
         : cameraMode === "explore" ? "Explore route" : "Guided navigation";
+  const minimizePanelButton = isMobileViewport && onMinimizePanel && !navigatingPhase ? (
+    <button
+      type="button"
+      data-testid="minimize-route-panel"
+      aria-label="Minimize route panel"
+      aria-controls="route-planner-dialog"
+      aria-expanded="true"
+      title="Minimize panel to see more of the map"
+      onClick={onMinimizePanel}
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+    ><Minimize2 aria-hidden="true" className="h-4 w-4" /></button>
+  ) : null;
   const routeFacts = route ? studentRouteFacts(route, standardPreference) : [];
   const routePreferenceFallbackNotice = studentRoutePreferenceFallbackNotice(route, standardPreference);
   const normalizedSteps = route ? studentFacingRouteSteps(route).map((step) => step.instruction) : [];
@@ -639,7 +873,78 @@ export function UnifiedRoutePlannerDialog({
   const safeFollowStepIndex = Math.max(0, Math.min(followStepIndex, Math.max(0, visibleNavigationSteps.length - 1)));
   const currentInstruction = visibleNavigationSteps[safeStepIndex] ?? "Follow the route to your destination.";
   const activeDestinationName = route?.emergencyDestinationLabel ?? toDisplay.label;
+  const canEditActiveRoute = navigatingPhase && mode !== "emergency" && !routeEditUnavailableReason && onEditRoute;
+  const renderActiveRouteEditButton = (destinationName = activeDestinationName, compact = false) => canEditActiveRoute && (
+    <button
+      type="button"
+      data-testid="active-route-edit"
+      aria-label={`Edit route to ${destinationName}`}
+      title={`Edit route to ${destinationName}`}
+      onClick={onEditRoute}
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary/[0.08] hover:text-primary/75 active:bg-primary/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+        compact ? "h-11 w-11" : "h-11 w-11 lg:h-8 lg:w-8",
+      )}
+    >
+      <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+    </button>
+  );
+  const renderActiveRouteDestination = (destinationName = activeDestinationName, testId = "guided-destination", wrapCompact = false, showEdit = true) => (
+    <div className="inline-flex min-w-0 max-w-full flex-[0_1_auto] items-center gap-0.5">
+      <RouteNamePopover
+        name={destinationName}
+        kind="destination"
+        side={isMobileViewport && compactNavigation ? (exploreMode ? "left" : "top") : "bottom"}
+        align={isMobileViewport && compactNavigation ? (exploreMode ? "center" : "start") : "start"}
+        contentClassName={isMobileViewport && compactNavigation ? "w-fit max-w-[min(15rem,calc(100vw-1.5rem))]" : undefined}
+        testId={testId}
+        className="min-h-11 min-w-0 max-w-full flex-[0_1_auto] justify-start px-0.5 lg:min-h-8"
+        valueClassName={cn(
+          "font-extrabold",
+          compactNavigation
+            ? wrapCompact
+              ? "line-clamp-2 break-words whitespace-normal text-[10px] leading-tight [overflow-wrap:anywhere]"
+              : "truncate whitespace-nowrap text-[11px]"
+            : "line-clamp-2 break-words whitespace-normal text-[12px] leading-tight [overflow-wrap:anywhere]",
+        )}
+      />
+      {showEdit && renderActiveRouteEditButton(destinationName)}
+    </div>
+  );
+  const renderExploreOrigin = (compact = false) => (
+    <div
+      data-testid={compact ? "collapsed-explore-route" : "explore-route-origin"}
+      className={cn("flex min-w-0 items-center", compact ? "gap-1" : "gap-1.5")}
+    >
+      <span data-testid="explore-origin-marker" aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary", compact ? "h-5 w-5" : "h-7 w-7")}>
+        <MapPin className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5")} />
+      </span>
+      <span className="shrink-0 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">From:</span>
+      <div className="flex min-w-0 flex-1 items-center gap-0.5">
+        <RouteNamePopover
+          name={fromDisplay.label}
+          kind="origin"
+          side={isMobileViewport && compact ? "top" : "bottom"}
+          align={isMobileViewport && compact ? "end" : "start"}
+          contentClassName={isMobileViewport && compact ? "w-fit max-w-[min(15rem,calc(100vw-1.5rem))]" : undefined}
+          testId={compact ? "compact-explore-origin-name" : "explore-route-origin-name"}
+          className={cn("min-h-11 min-w-0 max-w-full flex-[0_1_auto] justify-start", !compact && "lg:min-h-8")}
+          valueClassName={compact
+            ? "line-clamp-2 break-words text-[10px] font-extrabold leading-tight [overflow-wrap:anywhere]"
+            : "truncate text-[11px] font-extrabold"}
+        />
+        {renderActiveRouteEditButton(activeDestinationName, compact)}
+      </div>
+    </div>
+  );
   const exploreMode = cameraMode === "explore";
+  const normalizedInspectionContext = inspectionContextLabel.trim().toLocaleLowerCase();
+  const hasMeaningfulInspectionContext = Boolean(normalizedInspectionContext)
+    && normalizedInspectionContext !== "campus"
+    && normalizedInspectionContext !== "route context";
+  const exploreRouteTypeLabel = mode === "emergency"
+    ? "Emergency route"
+    : `${MODES.find((item) => item.key === mode)?.label ?? "Route"} route`;
   const hasEmergencyRoutes = mode === "emergency" && emergencyRoutes.length > 0;
   const emergencyExploreActive = exploreMode && navigatingPhase && hasEmergencyRoutes;
   // A permitted Campus Gate fallback is already named in the route summary
@@ -730,6 +1035,14 @@ export function UnifiedRoutePlannerDialog({
     const stepIndex = exploreMode ? safeFollowStepIndex : safeStepIndex;
     const row = stepRowRefs.current.get(stepIndex);
     if (!list || !row) return;
+    const scrollRegion = list.closest<HTMLElement>('[data-testid="route-planner-scroll-region"]');
+    if (isMobileViewport && !exploreMode && showAllSteps && scrollRegion) {
+      const scrollRect = scrollRegion.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      if (rowRect.top < scrollRect.top) scrollRegion.scrollTop -= scrollRect.top - rowRect.top;
+      else if (rowRect.bottom > scrollRect.bottom) scrollRegion.scrollTop += rowRect.bottom - scrollRect.bottom;
+      return;
+    }
     const listRect = list.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
     const top = rowRect.top - listRect.top + list.scrollTop;
@@ -740,14 +1053,14 @@ export function UnifiedRoutePlannerDialog({
   /** Obvious FOLLOW | EXPLORE segmented control with a clearly active state. */
   const cameraModeSegmented = (testid: string) => (
     <div role="group" aria-label="Route camera mode" data-testid={testid}
-      className="flex shrink-0 items-center rounded-full border border-primary/20 bg-card p-0.5">
+      className="flex shrink-0 items-center rounded-full border border-primary/20 bg-card p-px">
       <button type="button" aria-label={exploreMode ? "Return to Follow mode" : "Switch to Follow mode"} aria-pressed={!exploreMode}
         onClick={() => onCameraModeChange?.("follow")}
-        className={cn("min-h-11 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8",
+        className={cn("min-h-11 rounded-full px-2 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 max-[360px]:px-1.5 lg:min-h-8",
           !exploreMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>FOLLOW</button>
       <button type="button" aria-label="Switch to Explore mode" aria-pressed={exploreMode}
         onClick={() => onCameraModeChange?.("explore")}
-        className={cn("min-h-11 rounded-full px-2.5 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:min-h-8",
+        className={cn("min-h-11 rounded-full px-2 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 max-[360px]:px-1.5 lg:min-h-8",
           exploreMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>EXPLORE</button>
     </div>
   );
@@ -770,10 +1083,10 @@ export function UnifiedRoutePlannerDialog({
 
   return (
     <motion.div
-      layout
+      layout={!isSheetDragging}
       transition={reducedMotion
         ? { layout: { duration: 0.01 } }
-        : { layout: { duration: 0.25, ease: [0.2, 0.8, 0.2, 1] } }}
+        : { layout: { duration: 0.3, ease: [0.2, 0.8, 0.2, 1] } }}
       ref={dialogRef}
       role="dialog"
       aria-modal="false"
@@ -790,7 +1103,9 @@ export function UnifiedRoutePlannerDialog({
       data-route-mode={mode}
       data-navigation-compact={compactNavigation ? "true" : undefined}
       data-mobile-sheet-state={isMobileViewport ? mobileSheetState : undefined}
-      className="route-planner-dialog pointer-events-auto fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex h-fit max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] flex-col overflow-hidden rounded-[24px] border border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[75dvh] md:w-full md:max-w-[460px] md:rounded-3xl md:shadow-2xl"
+      data-sheet-dragging={isSheetDragging ? "true" : undefined}
+      data-sheet-motion-active={isSheetDragging || isSheetSettling ? "true" : undefined}
+      className="route-planner-dialog pointer-events-auto fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-50 flex h-fit max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] flex-col overflow-hidden rounded-t-[24px] rounded-b-none border-x-0 border-b-0 border-t border-border/70 bg-card text-foreground shadow-[0_-16px_42px_rgba(15,23,42,0.18)] outline-none md:relative md:inset-auto md:h-fit md:max-h-[75dvh] md:w-full md:max-w-[460px] md:rounded-3xl md:border md:shadow-2xl"
       style={{
         ...(isMobileViewport ? {
           height: floorPickerSuspended
@@ -799,16 +1114,20 @@ export function UnifiedRoutePlannerDialog({
             ? `${compactMobileHeight}px`
           : activeEndpoint
             ? "min(82dvh, var(--student-map-mobile-panel-max-height, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px))))"
-          : mobileSheetState === "compact"
-            ? `${compactMobileHeight}px`
-            : panelHeight !== null ? `${panelHeight}px`
+          : panelHeight !== null && !previewPhase ? `${panelHeight}px`
+            : isCompactMobilePresentation
+              ? `${compactMobileHeight}px`
               : previewPhase
                 ? "fit-content"
                 : navigatingPhase
-                  ? "min(var(--student-map-mobile-panel-max-height, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px))), 72dvh)"
+                  ? showAllSteps
+                    ? exploreMode ? "fit-content" : `min(88dvh, ${mobileStepsPanelMaxHeight})`
+                    : "fit-content"
                 : "fit-content",
+          ...((navigatingPhase && showAllSteps) || arrivedPhase ? { maxHeight: mobileStepsPanelMaxHeight } : {}),
         } : {}),
-        ...(isMobileViewport && panelHeight !== null && !activeEndpoint && !mapSelectionEndpoint ? { height: `${panelHeight}px` } : {}),
+        ...(isMobileViewport && panelHeight !== null && !activeEndpoint && !mapSelectionEndpoint && !previewPhase ? { height: `${panelHeight}px` } : {}),
+        ...(isSheetDragging || reducedMotion ? { transition: "none" } : {}),
       }}
       onWheelCapture={(event) => event.stopPropagation()}
       onTouchMoveCapture={(event) => event.stopPropagation()}
@@ -818,24 +1137,37 @@ export function UnifiedRoutePlannerDialog({
         {route ? `Route ready from ${fromDisplay.label} to ${toDisplay.label}.` : "Choose a starting point and destination to plan a route."}
       </p>
 
-      <header className={cn("shrink-0 border-b border-border/60 bg-card/95 backdrop-blur-xl", mapSelectionEndpoint ? "px-3 py-1" : (activeEndpoint || (isMobileViewport && mobileSheetState === "compact")) ? "px-3 pb-1 pt-1 xl:px-4 xl:pb-3 xl:pt-3" : "px-3.5 pb-1.5 pt-1.5 md:px-4 md:pb-3 md:pt-3")}>
-        {isMobileViewport && <div
+      <header data-testid="route-planner-header" className={cn(
+        "shrink-0 border-b border-border/60 bg-card/95 backdrop-blur-xl",
+        isMobileViewport && navigatingPhase
+          ? "px-3 py-1.5 md:px-4 md:py-3"
+          : isMobileViewport
+            ? "px-3 py-3 md:px-4 md:py-3"
+          : "px-3.5 py-3",
+      )}>
+        {isMobileViewport && navigatingPhase && !floorPickerSuspended && !activeEndpoint && !mapSelectionEndpoint && <div
           role="slider"
           tabIndex={0}
-          aria-label="Resize route planner"
+          aria-label="Resize navigation panel"
           aria-orientation="vertical"
           aria-valuemin={ROUTE_PLANNER_MIN_HEIGHT}
           aria-valuemax={resizeBounds.max}
           aria-valuenow={currentPanelHeight()}
           data-testid="route-planner-resize-handle"
-          className={cn("mx-auto flex w-full touch-none cursor-row-resize items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", isMobileViewport ? mapSelectionEndpoint ? "h-4" : "h-6" : "h-11")}
+          className={cn(
+            "relative z-10 mx-auto flex w-full touch-none cursor-row-resize items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+            isMobileViewport
+              ? "h-4 before:absolute before:left-1/2 before:top-0 before:z-0 before:h-11 before:w-11 before:-translate-x-1/2 before:rounded-full before:content-[''] before:pointer-events-auto"
+              : "h-11",
+          )}
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerEnd}
           onPointerCancel={handleResizePointerEnd}
+          onLostPointerCapture={handleResizeLostPointerCapture}
           onKeyDown={handleResizeKeyDown}
         >
-          <span aria-hidden="true" className="h-1 w-8 rounded-full bg-border md:w-9" />
+          <span aria-hidden="true" className="relative z-10 h-1 w-8 rounded-full bg-border md:w-9" />
         </div>}
         <div data-testid="route-planner-header-primary-row" className="flex min-w-0 items-center gap-2 md:gap-2.5">
           {mapSelectionEndpoint ? (
@@ -850,21 +1182,37 @@ export function UnifiedRoutePlannerDialog({
             {(mapSelectionEndpoint || activeEndpoint || phase === "planning") && <p className="mt-0.5 hidden truncate text-[11px] text-muted-foreground md:block">{mapSelectionEndpoint ? "Tap a place or search for a room" : activeEndpoint ? "Search buildings, rooms, and offices" : "Choose a start and destination"}</p>}
           </div>
           {!compactPanelLayout && headerUtility && <div data-testid="route-planner-header-controls" className="flex min-w-0 shrink-0 items-center gap-1.5">{headerUtility}</div>}
-          <div data-testid="route-planner-header-actions" className="flex shrink-0 items-center gap-1.5">
+          <div data-testid="route-planner-header-actions" className={cn("flex shrink-0 items-center gap-1.5", isMobileViewport && navigatingPhase && "relative z-20")}>
             {headerModeToggle}
-            {compactPanelLayout && headerUtility && !(isMobileViewport && previewPhase && mobileSheetState === "compact") && <div data-testid="route-planner-responsive-header-controls" className="flex min-w-0 shrink-0 items-center justify-end gap-1.5">
+            {compactPanelLayout && headerUtility && !isCompactMobilePresentation && <div data-testid="route-planner-responsive-header-controls" className="flex min-w-0 shrink-0 items-center justify-end gap-1.5">
               {headerUtility}
             </div>}
             {mapSelectionEndpoint ? (
-              <button type="button" onClick={handleCancelMapSelection} className="min-h-11 shrink-0 rounded-xl px-3 text-xs font-extrabold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">Cancel</button>
+              <>
+                {minimizePanelButton}
+                <button type="button" onClick={handleCancelMapSelection} className="min-h-11 shrink-0 rounded-xl px-3 text-xs font-extrabold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">Cancel</button>
+              </>
             ) : activeEndpoint ? (
-              <button type="button" onClick={onClose} aria-label="Close directions" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
-            ) : compactNavigation || (isMobileViewport && mobileSheetState === "compact") ? (
-              <button type="button" onClick={() => { setPanelHeight(null); setMobileSheetState("expanded"); onExpand?.(); }} aria-label={navigatingPhase ? "Expand navigation panel" : "Expand route panel"} className="min-h-11 shrink-0 rounded-xl px-3 text-xs font-extrabold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">Expand</button>
-            ) : phase !== "planning" && !activeEndpoint && !mapSelectionEndpoint ? (
-              <button type="button" onClick={() => { if (isMobileViewport) setMobileSheetState("compact"); onCollapse?.(); }} aria-label={navigatingPhase ? "Collapse navigation panel" : "Collapse route preview"} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ChevronDown className="h-4 w-4" /></button>
+              <>
+                {minimizePanelButton}
+                <button type="button" onClick={onClose} aria-label="Close directions" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              </>
+            ) : previewPhase && editingCompletedRoute ? (
+              <>
+                {minimizePanelButton}
+                <button type="button" onClick={onCancelEditRoute ?? onClose} aria-label="Cancel editing route" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              </>
+            ) : previewPhase ? minimizePanelButton
+            : arrivedPhase && isMobileViewport ? minimizePanelButton
+            : compactNavigation || isCompactMobilePresentation ? (
+              <button type="button" onClick={() => transitionToMobileSheetState("expanded", true)} aria-label="Expand navigation panel" aria-expanded="false" title="Expand navigation panel" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ChevronUp aria-hidden="true" className="h-4 w-4" /></button>
+            ) : navigatingPhase || (!isMobileViewport && arrivedPhase) ? (
+              <button type="button" onClick={() => isMobileViewport ? transitionToMobileSheetState("compact") : onCollapse?.()} aria-label="Collapse navigation panel" aria-expanded="true" title="Collapse navigation panel" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ChevronDown aria-hidden="true" className="h-4 w-4" /></button>
             ) : (
-              <button type="button" onClick={onClose} aria-label={editingCompletedRoute ? "Cancel editing route" : "Cancel route planning"} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              <>
+                {minimizePanelButton}
+                <button type="button" onClick={onClose} aria-label={editingCompletedRoute ? "Cancel editing route" : "Cancel route planning"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+              </>
             )}
           </div>
         </div>
@@ -932,55 +1280,54 @@ export function UnifiedRoutePlannerDialog({
               dense={isMobileViewport}
             />
           </motion.div>
-        ) : compactNavigation || (isMobileViewport && mobileSheetState === "compact") ? (
-          previewPhase ? (
-            <div data-testid="mobile-route-preview-collapsed-summary" className="flex min-h-0 flex-1 flex-col justify-center gap-1 px-3 pb-2">
-              {emergencyRouteOverview ? (
-                <>
-                  <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route preview</p>
-                  <p className="shrink-0 truncate text-[10px] font-extrabold text-foreground">From {fromDisplay.label}</p>
-                  <p className="shrink-0 truncate text-[10px] font-semibold text-muted-foreground">Destination · {activeDestinationName}</p>
-                  {emergencyRoutes.length > 1 && <div data-testid="mobile-emergency-route-overview-choices" className="min-h-0">{emergencyRouteChoiceButtons(true)}</div>}
-                </>
-              ) : (
-                <>
-                  {mode === "emergency" ? <>
-                    <p className="shrink-0 truncate text-[9px] font-extrabold uppercase tracking-wider text-primary">SOS · Emergency route preview</p>
-                    <p className="shrink-0 truncate text-[10px] font-semibold text-muted-foreground">From {fromDisplay.label}</p>
-                    <p title={activeDestinationName} className="shrink-0 truncate text-[11px] font-extrabold">{activeDestinationName}</p>
-                    {showEmergencyRouteChoices && emergencyRouteChoiceButtons(true)}
-                  </> : <>
-                    <p title={`${fromDisplay.label} → ${activeDestinationName}`} className="shrink-0 line-clamp-2 break-words text-[11px] font-extrabold">{fromDisplay.label} → {activeDestinationName}</p>
-                    <p className="shrink-0 truncate text-[10px] text-muted-foreground">{preferenceLabel}</p>
-                  </>}
-                </>
-              )}
-              {emergencyPreviewNeedsReview && <p role="status" className="truncate text-[9px] font-semibold text-amber-700 dark:text-amber-300">Route needs review · Start is disabled</p>}
-              {mode !== "emergency" && routePreferenceFallbackNotice && <p data-testid="route-preference-fallback-note" role="status" className="truncate text-[9px] font-semibold text-amber-700 dark:text-amber-300">{routePreferenceFallbackNotice}</p>}
-              {!emergencyRouteOverview && <button type="button" data-testid="mobile-route-preview-start-navigation" onClick={onStartNavigation} disabled={emergencyPreviewNeedsReview} aria-describedby={emergencyPreviewNeedsReview ? "emergency-route-status" : undefined} className="min-h-10 w-full rounded-xl bg-primary px-3 text-[11px] font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">Start Navigation</button>}
-            </div>
-          ) : navigatingPhase && route ? (
+        ) : compactNavigation || isCompactMobilePresentation ? (
+          navigatingPhase && route ? (
             <div data-testid={isMobileViewport ? "mobile-route-collapsed-summary" : "desktop-route-collapsed-summary"} className="flex min-h-0 flex-1 flex-col justify-center gap-1.5 px-3 pb-2">
               {showEmergencyRouteChoices && emergencyRouteChoiceButtons()}
               {emergencyRouteSwitchConfirmation}
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  {exploreMode ? <>
-                    <p data-testid="collapsed-explore-route" className="truncate text-[11px] font-extrabold">{fromDisplay.label} → {activeDestinationName}</p>
-                    <p data-testid="explore-context-label" className="truncate text-[10px] font-bold text-muted-foreground">{inspectionContextLabel} · {mode === "emergency" ? "SOS" : preferenceLabel}</p>
-                    {emergencyExploreActive ? <>
-                      <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p>
-                      <motion.p key={`compact-emergency-explore-${safeStepIndex}-${currentInstruction}`} data-testid="compact-current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="line-clamp-2 text-[11px] leading-snug text-foreground"
-                        initial={reducedMotion ? false : { opacity: 0.35, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.16, ease: "easeOut" }}>{currentInstruction}</motion.p>
-                    </> : <p data-testid="compact-explore-guidance" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">Move the map to explore this route.</p>}
-                  </> : <>
-                    <p className="truncate text-[11px] font-extrabold">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)} · {activeDestinationName}</p>
-                    <p data-testid="compact-current-route-instruction" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">{currentInstruction}</p>
-                  </>}
+              {exploreMode ? <>
+                <div className="min-w-0 space-y-0.5">
+                  <div data-testid="collapsed-explore-route-endpoints" className="min-w-0">
+                    {renderExploreOrigin(true)}
+                  </div>
+                  <p data-testid="compact-explore-route-meta" className="truncate text-[10px] font-bold text-muted-foreground">
+                    <span>{exploreRouteTypeLabel}</span>
+                    {hasMeaningfulInspectionContext
+                      ? <> <span aria-hidden="true">·</span> <span data-testid="explore-context-label">{inspectionContextLabel}</span></>
+                      : mode === "standard" && <> <span aria-hidden="true">·</span> <span>{preferenceLabel}</span></>}
+                  </p>
+                  {emergencyExploreActive ? <>
+                    <p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p>
+                    <motion.p key={`compact-emergency-explore-${safeStepIndex}-${currentInstruction}`} data-testid="compact-current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="line-clamp-2 text-[12px] font-semibold leading-snug text-foreground"
+                      initial={reducedMotion ? false : { opacity: 0.35, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.16, ease: "easeOut" }}>{currentInstruction}</motion.p>
+                  </> : null}
                 </div>
-                {cameraModeSegmented("compact-camera-mode")}
-              </div>
-              {!exploreMode && inspectionPaused && <p data-testid="route-paused-for-inspection" role="status" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">Paused for map inspection. Resume to return the map to your route.</p>}
+                {transitionAwaitingAction && transitionPrompt && <p data-testid="compact-transition-prompt" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
+                {contextRecoveryPending && <div data-testid="route-context-recovery-status" role="status" className="flex items-center gap-1.5 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">
+                  <Navigation className="h-3.5 w-3.5 animate-pulse" /><span>Returning to the current route position…</span>
+                </div>}
+                {contextRecoveryFailed && <div data-testid="route-context-recovery-failed" role="alert" className="flex items-center justify-between gap-2 rounded-lg bg-destructive/[0.08] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">
+                  <span>Could not return to the route position.</span>
+                  <button type="button" onClick={onRetryContextRecovery} disabled={!onRetryContextRecovery} className="min-h-8 shrink-0 rounded-lg border border-destructive/30 px-2.5 font-extrabold text-destructive disabled:opacity-50">Retry</button>
+                </div>}
+                {primaryAction === "continue-transition" && <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label={transitionActionLabel} className="min-h-11 w-full rounded-xl bg-primary px-2 text-[11px] font-extrabold leading-tight text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button>}
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <button type="button" onClick={() => { setShowAllSteps(true); setPanelHeight(null); setMobileSheetState("expanded"); onExpand?.(); }} className="min-h-11 min-w-0 flex-1 rounded-xl border border-border px-2 text-[11px] font-extrabold text-foreground">Route details</button>
+                  {cameraModeSegmented("compact-camera-mode")}
+                </div>
+              </> : <>
+                <div className="flex items-start gap-2">
+                  <div data-testid="compact-instruction-summary" className="min-w-0 flex-1">
+                    <div data-testid="compact-step-progress" className="flex min-w-0 items-center gap-1 text-[11px] font-extrabold">
+                      <span className="shrink-0 whitespace-nowrap max-[360px]:hidden">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)} ·</span>
+                      <span className="hidden shrink-0 whitespace-nowrap max-[360px]:inline">{safeStepIndex + 1}/{Math.max(1, visibleNavigationSteps.length)} ·</span>{" "}
+                      {renderActiveRouteDestination()}
+                    </div>
+                    <p data-testid="compact-current-route-instruction" className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">{currentInstruction}</p>
+                  </div>
+                  {cameraModeSegmented("compact-camera-mode")}
+                </div>
+                {inspectionPaused && <p data-testid="route-paused-for-inspection" role="status" className="line-clamp-2 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold leading-snug text-foreground">Paused for map inspection. Resume to return the map to your route.</p>}
               {transitionAwaitingAction && transitionPrompt && <p data-testid="compact-transition-prompt" className="rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
               {contextRecoveryPending && <div data-testid="route-context-recovery-status" role="status" className="flex items-center gap-1.5 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">
                 <Navigation className="h-3.5 w-3.5 animate-pulse" /><span>Returning to the current route position…</span>
@@ -989,47 +1336,45 @@ export function UnifiedRoutePlannerDialog({
                 <span>Could not return to the route position.</span>
                 <button type="button" onClick={onRetryContextRecovery} disabled={!onRetryContextRecovery} className="min-h-8 shrink-0 rounded-lg border border-destructive/30 px-2.5 font-extrabold text-destructive disabled:opacity-50">Retry</button>
               </div>}
-              <div className="flex items-center gap-1.5">
-                {exploreMode ? (
-                  <div className="flex w-full gap-1.5">
-                    {primaryAction === "continue-transition" && <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label={transitionActionLabel} className="min-h-10 flex-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button>}
-                    <button type="button" onClick={() => { setShowAllSteps(true); setPanelHeight(null); setMobileSheetState("expanded"); onExpand?.(); }} className="min-h-10 flex-1 rounded-xl border border-border px-2 text-[10px] font-extrabold text-foreground">Route details</button>
-                  </div>
-                ) : (
-                  <>
-                    <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
-                    {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label={transitionActionLabel} className="flex h-11 flex-1 items-center justify-center rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="flex h-10 flex-1 items-center justify-center rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={contextRecoveryPending ? "Returning to route" : primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary text-[10px] font-extrabold text-primary-foreground disabled:opacity-45">{contextRecoveryPending ? <><Navigation className="h-3.5 w-3.5 animate-pulse" />Returning…</> : primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
-                    {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex >= visibleNavigationSteps.length - 1} aria-label="Next step" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
-                    {speedControl(true)}
-                  </>
-                )}
-              </div>
+                <div data-testid="compact-playback-controls" className={cn("grid gap-1.5", primaryAction === "continue-transition" || primaryAction === "done" ? "grid-cols-[44px_minmax(0,1fr)_44px]" : "grid-cols-[44px_minmax(0,1fr)_44px_44px]")}>
+                  <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step" title="Previous step" className="flex h-11 w-11 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
+                  {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} aria-label={transitionActionLabel} className="flex min-h-11 min-w-0 items-center justify-center rounded-xl bg-primary px-2 text-[11px] font-extrabold leading-tight text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="flex min-h-11 min-w-0 items-center justify-center rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={contextRecoveryPending ? "Returning to route" : primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{contextRecoveryPending ? <><Navigation className="h-3.5 w-3.5 animate-pulse" />Returning…</> : primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
+                  {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex >= visibleNavigationSteps.length - 1} aria-label="Next step" title="Next step" className="flex h-11 w-11 items-center justify-center rounded-xl border border-border text-primary disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>}
+                  {speedControl(true)}
+                </div>
+              </>}
             </div>
           ) : arrivedPhase ? (
             <div data-testid="mobile-route-arrival-compact" className="flex min-h-0 flex-col gap-2 px-3 pb-2">
-              <p className="truncate text-[12px] font-extrabold">{activeDestinationName}</p>
-              <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step from arrival" className="min-h-11 w-full rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous step</button>
-              <button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button>
-                <button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button>
+              <div data-testid="mobile-arrival-actions" className="flex w-full flex-col gap-2">
+                <p title={arrivalSubtitle ?? activeDestinationName} className="line-clamp-2 break-words text-[12px] font-extrabold">{arrivalSubtitle ?? activeDestinationName}</p>
+                <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step from arrival" className="min-h-11 w-full rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous step</button>
+                <button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button>
+                  <button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button>
+                </div>
               </div>
             </div>
           ) : null
         ) : (
-          <motion.div
+            <motion.div
             key="route-planner-main"
             data-testid="route-planner-scroll-region"
             className={cn("min-h-0 overscroll-contain px-3.5 py-2 md:max-h-[calc(100dvh-14rem)] md:px-4 md:py-4",
-              navigatingPhase || previewPhase
-                ? cn("flex flex-1 flex-col gap-2", isMobileViewport && navigatingPhase ? "overflow-hidden" : "overflow-y-auto")
+              navigatingPhase
+                ? cn("flex min-h-0 flex-col gap-2", showAllSteps ? cn("flex-1", isMobileViewport ? "overflow-y-auto" : "overflow-hidden") : "flex-none overflow-y-auto", isMobileViewport && "touch-pan-y")
+                : previewPhase
+                  ? "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
                 : "flex-none space-y-2 overflow-y-auto md:flex-none md:space-y-3",
               isMobileViewport && phase === "planning" && !activeEndpoint && !mapSelectionEndpoint && mobileSheetState !== "expanded" && "hide-scrollbar-mobile")}
             style={isMobileViewport && !activeEndpoint && !mapSelectionEndpoint
               ? previewPhase
                 ? { flex: "0 1 auto", maxHeight: "min(44dvh, 24rem)" }
                 : navigatingPhase
-                ? { flex: "1 1 0%", maxHeight: "none" }
+                ? { flex: showAllSteps ? (exploreMode ? "0 1 auto" : "1 1 0%") : "0 1 auto", maxHeight: "none" }
+                : arrivedPhase
+                  ? { flex: "0 1 auto", maxHeight: mobileArrivalContentMaxHeight }
                 : { flex: "0 1 auto", maxHeight: `max(0px, calc(var(--student-map-mobile-panel-max-height, 60dvh) - 8rem))` }
               : undefined}
             initial={reducedMotion ? false : { opacity: 0, x: -10 }}
@@ -1059,7 +1404,7 @@ export function UnifiedRoutePlannerDialog({
                 <div className="flex items-center gap-2">
                   <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground"><RouteIcon className="h-4 w-4" /></span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-primary">{mode === "emergency" ? "Emergency route" : `${MODES.find((item) => item.key === mode)?.label} route`}</p>
+                    <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-primary">{editingCompletedRoute ? "Proposed " : ""}{mode === "emergency" ? "Emergency route" : `${MODES.find((item) => item.key === mode)?.label} route`}</p>
                     {mode === "emergency" ? <>
                       <p className="truncate text-[10px] font-semibold text-muted-foreground">From {fromDisplay.label}</p>
                       <p data-testid="emergency-route-summary-destination" title={activeDestinationName} className="line-clamp-2 break-words text-[13px] font-extrabold text-foreground">{activeDestinationName}</p>
@@ -1078,19 +1423,31 @@ export function UnifiedRoutePlannerDialog({
                 </details>
               </div>
             ) : navigatingPhase && route ? (
-              <div data-testid="guided-navigation-summary" className="flex min-h-0 flex-1 flex-col gap-2">
+              <div data-testid="guided-navigation-summary" data-camera-mode={exploreMode ? "explore" : "follow"} className={cn("flex min-h-0 flex-col gap-2", showAllSteps && (isMobileViewport ? "flex-none" : "flex-1"))}>
                 {exploreMode && <div data-testid="explore-route-summary" className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
-                  <div className="flex items-start gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><RouteIcon className="h-4 w-4" /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">{mode === "emergency" ? "Emergency route" : `${MODES.find((item) => item.key === mode)?.label} route`}</p>
-                      {mode === "emergency" ? <>
-                        <p className="truncate text-[10px] font-semibold text-muted-foreground">From {fromDisplay.label}</p>
-                        <p data-testid="guided-destination" title={activeDestinationName} className="line-clamp-2 break-words text-[11px] font-extrabold leading-tight">{activeDestinationName}</p>
-                      </> : <p className="truncate text-[12px] font-extrabold">{fromDisplay.label} → {activeDestinationName}</p>}
-                      <p data-testid="guided-inspection-context" className="truncate text-[11px] font-bold text-muted-foreground"><span data-testid="explore-context-label">{inspectionContextLabel}</span></p>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <div className="flex min-w-0 flex-[1_1_14rem] items-center gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground max-[429px]:hidden"><RouteIcon className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                      <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-[9px] font-extrabold uppercase tracking-wider text-primary"><span>{exploreRouteTypeLabel}</span>{hasMeaningfulInspectionContext && <><span aria-hidden="true" className="opacity-55">·</span><span data-testid="guided-inspection-context" className="truncate text-muted-foreground normal-case tracking-normal">{inspectionContextLabel}</span></>}</p>
+                      <div data-testid="explore-route-endpoints" className="mt-0.5 min-w-0">
+                        {renderExploreOrigin()}
+                        {emergencyExploreActive && <div className="mt-1 min-w-0">
+                          <p className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground">To</p>
+                          <RouteNamePopover
+                            name={activeDestinationName}
+                            kind="destination"
+                            testId="explore-emergency-destination"
+                            className="min-h-8 max-w-full"
+                            valueClassName="line-clamp-2 break-words text-[11px] font-bold text-foreground [overflow-wrap:anywhere]"
+                          />
+                        </div>}
+                      </div>
+                      </div>
                     </div>
-                    {cameraModeSegmented("camera-mode")}
+                    <div className="ml-auto flex shrink-0 justify-end">
+                      {cameraModeSegmented("camera-mode")}
+                    </div>
                   </div>
                   <div data-testid="explore-route-facts" className="mt-2 hidden flex-wrap gap-1.5 md:flex">{routeFacts.map((fact) => <span key={fact} className="rounded-full border border-border/70 bg-card px-2 py-1 text-[10px] font-bold text-muted-foreground">{fact}</span>)}</div>
                   {routePreferenceFallbackNotice && <p data-testid="route-preference-fallback-note" role="status" className="mt-2 text-[10px] font-semibold leading-snug text-amber-700 dark:text-amber-300">{routePreferenceFallbackNotice}</p>}
@@ -1099,14 +1456,16 @@ export function UnifiedRoutePlannerDialog({
                     <motion.p key={`emergency-explore-step-${safeStepIndex}-${currentInstruction}`} data-testid="current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="mt-0.5 text-[13px] font-bold leading-snug text-foreground"
                       initial={reducedMotion ? false : { opacity: 0.35, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.16, ease: "easeOut" }}>{currentInstruction}</motion.p>
                     {routePreferenceFallbackNotice && <p data-testid="route-preference-fallback-note" role="status" className="mt-1 text-[10px] font-semibold leading-snug text-amber-700 dark:text-amber-300">{routePreferenceFallbackNotice}</p>}
-                  </div> : <p data-testid="explore-route-guidance" className="mt-2 text-[11px] font-medium leading-snug text-muted-foreground">Move the map or select a step.</p>}
+                  </div> : null}
                   {transitionAwaitingAction && transitionPrompt && <p data-testid="transition-wait-prompt" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-2 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
-                  <button type="button" data-testid="guided-explore-steps-toggle" onClick={() => setShowAllSteps((open) => !open)} className="mt-2 min-h-9 rounded-lg border border-border px-3 text-[10px] font-extrabold text-foreground">{showAllSteps ? "Hide steps" : "Show steps"}</button>
                 </div>}
+                {exploreMode && <button type="button" data-testid="guided-explore-steps-toggle" onClick={() => setShowAllSteps((open) => !open)} aria-expanded={showAllSteps} aria-label={showAllSteps ? "Hide steps" : "Show steps"} className="flex min-h-11 w-full items-center justify-between rounded-lg px-1.5 text-left text-[11px] font-extrabold text-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                  <span>Steps ({visibleNavigationSteps.length})</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-muted-foreground">{showAllSteps ? "Hide" : "Show"}<ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", showAllSteps && "rotate-180")} /></span>
+                </button>}
                 {!exploreMode && <div className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
-                  <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Navigation className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p><p data-testid="guided-destination" title={activeDestinationName} className={cn("font-extrabold", mode === "emergency" ? "line-clamp-2 break-words text-[11px] leading-tight" : "truncate text-[13px]")}>{activeDestinationName}</p></div>{cameraModeSegmented("camera-mode")}</div>
-                  <>
-                    <motion.p key={`guided-step-${safeStepIndex}-${currentInstruction}`} data-testid="current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="mt-3 min-h-[2.5rem] text-[14px] font-bold leading-snug text-foreground"
+                  <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground max-[360px]:hidden"><Navigation className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p><div data-testid="guided-destination-row" className="flex min-w-0 items-center gap-1">{mode === "emergency" ? <p data-testid="guided-destination" title={activeDestinationName} className="line-clamp-2 break-words text-[11px] font-extrabold leading-tight">{activeDestinationName}</p> : renderActiveRouteDestination()}</div></div>{cameraModeSegmented("camera-mode")}</div>
+                    <motion.p key={`guided-step-${safeStepIndex}-${currentInstruction}`} data-testid="current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="mt-2 min-h-[2.5rem] text-[14px] font-bold leading-snug text-foreground"
                       initial={reducedMotion ? false : { opacity: 0.35, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.16, ease: "easeOut" }}>{currentInstruction}</motion.p>
                     {inspectionPaused && <p data-testid="route-paused-for-inspection" role="status" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">Paused for map inspection. Resume to return the map to your route.</p>}
                     {contextRecoveryPending && <div data-testid="route-context-recovery-status" role="status" className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">
@@ -1119,11 +1478,10 @@ export function UnifiedRoutePlannerDialog({
                     {routePreferenceFallbackNotice && <p data-testid="route-preference-fallback-note" role="status" className="mt-1 text-[10px] font-semibold leading-snug text-amber-700 dark:text-amber-300">{routePreferenceFallbackNotice}</p>}
                     {transitionAwaitingAction && transitionPrompt && <p data-testid="transition-wait-prompt" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-2 text-[11px] font-semibold leading-snug text-foreground">{transitionPrompt}</p>}
                     {visibleNavigationSteps[safeStepIndex + 1] && <p className="mt-2 text-[11px] text-muted-foreground">Next: {visibleNavigationSteps[safeStepIndex + 1]}</p>}
-                  </>
                 </div>}
                 {!exploreMode && (
                   <>
-                    <div className="grid grid-cols-4 gap-2">
+                  <div data-testid="guided-playback-controls" className="grid grid-cols-4 gap-2">
                       <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous</button>
                       {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={contextRecoveryPending ? "Returning to route" : primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{contextRecoveryPending ? <><Navigation className="h-3.5 w-3.5 animate-pulse" />Returning…</> : primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
                       {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>}
@@ -1135,7 +1493,15 @@ export function UnifiedRoutePlannerDialog({
                   </>
                 )}
                 {exploreMode && primaryAction === "continue-transition" && <button type="button" data-testid="explore-continue-transition" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 w-full rounded-xl bg-primary px-3 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button>}
-                {showAllSteps && <ol ref={stepListRef} data-testid="guided-route-steps" aria-label="Route steps" className={cn("min-h-[9rem] max-h-[min(38dvh,24rem)] space-y-0.5 overflow-y-auto overscroll-y-auto touch-pan-y rounded-xl border border-border/70 p-2", isMobileViewport && navigatingPhase ? "flex-1" : "shrink-0")}>
+                <AnimatePresence initial={false}>
+                {showAllSteps && <motion.ol ref={stepListRef} key="guided-route-steps" id="guided-route-steps" data-testid="guided-route-steps" aria-label="Route steps"
+                  initial={reducedMotion ? false : { opacity: 0, y: 3 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -3 }}
+                  transition={{ duration: reducedMotion ? 0.01 : 0.18, ease: "easeOut" }}
+                  className={cn("space-y-0.5 rounded-xl border border-border/70 p-2", isMobileViewport && navigatingPhase
+                  ? "max-h-none shrink-0 overflow-visible"
+                  : "min-h-0 max-h-[min(38dvh,24rem)] shrink-0 overflow-y-auto overscroll-y-auto touch-pan-y")}>
                   {visibleNavigationSteps.map((step, index) => {
                     const inspected = exploreMode && index === safeStepIndex;
                     const actualFollow = exploreMode && index === safeFollowStepIndex;
@@ -1150,15 +1516,23 @@ export function UnifiedRoutePlannerDialog({
                       />
                     </li>;
                   })}
-                </ol>}
+                </motion.ol>}
+                </AnimatePresence>
               </div>
             ) : arrivedPhase ? (
               <motion.div data-testid="route-arrival-state" className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5 text-center" initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.99 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={reducedMotion ? { duration: 0.01 } : { duration: 0.24, ease: "easeOut" }}>
                 <motion.span className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white" initial={reducedMotion ? false : { scale: 0.78 }} animate={{ scale: 1 }} transition={reducedMotion ? { duration: 0.01 } : { type: "spring", stiffness: 360, damping: 24 }}><Check className="h-6 w-6" /></motion.span>
-                <p data-testid="route-arrival-title" className="text-base font-extrabold text-emerald-800">{mode === "emergency" ? `Arrived at ${activeDestinationName}` : "You've arrived"}</p>
-                {mode !== "emergency" && <p className="mt-1 text-lg font-extrabold">{activeDestinationName}</p>}
+                <p data-testid="route-arrival-title" className="text-base font-extrabold text-emerald-800 dark:text-emerald-300">{mode === "emergency" ? `Arrived at ${activeDestinationName}` : "You've arrived"}</p>
+                {mode !== "emergency" && <p className="mt-1 text-lg font-extrabold">{arrivalSubtitle ?? activeDestinationName}</p>}
                 {mode === "emergency" && <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Follow campus personnel's instructions.</p>}
-                <div className="mt-4 flex w-full flex-col gap-2"><button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step from arrival" className="min-h-11 w-full rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous step</button><button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button><div className="grid w-full grid-cols-2 gap-2"><button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button><button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button></div></div>
+                <div data-testid="route-arrival-actions" className="mt-4 flex w-full max-w-sm flex-col gap-2">
+                  <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} aria-label="Previous step from arrival" className="min-h-11 w-full rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous step</button>
+                  <button type="button" onClick={onStartNavigation} className="min-h-11 w-full rounded-xl bg-primary text-[11px] font-extrabold text-primary-foreground">Restart Route</button>
+                  <div className="grid w-full grid-cols-2 gap-2">
+                    <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Edit Route</button>
+                    <button type="button" onClick={onDone} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold">Done</button>
+                  </div>
+                </div>
               </motion.div>
             ) : (
               <>
@@ -1210,7 +1584,10 @@ export function UnifiedRoutePlannerDialog({
           : <button type="button" onClick={onClear} className="min-h-11 rounded-xl border border-border px-3 text-[12px] font-extrabold text-muted-foreground transition-colors hover:bg-muted">Clear</button>}
           <button type="button" onClick={findRoute} disabled={!canCalculateRoute} aria-describedby={emergencyRouteBlocked ? "emergency-route-status" : undefined} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-[12px] font-extrabold text-primary-foreground shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"><Navigation className="h-3.5 w-3.5" />{emergencyRouteBlocked ? "Find Route" : canStart ? "Find Route" : sameEndpoint ? "Choose a different place" : hasFrom ? "Choose a destination" : "Choose starting point"}</button>
         </div> : previewPhase ? <div className="flex gap-2">
-          {emergencyRouteOverview && emergencyRoutes.length > 1 ? <>
+        {editingCompletedRoute ? <>
+          <button type="button" onClick={onCancelEditRoute ?? onClose} className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Cancel</button>
+          <button type="button" onClick={onConfirmRouteEdit} disabled={!onConfirmRouteEdit || emergencyPreviewNeedsReview || !route} aria-describedby={emergencyPreviewNeedsReview ? "emergency-route-status" : undefined} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-[12px] font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">Use This Route</button>
+        </> : emergencyRouteOverview && emergencyRoutes.length > 1 ? <>
             <button type="button" onClick={onEditRoute} className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Edit Route</button>
             <button type="button" onClick={onClear} aria-label="Close Preview" title="Close Preview" className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Close Preview</button>
           </> : <>

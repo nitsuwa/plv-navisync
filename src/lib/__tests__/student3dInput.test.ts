@@ -10,7 +10,7 @@ describe("Student 3D camera input", () => {
         Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
         const controls = {
           mouseButtons: { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN },
-          touches: { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN },
+          touches: { ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE },
         };
 
         configureStudent3dInputMappings(controls);
@@ -20,7 +20,7 @@ describe("Student 3D camera input", () => {
           MIDDLE: MOUSE.DOLLY,
           RIGHT: MOUSE.ROTATE,
         });
-        expect(controls.touches, `touch at ${width}px`).toEqual({ ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN });
+        expect(controls.touches, `touch at ${width}px`).toEqual({ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE });
       }
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -48,14 +48,26 @@ describe("Student 3D camera input", () => {
     expect(student3dCameraGesture({ pointerType: "mouse", button: 0, pointerCount: 1, movement: 4 })).toBe("none");
   });
 
-  it("keeps one-finger touch orbit live and pauses only deliberate two-finger pan", () => {
-    expect(student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 1, movement: 9 })).toBe("orbit");
+  it("classifies one-finger touch as pan and pauses Follow for deliberate pans", () => {
+    const oneFingerPan = student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 1, movement: 9 });
+    expect(oneFingerPan).toBe("pan");
+    expect(shouldPauseFollowForManualCameraGesture(true, oneFingerPan === "pan")).toBe(true);
+    expect(student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 1, movement: 4 })).toBe("none");
     const pan = student3dTouchGestureMotion([{ x: 10, y: 20 }, { x: 110, y: 20 }], [{ x: 20, y: 30 }, { x: 120, y: 30 }]);
     expect(pan.centroidDistance).toBeGreaterThan(7);
     expect(pan.pinchDistance).toBeLessThan(7);
-    expect(student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 2, movement: pan.centroidDistance, pinchMovement: pan.pinchDistance })).toBe("pan");
+    const twoFingerPan = student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 2, movement: pan.centroidDistance, pinchMovement: pan.pinchDistance });
+    expect(twoFingerPan).toBe("pan");
+    expect(shouldPauseFollowForManualCameraGesture(true, twoFingerPan === "pan")).toBe(true);
     const pinch = student3dTouchGestureMotion([{ x: 10, y: 20 }, { x: 110, y: 20 }], [{ x: 5, y: 20 }, { x: 125, y: 20 }]);
     expect(student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 2, movement: pinch.centroidDistance, pinchMovement: pinch.pinchDistance })).toBe("zoom");
+    const twist = student3dTouchGestureMotion([{ x: 30, y: 80 }, { x: 130, y: 80 }], [{ x: 80, y: 30 }, { x: 80, y: 130 }]);
+    expect(twist.centroidDistance).toBe(0);
+    expect(twist.pinchDistance).toBe(0);
+    expect(twist.rotationRadians).toBeCloseTo(Math.PI / 2);
+    const rotation = student3dCameraGesture({ pointerType: "touch", button: 0, pointerCount: 2, movement: twist.centroidDistance, pinchMovement: twist.pinchDistance, rotationMovement: twist.rotationRadians });
+    expect(rotation).toBe("orbit");
+    expect(shouldPauseFollowForManualCameraGesture(true, rotation === "pan")).toBe(false);
   });
 
   it("tracks a moving marker while preserving the chosen camera orbit offset", () => {

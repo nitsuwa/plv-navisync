@@ -254,7 +254,7 @@ describe("AdminMapBuilderPage — campus lifecycle", () => {
     expect(screen.getByLabelText("Buildings: 2")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /open editor/i }));
-    fireEvent.click(await screen.findByTitle("Back to campus list"));
+    fireEvent.click(await screen.findByTitle("Back to campus list", {}, { timeout: 10000 }));
 
     expect(await screen.findByRole("heading", { name: "Campus Management" })).toBeInTheDocument();
     expect(await screen.findByTestId("campus-mini-map")).toBeInTheDocument();

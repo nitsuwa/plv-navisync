@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -8,23 +8,31 @@ import { campusService, CampusConflictError, CampusDeletionError, CampusServiceE
 import { campusStructureService } from "../services/campusStructureService";
 import { nextDefaultBuildingIdentity } from "../lib/buildingDefaults";
 import { canPersistCampusStructure, campusHasUnpublishedChanges, campusHasUnsavedChanges, clearCampusDraft, restoreCampusDraft, shouldPersistCampusDraft, writeCampusDraft } from "../lib/campusDraftPersistence";
-import {
-  CampusHome,
-  CampusWizard,
-  CampusCreationSuccess,
-  CampusEditor,
-  FloorEditor,
-  BuildingWizardModal,
-  CanvasSetupWizard,
-  CanvasSettingsModal,
-  genId,
-  BUILDING_COLORS,
-  TestRouteSessionProvider,
-  StudentPreview,
-} from "../components/map-builder";
+import { CampusHome, type BulkDeleteFailure, type BulkDeleteProgress, type BulkDeleteResult } from "../components/map-builder/CampusHome";
+import { CampusWizard } from "../components/map-builder/CampusWizard";
+import { CampusCreationSuccess } from "../components/map-builder/CampusCreationSuccess";
+import { BuildingWizardModal } from "../components/map-builder/BuildingWizardModal";
+import { CanvasSetupWizard } from "../components/map-builder/CanvasSetupWizard";
+import { CanvasSettingsModal } from "../components/map-builder/CanvasSettingsModal";
+import { genId, BUILDING_COLORS } from "../components/map-builder/constants";
+import { TestRouteSessionProvider } from "../components/map-builder/TestNavigationPanel";
+import { StudentPreview } from "../components/map-builder/StudentPreview";
 import { validateCampusForPublish } from "../lib/campusPublication";
-import type { BulkDeleteFailure, BulkDeleteProgress, BulkDeleteResult } from "../components/map-builder";
 import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
+
+const LazyCampusEditor = lazy(() => import("../components/map-builder/CampusEditor").then((module) => ({ default: module.CampusEditor })));
+const LazyFloorEditor = lazy(() => import("../components/map-builder/FloorEditor").then((module) => ({ default: module.FloorEditor })));
+
+function EditorModuleLoading({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-background/80 p-6" role="status" aria-live="polite" aria-busy="true">
+      <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-card/95 px-5 py-4 text-sm font-semibold text-muted-foreground shadow-sm">
+        <Loader2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
 
 const shouldLogCampusDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== "test";
 
@@ -1168,23 +1176,25 @@ export function AdminMapBuilderPage() {
                   </div>
                 </div>
               ) : <>
-                  <CampusEditor
-                    campus={activeCampus}
-                    onBack={goHome}
-                    onUpdate={updateCampus}
-                    onSave={saveCampusStructure}
-                    onPublish={() => undefined}
-                    onPreviewStudent={openStudentPreview}
-                    publishingEnabled
-                    onOpenFloor={handleOpenFloor}
-                    onAddBuilding={() => setShowBuildingWizard(true)}
-                    onOpenCanvasSettings={() => setShowCanvasSettings(true)}
-                    lastSavedAt={activeCampus.updatedAt}
-                    savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
-                    publishedSnapshot={publishedSnapshotsRef.current[activeCampus.id]}
-                    isDirty={(campusEditRevisionRef.current.get(activeCampus.id) ?? 0)
-                      !== (campusSavedRevisionRef.current.get(activeCampus.id) ?? 0)}
-                  />
+                  <Suspense fallback={<EditorModuleLoading label="Preparing campus editor…" />}>
+                    <LazyCampusEditor
+                      campus={activeCampus}
+                      onBack={goHome}
+                      onUpdate={updateCampus}
+                      onSave={saveCampusStructure}
+                      onPublish={() => undefined}
+                      onPreviewStudent={openStudentPreview}
+                      publishingEnabled
+                      onOpenFloor={handleOpenFloor}
+                      onAddBuilding={() => setShowBuildingWizard(true)}
+                      onOpenCanvasSettings={() => setShowCanvasSettings(true)}
+                      lastSavedAt={activeCampus.updatedAt}
+                      savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
+                      publishedSnapshot={publishedSnapshotsRef.current[activeCampus.id]}
+                      isDirty={(campusEditRevisionRef.current.get(activeCampus.id) ?? 0)
+                        !== (campusSavedRevisionRef.current.get(activeCampus.id) ?? 0)}
+                    />
+                  </Suspense>
                 {showBuildingWizard && (
                   <BuildingWizardModal
                     onClose={() => setShowBuildingWizard(false)}
@@ -1226,21 +1236,23 @@ export function AdminMapBuilderPage() {
 
             {/* ── Floor editor ── */}
             {view.type === "floor" && activeCampus && (
-              <FloorEditor
-                campus={activeCampus}
-                buildingId={view.buildingId}
-                floorId={view.floorId}
-                onBack={() => goToCampusFromFloor(activeCampus.id)}
-                onOpenFloor={handleOpenFloor}
-                onSwitchFloor={(fId, selection) => setView({ ...view, floorId: fId, initialSelection: selection })}
-                onUpdate={updateCampus}
-                onSave={saveCampusStructure}
-                onPublish={() => undefined}
-                onPreviewStudent={openStudentPreview}
-                publishingEnabled
-                savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
-                initialSelection={view.initialSelection}
-              />
+              <Suspense fallback={<EditorModuleLoading label="Preparing floor editor…" />}>
+                <LazyFloorEditor
+                  campus={activeCampus}
+                  buildingId={view.buildingId}
+                  floorId={view.floorId}
+                  onBack={() => goToCampusFromFloor(activeCampus.id)}
+                  onOpenFloor={handleOpenFloor}
+                  onSwitchFloor={(fId, selection) => setView({ ...view, floorId: fId, initialSelection: selection })}
+                  onUpdate={updateCampus}
+                  onSave={saveCampusStructure}
+                  onPublish={() => undefined}
+                  onPreviewStudent={openStudentPreview}
+                  publishingEnabled
+                  savedSnapshot={savedSnapshotsRef.current[activeCampus.id]}
+                  initialSelection={view.initialSelection}
+                />
+              </Suspense>
             )}
 
             {/* ── Campus creation success ── */}

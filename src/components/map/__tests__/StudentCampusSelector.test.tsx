@@ -67,6 +67,20 @@ describe("StudentCampusSelector", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("uses a compact aligned mobile campus label while keeping the full campus name accessible", () => {
+    render(<StudentCampusSelector
+      campuses={[{ id: "main", name: "MAIN CAMPUS - PLV", code: "MAIN" }]}
+      activeCampusId="main"
+      activeCampusName="MAIN CAMPUS - PLV"
+      onSelect={vi.fn()}
+    />);
+
+    const trigger = screen.getByRole("button", { name: "Change campus. Current campus: MAIN CAMPUS - PLV" });
+    expect(trigger).toHaveAttribute("title", "MAIN CAMPUS - PLV");
+    expect(trigger).toHaveClass("min-h-11", "rounded-2xl");
+    expect(screen.getByText("MAIN CAMPUS")).toBeInTheDocument();
+  });
+
   it("closes on outside pointer input and remains open when a selection is declined", () => {
     const onSelect = vi.fn(() => false);
     render(<StudentCampusSelector campuses={campuses} activeCampusId="main" onSelect={onSelect} />);

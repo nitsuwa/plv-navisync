@@ -5,26 +5,27 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { DoorOpen, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import * as THREE from "three";
-import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceSteps } from "../map-builder/types";
+import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceRamp, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
-import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, deriveStudentAuditoriumChairLayoutsForFloor, discoverIndoorCameraDirection, exteriorEmergencyStairOpenings, INDOOR_FLOOR_CAMERA_DIRECTION, indoorDoorVisualWidth, indoorFloorCameraBounds, indoorFloorCameraDirectionForViewport, indoorFloorCameraFarPlane, indoorFloorCameraFitPadding, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
-import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry } from "../../lib/exteriorFloorZones";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, deriveStudentAuditoriumChairLayoutsForFloor, discoverIndoorCameraDirection, exteriorEmergencyStairOpenings, INDOOR_FLOOR_CAMERA_DIRECTION, indoorDoorLeafLayouts, indoorDoorVisualWidth, indoorFloorCameraBounds, indoorFloorCameraDirectionForViewport, indoorFloorCameraFarPlane, indoorFloorCameraFitPadding, indoorFloorCameraHalfDepth, indoorOcclusionTargetOpacity, indoorRoomLabelPriority, indoorWallOccludesRouteFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue } from "../../lib/indoor3dGeometry";
+import { exteriorZoneAccessFeatureGeometry, exteriorZoneGeometry, isExteriorAccessParent } from "../../lib/exteriorFloorZones";
 import { exteriorStairVisualItem } from "../map-builder/ExteriorEmergencyFloorModule";
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import type { StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
 import { groupStudentRouteExploreTransitions } from "../../lib/studentRouteFlow";
-import { student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
+import { shouldPreserveStudent3dFollowCameraOffset, student3dFollowCameraOffsetForRecovery, student3dFollowCameraOrientationChanged, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dIndoorArrivalCameraDirection, student3dIndoorFollowCameraOffset, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
-import { resolveStudentEntranceStairYaw, studentEntranceRampGroundDirection } from "../../lib/studentCampus3dPresentation";
+import { resolveStudentEntranceRampPlacement, resolveStudentEntranceStairPlacement, STUDENT_CAMPUS_3D_GROUND_EPSILON, studentEntranceRampGroundDirection, studentEntranceStairFlightLayout, studentExteriorZone3dHeights, studentExteriorZone3dPresentation } from "../../lib/studentCampus3dPresentation";
 import { Event3DSceneLayout } from "../events/Event3DSceneLayout";
 import type { Event3DEditing } from "../../lib/event3dEditing";
 import { EventPreviewCamera } from "../events/EventPreviewCamera";
 import type { Event3DCameraRequest, Event3DCameraSession } from "../../lib/event3dLayout";
+import { measureRouteDoorCrossings, routeDoorTransitOpacity, shouldApplyDoorFocusOcclusion } from "../../lib/routeDoorTransit";
 
 declare module "react" {
   namespace JSX {
@@ -61,6 +62,8 @@ interface IndoorFloor3DRendererProps {
   onExitDoorClick?: (doorId: string) => void;
   focusRoomId?: string | null;
   focusNonce?: number;
+  youAreHerePoint?: Pt | null;
+  youAreHereLabel?: string | null;
   arrivalFocusKey?: string;
   arrivalFocusPoint?: Pt | null;
   arrivalApproachPoint?: Pt | null;
@@ -78,6 +81,8 @@ interface IndoorFloor3DRendererProps {
   exploreTransitionCues?: readonly StudentRouteExploreTransitionMarker[];
   followMode?: boolean;
   followPlaying?: boolean;
+  /** Stable route identity across floor-local waypoint geometry changes. */
+  followCameraRouteKey?: string;
   freeLook?: boolean;
   recenterNonce?: number;
   recenterFollowOffset?: Student3dCameraOffset | null;
@@ -96,7 +101,7 @@ type StairVisualItem = Pick<FloorStairs, "id" | "x" | "y" | "width" | "height" |
   parentZoneId?: string; linkedEntranceId?: string; attachmentEdge?: FloorEntranceSteps["attachmentEdge"];
   direction?: FloorStairs["direction"] | "forward" | "reverse"; flip?: boolean;
 };
-type RampVisualItem = { x: number; y: number; width: number; height: number; rotation?: number; visible?: boolean; slope?: "gentle" | "medium" | "steep"; handrails?: boolean; direction?: "up" | "down" | "both" | "forward" | "reverse"; layout?: "straight" | "l_turn_left" | "l_turn_right" };
+type RampVisualItem = NonNullable<FloorPlan["ramps"]>[number] | NonNullable<FloorPlan["entranceRamps"]>[number];
 
 const FLOOR_SCALE = 0.025;
 const STUDENT_ROUTE_RIBBON_WIDTH = 0.12;
@@ -120,16 +125,51 @@ const EMPTY_POLYGONS: readonly Pt[][] = Object.freeze([]);
 const EMPTY_STRING_SET: ReadonlySet<string> = new Set();
 
 interface WallOcclusionEntry {
-  material: THREE.MeshStandardMaterial;
+  kind: "wall" | "door" | "window";
+  materials: Array<{
+    material: THREE.Material;
+    baseOpacity: number;
+    baseTransparent: boolean;
+    baseDepthWrite: boolean;
+    obstructedOpacity?: number;
+  }>;
   start: [number, number, number];
   end: [number, number, number];
   thickness: number;
   baseHeight: number;
   height: number;
   targetOpacity: number;
+  routeTransitMaterials?: ReadonlySet<THREE.Material>;
+  routeTransitTargetOpacity?: number;
+  wallSourceIds?: readonly string[];
+  attachedWallId?: string;
   registered: boolean;
 }
 type WallOcclusionRegistry = MutableRefObject<Map<string, WallOcclusionEntry>>;
+
+function captureOcclusionMaterials(
+  materials: Iterable<THREE.Material>,
+  obstructedOpacityOverrides: ReadonlyMap<THREE.Material, number> = new Map(),
+) {
+  return [...new Set(materials)].map((material) => ({
+    material,
+    baseOpacity: material.opacity,
+    baseTransparent: material.transparent,
+    baseDepthWrite: material.depthWrite,
+    ...(obstructedOpacityOverrides.has(material)
+      ? { obstructedOpacity: obstructedOpacityOverrides.get(material) }
+      : {}),
+  }));
+}
+
+function restoreOcclusionMaterials(entry: WallOcclusionEntry) {
+  for (const state of entry.materials) {
+    state.material.opacity = state.baseOpacity;
+    state.material.transparent = state.baseTransparent;
+    state.material.depthWrite = state.baseDepthWrite;
+    state.material.needsUpdate = true;
+  }
+}
 
 class IndoorSceneBoundary extends Component<{ children: ReactNode; onError?: () => void }, { failed: boolean }> {
   state = { failed: false };
@@ -303,7 +343,7 @@ function rampHeightAt(point: Pt, ramps: readonly RampVisualItem[]) {
     const localY = -dx * Math.sin(rotation) + dy * Math.cos(rotation);
     if (Math.abs(localX) > ramp.width / 2 || Math.abs(localY) > ramp.height / 2) continue;
     const depth = Math.max(0.45, ramp.height * FLOOR_SCALE);
-    const slope = ramp.slope ?? "medium";
+    const slope = "slope" in ramp ? ramp.slope ?? "medium" : "medium";
     const rise = Math.min(0.72, depth * (slope === "gentle" ? 0.075 : slope === "steep" ? 0.19 : 0.12));
     const direction = ramp.direction === "down" || ramp.direction === "reverse" ? -1 : 1;
     const localRatio = localY / ramp.height + 0.5;
@@ -435,19 +475,24 @@ function Wall({ id, segment, viewport, registry, darkMode }: {
     const material = materialRef.current;
     if (!material) return;
     registry.current.set(id, {
-      material,
+      kind: "wall",
+      materials: captureOcclusionMaterials([material]),
       start,
       end,
       thickness,
       baseHeight: segment.baseHeight,
       height,
       targetOpacity: 1,
+      wallSourceIds: segment.sourceIds,
       registered: true,
     });
     invalidate();
     return () => {
       const entry = registry.current.get(id);
-      if (entry) entry.registered = false;
+      if (entry) {
+        entry.registered = false;
+        restoreOcclusionMaterials(entry);
+      }
       registry.current.delete(id);
       invalidate();
     };
@@ -467,47 +512,117 @@ function Wall({ id, segment, viewport, registry, darkMode }: {
 }
 const MemoWall = memo(Wall);
 
-function IndoorWallOcclusionController({ registry, viewport, route, progressRef, focusPoint, followMode, focusOpacity = 0.5 }: {
+function IndoorWallOcclusionController({ registry, viewport, route, progressRef, focusPoint, followMode, followPlaying, reducedMotion, focusOpacity = 0.5 }: {
   registry: WallOcclusionRegistry;
   viewport: FloorViewport;
   route: readonly Pt[];
   progressRef?: MutableRefObject<number>;
   focusPoint: Pt | null;
   followMode?: boolean;
+  followPlaying?: boolean;
+  reducedMotion?: boolean;
   focusOpacity?: number;
 }) {
   const { invalidate } = useThree();
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
+  const routeWorldPoints = useMemo(() => route.map((point) => {
+    const world = pointToWorld(point, viewport);
+    return { x: world[0], y: world[2] };
+  }), [route, viewport]);
+  const crossingCacheRef = useRef<{ points: readonly Pt[]; byDoor: WeakMap<WallOcclusionEntry, ReturnType<typeof measureRouteDoorCrossings>> }>({
+    points: [], byDoor: new WeakMap(),
+  });
   const samplePoint = useRef<Pt>({ x: 0, y: 0 });
+  const lookAheadPointRef = useRef<Pt>({ x: 0, y: 0 });
   const timeSinceCheck = useRef(1);
   const animating = useRef(new Set<WallOcclusionEntry>());
+
+  useEffect(() => {
+    // Route identity and Floor changes invalidate the crossing lookup. Restore
+    // first so a Door from the previous playback context can never stay faded.
+    crossingCacheRef.current = { points: routeWorldPoints, byDoor: new WeakMap() };
+    for (const entry of registry.current.values()) {
+      if (entry.kind !== "door" || (entry.routeTransitTargetOpacity ?? 1) === 1) continue;
+      entry.routeTransitTargetOpacity = 1;
+      animating.current.add(entry);
+    }
+    invalidate();
+  }, [invalidate, registry, routeWorldPoints]);
+
+  useEffect(() => {
+    // Pausing, seeking out of Follow, or ending playback restores every Door
+    // even if the route marker is currently sitting on its threshold.
+    if (followMode && followPlaying && progressRef) return;
+    for (const entry of registry.current.values()) {
+      if (entry.kind !== "door" || (entry.routeTransitTargetOpacity ?? 1) === 1) continue;
+      entry.routeTransitTargetOpacity = 1;
+      animating.current.add(entry);
+    }
+    invalidate();
+  }, [followMode, followPlaying, invalidate, progressRef, registry]);
+
   useFrame(({ camera }, delta) => {
     const safeDelta = Math.min(delta, 0.05);
     timeSinceCheck.current += safeDelta;
     if (timeSinceCheck.current >= 0.08) {
       timeSinceCheck.current = 0;
+      if (crossingCacheRef.current.points !== routeWorldPoints) {
+        crossingCacheRef.current = { points: routeWorldPoints, byDoor: new WeakMap() };
+      }
+      const transitActive = Boolean(followMode && followPlaying && progressRef);
+      for (const entry of registry.current.values()) {
+        if (entry.kind !== "door" || !entry.routeTransitMaterials?.size) continue;
+        let nextTransitOpacity = 1;
+        if (transitActive) {
+          let measure = crossingCacheRef.current.byDoor.get(entry);
+          if (!measure) {
+            measure = measureRouteDoorCrossings(
+              routeWorldPoints,
+              { x: entry.start[0], y: entry.start[2] },
+              { x: entry.end[0], y: entry.end[2] },
+            );
+            crossingCacheRef.current.byDoor.set(entry, measure);
+          }
+          nextTransitOpacity = routeDoorTransitOpacity(progressRef!.current, true, measure);
+        }
+        if ((entry.routeTransitTargetOpacity ?? 1) !== nextTransitOpacity) {
+          entry.routeTransitTargetOpacity = nextTransitOpacity;
+          animating.current.add(entry);
+        }
+      }
+      const routeProgress = progressRef?.current;
       const point = followMode && progressRef
-        ? sampleRoute(progressRef.current, samplePoint.current)
+        ? sampleRoute(routeProgress ?? 0, samplePoint.current)
         : focusPoint;
+      const lookAheadPoint = followMode && routeProgress !== undefined && route.length > 1
+        ? sampleRoute(Math.min(1, routeProgress + 0.045), lookAheadPointRef.current)
+        : null;
       if (point) {
         const focus = pointToWorld(point, viewport, 0.16);
+        const focusWorld = { x: focus[0], y: focus[1], z: focus[2] };
+        const lookAhead = lookAheadPoint ? pointToWorld(lookAheadPoint, viewport, 0.16) : null;
+        const lookAheadWorld = lookAhead ? { x: lookAhead[0], y: lookAhead[1], z: lookAhead[2] } : null;
+        const occludedWallIds = new Set<string>();
+        const ownOcclusion = new Map<WallOcclusionEntry, boolean>();
         for (const entry of registry.current.values()) {
-          const occludesFocus = indoorWallOccludesFocus(
+          const occludesFocus = shouldApplyDoorFocusOcclusion(entry.kind, Boolean(followMode)) && indoorWallOccludesRouteFocus(
             camera.position,
-            { x: focus[0], y: focus[1], z: focus[2] },
+            focusWorld,
+            lookAheadWorld,
             { startX: entry.start[0], startZ: entry.start[2], endX: entry.end[0], endZ: entry.end[2], thickness: entry.thickness, baseY: FLOOR_SURFACE_Y + entry.baseHeight, height: entry.height },
           );
+          ownOcclusion.set(entry, occludesFocus);
+          if (entry.kind === "wall" && occludesFocus) entry.wallSourceIds?.forEach((id) => occludedWallIds.add(id));
+        }
+        for (const entry of registry.current.values()) {
+          const occludesFocus = ownOcclusion.get(entry) === true
+            || Boolean(entry.attachedWallId && occludedWallIds.has(entry.attachedWallId));
           // Preserve the room boundary while revealing the selected route point.
           // Very low opacity made several unrelated walls appear to vanish at once.
           const nextOpacity = occludesFocus ? focusOpacity : 1;
           if (entry.targetOpacity !== nextOpacity) {
             entry.targetOpacity = nextOpacity;
             animating.current.add(entry);
-            if (occludesFocus && !entry.material.transparent) {
-              entry.material.transparent = true;
-              entry.material.depthWrite = false;
-              entry.material.needsUpdate = true;
-            }
           }
         }
       } else {
@@ -526,14 +641,42 @@ function IndoorWallOcclusionController({ registry, viewport, route, progressRef,
         animating.current.delete(entry);
         continue;
       }
-      entry.material.opacity += (entry.targetOpacity - entry.material.opacity) * fade;
-      if (Math.abs(entry.material.opacity - entry.targetOpacity) < 0.008) {
-        entry.material.opacity = entry.targetOpacity;
-        if (entry.targetOpacity === 1 && entry.material.transparent) {
-          entry.material.transparent = false;
-          entry.material.depthWrite = true;
-          entry.material.needsUpdate = true;
+      let settled = true;
+      for (const state of entry.materials) {
+        const occlusionOpacity = indoorOcclusionTargetOpacity(
+          state.baseOpacity,
+          entry.targetOpacity !== 1,
+          entry.targetOpacity,
+          state.obstructedOpacity,
+        );
+        const transitOpacity = entry.routeTransitMaterials?.has(state.material)
+          ? state.baseOpacity * (entry.routeTransitTargetOpacity ?? 1)
+          : state.baseOpacity;
+        const targetOpacity = Math.min(occlusionOpacity, transitOpacity);
+        if (targetOpacity < state.baseOpacity - 0.001
+          && (!state.material.transparent || state.material.depthWrite)) {
+          state.material.transparent = true;
+          state.material.depthWrite = false;
+          state.material.needsUpdate = true;
         }
+        state.material.opacity = reducedMotion
+          ? targetOpacity
+          : state.material.opacity + (targetOpacity - state.material.opacity) * fade;
+        if (Math.abs(state.material.opacity - targetOpacity) < 0.008) {
+          state.material.opacity = targetOpacity;
+          if (targetOpacity >= state.baseOpacity - 0.008) {
+            state.material.opacity = state.baseOpacity;
+            if (state.material.transparent !== state.baseTransparent || state.material.depthWrite !== state.baseDepthWrite) {
+              state.material.transparent = state.baseTransparent;
+              state.material.depthWrite = state.baseDepthWrite;
+              state.material.needsUpdate = true;
+            }
+          }
+        } else {
+          settled = false;
+        }
+      }
+      if (settled || reducedMotion) {
         animating.current.delete(entry);
       }
     }
@@ -996,23 +1139,27 @@ function Beam({ start, end, thickness, color, metalness = 0 }: { start: [number,
   </mesh>;
 }
 
-function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79, treadThickness = 0.07, alignLandings = false }: {
-  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number; treadThickness?: number; alignLandings?: boolean;
+function StairFlight({ x, width, fromZ, toZ, fromY, toY, steps, color = "#b7c1c7", railColor = "#63727b", railPostSegments = 4, railHeight = 0.79, treadThickness = 0.07, alignLandings = false, treadSurfaceHeights }: {
+  x: number; width: number; fromZ: number; toZ: number; fromY: number; toY: number; steps: number; color?: string; railColor?: string; railPostSegments?: number; railHeight?: number; treadThickness?: number; alignLandings?: boolean; treadSurfaceHeights?: readonly number[];
 }) {
   const count = Math.max(3, steps);
+  const endpointAlignedHeights = treadSurfaceHeights?.length === count ? treadSurfaceHeights : null;
   const direction = Math.sign(toZ - fromZ) || 1;
   const treadDepth = Math.abs(toZ - fromZ) / count;
   const edgeXs = [x - width / 2, x + width / 2];
   return <group>
     {Array.from({ length: count }, (_, index) => {
       const ratio = alignLandings ? (index + 0.5) / count : (index + 1) / count;
-      const previousY = fromY + (toY - fromY) * (index / count);
-      const treadY = fromY + (toY - fromY) * ((index + 1) / count);
+      const previousY = endpointAlignedHeights
+        ? index === 0 ? fromY : endpointAlignedHeights[index - 1] ?? fromY
+        : fromY + (toY - fromY) * (index / count);
+      const treadY = endpointAlignedHeights?.[index]
+        ?? (fromY + (toY - fromY) * ((index + 1) / count));
       const treadZ = fromZ + (toZ - fromZ) * ratio;
-      const riserY = (previousY + treadY) / 2;
+      const riserY = (previousY + treadY) / 2 - (alignLandings ? 0 : treadThickness / 2);
       const riserZ = treadZ - direction * treadDepth * (alignLandings ? 0.5 : 0.47);
       return <Fragment key={index}>
-        <mesh position={[x, treadY - treadThickness / 2, treadZ]} castShadow receiveShadow><boxGeometry args={[width, treadThickness, treadDepth + 0.025]} /><meshStandardMaterial color={color} roughness={0.76} metalness={0.08} /></mesh>
+        <mesh position={[x, treadY - treadThickness / 2, treadZ]} castShadow receiveShadow><boxGeometry args={[width, treadThickness, treadDepth + (alignLandings ? 0 : 0.025)]} /><meshStandardMaterial color={color} roughness={0.76} metalness={0.08} /></mesh>
         <mesh position={[x, riserY - treadThickness / 2, riserZ]}><boxGeometry args={[width - 0.015, Math.max(0.025, Math.abs(treadY - previousY)), 0.035]} /><meshStandardMaterial color="#9faab0" roughness={0.8} /></mesh>
       </Fragment>;
     })}
@@ -1047,14 +1194,16 @@ function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = fal
     const attachedGeometry = parentZone
       ? exteriorZoneAccessFeatureGeometry(parentZone, stair as FloorEntranceSteps, floor.canvasW ?? 600, floor.canvasH ?? 450)
       : null;
-    const featureSide = attachedGeometry && "side" in attachedGeometry ? attachedGeometry.side : parentZone?.side;
-    const outwardDirection = featureSide === "top" ? { x: 0, y: -1 }
-      : featureSide === "bottom" ? { x: 0, y: 1 }
-        : featureSide === "left" ? { x: -1, y: 0 }
-          : featureSide === "right" ? { x: 1, y: 0 }
-            : undefined;
-    const stairCenter = { x: stair.x + stair.width / 2, y: stair.y + stair.height / 2 };
-    const candidateRamps = (floor.entranceRamps ?? []).filter((ramp) => ramp.visible !== false && (
+    const platformTopY = parentZone
+      ? studentExteriorZone3dHeights(parentZone.type, FLOOR_SURFACE_Y).topY
+      : undefined;
+    const authoredPlacement = resolveStudentEntranceStairPlacement({
+      authored: stair as FloorEntranceSteps,
+      attachment: attachedGeometry,
+      floorSurfaceY: FLOOR_SURFACE_Y,
+      platformTopY,
+    });
+    const candidateRamps = authoredPlacement.outwardDirection ? [] : (floor.entranceRamps ?? []).filter((ramp) => ramp.visible !== false && (
       Boolean(stair.linkedEntranceId && ramp.linkedEntranceId === stair.linkedEntranceId)
       || Boolean(stair.parentZoneId && ramp.parentZoneId === stair.parentZoneId)
     ));
@@ -1062,27 +1211,31 @@ function StairModel({ stair, viewport, floor, labelRegistry, entranceModel = fal
       const linkedA = stair.linkedEntranceId && a.linkedEntranceId === stair.linkedEntranceId ? 0 : 1;
       const linkedB = stair.linkedEntranceId && b.linkedEntranceId === stair.linkedEntranceId ? 0 : 1;
       if (linkedA !== linkedB) return linkedA - linkedB;
-      const directionA = studentEntranceRampGroundDirection(stairCenter, a);
-      const directionB = studentEntranceRampGroundDirection(stairCenter, b);
+      const directionA = studentEntranceRampGroundDirection(authoredPlacement.center, a);
+      const directionB = studentEntranceRampGroundDirection(authoredPlacement.center, b);
       return Math.hypot(directionA.x, directionA.y) - Math.hypot(directionB.x, directionB.y);
     })[0];
-    const connectionDirection = matchingRamp ? studentEntranceRampGroundDirection(stairCenter, matchingRamp) : undefined;
-    // For attached features, the floor-plan attachment determines which way
-    // is physically outside. A saved rotation is retained only when it points
-    // along that authored ramp/egress vector; this fixes side-mounted runs
-    // whose legacy 0-degree angle points sideways along the facade.
-    const yaw = parentZone || matchingRamp
-      ? resolveStudentEntranceStairYaw({ authoredRotation: stair.rotation, connectionDirection, outwardDirection })
-      : -(stair.rotation ?? 0) * Math.PI / 180;
-    // The low end is always outside and the high end meets the veranda. The
-    // route cue's forward/reverse value does not invert the physical stair.
-    const fromZ = depth / 2;
-    const toZ = -depth / 2;
-    const rise = 0.42;
-    return <group position={position} rotation={[0, yaw, 0]}>
-      <Landing width={width * 1.08} depth={0.34} z={fromZ + 0.13} y={0.02} color="#d9ddd9" />
-      <StairFlight x={0} width={width * 0.88} fromZ={fromZ} toZ={toZ} fromY={0} toY={rise} steps={stepCount} color="#d1d4d1" railColor={steel} railPostSegments={2} railHeight={0.44} alignLandings />
-      <Landing width={width * 1.08} depth={0.38} z={toZ - 0.12} y={rise} color="#d9ddd9" />
+    const connectionDirection = matchingRamp ? studentEntranceRampGroundDirection(authoredPlacement.center, matchingRamp) : undefined;
+    const placement = connectionDirection
+      ? resolveStudentEntranceStairPlacement({
+        authored: stair as FloorEntranceSteps,
+        attachment: attachedGeometry,
+        floorSurfaceY: FLOOR_SURFACE_Y,
+        platformTopY,
+        connectionDirection,
+      })
+      : authoredPlacement;
+    // Local +Z is downhill/outward; local -Z ends at the authored parent
+    // platform. Attached feature bounds, not a stale saved x/y, own placement.
+    const position = pointToWorld(placement.center, viewport, FLOOR_SURFACE_Y);
+    const width = Math.max(0.92, placement.width * FLOOR_SCALE);
+    const depth = Math.max(1.15, placement.depth * FLOOR_SCALE);
+    const stepCount = Math.max(5, Math.min(10, Math.round(depth / 0.22)));
+    const rise = placement.rise;
+    const flight = studentEntranceStairFlightLayout(depth, rise, stepCount);
+    return <group position={position} rotation={[0, placement.yaw, 0]}>
+      <Landing width={width * 1.08} depth={flight.lowerLandingDepth} z={flight.lowerLandingCenterZ} y={0.005} color="#d9ddd9" />
+      <StairFlight x={0} width={width * 0.88} fromZ={flight.fromZ} toZ={flight.toZ} fromY={0} toY={rise} steps={flight.stepCount} color="#d1d4d1" railColor={steel} railPostSegments={2} railHeight={0.44} treadThickness={flight.treadThickness} alignLandings treadSurfaceHeights={flight.treadSurfaceHeights} />
     </group>;
   }
 
@@ -1244,21 +1397,36 @@ function ElevatorModel({ elevator, viewport }: { elevator: FloorPlan["elevators"
 }
 const MemoElevatorModel = memo(ElevatorModel);
 
-function RampModel({ item, viewport }: { item: RampVisualItem; viewport: FloorViewport }) {
+function RampModel({ item, floor, viewport }: { item: RampVisualItem; floor: FloorPlan; viewport: FloorViewport }) {
   if (item.visible === false) return null;
-  const position = pointToWorld({ x: item.x + item.width / 2, y: item.y + item.height / 2 }, viewport, FLOOR_SURFACE_Y);
-  const width = Math.max(0.32, item.width * FLOOR_SCALE);
-  const depth = Math.max(0.45, item.height * FLOOR_SCALE);
+  const parentZoneId = "parentZoneId" in item ? item.parentZoneId : undefined;
+  const parentZone = parentZoneId ? floor.exteriorZones?.find((zone) => zone.id === parentZoneId) : undefined;
+  const attachedGeometry = parentZone && isExteriorAccessParent(parentZone)
+    ? exteriorZoneAccessFeatureGeometry(parentZone, item as FloorEntranceRamp, floor.canvasW ?? 600, floor.canvasH ?? 450)
+    : null;
+  const attachedPlacement = attachedGeometry && parentZone
+    ? resolveStudentEntranceRampPlacement({
+      authored: item as FloorEntranceRamp,
+      attachment: attachedGeometry,
+      floorSurfaceY: FLOOR_SURFACE_Y,
+      platformTopY: studentExteriorZone3dHeights(parentZone.type, FLOOR_SURFACE_Y).topY,
+    })
+    : null;
+  const center = attachedPlacement?.center ?? { x: item.x + item.width / 2, y: item.y + item.height / 2 };
+  const position = pointToWorld(center, viewport, FLOOR_SURFACE_Y);
+  const width = Math.max(0.32, (attachedPlacement?.width ?? item.width) * FLOOR_SCALE);
+  const depth = Math.max(0.45, (attachedPlacement?.depth ?? item.height) * FLOOR_SCALE);
   const slope = "slope" in item ? item.slope : "medium";
-  const rotation = -(item.rotation ?? 0) * Math.PI / 180;
-  const rise = Math.min(0.72, depth * (slope === "gentle" ? 0.075 : slope === "steep" ? 0.19 : 0.12));
-  const direction = item.direction === "down" || item.direction === "reverse" ? -1 : 1;
+  const rotation = attachedPlacement?.yaw ?? -(item.rotation ?? 0) * Math.PI / 180;
+  const rise = attachedPlacement?.rise ?? Math.min(0.72, depth * (slope === "gentle" ? 0.075 : slope === "steep" ? 0.19 : 0.12));
+  const direction = attachedPlacement?.direction ?? (item.direction === "down" || item.direction === "reverse" ? -1 : 1);
+  const surfaceClearance = attachedPlacement ? STUDENT_CAMPUS_3D_GROUND_EPSILON : 0.035;
   const lowZ = direction < 0 ? depth / 2 : -depth / 2;
   const highZ = -lowZ;
   const handrails = "handrails" in item && item.handrails;
   const rampGeometry = useMemo(() => {
     const half = width / 2; const thick = 0.065;
-    const lowY = 0.035; const highY = rise + 0.035;
+    const lowY = surfaceClearance; const highY = rise + surfaceClearance;
     const vertices = [
       -half, lowY, lowZ, half, lowY, lowZ, half, highY, highZ, -half, highY, highZ,
       -half, lowY - thick, lowZ, half, lowY - thick, lowZ, half, highY - thick, highZ, -half, highY - thick, highZ,
@@ -1268,14 +1436,14 @@ function RampModel({ item, viewport }: { item: RampVisualItem; viewport: FloorVi
     geometry.setIndex([0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 1, 5, 6, 1, 6, 2, 2, 6, 7, 2, 7, 3, 3, 7, 4, 3, 4, 0]);
     geometry.computeVertexNormals();
     return geometry;
-  }, [highZ, lowZ, rise, width]);
+  }, [highZ, lowZ, rise, surfaceClearance, width]);
   useEffect(() => () => rampGeometry.dispose(), [rampGeometry]);
   return <group position={position} rotation={[0, rotation, 0]}>
     <mesh geometry={rampGeometry} castShadow receiveShadow><meshStandardMaterial color="#c4ccca" roughness={0.84} side={THREE.DoubleSide} /></mesh>
     {handrails && [-1, 1].map((side) => <Fragment key={side}>
-      <Beam start={[side * width * 0.53, (lowZ < 0 ? 0.035 : rise + 0.035) + 0.76, lowZ]} end={[side * width * 0.53, (highZ < 0 ? 0.035 : rise + 0.035) + 0.76, highZ]} thickness={0.035} color="#87939a" metalness={0.35} />
+      <Beam start={[side * width * 0.53, surfaceClearance + 0.76, lowZ]} end={[side * width * 0.53, surfaceClearance + rise + 0.76, highZ]} thickness={0.035} color="#87939a" metalness={0.35} />
       {Array.from({ length: 4 }, (_, index) => {
-        const t = index / 3; const z = lowZ + (highZ - lowZ) * t; const baseY = 0.035 + (direction > 0 ? t : 1 - t) * rise;
+        const t = index / 3; const z = lowZ + (highZ - lowZ) * t; const baseY = surfaceClearance + t * rise;
         return <Beam key={index} start={[side * width * 0.53, baseY, z]} end={[side * width * 0.53, baseY + 0.76, z]} thickness={0.025} color="#87939a" metalness={0.3} />;
       })}
     </Fragment>)}
@@ -1283,36 +1451,120 @@ function RampModel({ item, viewport }: { item: RampVisualItem; viewport: FloorVi
 }
 const MemoRampModel = memo(RampModel);
 
-function DoorModel({ door, floor, viewport }: { door: FloorPlan["doors"][number]; floor: FloorPlan; viewport: FloorViewport }) {
-  if (door.visible === false || door.openingType === "open_passage") return null;
+function WindowModel({ window, floor, viewport, registry }: {
+  window: FloorPlan["windows"][number]; floor: FloorPlan; viewport: FloorViewport; registry: WallOcclusionRegistry;
+}) {
+  const materialRefs = useRef(new Map<string, THREE.Material>());
+  const invalidate = useThree((state) => state.invalidate);
+  const bindMaterial = useCallback((key: string) => (material: THREE.Material | null) => {
+    if (material) materialRefs.current.set(key, material);
+    else materialRefs.current.delete(key);
+  }, []);
+  const wall = floor.walls.find((candidate) => candidate.id === window.wallId);
+  const angle = wall ? Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) : 0;
+  const yaw = -angle;
+  const position = pointToWorld({ x: window.x, y: window.y }, viewport, FLOOR_SURFACE_Y + 1.46);
+  const width = Math.max(0.25, window.width * FLOOR_SCALE);
+  const glassHeight = 1.12;
+  const entryId = `window-${window.id}`;
+  useEffect(() => {
+    const axisX = Math.cos(yaw);
+    const axisZ = -Math.sin(yaw);
+    const glassMaterial = materialRefs.current.get("glass");
+    const opacityOverrides = glassMaterial ? new Map([[glassMaterial, 0.34]]) : new Map<THREE.Material, number>();
+    const entry: WallOcclusionEntry = {
+      kind: "window",
+      materials: captureOcclusionMaterials(materialRefs.current.values(), opacityOverrides),
+      start: [position[0] - axisX * width / 2, position[1], position[2] - axisZ * width / 2],
+      end: [position[0] + axisX * width / 2, position[1], position[2] + axisZ * width / 2],
+      thickness: 0.06,
+      baseHeight: 1.46 - 0.61,
+      height: 1.22,
+      targetOpacity: 1,
+      ...(window.wallId ? { attachedWallId: window.wallId } : {}),
+      registered: true,
+    };
+    registry.current.set(entryId, entry);
+    invalidate();
+    return () => {
+      entry.registered = false;
+      restoreOcclusionMaterials(entry);
+      if (registry.current.get(entryId) === entry) registry.current.delete(entryId);
+      invalidate();
+    };
+  }, [entryId, invalidate, position, registry, width, window, yaw]);
+  return <group position={position} rotation={[0, yaw, 0]}>
+    <mesh><boxGeometry args={[width - 0.06, glassHeight, 0.04]} /><meshPhysicalMaterial ref={bindMaterial("glass")} color={window.color || "#9bcbd7"} roughness={0.2} metalness={0.05} transparent opacity={0.48} /></mesh>
+    {[-1, 1].map((side) => <mesh key={`side-${side}`} position={[side * (width / 2 - 0.025), 0, 0.012]}><boxGeometry args={[0.045, glassHeight + 0.08, 0.06]} /><meshStandardMaterial ref={bindMaterial(`side-${side}`)} color="#9ba8ad" metalness={0.25} roughness={0.48} /></mesh>)}
+    {[-1, 1].map((side) => <mesh key={`rail-${side}`} position={[0, side * (glassHeight / 2 + 0.025), 0.012]}><boxGeometry args={[width, 0.05, 0.06]} /><meshStandardMaterial ref={bindMaterial(`rail-${side}`)} color="#9ba8ad" metalness={0.25} roughness={0.48} /></mesh>)}
+  </group>;
+}
+const MemoWindowModel = memo(WindowModel);
+
+function DoorModel({ door, floor, viewport, registry }: { door: FloorPlan["doors"][number]; floor: FloorPlan; viewport: FloorViewport; registry: WallOcclusionRegistry }) {
+  const shouldRender = door.visible !== false && door.openingType !== "open_passage";
+  const materialRefs = useRef(new Map<string, THREE.Material>());
+  const invalidate = useThree((state) => state.invalidate);
+  const bindMaterial = useCallback((key: string) => (material: THREE.Material | null) => {
+    if (material) materialRefs.current.set(key, material);
+    else materialRefs.current.delete(key);
+  }, []);
   const wall = floor.walls.find((candidate) => candidate.id === door.wallId);
   const wallAngle = wall ? Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) : 0;
+  const yaw = -wallAngle;
   const width = Math.max(0.82, indoorDoorVisualWidth(door) * FLOOR_SCALE);
   const position = pointToWorld({ x: door.x, y: door.y }, viewport, FLOOR_SURFACE_Y);
   const double = door.doorType === "double" || door.direction === "double";
-  const leafCount = double ? 2 : 1;
-  const leafWidth = width / leafCount;
   const emergency = Boolean(door.isEmergencyExit);
-  const leafColor = emergency ? "#4c5960" : "#a77950";
-  const frameColor = emergency ? "#36434a" : "#c4a37b";
-  return <group position={position} rotation={[0, -wallAngle, 0]}>
-    {[-1, 1].map((side) => <mesh key={`jamb-${side}`} position={[side * width * 0.5, 1.04, 0]} castShadow>
-      <boxGeometry args={[0.045, 2.08, 0.08]} /><meshStandardMaterial color={frameColor} roughness={0.72} metalness={emergency ? 0.28 : 0} />
+  const leafColor = emergency ? "#59666b" : "#b69a76";
+  const frameColor = emergency ? "#36434a" : "#d0c2aa";
+  const swingSide = door.swingSide ?? (wall?.managedKind === "perimeter" ? "b" : "a");
+  const leafLayouts = indoorDoorLeafLayouts(door, width, swingSide, emergency ? 68 : 0);
+  const entryId = `door-${door.id}`;
+  useEffect(() => {
+    if (!shouldRender) return;
+    const axisX = Math.cos(yaw);
+    const axisZ = -Math.sin(yaw);
+    const entry: WallOcclusionEntry = {
+      kind: "door",
+      materials: captureOcclusionMaterials(materialRefs.current.values()),
+      start: [position[0] - axisX * width / 2, position[1], position[2] - axisZ * width / 2],
+      end: [position[0] + axisX * width / 2, position[1], position[2] + axisZ * width / 2],
+      thickness: 0.08,
+      baseHeight: 0,
+      height: 2.12,
+      targetOpacity: 1,
+      routeTransitMaterials: new Set([...materialRefs.current.entries()]
+        .filter(([key]) => key.startsWith("leaf-"))
+        .map(([, material]) => material)),
+      routeTransitTargetOpacity: 1,
+      ...(door.wallId ? { attachedWallId: door.wallId } : {}),
+      registered: true,
+    };
+    registry.current.set(entryId, entry);
+    invalidate();
+    return () => {
+      entry.registered = false;
+      restoreOcclusionMaterials(entry);
+      if (registry.current.get(entryId) === entry) registry.current.delete(entryId);
+      invalidate();
+    };
+  }, [door, entryId, invalidate, position, registry, shouldRender, width, yaw]);
+  if (!shouldRender) return null;
+  return <group position={position} rotation={[0, yaw, 0]}>
+    {[-1, 1].map((side) => <mesh key={`jamb-${side}`} position={[side * width * 0.5, 1.04, 0]}>
+      <boxGeometry args={[0.045, 2.08, 0.08]} /><meshStandardMaterial ref={bindMaterial(`jamb-${side}`)} color={frameColor} roughness={0.72} metalness={emergency ? 0.28 : 0} />
     </mesh>)}
-    <mesh position={[0, 2.08, 0]} castShadow><boxGeometry args={[width + 0.045, 0.07, 0.08]} /><meshStandardMaterial color={frameColor} roughness={0.72} metalness={emergency ? 0.28 : 0} /></mesh>
-    {Array.from({ length: leafCount }, (_, index) => {
-      const side = double ? (index === 0 ? -1 : 1) : 0;
-      const x = side * leafWidth * 0.5;
-      const singleHingeSide = door.hinge === "right" || door.direction === "right" ? 1 : -1;
-      const hingeX = double ? side * width * 0.5 : singleHingeSide * width * 0.5;
-      const handleX = double ? x - side * leafWidth * 0.39 : -singleHingeSide * width * 0.35;
+    <mesh position={[0, 2.08, 0]}><boxGeometry args={[width + 0.045, 0.07, 0.08]} /><meshStandardMaterial ref={bindMaterial("header")} color={frameColor} roughness={0.72} metalness={emergency ? 0.28 : 0} /></mesh>
+    {leafLayouts.map((leaf, index) => {
+      const hingeX = leaf.hingeX;
       return <Fragment key={index}>
-        <mesh position={[x, 1.04, 0.028]} castShadow receiveShadow><boxGeometry args={[leafWidth - 0.012, 2.02, 0.035]} /><meshStandardMaterial color={leafColor} roughness={0.74} /></mesh>
-        {double && <mesh position={[x - side * 0.015, 1.04, 0.05]}><boxGeometry args={[0.012, 1.98, 0.012]} /><meshStandardMaterial color="#d4bd94" metalness={0.18} roughness={0.4} /></mesh>}
-        <mesh position={[handleX, 1.02, 0.055]}><sphereGeometry args={[0.022, 6, 6]} /><meshStandardMaterial color="#d9bd7c" metalness={0.42} roughness={0.35} /></mesh>
-        {emergency && <mesh position={[x, 0.98, 0.073]} castShadow><boxGeometry args={[Math.max(leafWidth - 0.18, 0.32), 0.055, 0.055]} /><meshStandardMaterial color="#d5dde0" metalness={0.72} roughness={0.3} /></mesh>}
-        <mesh position={[hingeX + (double ? -side : singleHingeSide) * 0.025, 0.43, 0.052]}><boxGeometry args={[0.045, 0.085, 0.045]} /><meshStandardMaterial color="#ddc89b" metalness={0.28} roughness={0.45} /></mesh>
-        <mesh position={[hingeX + (double ? -side : singleHingeSide) * 0.025, 1.63, 0.052]}><boxGeometry args={[0.045, 0.085, 0.045]} /><meshStandardMaterial color="#ddc89b" metalness={0.28} roughness={0.45} /></mesh>
+        <group position={[hingeX ?? 0, 0, 0]} rotation={[0, leaf.rotationY, 0]}>
+          <mesh position={[leaf.leafOffsetX, 1.04, 0.028]}><boxGeometry args={[Math.max(0.12, leaf.width - 0.012), 2.02, 0.035]} /><meshStandardMaterial ref={bindMaterial(`leaf-${index}`)} color={leafColor} roughness={0.74} /></mesh>
+          <mesh position={[leaf.handleOffsetX, 1.02, 0.055]}><sphereGeometry args={[0.022, 6, 6]} /><meshStandardMaterial ref={bindMaterial(`handle-${index}`)} color="#d9bd7c" metalness={0.42} roughness={0.35} /></mesh>
+          {emergency && <mesh position={[leaf.leafOffsetX, 0.98, 0.073]}><boxGeometry args={[Math.max(leaf.width - 0.18, 0.32), 0.055, 0.055]} /><meshStandardMaterial ref={bindMaterial(`push-bar-${index}`)} color="#d5dde0" metalness={0.72} roughness={0.3} /></mesh>}
+        </group>
+        {hingeX !== null && [0.43, 1.63].map((height) => <mesh key={height} position={[hingeX, height, 0.052]}><boxGeometry args={[0.045, 0.085, 0.045]} /><meshStandardMaterial ref={bindMaterial(`hinge-${index}-${height}`)} color="#ddc89b" metalness={0.28} roughness={0.45} /></mesh>)}
       </Fragment>;
     })}
     {emergency && <Html position={[0, 2.34, 0.06]} center distanceFactor={12} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}><span className="rounded-sm border border-white/80 bg-red-700 px-1.5 py-0.5 text-[8px] font-black tracking-[0.12em] text-white shadow">EXIT</span></Html>}
@@ -1389,8 +1641,15 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
   const lastRouteInspectionFocusKeyRef = useRef("");
   const dampingBeforeRecenterRef = useRef<boolean | null>(null);
   const lastCameraPoseRestoreNonceRef = useRef(0);
+  const floorCameraContextKey = `${floor.buildingId}:${floor.id}`;
+  const lastFloorCameraContextKeyRef = useRef(floorCameraContextKey);
   const followCameraStateRef = useRef({ freeLook: Boolean(props.freeLook) });
-  const followCameraContextRef = useRef<{ floorId: string; route: readonly Pt[]; viewportKey: string; width: number; height: number } | null>(null);
+  const followCameraContextRef = useRef<{ floorId: string; routeKey: string | readonly Pt[]; viewportKey: string; width: number; height: number } | null>(null);
+  const followOrientationElapsedRef = useRef(0);
+  const followOrientationTargetRef = useRef<THREE.Vector3 | null>(null);
+  const followOrientationStartRef = useRef<Pt>({ x: 0, y: 0 });
+  const followOrientationEndRef = useRef<Pt>({ x: 0, y: 0 });
+  const followOrientationCurrentRef = useRef(new THREE.Vector3());
   const previousFollowPlayingRef = useRef(Boolean(props.followPlaying));
   const { camera, invalidate, size } = useThree();
   const exploreTransitionChoices = useMemo(
@@ -1509,6 +1768,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     y: floorFocusBounds.y + floorFocusBounds.height / 2,
   }, viewport), [floorFocusBounds, viewport]);
   const route = props.routePoints ?? EMPTY_FLOOR_ROUTE;
+  const followCameraRouteKey = props.followCameraRouteKey ?? route;
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
   const routeForFrame = useMemo(() => props.emergencyRouteOverview && props.emergencyRouteSegments?.length
     ? props.emergencyRouteSegments.flatMap((segment) => segment.points)
@@ -1764,6 +2024,12 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
   }, [camera, halfDepth, invalidate]);
 
   useEffect(() => {
+    if (lastFloorCameraContextKeyRef.current !== floorCameraContextKey) {
+      lastFloorCameraContextKeyRef.current = floorCameraContextKey;
+      // A new Floor context takes ownership immediately. An unfinished Room
+      // focus/recenter from the previous Building must not write into it.
+      cancelRecenterTween();
+    }
     if (props.arrivalFocusKey) return;
     // A cross-floor room search should animate directly from the current
     // camera pose to the selected room. Do not first fit the entire floor.
@@ -1781,18 +2047,29 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     const attachedFollow = Boolean(props.followMode && !props.freeLook && followPoint);
     const viewportKey = `${viewport.width}:${viewport.height}:${viewport.offsetX}:${viewport.offsetY}`;
     const previousFollowContext = followCameraContextRef.current;
+    const sameFollowRoute = Boolean(previousFollowContext && previousFollowContext.routeKey === followCameraRouteKey);
+    const sameFollowViewportSize = Boolean(previousFollowContext
+      && previousFollowContext.width === size.width
+      && previousFollowContext.height === size.height);
+    const continuingRouteFollowAcrossContext = shouldPreserveStudent3dFollowCameraOffset({
+      attachedFollow: Boolean(attachedFollow),
+      sameRoute: sameFollowRoute,
+      sameViewportSize: sameFollowViewportSize,
+    });
+    const currentFollowOffset = continuingRouteFollowAcrossContext && controls.current
+      ? camera.position.clone().sub(controls.current.target as THREE.Vector3)
+      : null;
     if (attachedFollow && previousFollowContext
       && previousFollowContext.floorId === floor.id
-      && previousFollowContext.route === route
+      && sameFollowRoute
       && previousFollowContext.viewportKey === viewportKey
-      && previousFollowContext.width === size.width
-      && previousFollowContext.height === size.height) {
+      && sameFollowViewportSize) {
       // The route cursor advances independently through its progress ref.
       // Reframing here on every React snapshot would erase the student's orbit.
       return;
     }
     followCameraContextRef.current = attachedFollow
-      ? { floorId: floor.id, route, viewportKey, width: size.width, height: size.height }
+      ? { floorId: floor.id, routeKey: followCameraRouteKey, viewportKey, width: size.width, height: size.height }
       : null;
     let nextTarget = followPoint
       ? new THREE.Vector3(...pointToWorld(followPoint, viewport, 0.15 + rampHeightAt(followPoint, ramps)))
@@ -1806,7 +2083,6 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     const allowResponsiveIndoorFit = Boolean(safeFocus)
       && !props.followMode
       && !props.humanVisible
-      && !props.discoverCamera
       && !props.routePreviewFocusKey
       && !props.arrivalFocusKey
       && !props.emergencyRouteOverview
@@ -1818,7 +2094,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       ? floorFocusBounds.height * safeFocus.canvasRect.height / Math.max(1, safeFocus.safeRect.height)
       : floorFocusBounds.height;
     const fitDirection = allowResponsiveIndoorFit
-      ? indoorFloorCameraDirectionForViewport(fitBoundsWidth, fitBoundsHeight, safeAspect)
+      ? indoorFloorCameraDirectionForViewport(fitBoundsWidth, fitBoundsHeight, safeAspect, cameraDirection)
       : cameraDirection;
     const fitPadding = allowResponsiveIndoorFit ? indoorFloorCameraFitPadding(safeAspect) : 1.08;
     const focusDepth = safeFocus && !props.routePreviewFocusKey
@@ -1832,20 +2108,12 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
         fitPadding,
       )
       : halfDepth;
-    // Discover enters on the actual floor instead of a room target. A modest
-    // tighter fit uses the mobile canvas more effectively while the authored
-    // bounds and safety margin still keep the complete floor in view.
-    const portraitDiscoverCamera = size.width / Math.max(1, size.height) < 0.82;
-    // Portrait framing turns the authored long axis upright. Keep a little
-    // more breathing room than the landscape showcase angle so doors, stairs,
-    // and their labels remain inside the narrow screen edges.
-    const discoverFitScale = props.discoverCamera && !props.focusRoomId
-      ? portraitDiscoverCamera ? 0.92 : 0.82
-      : 1;
+    // Discovery still enters on the whole Floor. Keep the calculated fit
+    // distance intact; reducing it after fitting could crop long Floor layouts.
     const cameraOffset = new THREE.Vector3(
-      focusDepth * fitDirection[0] * discoverFitScale,
-      focusDepth * fitDirection[1] * discoverFitScale,
-      focusDepth * fitDirection[2] * discoverFitScale,
+      focusDepth * fitDirection[0],
+      focusDepth * fitDirection[1],
+      focusDepth * fitDirection[2],
     );
     if (!followPoint && controls.current) {
       const { canvasRect, safeRect } = safeFocus ?? indoorSafeFocusRect(controls.current.domElement as HTMLElement);
@@ -1891,16 +2159,34 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
         ? followPoint
         : sampleRoute(Math.min(1, followProgress + 0.06), { x: 0, y: 0 });
       const routeOffset = route.length > 1 && directionStart && directionEnd
-        ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, distance)
+        ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, distance, { elevation: 0.76 })
         : null;
-      camera.position.copy(nextTarget).add(routeOffset
-        ? new THREE.Vector3(routeOffset.x, routeOffset.y, routeOffset.z)
-        : new THREE.Vector3(distance * 0.46, distance * 0.7, distance * 0.54));
-    } else camera.position.copy(nextTarget).add(cameraOffset);
+      const defaultOffset = routeOffset
+        ? [routeOffset.x, routeOffset.y, routeOffset.z] as Student3dCameraOffset
+        : [distance * 0.46, distance * 0.7, distance * 0.54] as Student3dCameraOffset;
+      const liveOffset = currentFollowOffset
+        ? [currentFollowOffset.x, currentFollowOffset.y, currentFollowOffset.z] as Student3dCameraOffset
+        : defaultOffset;
+      const preservedOffset = student3dFollowCameraOffsetForRecovery(
+        null,
+        liveOffset,
+        defaultOffset,
+        controls.current?.minDistance ?? 4,
+        controls.current?.maxDistance ?? Math.max(18, halfDepth * 2.7),
+        Boolean(currentFollowOffset && currentFollowOffset.length() >= 4),
+      );
+      followOrientationTargetRef.current = new THREE.Vector3(...preservedOffset);
+      followOrientationElapsedRef.current = 0;
+      camera.position.copy(nextTarget).add(followOrientationTargetRef.current);
+    } else {
+      followOrientationTargetRef.current = null;
+      followOrientationElapsedRef.current = 0;
+      camera.position.copy(nextTarget).add(cameraOffset);
+    }
     camera.lookAt(nextTarget);
     camera.updateProjectionMatrix();
     invalidate();
-  }, [camera, cameraDirection, cameraTargetBounds, floor.id, floorFocusBounds, frameCenter, halfDepth, invalidate, props.arrivalFocusKey, props.discoverCamera, props.focusRoomId, props.followMode, props.freeLook, props.humanVisible, props.routePreviewFocusKey, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, size.width, viewport]);
+  }, [camera, cameraDirection, cameraTargetBounds, cancelRecenterTween, floor.id, floorCameraContextKey, floorFocusBounds, frameCenter, halfDepth, invalidate, props.arrivalFocusKey, props.discoverCamera, props.focusRoomId, props.followMode, props.freeLook, props.humanVisible, props.routePreviewFocusKey, props.walkProgress, props.walkProgressRef, ramps, sampleRoute, size.width, viewport]);
 
   useEffect(() => {
     // Follow takes camera ownership back when the canonical session is
@@ -2000,6 +2286,37 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       followTargetScratch.current,
       props.reducedMotion ? 1 : 1 - Math.exp(-safeDelta * 4.5),
     );
+    if (route.length > 1) {
+      followOrientationElapsedRef.current += safeDelta;
+      if (followOrientationElapsedRef.current >= 0.12) {
+        followOrientationElapsedRef.current = 0;
+        const progress = Math.max(0, Math.min(1, props.walkProgressRef?.current ?? props.walkProgress ?? 0));
+        const directionStart = sampleRoute(Math.max(0, progress - 0.02), followOrientationStartRef.current);
+        const directionEnd = sampleRoute(Math.min(1, progress + 0.05), followOrientationEndRef.current);
+        const currentDistance = camera.position.distanceTo(controlsTarget);
+        const routeOffset = directionStart && directionEnd
+          ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, currentDistance, { elevation: 0.76 })
+          : null;
+        if (routeOffset) {
+          const nextOffset = followOrientationTargetRef.current ?? new THREE.Vector3();
+          const orientationChanged = student3dFollowCameraOrientationChanged(nextOffset, routeOffset);
+          if (orientationChanged) {
+            nextOffset.set(routeOffset.x, routeOffset.y, routeOffset.z);
+            followOrientationTargetRef.current = nextOffset;
+          }
+        }
+      }
+      const orientationTarget = followOrientationTargetRef.current;
+      if (orientationTarget) {
+        const currentOffset = followOrientationCurrentRef.current.copy(camera.position).sub(controlsTarget);
+        const blend = props.reducedMotion ? 1 : 1 - Math.exp(-safeDelta * 3.2);
+        currentOffset.lerp(orientationTarget, blend);
+        const nextDistance = orientationTarget.length();
+        if (currentOffset.lengthSq() > 1e-5 && nextDistance > 0.1) currentOffset.setLength(nextDistance);
+        else currentOffset.copy(orientationTarget);
+        camera.position.copy(controlsTarget).add(currentOffset);
+      }
+    }
     camera.lookAt(controlsTarget);
   });
 
@@ -2032,7 +2349,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     const currentOffset = camera.position.clone().sub(startTarget);
     const currentContextIsFollow = Boolean(followCameraContextRef.current
       && followCameraContextRef.current.floorId === floor.id
-      && followCameraContextRef.current.route === route);
+      && followCameraContextRef.current.routeKey === followCameraRouteKey);
     const followProgress = Math.max(0, Math.min(1, liveProgress ?? 0));
     const directionStart = followProgress >= 0.94
       ? sampleRoute(Math.max(0, followProgress - 0.06), { x: 0, y: 0 })
@@ -2042,7 +2359,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       : sampleRoute(Math.min(1, followProgress + 0.06), { x: 0, y: 0 });
     const followDistance = Math.max(8, Math.min(14, context.halfDepth * 0.62));
     const defaultFollowOffset = (directionStart && directionEnd && route.length > 1
-      ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, followDistance)
+      ? student3dIndoorFollowCameraOffset(directionStart, directionEnd, followDistance, { elevation: 0.76 })
       : null) ?? { x: followDistance * 0.46, y: followDistance * 0.7, z: followDistance * 0.54 };
     const safeFollowOffset = context.followMode && liveFollowPoint
       ? student3dFollowCameraOffsetForRecovery(
@@ -2298,40 +2615,31 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       {openBelowPolygons.map((polygon, index) => <VoidGuardrail key={`void-guard-${index}`} polygon={polygon} viewport={viewport} />)}
       {floor.exteriorZones?.filter((zone) => zone.visible !== false).map((zone) => {
         const rect = exteriorZoneGeometry(zone, floor.canvasW ?? 600, floor.canvasH ?? 450);
+        const presentation = studentExteriorZone3dPresentation(zone.type);
+        const heights = studentExteriorZone3dHeights(zone.type, FLOOR_SURFACE_Y);
         const x = rect.x + rect.width / 2;
         const y = rect.y + rect.height / 2;
         const sizeX = rect.width;
         const sizeZ = rect.height;
-        const pos = pointToWorld({ x, y }, viewport, FLOOR_SURFACE_Y + 0.03);
+        const pos = pointToWorld({ x, y }, viewport, heights.centerY);
         return <group key={`zone-${zone.id}`} position={pos} rotation={[0, -(zone.rotation ?? 0) * Math.PI / 180, 0]}>
-          <mesh><boxGeometry args={[sizeX * FLOOR_SCALE, 0.08, sizeZ * FLOOR_SCALE]} /><meshStandardMaterial color="#c9d2d1" /></mesh>
-          {zone.type !== "entrance_landing" && [-1, 1].map((side) => <mesh key={side} position={[side * sizeX * FLOOR_SCALE * 0.48, 0.48, 0]}><boxGeometry args={[0.035, 0.08, sizeZ * FLOOR_SCALE]} /><meshStandardMaterial color="#8e999a" metalness={0.35} /></mesh>)}
+          <mesh><boxGeometry args={[sizeX * FLOOR_SCALE, presentation.thickness, sizeZ * FLOOR_SCALE]} /><meshStandardMaterial color={presentation.color} roughness={0.82} /></mesh>
+          {presentation.sideRails && [-1, 1].map((side) => <mesh key={side} position={[side * sizeX * FLOOR_SCALE * 0.48, 0.48, 0]}><boxGeometry args={[0.035, 0.08, sizeZ * FLOOR_SCALE]} /><meshStandardMaterial color="#8e999a" metalness={0.35} /></mesh>)}
         </group>;
       })}
-      <IndoorWallOcclusionController registry={wallRegistry} viewport={viewport} route={route} progressRef={props.walkProgressRef} focusPoint={cutawayFocus} followMode={props.followMode && props.humanVisible} focusOpacity={props.arrivalFocusKey ? 0.34 : 0.5} />
+      <IndoorWallOcclusionController registry={wallRegistry} viewport={viewport} route={route} progressRef={props.walkProgressRef} focusPoint={cutawayFocus} followMode={props.followMode && props.humanVisible} followPlaying={props.followPlaying} reducedMotion={props.reducedMotion} focusOpacity={props.arrivalFocusKey ? 0.34 : 0.5} />
       {wallSegments.map((segment, index) => {
         const id = `wall-${segment.sourceIds.join("-")}-${index}`;
         return <MemoWall key={id} id={id} segment={segment} viewport={viewport} registry={wallRegistry} darkMode={props.darkMode} />;
       })}
-      {floor.windows?.filter((window) => window.visible !== false).map((window) => {
-        const wall = floor.walls.find((candidate) => candidate.id === window.wallId);
-        const angle = wall ? Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) : 0;
-        const position = pointToWorld({ x: window.x, y: window.y }, viewport, FLOOR_SURFACE_Y + 1.46);
-        const width = Math.max(0.25, window.width * FLOOR_SCALE);
-        const glassHeight = 1.12;
-        return <group key={`window-${window.id}`} position={position} rotation={[0, -angle, 0]}>
-          <mesh><boxGeometry args={[width - 0.06, glassHeight, 0.04]} /><meshPhysicalMaterial color={window.color || "#9bcbd7"} roughness={0.2} metalness={0.05} transparent opacity={0.48} /></mesh>
-          {[-1, 1].map((side) => <mesh key={side} position={[side * (width / 2 - 0.025), 0, 0.012]}><boxGeometry args={[0.045, glassHeight + 0.08, 0.06]} /><meshStandardMaterial color="#9ba8ad" metalness={0.25} roughness={0.48} /></mesh>)}
-          {[-1, 1].map((side) => <mesh key={side} position={[0, side * (glassHeight / 2 + 0.025), 0.012]}><boxGeometry args={[width, 0.05, 0.06]} /><meshStandardMaterial color="#9ba8ad" metalness={0.25} roughness={0.48} /></mesh>)}
-        </group>;
-      })}
-      {floor.doors?.map((door) => <MemoDoorModel key={`door-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
+      {floor.windows?.filter((window) => window.visible !== false).map((window) => <MemoWindowModel key={`window-${window.id}`} window={window} floor={floor} viewport={viewport} registry={wallRegistry} />)}
+      {floor.doors?.map((door) => <MemoDoorModel key={`door-${door.id}`} door={door} floor={floor} viewport={viewport} registry={wallRegistry} />)}
       {rendererDoorOpenings.filter((door) => door.id.startsWith("visual-emergency-access-") || (door.isEmergencyExit && door.openingType === "open_passage")).map((door) => <EmergencyDoorwayFrame key={`emergency-frame-${door.id}`} door={door} floor={floor} viewport={viewport} />)}
       {exitCueDoors.map((door) => <IndoorExitCue key={`exit-cue-${door.id}`} door={door} viewport={viewport} routeRelevant={Boolean(props.routeRelevantExitDoorIds?.has(door.id))} onActivate={props.onExitDoorClick} />)}
       {floor.stairs?.map((stair) => <MemoStairModel key={`stairs-${stair.id}`} stair={stair} viewport={viewport} floor={floor} hasLowerServedFloor={hasLowerServedFloor} labelRegistry={roomLabelRegistry} />)}
       {floor.elevators?.map((elevator) => <MemoElevatorModel key={`elevator-${elevator.id}`} elevator={elevator} viewport={viewport} />)}
-      {floor.ramps?.map((ramp) => <MemoRampModel key={`ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
-      {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} viewport={viewport} />)}
+      {floor.ramps?.map((ramp) => <MemoRampModel key={`ramp-${ramp.id}`} item={ramp} floor={floor} viewport={viewport} />)}
+      {floor.entranceRamps?.map((ramp) => <MemoRampModel key={`entrance-ramp-${ramp.id}`} item={ramp} floor={floor} viewport={viewport} />)}
       {floor.entranceSteps?.filter((step) => step.visible !== false).map((step) => <MemoStairModel key={`entrance-step-${step.id}`} stair={step} viewport={viewport} floor={floor} labelRegistry={roomLabelRegistry} entranceModel />)}
       {floor.furniture?.filter((item) => shouldRenderIndoorLandmarkFurniture(item)
         && !(props.showDiningFurniture && shouldRenderStudentCanteenDiningFurniture(item)))
@@ -2366,6 +2674,23 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       {props.showDestinationMarker && route.at(-1) && <group position={pointToWorld(route.at(-1)!, viewport, 0.1 + rampHeightAt(route.at(-1)!, ramps))}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.11, 0.15, 24]} /><meshBasicMaterial color="#c83c51" transparent opacity={0.72} side={THREE.DoubleSide} /></mesh>
         <Html position={[0, 0.01, 0]} center occlude zIndexRange={[85, 0]}><span data-testid="student-indoor-3d-route-destination-pin" className="student-destination-pin block -translate-y-full drop-shadow-sm"><MapPin className="h-6 w-6 fill-rose-600 stroke-white stroke-[2.25]" /></span></Html>
+      </group>}
+      {props.youAreHerePoint && !props.showStartMarker && <group name="student-indoor-3d-current-location" position={pointToWorld(props.youAreHerePoint, viewport, FLOOR_SURFACE_Y + 0.02)}>
+        <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
+          <ringGeometry args={[0.16, 0.22, 24]} />
+          <meshBasicMaterial color="#2563eb" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh raycast={() => {}} position={[0, 0.28, 0]} renderOrder={25}>
+          <cylinderGeometry args={[0.025, 0.045, 0.48, 10]} />
+          <meshStandardMaterial color="#2563eb" roughness={0.45} />
+        </mesh>
+        <mesh raycast={() => {}} position={[0, 0.56, 0]} renderOrder={26}>
+          <sphereGeometry args={[0.085, 14, 10]} />
+          <meshStandardMaterial color="#60a5fa" emissive="#1d4ed8" emissiveIntensity={0.35} />
+        </mesh>
+        <Html position={[0, 0.82, 0]} center occlude distanceFactor={13} zIndexRange={[96, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+          <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-[9px] font-extrabold tracking-wide text-white shadow-lg">{props.youAreHereLabel ?? "You are here"}</span>
+        </Html>
       </group>}
       {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, 0.1 + humanRampHeight) : [0, FLOOR_SURFACE_Y, 0]}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={20}><circleGeometry args={[0.23, 24]} /><meshBasicMaterial color="#0f172a" depthWrite={false} /></mesh>
@@ -2474,7 +2799,7 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
     if (event.pointerType === "touch" && pointersRef.current.size >= 2 && touchGestureStartRef.current) {
       const pair = [...pointersRef.current.values()].slice(0, 2);
       const motion = student3dTouchGestureMotion(touchGestureStartRef.current, [pair[0], pair[1]]);
-      gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointersRef.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance });
+      gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointersRef.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance, rotationMovement: motion.rotationRadians });
     } else {
       const movement = Math.hypot(point.x - start.x, point.y - start.y);
       gesture = student3dCameraGesture({ pointerType: start.pointerType, button: start.button, pointerCount: 1, movement });
