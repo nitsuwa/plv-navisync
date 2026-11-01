@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type ComponentPropsWithoutRef, type RefObject } from "react";
-import { Bell, CalendarDays, CheckCheck, Flag, RefreshCw } from "lucide-react";
+import { Bell, CalendarDays, CheckCheck, ChevronDown, ChevronUp, Flag, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { createPortal } from "react-dom";
@@ -66,12 +66,15 @@ interface StudentNotification {
 const READ_IDS_PREFIX = "plv-student-notification-read:v1:";
 const NOTIFICATION_READ_EVENT = "plv-student-notification-read";
 const MAX_NOTIFICATIONS = 30;
+// The Home section previews the newest few so the rest of Home stays reachable.
+const SECTION_PREVIEW_COUNT = 3;
 const REPORT_STATUS_PRESENTATION: Record<ReportStatus, { label: string; className: string }> = {
   pending: { label: "Pending", className: "bg-amber-500/10 text-amber-700 dark:text-amber-300" },
   under_review: { label: "Under Review", className: "bg-blue-500/10 text-blue-700 dark:text-blue-300" },
   in_progress: { label: "In Progress", className: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" },
   resolved: { label: "Resolved", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
-  rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive dark:text-red-300" },
+  // Matches the student Reports page, which shows rejected reports as Dismissed.
+  rejected: { label: "Dismissed", className: "bg-destructive/10 text-destructive dark:text-red-300" },
 };
 const REPORT_STATUS_FILTER_OPTIONS: Array<{ value: ReportStatus | "all"; label: string }> = [
   { value: "all", label: "All notifications" },
@@ -138,7 +141,10 @@ function reportUpdateNotifications(reports: IssueReport[], readIds: Set<string>)
           date: update.date,
           href: `/student/reports?reportId=${encodeURIComponent(report.id)}`,
           unread: !readIds.has(id),
-          reportStatus: isSubmission ? "pending" : normalizeReportStatus(report.status),
+          // Badges reflect where the report stands now, not the status at the
+          // time of each update, so an old "Report submitted" row can't keep
+          // saying Pending after the report was resolved or dismissed.
+          reportStatus: normalizeReportStatus(report.status),
         };
       });
   });
@@ -238,6 +244,8 @@ function StudentNotificationFeed({
 }: StudentNotificationFeedProps) {
   const isSection = presentation === "section";
   const filterLabelId = useId();
+  const sectionListId = useId();
+  const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState(false);
   const notificationPanelRef = useRef<HTMLElement | null>(null);
   const [reports, setReports] = useState<IssueReport[]>([]);
@@ -373,7 +381,23 @@ function StudentNotificationFeed({
     return notifications.filter((item) => item.kind === "report" && item.reportStatus === reportStatusFilter);
   }, [isSection, notifications, reportStatusFilter]);
   const unreadCount = notifications.filter((item) => item.unread).length;
-  const displayedNotifications = isSection ? filteredNotifications : notifications.slice(0, MAX_NOTIFICATIONS);
+  const displayedNotifications = isSection
+    ? (expanded ? filteredNotifications : filteredNotifications.slice(0, SECTION_PREVIEW_COUNT))
+    : notifications.slice(0, MAX_NOTIFICATIONS);
+  const hiddenSectionCount = isSection ? Math.max(0, filteredNotifications.length - SECTION_PREVIEW_COUNT) : 0;
+
+  const collapseSection = () => {
+    setExpanded(false);
+    // Scroll anchoring keeps the toggle in place as the list shrinks, which
+    // can push the header off-screen. Check after the collapse has rendered.
+    window.requestAnimationFrame(() => {
+      const panel = notificationPanelRef.current;
+      if (!panel || panel.getBoundingClientRect().top >= 0) return;
+      // Clear the sticky navbar rather than tucking the header under it.
+      const top = panel.getBoundingClientRect().top + window.scrollY - 72;
+      window.scrollTo({ top, behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    });
+  };
   const displayedReportsLoading = reportsSnapshot === undefined ? loading : reportsSnapshotLoading;
   const displayedReportError = reportsSnapshot === undefined ? reportError : reportsSnapshotError;
   const includeNonReportNotifications = !isSection || reportStatusFilter === "all";
@@ -491,16 +515,16 @@ function StudentNotificationFeed({
             </header>
 
             {isSection && (
-              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card px-3 py-2">
-                <span id={filterLabelId} className="shrink-0 text-xs font-semibold text-foreground">
+              <div className="mb-2.5 flex items-center justify-between gap-3">
+                <span id={filterLabelId} className="shrink-0 text-xs font-semibold text-muted-foreground">
                   Report status
                 </span>
-                <Select value={reportStatusFilter} onValueChange={(value) => setReportStatusFilter(value as ReportStatus | "all")}>
+                <Select value={reportStatusFilter} onValueChange={(value) => { setReportStatusFilter(value as ReportStatus | "all"); setExpanded(false); }}>
                   <NotificationSelectTrigger
                     size="default"
                     aria-label="Filter notifications by report status"
                     aria-labelledby={filterLabelId}
-                    className="!h-11 min-w-0 w-[min(15rem,70%)] rounded-xl border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15 [&_svg]:opacity-100"
+                    className="!h-9 min-w-0 w-[min(13rem,62%)] rounded-xl border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15 [&_svg]:opacity-100"
                   >
                     <SelectValue />
                   </NotificationSelectTrigger>
@@ -520,9 +544,9 @@ function StudentNotificationFeed({
             )}>
               {displayedNotificationsLoading && displayedNotifications.length === 0 ? (
                 <p role="status" className="px-4 py-8 text-center text-xs text-muted-foreground">Loading updates…</p>
-              ) : displayedNotifications.length ? (
-                <ul aria-label={isSection ? "All notifications" : "Recent notifications"} className={cn(
-                  isSection ? "space-y-2.5" : "divide-y divide-border/70",
+              ) : displayedNotifications.length ? (<>
+                <ul id={isSection ? sectionListId : undefined} aria-label={isSection ? "All notifications" : "Recent notifications"} className={cn(
+                  isSection ? "space-y-2" : "divide-y divide-border/70",
                 )}>
                   {displayedNotifications.map((item) => {
                     const Icon = item.kind === "report" ? Flag : CalendarDays;
@@ -539,14 +563,14 @@ function StudentNotificationFeed({
                           className={cn(
                             "flex items-start gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                             isSection
-                              ? "rounded-2xl border border-border/70 bg-card px-3.5 py-3 sm:px-4 sm:py-3.5 hover:border-primary/35 hover:bg-primary/[0.03] hover:shadow-sm"
+                              ? "rounded-2xl border border-border/70 bg-card px-3 py-2.5 sm:px-3.5 hover:border-primary/35 hover:bg-primary/[0.03] hover:shadow-sm"
                               : "px-4 py-3 hover:bg-muted/60",
                             item.unread && (isSection ? "border-primary/55 bg-primary/[0.02] dark:border-blue-300/55" : "bg-primary/[0.02]"),
                           )}
                         >
                           <span className={cn(
                             "mt-0.5 flex shrink-0 items-center justify-center rounded-xl",
-                            isSection ? "h-10 w-10" : "h-8 w-8",
+                            isSection ? "h-9 w-9" : "h-8 w-8",
                             item.kind === "report" ? "bg-primary/10 text-primary" : "bg-accent/15 text-foreground",
                           )} data-notification-icon>
                             <Icon className={cn("h-4 w-4", isSection && "h-[18px] w-[18px]")} aria-hidden="true" />
@@ -569,15 +593,40 @@ function StudentNotificationFeed({
                                 </>}
                               </span>
                             </span>
-                            <span className="mt-1 block text-xs leading-relaxed text-foreground/75">{item.message}</span>
-                            <time className={cn("mt-1.5 block font-medium text-foreground/75", isSection ? "text-[11px]" : "text-[10px]")} dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
+                            {isSection ? (
+                              // One line for message and time keeps each Home row short.
+                              <span className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs text-foreground/75">
+                                <span className="min-w-0 truncate">{item.message}</span>
+                                {/* Campus-event messages already name their start time. */}
+                                {item.kind === "campus-event" ? (
+                                  <time className="sr-only" dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
+                                ) : <>
+                                  <span aria-hidden="true">·</span>
+                                  <time className="shrink-0 text-[11px] font-medium" dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
+                                </>}
+                              </span>
+                            ) : <>
+                              <span className="mt-1 block text-xs leading-relaxed text-foreground/75">{item.message}</span>
+                              <time className="mt-1.5 block text-[10px] font-medium text-foreground/75" dateTime={item.date || undefined}>{formatNotificationDate(item.date)}</time>
+                            </>}
                           </span>
                         </Link>
                       </li>
                     );
                   })}
                 </ul>
-              ) : displayedNotificationsError ? (
+                {hiddenSectionCount > 0 && (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={sectionListId}
+                    onClick={() => (expanded ? collapseSection() : setExpanded(true))}
+                    className="mt-2 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/80 text-xs font-bold text-primary transition-colors hover:border-primary/35 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-blue-300"
+                  >
+                    {expanded ? <>Show fewer <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /></> : <>Show all {filteredNotifications.length} notifications <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></>}
+                  </button>
+                )}
+              </>) : displayedNotificationsError ? (
                 <div className={cn("px-4 py-7 text-center", isSection && "rounded-2xl border border-border/60 bg-card/50")}>
                   <p className="text-xs font-semibold text-foreground">Updates are temporarily unavailable.</p>
                   <button type="button" onClick={() => { void refreshReports(); void refreshEventUpdates(); void refreshPublishedEvents(); }} className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline">

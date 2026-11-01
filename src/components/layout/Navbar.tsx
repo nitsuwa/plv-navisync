@@ -131,7 +131,7 @@ export function Navbar() {
 
   return (
     <nav
-      className={cn("sticky top-0 z-40 w-full border-b", !isHome && "border-border bg-card/95 backdrop-blur-lg shadow-sm")}
+      className={cn("sticky top-0 z-40 w-full border-b pt-[env(safe-area-inset-top,0px)]", !isHome && "border-border bg-card/95 backdrop-blur-lg shadow-sm")}
       style={isHome ? {
         background: theme === "dark"
           ? `rgba(7,18,52,${0.68 + fillProgress * 0.28})`

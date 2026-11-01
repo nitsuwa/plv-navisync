@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import {
   ArrowLeft, Flag, MapPin, Clock, CheckCircle2, XCircle, AlertCircle,
-  Search, Eye, Image, StickyNote, History, Archive, RefreshCw, Download,
+  Search, Eye, Image, Archive, RefreshCw, Download,
 } from "lucide-react";
 import { SearchBar } from "../components/ui/SearchBar";
 import { cn } from "../lib/utils";
@@ -18,7 +18,8 @@ import {
   type IssueReport,
   type ReportStatus,
 } from "../services/reportService";
-import type { Tables } from "../types/database.generated";
+import { allowedNextStatuses, isReopen, transitionRequirement, validateTransition } from "../lib/reportWorkflow";
+import { presentReport } from "../lib/reportPresentation";
 import { downloadCsv } from "../lib/exporters";
 import { formatManilaDateStamp, toAdminReportExportRows } from "../lib/adminCsvExports";
 
@@ -32,7 +33,7 @@ const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; bg: st
   under_review: { label: "Under Review",  color: "text-blue-600 dark:text-blue-400",      bg: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/30",      icon: AlertCircle  },
   in_progress:  { label: "In Progress",   color: "text-violet-600 dark:text-violet-400",  bg: "bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800/30", icon: CheckCircle2 },
   resolved:     { label: "Resolved",      color: "text-green-600 dark:text-green-400",    bg: "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/30",    icon: CheckCircle2 },
-  rejected:     { label: "Rejected",      color: "text-destructive",                      bg: "bg-destructive/8 border-destructive/20",                                         icon: XCircle      },
+  rejected:     { label: "Dismissed",     color: "text-destructive",                      bg: "bg-destructive/8 border-destructive/20",                                         icon: XCircle      },
 };
 
 const CATEGORIES = ["All Categories", ...REPORT_CATEGORIES];
@@ -59,17 +60,13 @@ function formatDateTime(iso: string): string {
   }
 }
 
-function friendlyAction(action: string): string {
-  const map: Record<string, string> = {
-    "report.pending": "Report submitted",
-    "report.under_review": "Marked under review",
-    "report.in_progress": "Marked in progress",
-    "report.resolved": "Report resolved",
-    "report.rejected": "Report rejected",
-    "report.notes": "Internal notes updated",
-    "report.archive": "Report archived",
-  };
-  return map[action] ?? action.replaceAll("_", " ").replace(/^report\./, "Report ");
+/** Button label for a workflow step, phrased as the action being taken. */
+function transitionLabel(from: ReportStatus, to: ReportStatus): string {
+  if (isReopen(from, to)) return "Reopen";
+  if (to === "under_review") return from === "pending" ? "Start review" : "Back to review";
+  if (to === "in_progress") return "Mark in progress";
+  if (to === "resolved") return "Resolve";
+  return "Dismiss";
 }
 
 // ── Detail modal ───────────────────────────────────────────────────────────
@@ -90,40 +87,32 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   const Icon = cfg.icon;
   const toast = useToast();
 
-  const [history, setHistory] = useState<Tables<"report_history">[]>([]);
-  const [internalNotes, setInternalNotes] = useState(report.internalNotes ?? "");
-  const [resolutionNotes, setResolutionNotes] = useState(report.resolutionNotes ?? "");
-  const [savingNotes, setSavingNotes] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
-  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  // The step being confirmed, and the note the reporter will see with it.
+  const [pendingStatus, setPendingStatus] = useState<ReportStatus | null>(null);
+  const [transitionNote, setTransitionNote] = useState("");
+  const currentStatus = (report.status as ReportStatus) ?? "pending";
+  const shown = presentReport(report);
+  const issueLabel = shown.issue ?? formatCategoryLabel(report.category);
+  const nextStatuses = allowedNextStatuses(currentStatus);
 
   useEffect(() => {
-    reportService.getReportHistory(report.id).then(setHistory).catch(() => setHistory([]));
-  }, [report.id, report.updatedAt]);
-
-  const saveInternalNotes = async () => {
-    setSavingNotes(true);
-    try {
-      await reportService.updateReportInternalNotes(report.id, internalNotes);
-      toast.success("Notes saved", "Internal notes have been updated.");
-      onChanged();
-    } catch (err) {
-      toast.error("Save failed", err instanceof Error ? err.message : "Could not save notes.");
-    } finally {
-      setSavingNotes(false);
-    }
-  };
+    setPendingStatus(null);
+    setTransitionNote("");
+  }, [report.status]);
 
   const changeStatus = async (status: ReportStatus) => {
-    if (status === "resolved" && !resolutionNotes.trim()) {
-      toast.error("Resolution notes required", "Add a short resolution note before marking the report as resolved.");
+    const problem = validateTransition(currentStatus, status, transitionNote);
+    if (problem) {
+      toast.error("Can't update the report yet", problem);
       return;
     }
     setChangingStatus(true);
     try {
-      await reportService.updateReportStatus(report.id, status, resolutionNotes.trim() || undefined);
+      await reportService.updateReportStatus(report.id, status, transitionNote.trim() || undefined, currentStatus);
       toast.success(STATUS_CONFIG[status].label, "Report status has been updated.");
-      setShowStatusMenu(false);
+      setPendingStatus(null);
+      setTransitionNote("");
       onChanged();
     } catch (err) {
       toast.error("Update failed", err instanceof Error ? err.message : "Could not update the report status.");
@@ -162,7 +151,8 @@ function ReportDetailModal({ report, onClose, onChanged }: {
               <Flag className="h-4 w-4 text-destructive" />
             </div>
             <div>
-              <h3 className="font-extrabold text-foreground text-sm">{report.title}</h3>
+              <h3 className="font-extrabold text-foreground text-sm">{shown.place}</h3>
+              {shown.context && <p className="text-xs text-muted-foreground">{shown.context}</p>}
             </div>
           </div>
           <button onClick={onClose} aria-label="Close modal"
@@ -177,20 +167,18 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             <Icon className="h-4 w-4" /> {cfg.label}
           </div>
 
-          {/* Location */}
-          <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-muted/60 border border-border">
-            <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs font-bold text-foreground">{report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus"}</p>
-              {(report.floorLabel || report.roomName) && <p className="text-xs text-muted-foreground">{[report.floorLabel, report.roomName].filter(Boolean).join(" · ")}</p>}
-              <p className="text-xs text-muted-foreground">{formatCategoryLabel(report.category)} · {formatCategoryLabel(report.priority)} priority</p>
-            </div>
+          {/* Issue (the place is already the title) */}
+          <div className="px-3 py-2.5 rounded-xl bg-muted/50">
+            <p className="text-[10px] text-muted-foreground mb-0.5">Issue</p>
+            <p className="text-xs font-bold text-foreground">{issueLabel}</p>
           </div>
 
-          {/* Description */}
+          {/* Description: only what the student wrote */}
           <div>
             <p className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">Description</p>
-            <p className="text-sm text-foreground leading-relaxed">{report.description}</p>
+            {shown.details
+              ? <p className="text-sm text-foreground leading-relaxed">{shown.details}</p>
+              : <p className="text-sm italic text-muted-foreground">No additional details provided.</p>}
           </div>
 
           {/* Photo */}
@@ -218,58 +206,90 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             </div>
           </div>
 
-          {/* Resolution notes */}
-          <div>
-            <label htmlFor="report-resolution-notes" className="block text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">
-              Resolution notes <span className="normal-case font-medium">(required to resolve)</span>
-            </label>
-            <textarea
-              id="report-resolution-notes" rows={2} value={resolutionNotes}
-              onChange={e => setResolutionNotes(e.target.value)}
-              placeholder="e.g. Maintenance team fixed the broken light on Jan 20…"
-              className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-
-          {/* Internal notes */}
-          <div>
-            <label htmlFor="report-internal-notes" className="flex items-center gap-1.5 text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">
-              <StickyNote className="h-3 w-3" /> Internal notes <span className="normal-case font-medium">(visible to admins only)</span>
-            </label>
-            <textarea
-              id="report-internal-notes" rows={2} value={internalNotes}
-              onChange={e => setInternalNotes(e.target.value)}
-              placeholder="Private notes for the admin team…"
-              className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <div className="flex justify-end mt-1.5">
-              <Button variant="outline" size="sm" onClick={saveInternalNotes} disabled={savingNotes}>
-                {savingNotes ? "Saving…" : "Save notes"}
-              </Button>
+          {/* Closing reason the reporter sees */}
+          {(currentStatus === "resolved" || currentStatus === "rejected") && report.resolutionNotes && (
+            <div className="rounded-xl border border-border bg-muted/40 px-3 py-2.5">
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground mb-1">
+                {currentStatus === "resolved" ? "Resolution shared with the reporter" : "Dismissal reason shared with the reporter"}
+              </p>
+              <p className="text-sm text-foreground leading-relaxed">{report.resolutionNotes}</p>
             </div>
-          </div>
+          )}
 
-          {/* History */}
-          <div>
-            <p className="flex items-center gap-1.5 text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">
-              <History className="h-3 w-3" /> History
-            </p>
-            {history.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No activity recorded yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {history.map(h => (
-                  <div key={h.id} className="flex items-start gap-2 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
-                    <div>
-                      <p className="font-semibold text-foreground">{friendlyAction(h.action)}</p>
-                      <p className="text-muted-foreground text-[11px]">{formatDateTime(h.created_at)}</p>
-                    </div>
+          {/* Workflow: only the steps allowed from the current status */}
+          <section aria-labelledby="report-next-step">
+            <p id="report-next-step" className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-widest mb-2">Next step</p>
+            {pendingStatus ? (() => {
+              const requirement = transitionRequirement(currentStatus, pendingStatus);
+              const length = transitionNote.trim().length;
+              const problem = validateTransition(currentStatus, pendingStatus, transitionNote);
+              const label = transitionLabel(currentStatus, pendingStatus);
+              return (
+                <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-3">
+                  <label htmlFor="report-transition-note" className="block text-xs font-bold text-foreground mb-1.5">
+                    {requirement.noteLabel}
+                  </label>
+                  <textarea
+                    id="report-transition-note" rows={3} value={transitionNote} autoFocus
+                    onChange={e => setTransitionNote(e.target.value)}
+                    placeholder={requirement.placeholder}
+                    aria-describedby="report-transition-hint"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-input-background text-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <p id="report-transition-hint" className="mt-1 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>Shown to the reporter in their report history.</span>
+                    {requirement.noteRequired && (
+                      <span className={length >= requirement.minLength ? "text-green-600 dark:text-green-400" : undefined}>
+                        {length}/{requirement.minLength} characters minimum
+                      </span>
+                    )}
+                  </p>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => { setPendingStatus(null); setTransitionNote(""); }} disabled={changingStatus}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant={pendingStatus === "rejected" ? "danger" : "primary"}
+                      size="sm"
+                      onClick={() => void changeStatus(pendingStatus)}
+                      disabled={Boolean(problem)}
+                      isLoading={changingStatus}
+                    >
+                      {label}
+                    </Button>
                   </div>
-                ))}
+                </div>
+              );
+            })() : nextStatuses.length ? (
+              <div className="flex flex-wrap gap-2">
+                {nextStatuses.map(status => {
+                  const c = STATUS_CONFIG[status];
+                  const I = c.icon;
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => { setPendingStatus(status); setTransitionNote(""); }}
+                      disabled={changingStatus}
+                      className={cn(
+                        "inline-flex min-h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        status === "rejected"
+                          ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                          : "border-border text-foreground hover:bg-muted",
+                      )}
+                    >
+                      <I className={cn("h-3.5 w-3.5", c.color)} aria-hidden="true" />
+                      {transitionLabel(currentStatus, status)}
+                    </button>
+                  );
+                })}
               </div>
+            ) : null}
+            {currentStatus === "pending" && !pendingStatus && (
+              <p className="mt-2 text-[11px] text-muted-foreground">Review the report before it can be resolved.</p>
             )}
-          </div>
+          </section>
+
         </div>
 
         {/* Actions */}
@@ -286,27 +306,6 @@ function ReportDetailModal({ report, onClose, onChanged }: {
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50">
             <Archive className="h-3.5 w-3.5" /> Archive
           </button>
-          <div className="relative ml-auto">
-            <button onClick={() => setShowStatusMenu(v => !v)} disabled={changingStatus}
-              className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 active:scale-[0.97] transition-all disabled:opacity-50">
-              {changingStatus ? "Updating…" : "Change Status"}
-            </button>
-            {showStatusMenu && (
-              <div className="absolute bottom-full right-0 mb-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-10 min-w-[190px] animate-scale-in">
-                {STATUS_ORDER.filter(s => s !== report.status).map(s => {
-                  const c = STATUS_CONFIG[s];
-                  const I = c.icon;
-                  return (
-                    <button key={s} onClick={() => changeStatus(s)}
-                      className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-muted transition-colors text-left">
-                      <I className={cn("h-3.5 w-3.5 shrink-0", c.color)} />
-                      <span className="text-xs font-semibold text-foreground">{c.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
       </motion.div>
       {mapOpen && createPortal(
@@ -342,6 +341,8 @@ function ReportDetailModal({ report, onClose, onChanged }: {
                 initialCampusId={report.campusId ?? undefined}
                 initialBuildingId={report.buildingId ?? undefined}
                 initialPlaceId={report.campusPlaceId ?? undefined}
+                initialRoomId={report.campusPlaceId ? undefined : report.roomId ?? undefined}
+                initialFloorId={report.floorId ?? undefined}
                 locationPreviewPanel={(
                   <>
                     <div className="shrink-0 border-b border-border px-5 py-5">
@@ -351,41 +352,29 @@ function ReportDetailModal({ report, onClose, onChanged }: {
                           <Icon className="h-3 w-3" /> {cfg.label}
                         </span>
                       </div>
-                      <h2 className="mt-2 line-clamp-3 text-lg font-extrabold leading-snug text-foreground">{report.title}</h2>
+                      <h2 className="mt-2 line-clamp-3 text-lg font-extrabold leading-snug text-foreground">{shown.place}</h2>
+                      {shown.context && <p className="mt-0.5 text-xs text-muted-foreground">{shown.context}</p>}
                     </div>
                     {report.imageUrl && (
                       <div className="shrink-0 border-b border-border/70 p-3">
                         <img
                           src={report.imageUrl}
-                          alt={`Evidence for ${report.title}`}
+                          alt={`Evidence for the report at ${shown.place}`}
                           loading="lazy"
                           className="max-h-48 w-full rounded-xl border border-border object-cover"
                         />
                       </div>
                     )}
                     <div className="space-y-5 px-5 py-5">
-                      <div className="flex items-start gap-2.5">
-                        <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Location</p>
-                          <p className="mt-1 text-sm font-bold text-foreground">
-                            {[report.campusPlaceName ?? report.buildingName ?? report.buildingId ?? "Campus map", report.floorLabel, report.roomName].filter(Boolean).join(" · ")}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-xl bg-muted/50 px-3 py-2.5">
-                          <p className="text-[10px] text-muted-foreground">Issue type</p>
-                          <p className="mt-0.5 text-xs font-bold text-foreground">{formatCategoryLabel(report.category)}</p>
-                        </div>
-                        <div className="rounded-xl bg-muted/50 px-3 py-2.5">
-                          <p className="text-[10px] text-muted-foreground">Priority</p>
-                          <p className="mt-0.5 text-xs font-bold text-foreground">{formatCategoryLabel(report.priority)}</p>
-                        </div>
+                      <div className="rounded-xl bg-muted/50 px-3 py-2.5">
+                        <p className="text-[10px] text-muted-foreground">Issue</p>
+                        <p className="mt-0.5 text-xs font-bold text-foreground">{issueLabel}</p>
                       </div>
                       <div>
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Description</p>
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{report.description}</p>
+                        {shown.details
+                          ? <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{shown.details}</p>
+                          : <p className="mt-2 text-sm italic text-muted-foreground">No additional details provided.</p>}
                       </div>
                       <div className="border-t border-border/70 pt-4">
                         <p className="text-[10px] text-muted-foreground">Submitted</p>
@@ -471,7 +460,7 @@ export function AdminReportsPage() {
     { key: "under_review", label: "Under Review" },
     { key: "in_progress", label: "In Progress" },
     { key: "resolved", label: "Resolved" },
-    { key: "rejected", label: "Rejected" },
+    { key: "rejected", label: "Dismissed" },
   ];
 
   if (loading) return <ReportsSkeleton />;
@@ -526,7 +515,7 @@ export function AdminReportsPage() {
           { label: "Pending", value: counts.pending, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-50 dark:bg-amber-900/15" },
           { label: "In Progress", value: counts.in_progress, color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-50 dark:bg-violet-900/15" },
           { label: "Resolved", value: counts.resolved, color: "text-green-600 dark:text-green-400", bg: "bg-green-50 dark:bg-green-900/15" },
-          { label: "Rejected", value: counts.rejected, color: "text-destructive", bg: "bg-destructive/5" },
+          { label: "Dismissed", value: counts.rejected, color: "text-destructive", bg: "bg-destructive/5" },
         ].map(c => (
           <motion.div
             key={c.label}
@@ -605,6 +594,7 @@ export function AdminReportsPage() {
             {reports.map(report => {
               const cfg = STATUS_CONFIG[report.status as ReportStatus] ?? STATUS_CONFIG.pending;
               const StatusIcon = cfg.icon;
+              const shown = presentReport(report);
               return (
                 <div key={report.id} className="flex items-start gap-4 px-5 py-4 hover:bg-muted/20 transition-colors group">
                   <div className="w-9 h-9 rounded-xl bg-destructive/8 flex items-center justify-center shrink-0 mt-0.5">
@@ -612,19 +602,25 @@ export function AdminReportsPage() {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <span className="text-sm font-bold text-foreground">{report.title}</span>
+                    <span className="block text-sm font-bold text-foreground">{shown.place}</span>
+                    {shown.context && (
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 text-primary shrink-0" aria-hidden="true" />
+                        <span className="truncate">{shown.context}</span>
+                      </div>
+                    )}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold text-foreground">
+                        <Flag className="h-2.5 w-2.5 text-destructive" aria-hidden="true" />
+                        {shown.issue ?? formatCategoryLabel(report.category)}
+                      </span>
                       {report.imageUrl && (
                         <span className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                           <Image className="h-2.5 w-2.5" /> Photo
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                      <MapPin className="h-3 w-3 text-primary shrink-0" />
-                      <span className="truncate">{report.buildingName ?? report.buildingId ?? "Campus"} · {formatCategoryLabel(report.category)}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-1">{report.description}</p>
+                    {shown.details && <p className="mt-1.5 text-xs text-muted-foreground line-clamp-1">{shown.details}</p>}
                   </div>
 
                   <div className="flex flex-col items-end gap-2 shrink-0">

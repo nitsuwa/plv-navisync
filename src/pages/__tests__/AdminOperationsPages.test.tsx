@@ -126,23 +126,59 @@ describe("admin operational pages (C8-A)", () => {
       </MemoryRouter>
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "Student Reports" })).toBeInTheDocument());
-    expect(await screen.findByText("Broken hallway light")).toBeInTheDocument();
+    // Rows lead with the reported place; the student's own words appear once.
+    expect(await screen.findByText("Main Academic Building")).toBeInTheDocument();
+    expect(screen.getByText("Lights out in the hallway")).toBeInTheDocument();
   });
 
-  it("refreshes the open report and lifecycle history after changing status", async () => {
+  it("refreshes the open report after changing status", async () => {
     const list = vi.mocked(reportService.listAllReports);
     const [pending] = await list();
     list.mockClear();
     list.mockResolvedValueOnce([pending]).mockResolvedValueOnce([{ ...pending, status: "under_review", updatedAt: "2026-09-26T01:00:00Z" }]);
     render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole("button", { name: "View" }));
-    await waitFor(() => expect(reportService.getReportHistory).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Change Status" }));
-    fireEvent.click(screen.getByRole("button", { name: "Under Review" }));
-    await waitFor(() => expect(reportService.updateReportStatus).toHaveBeenCalledWith("r1", "under_review", undefined));
-    await waitFor(() => expect(reportService.getReportHistory).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole("button", { name: "Change Status" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Under Review" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+    // Moving into review needs no reason; confirming applies the step.
+    fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+    await waitFor(() => expect(reportService.updateReportStatus).toHaveBeenCalledWith("r1", "under_review", undefined, "pending"));
+    // Once under review, the next steps follow the workflow.
+    expect(await screen.findByRole("button", { name: "Mark in progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+  });
+
+  it("keeps the report details to what an admin acts on", async () => {
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    expect(screen.queryByText(/Internal notes/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("History")).not.toBeInTheDocument();
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(reportService.getReportHistory).not.toHaveBeenCalled();
+  });
+
+  it("won't offer to resolve a report nobody has reviewed", async () => {
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    expect(screen.getByRole("button", { name: "Start review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    expect(screen.getByText("Review the report before it can be resolved.")).toBeInTheDocument();
+  });
+
+  it("requires a real reason, shown to the reporter, before dismissing", async () => {
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    const reason = screen.getByLabelText("Why is this report being dismissed?");
+    const confirm = screen.getByRole("button", { name: "Dismiss" });
+    expect(screen.getByText("Shown to the reporter in their report history.")).toBeInTheDocument();
+    expect(confirm).toBeDisabled();
+    fireEvent.change(reason, { target: { value: "duplicate" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(reason, { target: { value: "Duplicate of the report filed on Aug 6." } });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(reportService.updateReportStatus).toHaveBeenCalledWith("r1", "rejected", "Duplicate of the report filed on Aug 6.", "pending"));
   });
 
   it("renders the events list from eventService", async () => {

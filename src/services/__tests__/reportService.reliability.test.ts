@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSupabase } from "../../lib/supabase";
-import { archiveReport, countPendingReports, getReportHistory, getStudentReports, listAllReports, submitReport, updateReportInternalNotes, updateReportStatus, validateReportImage } from "../reportService";
+import { archiveReport, countPendingReports, getReportHistory, getStudentReports, listAllReports, reopenOwnReport, submitReport, updateReportInternalNotes, updateReportStatus, validateReportImage } from "../reportService";
 
 vi.mock("../../lib/supabase", () => ({ getSupabase: vi.fn() }));
 const row = { id: "r1", campus_id: "c1", building_id: "b1", floor_id: "f1", map_element_id: "room1", reporter_id: "student-a", category: "electrical_issue", priority: "normal", title: "Broken light", description: "Needs repair", status: "pending", internal_notes: "Legacy secret", resolution_notes: null, created_at: "2026-09-26T00:00:00Z", updated_at: "2026-09-26T00:00:00Z" };
@@ -16,8 +16,11 @@ function client(rows: unknown[] = [row], imageRows: unknown[] = [{ report_id: "r
     map_elements: query([{ id: "room1", name: "Copy Shop" }]), report_admin_notes: query([{ report_id: "r1", notes: "Private staff note" }]),
     report_images: query(imageRows), report_history: query([{ id: "h1", report_id: "r1", action: "report.resolved", new_status: "resolved", note: "Fixed", created_at: row.created_at }]), activity_logs: query([]),
   };
+  const missingRpc = { code: "PGRST202", message: "Could not find the function public.transition_report" };
   const mock = {
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: "student-a" } }, error: null })) },
+    // Default: the workflow migration isn't applied, so the legacy update path runs.
+    rpc: vi.fn(async () => ({ data: null as unknown, error: missingRpc as { code?: string; message: string } | null })),
     from: vi.fn((table: string) => queries[table]),
     storage: { from: vi.fn(() => ({ upload: vi.fn(async () => ({ error: null })), createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed/photo" }, error: null })), remove: vi.fn(async () => ({ error: null })) })) },
   };
@@ -125,6 +128,32 @@ describe("report reliability and privacy", () => {
     await expect(updateReportStatus("missing", "under_review")).rejects.toThrow("not found");
     await expect(archiveReport("missing")).rejects.toThrow("not found");
     expect(queries.activity_logs.insert).not.toHaveBeenCalled();
+  });
+  it("routes status changes through transition_report with the reason", async () => {
+    const { mock, queries } = client();
+    mock.rpc.mockResolvedValue({ data: { id: "r1" }, error: null });
+    await updateReportStatus("r1", "resolved", " Replaced the light on Oct 27. ", "in_progress");
+    expect(mock.rpc).toHaveBeenCalledWith("transition_report", { p_report_id: "r1", p_status: "resolved", p_note: "Replaced the light on Oct 27." });
+    expect(queries.reports.update).not.toHaveBeenCalled();
+  });
+  it("refuses skipped steps and thin reasons before calling the server", async () => {
+    const { mock } = client();
+    await expect(updateReportStatus("r1", "resolved", "Replaced the light on Oct 27.", "pending")).rejects.toThrow("Review the report before resolving it.");
+    await expect(updateReportStatus("r1", "rejected", "dup", "pending")).rejects.toThrow("at least 15 characters");
+    expect(mock.rpc).not.toHaveBeenCalled();
+  });
+  it("surfaces the server's refusal instead of falling back", async () => {
+    const { mock, queries } = client();
+    mock.rpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "A report cannot move from pending to resolved" } });
+    await expect(updateReportStatus("r1", "resolved", "Replaced the light on Oct 27.")).rejects.toThrow("cannot move from pending to resolved");
+    expect(queries.reports.update).not.toHaveBeenCalled();
+  });
+  it("lets a reporter reopen with a reason through reopen_own_report", async () => {
+    const { mock } = client();
+    mock.rpc.mockResolvedValue({ data: { id: "r1" }, error: null });
+    await expect(reopenOwnReport("r1", "short")).rejects.toThrow("at least 10 characters");
+    await reopenOwnReport("r1", " The light is still flickering. ");
+    expect(mock.rpc).toHaveBeenCalledWith("reopen_own_report", { p_report_id: "r1", p_reason: "The light is still flickering." });
   });
   it("requires resolution notes and clears resolved timestamp when reopening", async () => {
     const { queries } = client();
