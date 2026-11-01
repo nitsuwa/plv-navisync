@@ -106,7 +106,9 @@ describe("report service (admin workflow)", () => {
       return { update };
     });
 
-    vi.mocked(getSupabase).mockReturnValue({ from, auth } as never);
+    // Before the workflow migration, transition_report doesn't exist yet.
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "PGRST202", message: "Could not find the function public.transition_report" } });
+    vi.mocked(getSupabase).mockReturnValue({ from, auth, rpc } as never);
 
     await updateReportStatus("r1", "resolved", "Fixed the hallway light.");
 

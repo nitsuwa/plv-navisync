@@ -52,7 +52,8 @@ describe("StudentHomePage in-scope content", () => {
 
     expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
     expect(screen.getByText("Find campus buildings, locate rooms, and plan your next route.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open campus map to find a building, room, or route" })).toHaveAttribute("href", "/map");
+    // The map stays one tap away in the bottom navigation; Home no longer repeats it as a card.
+    expect(screen.queryByText("Find your next stop")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Buildings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument();

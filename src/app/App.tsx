@@ -6,6 +6,7 @@ import { CampusDataProvider } from "../contexts/CampusDataContext";
 import { AuthProvider, useAuthBootstrap } from "../contexts/StudentAuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
+import { OfflineIndicator, PwaUpdateNotifier } from "../components/layout/PwaPrompts";
 
 function AppRuntime() {
   const auth = useAuthBootstrap();
@@ -19,6 +20,17 @@ function AppRuntime() {
     setAppStarted(true);
     setExiting(true);
   }, [authReady, appStarted]);
+
+  // An installed app opened offline stops at "needs a connection"; retry as
+  // soon as the device is back online instead of waiting for a tap.
+  const authFailed = auth.status === "error";
+  const { retryBootstrap } = auth;
+  useEffect(() => {
+    if (!authFailed) return;
+    const retry = () => { void retryBootstrap(); };
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [authFailed, retryBootstrap]);
 
   useEffect(() => {
     if (!exiting) return;

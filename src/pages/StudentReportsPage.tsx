@@ -17,6 +17,9 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
 import { normalizeReportStatus, reportService, type IssueReport } from "../services/reportService";
+import { reportMapHref } from "../lib/reportMapLink";
+import { presentReport } from "../lib/reportPresentation";
+import { ReportClosurePanel } from "../components/reports/ReportClosurePanel";
 import { ReportModal } from "../components/map/ReportModal";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -71,7 +74,7 @@ function formatReportUpdateDate(value: string): string {
 
 export function StudentReportsPage() {
   const { loading: authLoading, isStudent, profile } = useStudentAuth();
-  const { activeCampus } = usePublishedCampus();
+  const { activeCampus, campuses } = usePublishedCampus();
   const location = useLocation();
   const navigate = useNavigate();
   const [reports, setReports] = useState<IssueReport[]>([]);
@@ -334,6 +337,8 @@ export function StudentReportsPage() {
                 {filtered.map((r, i) => {
                   const st = REPORT_STATUS[r.status] || REPORT_STATUS.pending;
                   const StatusIcon = st.icon;
+                  const shown = presentReport(r, campuses);
+                  const dismissedReport = r.status === "rejected" || r.status === "dismissed";
                   const dateStr = new Date(r.createdAt).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
@@ -360,27 +365,42 @@ export function StudentReportsPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className="min-w-0 break-words text-sm font-extrabold text-foreground">{r.title}</p>
+                                <h3 className="min-w-0 break-words text-sm font-extrabold text-foreground">{shown.place}</h3>
                                 <span className={cn("flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border shrink-0 whitespace-nowrap", st.bg, st.color)}>
                                   <StatusIcon className="h-2.5 w-2.5" />
                                   {st.label}
                                 </span>
                               </div>
-                              <div className="flex min-w-0 flex-wrap items-start gap-x-1.5 gap-y-1 mt-1 text-xs text-muted-foreground">
-                                <MapPin className="h-3 w-3 text-primary shrink-0" />
-                                <span className="min-w-0 break-words">{[r.campusPlaceName || r.buildingName || "Campus Location", r.floorLabel, r.roomName].filter(Boolean).join(" · ")}</span>
+                              {shown.context && (
+                                <div className="flex min-w-0 items-start gap-1.5 mt-1 text-xs text-muted-foreground">
+                                  <MapPin className="h-3 w-3 mt-0.5 text-primary shrink-0" aria-hidden="true" />
+                                  <span className="min-w-0 break-words">{shown.context}</span>
+                                </div>
+                              )}
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                {shown.issue && (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold text-foreground">
+                                    <Flag className="h-2.5 w-2.5 text-primary" aria-hidden="true" />
+                                    {shown.issue}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-muted-foreground">{dateStr}</span>
                               </div>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
                           </div>
                         </div>
 
                         {/* Description */}
                         <div className="px-5 py-3 border-b border-border/50 bg-muted/20">
-                          <p className="break-words text-xs text-muted-foreground leading-relaxed">{r.description}</p>
+                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Description</p>
+                          {shown.details ? (
+                            <p className="break-words text-xs text-foreground/85 leading-relaxed">{shown.details}</p>
+                          ) : (
+                            <p className="text-xs italic text-muted-foreground">No additional details provided.</p>
+                          )}
                           {r.imageUrl && (
                             <div className="mt-2.5 overflow-hidden rounded-xl border border-border max-w-xs">
-                              <img src={r.imageUrl} alt={`Photo attached to ${r.title}`} className="w-full h-32 object-cover" />
+                              <img src={r.imageUrl} alt={`Photo attached to the report for ${shown.place}`} className="w-full h-32 object-cover" />
                             </div>
                           )}
                         </div>
@@ -419,28 +439,32 @@ export function StudentReportsPage() {
                             Status Progress
                           </p>
                           <div className="flex items-center gap-0">
-                            {STEPS.map((s, idx) => {
+                            {(dismissedReport ? [...STEPS.slice(0, -1), "Dismissed"] : STEPS).map((s, idx) => {
                               const active = idx < st.step;
                               const current = idx === st.step - 1;
                               const last = idx === STEPS.length - 1;
+                              // A dismissed report ends in a red "Dismissed" step, never a green "Resolved".
+                              const tone = dismissedReport && last ? "var(--destructive)" : "var(--primary)";
                               return (
                                 <div key={s} className="flex items-center flex-1 min-w-0">
                                   <div className="flex flex-col items-center shrink-0">
                                     <div
                                       className="w-7 h-7 rounded-full flex items-center justify-center border-2 transition-all"
                                       style={{
-                                        borderColor: active ? "var(--primary)" : "var(--border)",
-                                        background: active ? "var(--primary)" : "var(--card)",
+                                        borderColor: active ? tone : "var(--border)",
+                                        background: active ? tone : "var(--card)",
                                       }}
                                     >
                                       {active
-                                        ? <CheckCircle2 className="h-3.5 w-3.5 text-primary-foreground" />
+                                        ? dismissedReport && last
+                                          ? <X className="h-3.5 w-3.5 text-white" />
+                                          : <CheckCircle2 className="h-3.5 w-3.5 text-primary-foreground" />
                                         : <div className="w-2 h-2 rounded-full bg-border" />
                                       }
                                     </div>
                                     <span
                                       className="text-[10px] font-bold mt-1.5 text-center whitespace-nowrap"
-                                      style={{ color: current ? "var(--primary)" : active ? "var(--foreground)" : "var(--muted-foreground)" }}
+                                      style={{ color: current ? tone : active ? "var(--foreground)" : "var(--muted-foreground)" }}
                                     >
                                       {s}
                                     </span>
@@ -457,9 +481,11 @@ export function StudentReportsPage() {
                           </div>
                         </div>
 
+                        <ReportClosurePanel report={r} onReopened={() => void refreshReports()} />
+
                         {/* Footer */}
                         <div className="px-5 py-3 flex items-center justify-between bg-muted/10">
-                          <Link to={r.buildingId ? `/map?buildingId=${encodeURIComponent(r.buildingId)}` : "/map"} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group">
+                          <Link to={reportMapHref(r)} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline group">
                             View on map <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                           </Link>
                           {r.status === "resolved" && (
