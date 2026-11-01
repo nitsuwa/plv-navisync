@@ -13,16 +13,17 @@ function AppRuntime() {
   const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
   const authFailed = auth.status === "error";
   const { retryBootstrap } = auth;
-  const [minimumElapsed, setMinimumElapsed] = useState(false);
   const [appStarted, setAppStarted] = useState(false);
+  const [loadingScreenVisible, setLoadingScreenVisible] = useState(true);
   const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setMinimumElapsed(true), 500);
-    return () => window.clearTimeout(timer);
-  }, []);
+    if (!authReady || appStarted) return;
+    setAppStarted(true);
+    setExiting(true);
+  }, [authReady, appStarted]);
 
-  // An installed app opened offline can retry automatically when connectivity returns.
+  // Retry session restoration automatically when an offline app reconnects.
   useEffect(() => {
     if (!authFailed) return;
     const retry = () => { void retryBootstrap(); };
@@ -31,45 +32,35 @@ function AppRuntime() {
   }, [authFailed, retryBootstrap]);
 
   useEffect(() => {
-    if (!authReady || !minimumElapsed || appStarted) {
-      // If bootstrap becomes unavailable during the exit transition, restore
-      // the visible retry state instead of leaving a transparent loading layer.
-      if (!authReady && !appStarted && exiting) setExiting(false);
-      return;
-    }
-
-    if (!exiting) {
-      setExiting(true);
-      return;
-    }
-
-    const timer = window.setTimeout(() => setAppStarted(true), 260);
+    if (!exiting) return;
+    const timer = window.setTimeout(() => setLoadingScreenVisible(false), 260);
     return () => window.clearTimeout(timer);
-  }, [authReady, minimumElapsed, appStarted, exiting]);
-
-  if (!appStarted) {
-    return (
-      <LoadingScreen
-        exiting={exiting}
-        error={authFailed ? auth.error : null}
-        onRetry={() => void retryBootstrap()}
-      />
-    );
-  }
+  }, [exiting]);
 
   return (
-    <CampusDataProvider>
-      <ErrorBoundary>
-        <RouterProvider router={router} />
-      </ErrorBoundary>
-      <Toaster
-        closeButton
-        position="top-right"
-        toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
-      />
-      <PwaUpdateNotifier />
-      <OfflineIndicator />
-    </CampusDataProvider>
+    <>
+      {appStarted && (
+        <CampusDataProvider>
+          <ErrorBoundary>
+            <RouterProvider router={router} />
+          </ErrorBoundary>
+          <Toaster
+            closeButton
+            position="top-right"
+            toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
+          />
+          <PwaUpdateNotifier />
+          <OfflineIndicator />
+        </CampusDataProvider>
+      )}
+      {loadingScreenVisible && (
+        <LoadingScreen
+          exiting={exiting}
+          error={!appStarted && authFailed ? auth.error : null}
+          onRetry={() => void retryBootstrap()}
+        />
+      )}
+    </>
   );
 }
 
