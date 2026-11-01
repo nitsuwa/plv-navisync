@@ -6,7 +6,6 @@ import type {
   CampusPath,
   CampusEntrance,
   ExteriorEmergencyStair,
-  ExteriorEmergencyStairVisualSize,
 } from "./types";
 import { MARKER_STYLES } from "../../data/mapData";
 import { DECOR_ASSET_MAP, groundTypeForDecorType, isDecorAreaType, type DecorAssetDescriptor } from "./constants";
@@ -28,6 +27,8 @@ import { Tooltip } from "../ui/Tooltip";
 import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
 import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
 import { SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, suhayHusaySymbolPath, suhayHusaySymbolPoint, suhayHusayV6SymbolPoint, suhayHusayV7SymbolPoint, suhayHusayV8SymbolPoint, suhayHusayV9SymbolPoint, suhayHusayV10SymbolPoint, suhayHusayV11SymbolPoint, type SuhayPointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
+import { exteriorEmergencyStairVisualDimensions } from "./exteriorEmergencyStairGeometry";
+export { exteriorEmergencyStairVisualDimensions, exteriorEmergencyStairSafeOffsetRange } from "./exteriorEmergencyStairGeometry";
 
 export interface OutdoorBuildingVisualProps {
   building: CampusBuilding;
@@ -149,38 +150,6 @@ export function fitOutdoorBuildingLabelLines(value: string, maxWidth: number, fo
   }
   const normalizedLines = lines.filter(Boolean).slice(0, maxLines);
   return { text: normalizedLines.join(" "), lines: normalizedLines, truncated: shouldTruncate };
-}
-
-/**
- * Convert the authored Exterior Emergency Stair footprint into a presentation
- * footprint.  This is deliberately kept out of the navigation/occurrence
- * synchronisation helpers: visual size must never move graph nodes or change
- * the served-floor contract.  Older campus records have no value and use the
- * medium scale.
- */
-export function exteriorEmergencyStairVisualDimensions(stair: Pick<ExteriorEmergencyStair, "width" | "height" | "visualSize">) {
-  // Medium is the default authored presentation. Keep the size readable at
-  // normal floor zoom while preserving a restrained Small/Large progression.
-  const factor = stair.visualSize === "small" ? 0.96 : stair.visualSize === "large" ? 1.58 : 1.35;
-  return {
-    width: Math.max(24, Math.round((stair.width || 28) * factor)),
-    height: Math.max(36, Math.round((stair.height || 42) * factor)),
-  };
-}
-
-/** Safe normalized attachment span for the complete rendered stair module. */
-export function exteriorEmergencyStairSafeOffsetRange(
-  edge: ExteriorEmergencyStair["attachment"]["edge"],
-  span: number,
-  width: number,
-  height: number,
-  visualSize?: ExteriorEmergencyStairVisualSize,
-) {
-  const visual = exteriorEmergencyStairVisualDimensions({ width, height, visualSize });
-  const along = edge === "top" || edge === "bottom" ? visual.width : visual.height;
-  const halfWithPadding = along / 2 + 6;
-  const inset = Math.min(0.45, halfWithPadding / Math.max(1, span));
-  return { min: inset, max: 1 - inset };
 }
 
 /** Presentation-only authored Building visual. No editor handles or graph UI. */

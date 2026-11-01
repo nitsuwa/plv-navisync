@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { Bookmark, CalendarDays, ChevronDown, Flag, LogIn, LogOut, Loader2, Settings, UserRound } from "lucide-react";
 import { useStudentAuth } from "../../hooks/useStudentAuth";
+import { useMapFeedbackPreferences } from "../../hooks/useMapFeedbackPreferences";
 import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/utils";
 import { StudentAvatar } from "../ui/StudentAvatar";
@@ -32,6 +33,7 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
   const navigate = useNavigate();
   const location = useLocation();
   const { error: showError } = useToast();
+  const mapFeedback = useMapFeedbackPreferences();
   const displayName = isStudent ? username : "Campus visitor";
   const roleLabel = isStudent ? role.replaceAll("_", " ") : "Guest";
   const openRef = useRef(open);
@@ -222,6 +224,18 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
                 </Link>
               )}
             </div>}
+
+            {!loading && (
+              <div className="border-t border-border py-1.5">
+                <p className="px-4 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Map feedback</p>
+                <button type="button" role="menuitemcheckbox" aria-checked={mapFeedback.soundEnabled} onClick={() => mapFeedback.setSoundEnabled(!mapFeedback.soundEnabled)} className={cn(menuItemClass, "justify-between")}>
+                  <span>Sound effects</span><span className="text-[11px] font-bold text-muted-foreground">{mapFeedback.soundEnabled ? "On" : "Off"}</span>
+                </button>
+                <button type="button" role="menuitemcheckbox" aria-checked={mapFeedback.hapticsEnabled} onClick={() => mapFeedback.setHapticsEnabled(!mapFeedback.hapticsEnabled)} className={cn(menuItemClass, "justify-between")}>
+                  <span>Haptic feedback</span><span className="text-[11px] font-bold text-muted-foreground">{mapFeedback.hapticsEnabled ? "On" : "Off"}</span>
+                </button>
+              </div>
+            )}
 
             {isStudent && !loading && (
               <>

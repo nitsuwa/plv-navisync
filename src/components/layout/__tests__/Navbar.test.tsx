@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Navbar } from "../Navbar";
 
 const authState = vi.hoisted(() => ({
@@ -10,8 +10,12 @@ const authState = vi.hoisted(() => ({
   loading: false,
   username: "Test Student",
   role: "student_org" as const,
-  profile: null,
+  profile: null as null | { id: string; avatar_path?: string },
   signOut: vi.fn(),
+}));
+const themeState = vi.hoisted(() => ({
+  theme: "light" as "light" | "dark",
+  toggleTheme: vi.fn(),
 }));
 
 vi.mock("../../../hooks/useStudentAuth", () => ({
@@ -19,7 +23,24 @@ vi.mock("../../../hooks/useStudentAuth", () => ({
 }));
 
 vi.mock("../../../hooks/useTheme", () => ({
-  useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
+  useTheme: () => themeState,
+}));
+
+vi.mock("../../../hooks/useStudentOrgEventUpdates", () => ({
+  useStudentOrgEventUpdates: () => ({
+    events: [],
+    unreadIds: new Set<string>(),
+    unreadCount: 0,
+    error: null,
+    refresh: vi.fn(),
+    markRead: vi.fn(),
+    handoverUpdates: [],
+    markHandoverRead: vi.fn(),
+  }),
+}));
+
+vi.mock("../StudentNotificationBell", () => ({
+  StudentNotificationBell: () => <button type="button" aria-label="Notifications" />,
 }));
 
 vi.mock("../../../hooks/useToast", () => ({
@@ -56,6 +77,18 @@ function RouteProbe() {
 }
 
 describe("Navbar student navigation", () => {
+  beforeEach(() => {
+    authState.isStudent = true;
+    authState.isAdmin = false;
+    authState.isStudentOrg = true;
+    authState.loading = false;
+    authState.username = "Test Student";
+    authState.profile = null;
+    authState.signOut.mockReset();
+    themeState.theme = "light";
+    themeState.toggleTheme.mockReset();
+  });
+
   it("shows Home, Map, and Organization Events to Student Org users", () => {
     authState.isStudent = true;
     authState.isStudentOrg = true;
@@ -66,6 +99,7 @@ describe("Navbar student navigation", () => {
     expect(screen.getByRole("link", { name: /Organization Events/ })).toHaveAttribute("href", "/student/events");
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
   });
 
   it("does not expose Organization Events to regular students", () => {
@@ -78,6 +112,27 @@ describe("Navbar student navigation", () => {
     expect(screen.queryByRole("link", { name: /Organization Events/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /My Day/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Announcements/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["regular students", false],
+    ["Student Organization accounts", true],
+  ])("places the theme toggle before Notifications for %s", (_accountType, isStudentOrg) => {
+    authState.isStudent = true;
+    authState.isStudentOrg = isStudentOrg;
+    authState.profile = { id: "student-profile" };
+    renderNavbar();
+
+    const themeToggle = screen.getByRole("button", { name: "Switch to dark mode" });
+    const notifications = screen.getByRole("button", { name: "Notifications" });
+    const profile = screen.getByRole("button", { name: /Test Student.*user menu/i });
+
+    expect(themeToggle.parentElement).toBe(notifications.parentElement);
+    expect(themeToggle.nextElementSibling).toBe(notifications);
+    expect(notifications.nextElementSibling).toBe(profile.parentElement);
+    fireEvent.click(themeToggle);
+    expect(themeState.toggleTheme).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the account menu focused on account pages and omits Home", () => {
@@ -87,6 +142,7 @@ describe("Navbar student navigation", () => {
     renderNavbar();
     fireEvent.click(screen.getByRole("button", { name: /Test Student.*user menu/i }));
 
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /My Profile/ })).toHaveAttribute("href", "/student");
     expect(screen.getByRole("link", { name: /Favorites/ })).toHaveAttribute("href", "/student/favorites");
     expect(screen.getByRole("link", { name: /My Reports/ })).toHaveAttribute("href", "/student/reports");
@@ -141,6 +197,7 @@ describe("Navbar student navigation", () => {
     authState.signOut.mockClear();
     render(<MemoryRouter initialEntries={["/"]}><RouteProbe /></MemoryRouter>);
 
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: /Login/ }));
 
     await waitFor(() => expect(screen.getByTestId("current-route")).toHaveTextContent("/admin"));

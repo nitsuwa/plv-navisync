@@ -35,6 +35,7 @@ describe("useArrivalChime", () => {
   });
 
   it("plays once for a completed Follow arrival and ignores rerenders and view changes", () => {
+    localStorage.setItem(ARRIVAL_SOUND_PREFERENCE_KEY, "on");
     const { rerender } = renderHook<ReturnType<typeof useArrivalChime>, { phase: StudentRoutePhase; camera: StudentCameraMode }>(({ phase, camera }) => useArrivalChime(phase, camera), {
       initialProps: { phase: "preview" as const, camera: "explore" as const },
     });
@@ -63,6 +64,7 @@ describe("useArrivalChime", () => {
   });
 
   it("allows one new chime after a new navigation run", () => {
+    localStorage.setItem(ARRIVAL_SOUND_PREFERENCE_KEY, "on");
     const { rerender } = renderHook<ReturnType<typeof useArrivalChime>, { phase: StudentRoutePhase }>(({ phase }) => useArrivalChime(phase, "follow"), {
       initialProps: { phase: "navigating" as const },
     });
@@ -105,5 +107,11 @@ describe("useArrivalChime", () => {
     await act(async () => { await Promise.resolve(); });
     const audio = MockAudio.instances[0]!;
     expect(audio.play).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps arrival sound off by default", () => {
+    const { result } = renderHook(() => useArrivalChime("navigating", "follow"));
+    expect(result.current.enabled).toBe(false);
+    expect(MockAudio.instances).toHaveLength(0);
   });
 });

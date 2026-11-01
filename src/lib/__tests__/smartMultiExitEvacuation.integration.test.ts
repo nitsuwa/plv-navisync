@@ -434,6 +434,40 @@ describe("smart multi-exit Admin-to-Student integration", () => {
     expect(planned?.isAuthoredGraph).toBe(true);
   });
 
+  it("invalidates a room-origin SOS route when its Assembly Point moves without changing graph identities", () => {
+    const campus = twoDoorTwoDistinctExitCampus();
+    const room = campus.buildings[0].floors[0].rooms[0];
+    const origin = {
+      type: "room" as const,
+      buildingId: "building",
+      floorNumber: 1,
+      roomId: room.id,
+      roomName: room.name,
+      buildingLabel: "Test Building",
+      buildingCode: "TEST",
+      accessDoorIds: room.accessDoorIds,
+    };
+    const route = planStudentEmergencyRoute(campus, origin);
+
+    expect(route).not.toBeNull();
+    expect(isStudentEmergencyRouteCurrentAndEligible(campus, route, origin)).toBe(true);
+
+    const originalNodeIds = route?.authoredGraphNodeIds;
+    const originalEdgeIds = route?.authoredGraphEdgeIds;
+    campus.navNodes = campus.navNodes?.map((node) => node.id === "assembly-point-node"
+      ? { ...node, x: node.x + 80, y: node.y + 40 }
+      : node);
+    campus.assemblyPoints = campus.assemblyPoints?.map((point) => point.id === "main-assembly-point"
+      ? { ...point, x: point.x + 80, y: point.y + 40 }
+      : point);
+
+    const refreshed = planStudentEmergencyRoute(campus, origin);
+    expect(refreshed?.authoredGraphNodeIds).toEqual(originalNodeIds);
+    expect(refreshed?.authoredGraphEdgeIds).toEqual(originalEdgeIds);
+    expect(refreshed?.campusPoints).not.toEqual(route?.campusPoints);
+    expect(isStudentEmergencyRouteCurrentAndEligible(campus, route, origin)).toBe(false);
+  });
+
   it("routes Room SOS through the connected central crossing to its assigned test Assembly Point", () => {
     const campus = twoDoorTwoDistinctExitCampus();
     // TEST ONLY topology: both eligible exterior exits hand off to the same

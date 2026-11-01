@@ -534,6 +534,8 @@ describe("isolated Smart Multi-Exit Admin-to-Student workflow", () => {
     expect(callbacks.start).toHaveBeenCalledTimes(2);
     view.rerender(<UnifiedRoutePlannerDialog {...common} playbackSpeed={playbackSpeed} route={otherRoute.candidate.route} phase="navigating" cameraMode="explore" playbackPaused currentStepIndex={1} navigationSteps={otherRouteSteps} activeEmergencyRouteId={otherRoute.id} emergencyRouteOverview={false} />);
     expect(screen.getByTestId("explore-route-summary")).toHaveTextContent("Test Assembly Point");
+    fireEvent.click(screen.getByRole("button", { name: "Show full destination name: Test Assembly Point" }));
+    expect(screen.getByRole("dialog", { name: "Destination details" })).toHaveTextContent("Test Assembly Point");
     expect(screen.getByTestId("current-route-instruction")).toHaveTextContent(otherRouteSteps[1]);
     expect(screen.getByTestId("guided-route-steps")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume navigation" })).not.toBeInTheDocument();

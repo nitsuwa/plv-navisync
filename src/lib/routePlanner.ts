@@ -767,6 +767,11 @@ export function planAuthoredDestinationRoute(
       && Boolean(node.entranceId || node.type === "entrance" || node.type === "emergency_exit"));
   const startsAtSameBuilding = to.type === "room"
     && (from.type === "building" && from.buildingId === to.buildingId || sameBuildingEntrancePlace);
+  const roomToSameBuildingExit = mode !== "emergency"
+    && from.type === "room"
+    && to.type === "building"
+    && from.buildingId === to.buildingId;
+  const sameBuildingLocalRoute = startsAtSameBuilding || roomToSameBuildingExit;
   // A Building → room route starts by entering that building. Resolving its
   // origin as an outbound endpoint can choose an exit-only door, then route
   // across Campus to re-enter through another door. Use an inbound eligible
@@ -781,7 +786,15 @@ export function planAuthoredDestinationRoute(
     startsAtSameBuilding && from.type === "building" ? "inbound" : "outbound",
     mode === "emergency",
   );
-  const toNodes = authoredDestinationEndpoints(campusGraph.nodes, to, accessibleOnly, campusGraph.edges, graph, "inbound", mode === "emergency");
+  const toNodes = authoredDestinationEndpoints(
+    campusGraph.nodes,
+    to,
+    accessibleOnly,
+    campusGraph.edges,
+    graph,
+    roomToSameBuildingExit ? "outbound" : "inbound",
+    mode === "emergency",
+  );
   if (fromNodes.length === 0 || toNodes.length === 0) return null;
 
   const entranceMetadata = startsAtSameBuilding && from.type === "building"
@@ -812,7 +825,9 @@ export function planAuthoredDestinationRoute(
         ? new Set(campusGraph.nodes
             .filter((node) => node.id === fromNode.id
               || (node.buildingId === to.buildingId
-                && (Boolean(node.floorId) || node.derivedOwnerType?.startsWith("entrance_"))))
+                && (Boolean(node.floorId)
+                  || node.derivedOwnerType?.startsWith("entrance_")
+                  || toNodes.some((candidate) => candidate.id === node.id))))
             .map((node) => node.id))
         : null;
       const routeNodes = localNodeIds
@@ -843,7 +858,7 @@ export function planAuthoredDestinationRoute(
     // Prefer a route contained within this building's authored graph. It
     // still includes derived entrance ramps/thresholds and the real entry
     // transition, but cannot detour through unrelated Campus connectors.
-    const localPath = startsAtSameBuilding ? findBestPath(sourceGroup, true) : null;
+    const localPath = sameBuildingLocalRoute ? findBestPath(sourceGroup, true) : null;
     const groupPath = localPath ?? findBestPath(sourceGroup, false);
     if (groupPath) {
       selected = groupPath;
@@ -1063,9 +1078,12 @@ function resolveBuildingEntranceNodes(
     const isEmergencyExit = type === "emergency_exit" || type === "emergency";
     if (!isGeneral && !(emergencyOnly && isEmergencyExit)) return false;
     if (accessibleOnly && entrance.accessible === false) return false;
-    if (isGeneral && general.length > 1) {
+    if (isGeneral && emergencyOnly && general.length > 1) {
       if (role === "inbound" && entrance.direction === "exit_only") return false;
       if (role === "outbound" && entrance.direction === "entrance_only" && hasOutbound) return false;
+    } else if (isGeneral && !emergencyOnly) {
+      if (role === "inbound" && entrance.direction === "exit_only") return false;
+      if (role === "outbound" && entrance.direction === "entrance_only") return false;
     }
     if (isEmergencyExit && role === "inbound") return false;
     return true;
@@ -1568,6 +1586,10 @@ function authoredRouteGuidanceSteps(
   };
   const fromName = destinationBuildingCode(from);
   const toName = destinationBuildingCode(to);
+  const roomToSameBuildingExit = route.mode !== "emergency"
+    && from.type === "room"
+    && to.type === "building"
+    && from.buildingId === to.buildingId;
   append("start", from.buildingId === "__point_origin__"
     ? "You are here"
     : from.type === "room"
@@ -1663,6 +1685,8 @@ function authoredRouteGuidanceSteps(
 
   if (to.type === "room") {
     append("arrive", `Arrive at ${to.roomName}.`);
+  } else if (roomToSameBuildingExit) {
+    append("arrive", `You've reached the ${toName} exit.`);
   } else {
     append("arrive", `Arrive at the entrance of ${toName} building.`);
   }

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { CampusBuilding, CampusDecorAsset, CampusMarker } from "../../components/map-builder/types";
 import { canEnterOutdoorBuilding } from "../../components/map-builder/ReadonlyOutdoorVisuals";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../readonlyOutdoorCampus";
-import { campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, resolveStudentEntranceStairYaw, resolveSuhayHusayDecorAssetId, studentEntranceRampGroundDirection, usesCompactGroundEmergencyExit } from "../studentCampus3dPresentation";
+import { campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, STUDENT_CAMPUS_3D_GROUND_EPSILON, studentEntranceStairFlightLayout, resolveStudentEntranceRampPlacement, resolveStudentEntranceStairPlacement, resolveStudentEntranceStairYaw, resolveSuhayHusayDecorAssetId, studentEntranceRampGroundDirection, studentExteriorZone3dHeights, studentExteriorZone3dPresentation, usesCompactGroundEmergencyExit } from "../studentCampus3dPresentation";
+import { exteriorZoneAccessFeatureGeometry } from "../exteriorFloorZones";
 
 const building = { id: "b1", x: 0, y: 0, width: 100, height: 60, floors: [] } as unknown as CampusBuilding;
 const entrance = (id: string, overrides: Partial<ReadonlyOutdoorEntrance> = {}): ReadonlyOutdoorEntrance => ({
@@ -15,6 +16,12 @@ const entrance = (id: string, overrides: Partial<ReadonlyOutdoorEntrance> = {}):
 });
 
 describe("Student Campus 3D presentation helpers", () => {
+  it("keeps veranda surfaces thin and integrated without hiding authored exterior access", () => {
+    expect(studentExteriorZone3dPresentation("veranda")).toEqual({ thickness: 0.035, color: "#cbbb9f", sideRails: false });
+    expect(studentExteriorZone3dPresentation("covered_walkway")).toMatchObject({ thickness: 0.08, sideRails: true });
+    expect(studentExteriorZone3dPresentation("entrance_landing").sideRails).toBe(false);
+  });
+
   it("orients local +Z toward the authored campus-side facade direction", () => {
     const outward = (mapAngle: number) => {
       const yaw = campusEntranceFacingYaw(mapAngle);
@@ -89,6 +96,116 @@ describe("Student Campus 3D presentation helpers", () => {
     })).toBeCloseTo(Math.PI / 2);
     expect(resolveStudentEntranceStairYaw({ authoredRotation: 0, outwardDirection: { x: 0, y: 1 } })).toBeCloseTo(0);
     expect(resolveStudentEntranceStairYaw({ authoredRotation: 0, outwardDirection: { x: -1, y: 0 } })).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it("meets the rendered veranda and points both side-mounted stairs outward", () => {
+    const zone = { id: "veranda", type: "veranda" as const, side: "bottom" as const, offset: 0.5, width: 200, depth: 40 };
+    const authored = { x: 9000, y: 8000, width: 40, height: 24, rotation: 0 };
+    const leftAttachment = exteriorZoneAccessFeatureGeometry(zone, {
+      ...authored, attachmentEdge: "start", attachmentOffset: 0.5,
+    }, 400, 300)!;
+    const rightAttachment = exteriorZoneAccessFeatureGeometry(zone, {
+      ...authored, attachmentEdge: "end", attachmentOffset: 0.5,
+    }, 400, 300)!;
+    const { topY } = studentExteriorZone3dHeights("veranda", 0.012);
+    const left = resolveStudentEntranceStairPlacement({
+      authored, attachment: leftAttachment, floorSurfaceY: 0.012, platformTopY: topY,
+      connectionDirection: { x: 0, y: 1 }, // sibling ramp is not allowed to face this side stair along the facade
+    });
+    const right = resolveStudentEntranceStairPlacement({
+      authored, attachment: rightAttachment, floorSurfaceY: 0.012, platformTopY: topY,
+      connectionDirection: { x: 0, y: 1 },
+    });
+
+    expect(left).toMatchObject({ center: { x: 88, y: 320 }, width: 40, depth: 24 });
+    expect(right).toMatchObject({ center: { x: 312, y: 320 }, width: 40, depth: 24 });
+    // The Student 3D veranda is renderer-only geometry, so its elevation is
+    // the authored stair's presentation endpoint. Five visible steps need a
+    // real rise; a 4 cm platform makes the current 7 cm treads overlap.
+    expect(left.rise).toBeCloseTo(0.42);
+    expect(right.rise).toBeCloseTo(0.42);
+    expect(left.rise / 5).toBeGreaterThan(0.07);
+    expect(right.rise / 5).toBeGreaterThan(0.07);
+    expect(Math.sin(left.yaw)).toBeCloseTo(-1);
+    expect(Math.cos(left.yaw)).toBeCloseTo(0);
+    expect(Math.sin(right.yaw)).toBeCloseTo(1);
+    expect(Math.cos(right.yaw)).toBeCloseTo(0);
+    expect(0.012 + left.rise).toBeCloseTo(topY);
+    expect(0.012 + right.rise).toBeCloseTo(topY);
+  });
+
+  it("keeps entrance stair treads visibly stepped and lands them flush at both ends", () => {
+    for (const count of [5, 10]) {
+      const flight = studentEntranceStairFlightLayout(1.15, 0.42, count);
+      expect(flight.stepRise).toBeGreaterThan(flight.treadThickness);
+      expect(flight.treadSurfaceHeights).toHaveLength(count);
+      expect(flight.treadSurfaceHeights[0]).toBeGreaterThan(0);
+      expect(flight.treadSurfaceHeights.at(-1)).toBeCloseTo(0.42);
+      expect(flight.treadSurfaceHeights.every((height, index, heights) =>
+        index === 0 || height > heights[index - 1]!
+      )).toBe(true);
+      expect(flight.lowerLandingCenterZ - flight.lowerLandingDepth / 2).toBeCloseTo(flight.fromZ);
+      // The bottom tread meets the lower landing at fromZ; the top tread
+      // terminates at the veranda edge, and its top surface reaches the
+      // veranda elevation rather than stopping half a step short.
+      const firstTreadCenterZ = flight.fromZ - flight.treadDepth / 2;
+      const lastTreadCenterZ = flight.toZ + flight.treadDepth / 2;
+      expect(firstTreadCenterZ + flight.treadDepth / 2).toBeCloseTo(flight.fromZ);
+      expect(lastTreadCenterZ - flight.treadDepth / 2).toBeCloseTo(flight.toZ);
+      expect(flight.toZ).toBeCloseTo(-1.15 / 2);
+    }
+  });
+
+  it("aligns both authored veranda ramps to the rendered platform and sends them down to ground", () => {
+    const zone = { id: "veranda", type: "veranda" as const, side: "bottom" as const, offset: 0.5, width: 400, depth: 48 };
+    const authored = { x: 9000, y: 8000, width: 100, height: 40, rotation: 0 };
+    const { topY } = studentExteriorZone3dHeights("veranda", 0.012);
+    const placements = [0.25, 0.75].map((attachmentOffset) => {
+      const attachment = exteriorZoneAccessFeatureGeometry(zone, {
+        ...authored, attachmentEdge: "outer", attachmentOffset,
+      }, 400, 300)!;
+      return resolveStudentEntranceRampPlacement({ authored, attachment, floorSurfaceY: 0.012, platformTopY: topY });
+    });
+
+    expect(placements).toHaveLength(2);
+    for (const placement of placements) {
+      expect(placement).not.toBeNull();
+      expect(placement!.direction).toBe(-1);
+      expect(placement!.yaw).toBeCloseTo(0);
+      expect(placement!.outwardDirection).toEqual({ x: 0, y: 1 });
+      // Local +Z points outside. Its positive end is the ground end; the
+      // negative end lands exactly on the veranda attachment edge.
+      expect(placement!.center.y + placement!.outwardDirection.y * placement!.depth / 2).toBeCloseTo(388);
+      expect(placement!.center.y - placement!.outwardDirection.y * placement!.depth / 2).toBeCloseTo(348);
+      expect(0.012 + STUDENT_CAMPUS_3D_GROUND_EPSILON).toBeCloseTo(0.014);
+      expect(0.012 + placement!.rise + STUDENT_CAMPUS_3D_GROUND_EPSILON).toBeCloseTo(topY);
+      expect(placement!.rise).toBeGreaterThan(0.35);
+    }
+    expect(placements[0]!.center.x).toBeLessThan(placements[1]!.center.x);
+    expect(placements[0]!.center.x).toBeCloseTo(100);
+    expect(placements[1]!.center.x).toBeCloseTo(300);
+  });
+
+  it("orients attached side ramps toward their actual exterior edge", () => {
+    const zone = { id: "veranda", type: "veranda" as const, side: "bottom" as const, offset: 0.5, width: 200, depth: 40 };
+    const authored = { x: 0, y: 0, width: 64, height: 32, rotation: 0 };
+    const leftAttachment = exteriorZoneAccessFeatureGeometry(zone, {
+      ...authored, attachmentEdge: "start", attachmentOffset: 0.5,
+    }, 400, 300)!;
+    const rightAttachment = exteriorZoneAccessFeatureGeometry(zone, {
+      ...authored, attachmentEdge: "end", attachmentOffset: 0.5,
+    }, 400, 300)!;
+    const left = resolveStudentEntranceRampPlacement({ authored, attachment: leftAttachment, floorSurfaceY: 0.012, platformTopY: 0.432 });
+    const right = resolveStudentEntranceRampPlacement({ authored, attachment: rightAttachment, floorSurfaceY: 0.012, platformTopY: 0.432 });
+
+    expect(left?.outwardDirection).toEqual({ x: -1, y: 0 });
+    expect(right?.outwardDirection).toEqual({ x: 1, y: 0 });
+    expect(Math.sin(left!.yaw)).toBeCloseTo(-1);
+    expect(Math.cos(left!.yaw)).toBeCloseTo(0);
+    expect(Math.sin(right!.yaw)).toBeCloseTo(1);
+    expect(Math.cos(right!.yaw)).toBeCloseTo(0);
+    expect(left!.width).toBeCloseTo(64);
+    expect(left!.depth).toBeCloseTo(32);
   });
 
   it("uses the authored entrance ramp downhill end when orienting veranda steps", () => {

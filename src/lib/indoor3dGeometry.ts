@@ -195,6 +195,29 @@ export function indoorWallOccludesFocus(
   return sightY >= wall.baseY - 0.08 && sightY <= wall.baseY + wall.height;
 }
 
+/** Detect walls blocking the active route point or the short corridor ahead. */
+export function indoorWallOccludesRouteFocus(
+  camera: { x: number; y: number; z: number },
+  current: { x: number; y: number; z: number },
+  lookAhead: { x: number; y: number; z: number } | null,
+  wall: IndoorWallOcclusionProbe,
+): boolean {
+  return indoorWallOccludesFocus(camera, current, wall)
+    || Boolean(lookAhead && indoorWallOccludesFocus(camera, lookAhead, wall));
+}
+
+/** Return an occlusion fade target without losing a material's authored opacity. */
+export function indoorOcclusionTargetOpacity(
+  baseOpacity: number,
+  occludesFocus: boolean,
+  focusOpacity: number,
+  obstructedOpacity?: number,
+): number {
+  if (!occludesFocus) return baseOpacity;
+  const requestedOpacity = obstructedOpacity ?? baseOpacity * focusOpacity;
+  return Math.max(0, Math.min(baseOpacity, Number.isFinite(requestedOpacity) ? requestedOpacity : baseOpacity));
+}
+
 const DISTANCE_EPSILON = 1.75;
 const ANGLE_EPSILON = 0.025;
 
@@ -435,6 +458,51 @@ export function indoorDoorVisualWidth(
   const isDouble = door.doorType === "double" || door.direction === "double";
   const minimumMeters = door.isEmergencyExit ? (isDouble ? 1.85 : 1.0) : (isDouble ? 1.42 : 0.82);
   return Math.max(0, door.width || 0, minimumMeters / Math.max(0.0001, worldScale));
+}
+
+export interface IndoorDoorLeafLayout {
+  /** Local X position of the hinge pivot; null denotes a sliding panel. */
+  hingeX: number | null;
+  width: number;
+  /** Leaf center relative to its hinge pivot (or the opening center). */
+  leafOffsetX: number;
+  handleOffsetX: number;
+  rotationY: number;
+}
+
+/** Keep ordinary Student 3D Doors closed; callers may request the existing
+ * emergency presentation angle without changing authored access/navigation. */
+export function indoorDoorLeafLayouts(
+  door: Pick<FloorDoor, "doorType" | "direction" | "hinge">,
+  openingWidth: number,
+  swingSide: "a" | "b" = "a",
+  openAngleDegrees = 0,
+): IndoorDoorLeafLayout[] {
+  const width = Number.isFinite(openingWidth) ? Math.max(0, openingWidth) : 0;
+  if (width <= 0) return [];
+  if (door.direction === "sliding") {
+    if (openAngleDegrees > 0) {
+      const leafWidth = width * 0.58;
+      return [{ hingeX: null, width: leafWidth, leafOffsetX: -width * 0.21, handleOffsetX: width * 0.08, rotationY: 0 }];
+    }
+    return [{ hingeX: null, width: Math.max(0.12, width - 0.012), leafOffsetX: 0, handleOffsetX: width * 0.35, rotationY: 0 }];
+  }
+
+  const isDouble = door.doorType === "double" || door.direction === "double";
+  const leafWidth = width / (isDouble ? 2 : 1);
+  const hingeSides = isDouble ? [-1, 1] : [door.hinge === "right" || door.direction === "right" ? 1 : -1];
+  const swingZSign = swingSide === "b" ? 1 : -1;
+  const openAngle = Math.max(0, Math.min(85, Number.isFinite(openAngleDegrees) ? openAngleDegrees : 68)) * Math.PI / 180;
+  return hingeSides.map((side) => {
+    const hingeX = side * width / 2;
+    return {
+      hingeX,
+      width: leafWidth,
+      leafOffsetX: isDouble ? -hingeX / 2 : -hingeX,
+      handleOffsetX: -hingeX * 0.68,
+      rotationY: openAngle === 0 ? 0 : swingZSign * (hingeX < 0 ? -1 : 1) * openAngle,
+    };
+  });
 }
 
 /** The 2D Student Map supplies exit eligibility; this helper only decides

@@ -107,7 +107,7 @@ export function PublicLayout() {
         className={cn(
           "relative z-[1] w-full max-w-full",
           isMapPage || isEventEditor ? "flex min-h-0 flex-1 flex-col overflow-hidden" : isStudentEventsDashboard ? "overflow-x-clip" : "overflow-x-hidden",
-          !isMapPage && !isEventEditor && "pb-[calc(76px+env(safe-area-inset-bottom,0px))] md:pb-0",
+          !isMapPage && !isEventEditor && "pb-[calc(var(--student-mobile-bottom-navigation-height,61px)+env(safe-area-inset-bottom,0px))] md:pb-0",
         )}
       >
         <motion.div

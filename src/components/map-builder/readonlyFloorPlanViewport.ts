@@ -1,5 +1,5 @@
 import type { ExteriorEmergencyStair, FloorEntranceRamp, FloorEntranceSteps, FloorPlan } from "./types";
-import { exteriorStairPresentationBounds } from "./ExteriorEmergencyFloorModule";
+import { exteriorStairPresentationBounds } from "./exteriorEmergencyStairGeometry";
 import {
   exteriorZoneAccessFeatureGeometry,
   exteriorZoneGeometry,

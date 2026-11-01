@@ -53,6 +53,7 @@ export interface TransitionLabelLayout {
   height: number;
   x: number;
   iconX: number;
+  iconY: number;
   textX: number;
   textY: number;
   fontSize: number;
@@ -138,7 +139,10 @@ export function transitionLabelLayout(instruction: string, options: TransitionLa
     x,
     iconX: x + 8,
     textX: x + 25,
-    textY: lines.length === 1 ? (compact ? 13.5 : 14.5) : (compact ? 11.5 : 12.5),
+    iconY: 1 + height / 2 - 5,
+    // SVG text uses a baseline, unlike the centered SVG icon. Center the full
+    // glyph block in the same pill box for every font size and wrapped label.
+    textY: 1 + (height - (fontSize + (lines.length - 1) * lineHeight)) / 2 + fontSize * 0.8,
     fontSize,
     lineHeight,
   };
@@ -220,8 +224,8 @@ export function RouteContinuationMarker({ marker, x, y, entranceRotation = 0, on
         className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100 motion-reduce:transition-none"
         transform={`translate(${cueX} -${labelLayout.height + 12})`}
       >
-        <rect x={labelLayout.x} y={0} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.94} stroke={accent} strokeWidth={0.7} />
-        <TransitionTooltipIcon kind={glyphKind} x={labelLayout.iconX} y={labelLayout.height / 2 - 5} size={10} color="#c4b5fd" />
+        <rect x={labelLayout.x} y={1} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.94} stroke={accent} strokeWidth={0.7} />
+        <TransitionTooltipIcon kind={glyphKind} x={labelLayout.iconX} y={labelLayout.iconY} size={10} color="#c4b5fd" />
         <text x={labelLayout.textX} y={labelLayout.textY} fill="white" fontSize={labelLayout.fontSize} fontWeight={600}>{labelLayout.lines.map((line, index) => <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : labelLayout.lineHeight}>{line}</tspan>)}</text>
       </g>
     </g>
@@ -332,7 +336,7 @@ export function RouteTransitionMarker({ marker, onClick, zoom = 1, viewport, red
             data-testid="transition-label-pill"
           >
             <rect x={labelLayout.x} y={1} width={labelLayout.width} height={labelLayout.height} rx={Math.min(8, labelLayout.height / 2)} fill="#111827" fillOpacity={0.9} stroke="#8b5cf6" strokeWidth={0.6} />
-            <TransitionTooltipIcon kind={marker.kind} x={labelLayout.iconX} y={labelLayout.height / 2 - 5} size={10} />
+            <TransitionTooltipIcon kind={marker.kind} x={labelLayout.iconX} y={labelLayout.iconY} size={10} />
             <text x={labelLayout.textX} y={labelLayout.textY} fill="white" fontSize={labelLayout.fontSize} fontWeight={600}>
               {labelLayout.lines.map((line, index) => (
                 <tspan key={`${line}-${index}`} x={labelLayout.textX} dy={index === 0 ? 0 : labelLayout.lineHeight}>{line}</tspan>

@@ -2,8 +2,22 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RouteMapOverlay } from "../RouteMapOverlay";
 import { StudentRouteTransitionMarker, studentRouteTransitionViewportFromCamera } from "../StudentRouteTransitionMarker";
+import { transitionLabelLayout } from "../../map-builder/RouteTransitionMarker";
 
 describe("StudentRouteTransitionMarker", () => {
+  it.each([
+    ["Enter CEIT building", {}],
+    ["Continue Upstairs to Floor 4", { fontSize: 12 }],
+    ["A much longer entrance name that wraps onto a second line", { compact: true, fontSize: 11 }],
+  ])("centers the icon and all %s label lines inside their transition pill", (label, options) => {
+    const layout = transitionLabelLayout(label, options);
+    const textBlockTop = layout.textY - layout.fontSize * 0.8;
+    const textBlockHeight = layout.fontSize + (layout.lines.length - 1) * layout.lineHeight;
+    const pillCenterY = 1 + layout.height / 2;
+    expect(textBlockTop + textBlockHeight / 2).toBeCloseTo(pillCenterY);
+    expect(layout.iconY + 5).toBeCloseTo(pillCenterY);
+  });
+
   it.each([
     ["enter_building", "entrance"],
     ["exit_building", "entrance"],

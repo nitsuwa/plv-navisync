@@ -3,10 +3,42 @@ import {
   clampStudent3dCameraOffset,
   student3dCameraOffsetFromPose,
   student3dCameraPoseAtTarget,
+  student3dCameraPoseRestoreCompletionMatches,
+  student3dCameraPoseRestoreForContext,
   student3dFollowCameraOffsetForRecovery,
+  student3dFollowCameraOrientationChanged,
+  shouldPreserveStudent3dFollowCameraOffset,
+  type Student3dCameraPoseRestoreRequest,
 } from "../student3dCameraPose";
 
-describe("3D Follow camera pose recovery", () => {
+describe("Student 3D camera pose ownership and recovery", () => {
+  it("keeps a saved outdoor pose from being replayed by a newly entered Floor renderer", () => {
+    const request: Student3dCameraPoseRestoreRequest = {
+      nonce: 12,
+      contextKey: "campus",
+      pose: { position: [0, 2, 0], target: [900, 0, 700] },
+    };
+
+    expect(student3dCameraPoseRestoreForContext(request, "campus")).toEqual(request);
+    expect(student3dCameraPoseRestoreForContext(request, "science-hall:1")).toBeNull();
+    expect(student3dCameraPoseRestoreForContext(request, "campus", false)).toBeNull();
+    expect(student3dCameraPoseRestoreCompletionMatches(request, 12, "campus")).toBe(true);
+    expect(student3dCameraPoseRestoreCompletionMatches(request, 12, "science-hall:1")).toBe(false);
+    expect(student3dCameraPoseRestoreCompletionMatches(request, 11, "campus")).toBe(false);
+  });
+
+  it("restores an indoor pose only to its exact Building and Floor context", () => {
+    const request: Student3dCameraPoseRestoreRequest = {
+      nonce: 13,
+      contextKey: "science-hall:2",
+      pose: { position: [6, 12, 8], target: [0, 0, 0] },
+    };
+
+    expect(student3dCameraPoseRestoreForContext(request, "science-hall:2")).toEqual(request);
+    expect(student3dCameraPoseRestoreForContext(request, "science-hall:1")).toBeNull();
+    expect(student3dCameraPoseRestoreForContext(request, "campus")).toBeNull();
+  });
+
   it("keeps distance and orbit orientation when rebasing a pose onto the canonical marker", () => {
     const offset = student3dCameraOffsetFromPose({
       position: [17, 28, 43],
@@ -39,6 +71,59 @@ describe("3D Follow camera pose recovery", () => {
       recovered = student3dFollowCameraOffsetForRecovery(null, recovered, [0, 9, 9], 4, 60, true);
     }
     expect(recovered).toEqual(initial);
+  });
+
+  it("keeps a user-adjusted Follow orbit and zoom when the route renderer changes Floors", () => {
+    const chosenOffset: [number, number, number] = [-9, 13, 7];
+    const routeDefault: [number, number, number] = [2, 10, 8];
+    const recovered = student3dFollowCameraOffsetForRecovery(
+      null,
+      chosenOffset,
+      routeDefault,
+      4,
+      80,
+      true,
+    );
+    const distance = (offset: [number, number, number]) => Math.hypot(...offset);
+    const azimuth = (offset: [number, number, number]) => Math.atan2(offset[0], offset[2]);
+    const elevation = (offset: [number, number, number]) => Math.atan2(offset[1], Math.hypot(offset[0], offset[2]));
+
+    expect(recovered).toEqual(chosenOffset);
+    expect(distance(recovered)).toBeCloseTo(distance(chosenOffset));
+    expect(azimuth(recovered)).toBeCloseTo(azimuth(chosenOffset));
+    expect(elevation(recovered)).toBeCloseTo(elevation(chosenOffset));
+  });
+
+  it("retains the live Follow offset across authored route contexts with changed floor geometry", () => {
+    expect(shouldPreserveStudent3dFollowCameraOffset({
+      attachedFollow: true,
+      sameRoute: true,
+      sameViewportSize: true,
+    })).toBe(true);
+  });
+
+  it("changes Follow heading at corridor bends while ignoring small route noise", () => {
+    expect(student3dFollowCameraOrientationChanged({ x: 0, y: 7, z: -7 }, { x: 7, y: 7, z: 0 })).toBe(true);
+    expect(student3dFollowCameraOrientationChanged({ x: 1, y: 7, z: -7 }, { x: 0.9, y: 7, z: -7 })).toBe(false);
+    expect(student3dFollowCameraOrientationChanged(null, { x: 0, y: 7, z: -7 })).toBe(true);
+  });
+
+  it("does not carry a Follow offset into a replaced route or resized canvas", () => {
+    expect(shouldPreserveStudent3dFollowCameraOffset({
+      attachedFollow: true,
+      sameRoute: false,
+      sameViewportSize: true,
+    })).toBe(false);
+    expect(shouldPreserveStudent3dFollowCameraOffset({
+      attachedFollow: true,
+      sameRoute: true,
+      sameViewportSize: false,
+    })).toBe(false);
+    expect(shouldPreserveStudent3dFollowCameraOffset({
+      attachedFollow: false,
+      sameRoute: true,
+      sameViewportSize: true,
+    })).toBe(false);
   });
 
   it("uses the local scene Follow default when no bookmark exists and the current camera is a floor fit", () => {

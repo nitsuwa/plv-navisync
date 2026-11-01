@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Moon, Sun, Lock, Bell, ChevronDown, Shield, CheckCircle2,
-  Sparkles, Monitor, Eye, EyeOff,
+  Sparkles, Monitor, Eye, EyeOff, Volume2, Smartphone,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router";
@@ -14,6 +14,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { useScrollReveal } from "../hooks/useScrollReveal";
 import { cn } from "../lib/utils";
 import { useReducedMotion } from "../hooks/useReducedMotion";
+import { useMapFeedbackPreferences } from "../hooks/useMapFeedbackPreferences";
 import type { ThemePreference } from "../hooks/useTheme";
 import { MIN_ACCOUNT_PASSWORD_LENGTH, updateStudentPassword } from "../lib/studentAccount";
 import {
@@ -62,8 +63,9 @@ type SettingsSection = "appearance" | "notifications" | "security";
 export function StudentSettingsPage() {
   const navigate = useNavigate();
   const { loading: authLoading, isStudent, username, role, signOut, profile } = useStudentAuth();
-  const { theme, themePreference, setThemePreference } = useTheme();
+  const { theme, preference: themePreference, setThemePreference } = useTheme();
   const reducedMotion = useReducedMotion();
+  const mapFeedback = useMapFeedbackPreferences();
   const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
@@ -199,7 +201,7 @@ export function StudentSettingsPage() {
     { key: "security", label: "Security", icon: Lock },
   ];
 
-  function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
+  function Toggle({ on, onToggle, label, disabled }: { on: boolean; onToggle: () => void; label: string; disabled?: boolean }) {
     return (
       <button
         type="button"
@@ -207,7 +209,7 @@ export function StudentSettingsPage() {
         aria-label={label}
         aria-checked={on}
         onClick={onToggle}
-        disabled={preferencesLoading || savingPreferences}
+        disabled={disabled ?? (preferencesLoading || savingPreferences)}
         className={cn(
           "relative inline-flex items-center h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
           on ? "bg-primary" : "bg-gray-200 dark:bg-gray-700"
@@ -310,6 +312,11 @@ export function StudentSettingsPage() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                    <SectionLabel>Map feedback</SectionLabel>
+                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                      <SettingRow icon={Volume2} label="Sound effects" desc="Short optional cues for a successful scan and arrival. Off by default." action={<Toggle on={mapFeedback.soundEnabled} onToggle={() => mapFeedback.setSoundEnabled(!mapFeedback.soundEnabled)} label="Sound effects" disabled={false} />} />
+                      <SettingRow icon={Smartphone} label="Haptic feedback" desc="A brief vibration after a successful location scan, where supported." action={<Toggle on={mapFeedback.hapticsEnabled} onToggle={() => mapFeedback.setHapticsEnabled(!mapFeedback.hapticsEnabled)} label="Haptic feedback" disabled={false} />} />
                     </div>
                   </div>
                 </Reveal>

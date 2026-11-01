@@ -209,6 +209,21 @@ export function StudentMapControls({
         </div>
       )}
 
+      {isFloorMode && onBackToCampus && !searchVisible && !eventMode && !discoverMode && (
+        <button
+          type="button"
+          data-testid="student-map-back-campus-mobile"
+          data-no-drag
+          onClick={onBackToCampus}
+          aria-label="Back to campus"
+          title="Back to campus"
+          className="map-layer-controls pointer-events-auto absolute left-3 top-[max(0.75rem,env(safe-area-inset-top,0px))] z-40 inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border/80 bg-card/95 px-3 text-[11px] font-extrabold text-primary shadow-md shadow-slate-950/10 backdrop-blur-xl transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden max-[359px]:px-2"
+        >
+          <ChevronLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <span className="max-[359px]:hidden">Back to campus</span>
+        </button>
+      )}
+
       {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="map-layer-controls pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
 
       {(utilityControlsVisible || mapModeToggleVisible) && (

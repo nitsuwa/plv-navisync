@@ -1,6 +1,7 @@
 import { MOUSE, TOUCH } from "three";
 
 export const STUDENT_3D_DRAG_THRESHOLD_PX = 7;
+export const STUDENT_3D_ROTATE_THRESHOLD_RAD = 0.04;
 
 interface Student3dOrbitInputControls {
   mouseButtons: { LEFT: number; MIDDLE: number; RIGHT: number };
@@ -26,6 +27,7 @@ export interface Student3dTouchPoint {
 export interface Student3dTouchGestureMotion {
   centroidDistance: number;
   pinchDistance: number;
+  rotationRadians: number;
 }
 
 export interface Student3dCameraAxes {
@@ -48,8 +50,8 @@ export function configureStudent3dInputMappings(controls: Student3dOrbitInputCon
     RIGHT: MOUSE.ROTATE,
   });
   Object.assign(controls.touches, {
-    ONE: TOUCH.ROTATE,
-    TWO: TOUCH.DOLLY_PAN,
+    ONE: TOUCH.PAN,
+    TWO: TOUCH.DOLLY_ROTATE,
   });
 }
 
@@ -96,7 +98,8 @@ export function crossedStudent3dDragThreshold(
 
 /**
  * Classify camera input by the actual pointer gesture, never by viewport size.
- * Follow pauses only for a deliberate pan; orbit and zoom leave playback live.
+ * One-finger touch is mapped to pan by OrbitControls, so Follow must yield to
+ * it just as it does to a deliberate desktop or two-finger pan.
  */
 export function student3dCameraGesture(input: {
   pointerType: string;
@@ -104,7 +107,9 @@ export function student3dCameraGesture(input: {
   pointerCount: number;
   movement: number;
   pinchMovement?: number;
+  rotationMovement?: number;
   threshold?: number;
+  rotationThreshold?: number;
 }): Student3dCameraGesture {
   const threshold = input.threshold ?? STUDENT_3D_DRAG_THRESHOLD_PX;
   if (input.pointerType === "touch") {
@@ -112,11 +117,12 @@ export function student3dCameraGesture(input: {
       // A pinch may also move its centroid. Treat the combined gesture as zoom
       // so it never pauses Follow as an accidental pan.
       if ((input.pinchMovement ?? 0) >= threshold) return "zoom";
+      if ((input.rotationMovement ?? 0) >= (input.rotationThreshold ?? STUDENT_3D_ROTATE_THRESHOLD_RAD)) return "orbit";
       if (!Number.isFinite(input.movement) || input.movement < threshold) return "none";
       return "pan";
     }
     if (!Number.isFinite(input.movement) || input.movement < threshold) return "none";
-    return input.pointerCount === 1 ? "orbit" : "none";
+    return input.pointerCount === 1 ? "pan" : "none";
   }
 
   if (!Number.isFinite(input.movement) || input.movement < threshold) return "none";
@@ -136,9 +142,13 @@ export function student3dTouchGestureMotion(
   const currentCentroid = { x: (current[0].x + current[1].x) / 2, y: (current[0].y + current[1].y) / 2 };
   const startDistance = Math.hypot(start[1].x - start[0].x, start[1].y - start[0].y);
   const currentDistance = Math.hypot(current[1].x - current[0].x, current[1].y - current[0].y);
+  const startAngle = Math.atan2(start[1].y - start[0].y, start[1].x - start[0].x);
+  const currentAngle = Math.atan2(current[1].y - current[0].y, current[1].x - current[0].x);
+  const angleDelta = Math.atan2(Math.sin(currentAngle - startAngle), Math.cos(currentAngle - startAngle));
   return {
     centroidDistance: Math.hypot(currentCentroid.x - startCentroid.x, currentCentroid.y - startCentroid.y),
     pinchDistance: Math.abs(currentDistance - startDistance),
+    rotationRadians: Math.abs(angleDelta),
   };
 }
 

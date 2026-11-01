@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FloorDoor, FloorFurniture, FloorPlan, FloorRoom, FloorStairs, FloorWall, FloorWindow } from "../../components/map-builder/types";
-import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, deriveStudentAuditoriumChairLayouts, deriveStudentAuditoriumChairLayoutsForFloor, discoverIndoorCameraDirection, exteriorEmergencyStairOpenings, indoorDoorVisualWidth, indoorFloorCameraBounds, indoorFloorCameraDirectionForViewport, indoorFloorCameraFarPlane, indoorFloorCameraFitPadding, indoorFloorCameraHalfDepth, indoorRoomLabelPriority, indoorWallOccludesFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue, INDOOR_FLOOR_CAMERA_DIRECTION } from "../indoor3dGeometry";
+import { clampIndoorPriorityRoomLabel, descendingIndoorStairOpeningPolygon, deriveStudentAuditoriumChairLayouts, deriveStudentAuditoriumChairLayoutsForFloor, discoverIndoorCameraDirection, exteriorEmergencyStairOpenings, indoorDoorLeafLayouts, indoorDoorVisualWidth, indoorFloorCameraBounds, indoorFloorCameraDirectionForViewport, indoorFloorCameraFarPlane, indoorFloorCameraFitPadding, indoorFloorCameraHalfDepth, indoorOcclusionTargetOpacity, indoorRoomLabelPriority, indoorWallOccludesFocus, indoorWallOccludesRouteFocus, isIndoorOpenBelowRoom, layoutIndoorRoomLabels, normalizeIndoorWallSegments, radialFurnitureSeatAngles, shouldRenderDescendingIndoorStair, shouldRenderIndoorDownStairModule, shouldRenderIndoorLandmarkFurniture, shouldRenderStudentCanteenDiningFurniture, shouldShowIndoorExitCue, INDOOR_FLOOR_CAMERA_DIRECTION } from "../indoor3dGeometry";
 
 const wall = (id: string, x1: number, y1: number, x2: number, y2: number): FloorWall => ({
   id, x1, y1, x2, y2, thickness: 4, color: "#ccc", visible: true,
@@ -25,6 +25,42 @@ describe("indoorWallOccludesFocus", () => {
     expect(indoorWallOccludesFocus({ x: 0, y: 4, z: 5 }, { x: 0, y: 0.16, z: -5 }, segment)).toBe(true);
     expect(indoorWallOccludesFocus({ x: 5, y: 4, z: 5 }, { x: 5, y: 0.16, z: -5 }, segment)).toBe(false);
     expect(indoorWallOccludesFocus({ x: 0, y: 7, z: 5 }, { x: 0, y: 0.16, z: -5 }, segment)).toBe(false);
+  });
+
+  it("detects a Door or Window footprint only when it crosses the camera-to-focus line", () => {
+    const door = { startX: -0.8, startZ: 0, endX: 0.8, endZ: 0, thickness: 0.08, baseY: 0.012, height: 2.12 };
+    const window = { startX: -1.2, startZ: 0, endX: 1.2, endZ: 0, thickness: 0.06, baseY: 0.86, height: 1.22 };
+    const camera = { x: 0, y: 4, z: 5 };
+    const focus = { x: 0, y: 0.16, z: -5 };
+    expect(indoorWallOccludesFocus(camera, focus, door)).toBe(true);
+    expect(indoorWallOccludesFocus(camera, focus, window)).toBe(true);
+    expect(indoorWallOccludesFocus(camera, focus, { ...door, startZ: -7, endZ: -7 })).toBe(false);
+  });
+});
+
+describe("indoorWallOccludesRouteFocus", () => {
+  const wall = { startX: -2, startZ: 0, endX: 2, endZ: 0, thickness: 0.18, baseY: 0, height: 3 };
+  const camera = { x: 0, y: 4, z: 5 };
+
+  it("fades a wall only when it obstructs the current marker or active route corridor ahead", () => {
+    const current = { x: 0, y: 0.16, z: 6 };
+    const lookAhead = { x: 0, y: 0.16, z: -5 };
+    expect(indoorWallOccludesRouteFocus(camera, current, lookAhead, wall)).toBe(true);
+    expect(indoorWallOccludesRouteFocus(camera, current, null, wall)).toBe(false);
+    expect(indoorWallOccludesRouteFocus(camera, current, { x: 8, y: 0.16, z: 5 }, wall)).toBe(false);
+  });
+});
+
+describe("indoorOcclusionTargetOpacity", () => {
+  it("fades opaque Door and Wall materials and restores their original opacity", () => {
+    expect(indoorOcclusionTargetOpacity(1, true, 0.5)).toBe(0.5);
+    expect(indoorOcclusionTargetOpacity(1, false, 0.5)).toBe(1);
+  });
+
+  it("preserves a Window glass baseline and applies only its configured obstruction target", () => {
+    expect(indoorOcclusionTargetOpacity(0.48, true, 0.5, 0.34)).toBe(0.34);
+    expect(indoorOcclusionTargetOpacity(0.48, false, 0.5, 0.34)).toBe(0.48);
+    expect(indoorOcclusionTargetOpacity(0.2, true, 0.5, 0.34)).toBe(0.2);
   });
 });
 
@@ -102,6 +138,35 @@ describe("normalizeIndoorWallSegments", () => {
     const verticalSegments = result.filter((segment) => segment.sourceIds.includes("vertical"));
     expect(verticalSegments).toHaveLength(2);
     expect(verticalSegments.map((segment) => Math.abs(segment.y2 - segment.y1)).sort((a, b) => a - b)).toEqual([48, 48]);
+  });
+});
+
+describe("Student 3D door presentations", () => {
+  it("renders ordinary single leaves closed and preserves emergency open presentation on request", () => {
+    const left = indoorDoorLeafLayouts({ direction: "left", hinge: "left" }, 1, "a")[0]!;
+    const right = indoorDoorLeafLayouts({ direction: "right", hinge: "right" }, 1, "a")[0]!;
+    const emergency = indoorDoorLeafLayouts({ direction: "left", hinge: "left" }, 1, "a", 68)[0]!;
+
+    expect(left).toMatchObject({ hingeX: -0.5, width: 1, leafOffsetX: 0.5 });
+    expect(left.rotationY).toBe(0);
+    expect(right.rotationY).toBe(0);
+    expect(emergency.rotationY).toBeCloseTo(68 * Math.PI / 180);
+  });
+
+  it("closes both leaves of a normal double Door across the full opening", () => {
+    const leaves = indoorDoorLeafLayouts({ direction: "double", doorType: "double" }, 1.6, "a");
+    expect(leaves).toHaveLength(2);
+    expect(leaves.map((leaf) => leaf.hingeX)).toEqual([-0.8, 0.8]);
+    expect(leaves.map((leaf) => leaf.width)).toEqual([0.8, 0.8]);
+    expect(leaves.map((leaf) => leaf.rotationY)).toEqual([0, 0]);
+  });
+
+  it("shows an ordinary sliding Door closed across its opening and rejects invalid dimensions", () => {
+    const [sliding] = indoorDoorLeafLayouts({ direction: "sliding" }, 1);
+    expect(sliding).toMatchObject({ hingeX: null, rotationY: 0 });
+    expect(sliding!.width).toBeGreaterThan(0.95);
+    expect(indoorDoorLeafLayouts({ direction: "sliding" }, 1, "a", 68)[0]!.width).toBeLessThan(1);
+    expect(indoorDoorLeafLayouts({ direction: "left" }, Number.NaN)).toEqual([]);
   });
 });
 
@@ -387,6 +452,18 @@ describe("indoor 3D camera fit", () => {
     const defaultSquareDepth = indoorFloorCameraHalfDepth(420, 380, 390 / 844);
     const portraitSquareDepth = indoorFloorCameraHalfDepth(420, 380, 390 / 844, 0.025, 42, squarePortrait, 1.04);
     expect(portraitSquareDepth).toBeLessThan(defaultSquareDepth);
+  });
+
+  it("adapts the Discovery camera's elevated angle to each Floor's long axis", () => {
+    const portraitAspect = 390 / 844;
+    const discoverBaseDirection = discoverIndoorCameraDirection(portraitAspect);
+    const wideFloorDirection = indoorFloorCameraDirectionForViewport(1400, 240, portraitAspect, discoverBaseDirection);
+    const tallFloorDirection = indoorFloorCameraDirectionForViewport(240, 1400, portraitAspect, discoverBaseDirection);
+
+    expect(wideFloorDirection[2] / wideFloorDirection[0]).toBeCloseTo(0.18);
+    expect(tallFloorDirection[0] / tallFloorDirection[2]).toBeCloseTo(0.18);
+    expect(wideFloorDirection[1]).toBe(discoverBaseDirection[1]);
+    expect(tallFloorDirection[1]).toBe(discoverBaseDirection[1]);
   });
 
   it("uses the portrait perspective corners instead of combining unrelated worst-case extents", () => {

@@ -4,7 +4,56 @@ export interface Student3dCameraPose {
   target: [number, number, number];
 }
 
+export interface Student3dCameraPoseRestoreRequest {
+  nonce: number;
+  contextKey: string;
+  pose: Student3dCameraPose;
+}
+
 export type Student3dCameraOffset = [number, number, number];
+
+/** Reorient attached Follow only after the route heading changes materially. */
+export function student3dFollowCameraOrientationChanged(
+  current: { x: number; y: number; z: number } | null | undefined,
+  desired: { x: number; y: number; z: number },
+  minimumDirectionDot = 0.985,
+): boolean {
+  if (!current) return true;
+  const currentLength = Math.hypot(current.x, current.y, current.z);
+  const desiredLength = Math.hypot(desired.x, desired.y, desired.z);
+  if (currentLength < 1e-4 || desiredLength < 1e-4) return true;
+  const directionDot = (current.x * desired.x + current.y * desired.y + current.z * desired.z) / (currentLength * desiredLength);
+  return directionDot < Math.max(-1, Math.min(1, minimumDirectionDot));
+}
+
+/** A saved pose belongs only to the campus or Floor that produced it. */
+export function student3dCameraPoseRestoreForContext(
+  request: Student3dCameraPoseRestoreRequest | null | undefined,
+  contextKey: string,
+  allowRestore = true,
+): Student3dCameraPoseRestoreRequest | null {
+  return allowRestore && request?.contextKey === contextKey ? request : null;
+}
+
+/** Ignore completion from an old or unrelated renderer context. */
+export function student3dCameraPoseRestoreCompletionMatches(
+  request: Student3dCameraPoseRestoreRequest | null | undefined,
+  nonce: number,
+  contextKey: string,
+): boolean {
+  return Boolean(request && request.nonce === nonce && request.contextKey === contextKey);
+}
+
+/** Keep the live orbit when one route changes render context without resizing
+ * its canvas. Floor-local waypoint arrays and viewport offsets may change at
+ * an authored handoff; they do not identify a different route. */
+export function shouldPreserveStudent3dFollowCameraOffset(input: {
+  attachedFollow: boolean;
+  sameRoute: boolean;
+  sameViewportSize: boolean;
+}): boolean {
+  return input.attachedFollow && input.sameRoute && input.sameViewportSize;
+}
 
 /** Camera-to-target offset is the renderer-independent part of a Follow pose. */
 export function student3dCameraOffsetFromPose(pose: Student3dCameraPose): Student3dCameraOffset {

@@ -16,7 +16,7 @@ import {
   type CampusNavGraph,
   type RouteSegment,
 } from "../routePlanner";
-import { findBuildingPath, type GraphPath } from "../pathfinding";
+import { findBuildingPath, findNavigationRoute, type GraphPath } from "../pathfinding";
 import { studentRouteFacts } from "../studentRouteFlow";
 
 // Small published-campus nav graph shaped like the seed (b_mab / b_gym ids).
@@ -568,6 +568,57 @@ describe("authored destination endpoint combinations", () => {
     expect(standardRoute?.points).not.toContainEqual({ x: 150, y: 50 });
     expect(emergencyRoute?.points).toContainEqual({ x: 100, y: 100 });
     expect(standardRoute!.dist).toBeGreaterThan(emergencyRoute!.dist);
+  });
+
+  it("routes a Room to its own building through the shortest permitted outbound exit", () => {
+    const exitsGraph: CampusNavGraph = {
+      ...graph,
+      buildings: [{
+        id: "b1", x: 0, y: 0, width: 120, height: 80,
+        floors: [{ id: "f1", number: 1 }, { id: "f2", number: 2 }],
+        entrances: [
+          { id: "b1-main", type: "general", direction: "entrance_only", accessible: true },
+          { id: "b1-side", type: "general", direction: "exit_only", accessible: false },
+          { id: "b1-accessible-exit", type: "general", direction: "exit_only", accessible: true },
+        ],
+      }],
+      navNodes: [
+        ...graph.navNodes!.map((node) => node.id === "b1-entry" ? { ...node, entranceId: "b1-main" } : node),
+        { id: "b1-upper-hallway", name: "Upper Hallway", type: "hallway", buildingId: "b1", floorId: "f2", x: 57, y: 0, accessible: true },
+        { id: "b1-side-exit", name: "Side Exit", type: "entrance", entranceId: "b1-side", buildingId: "b1", x: 2, y: 0, accessible: false },
+        { id: "b1-accessible-exit-node", name: "Accessible Exit", type: "entrance", entranceId: "b1-accessible-exit", buildingId: "b1", x: 4, y: 0, accessible: true },
+      ],
+      navEdges: [
+        ...graph.navEdges!,
+        { id: "b1-room-hallway", startNodeId: "b1-door-upper", endNodeId: "b1-upper-hallway", distance: 5, bidirectional: true, accessible: true },
+        { id: "b1-hallway-side-exit", startNodeId: "b1-upper-hallway", endNodeId: "b1-side-exit", distance: 3, bidirectional: true, accessible: true, type: "entrance_transition" },
+        { id: "b1-hallway-accessible-exit", startNodeId: "b1-upper-hallway", endNodeId: "b1-accessible-exit-node", distance: 7, bidirectional: true, accessible: true, type: "entrance_transition" },
+      ],
+    };
+
+    const standard = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "standard", exitsGraph);
+    expect(findNavigationRoute(exitsGraph.navNodes!, exitsGraph.navEdges!, "b1-door-upper", "b1-side-exit")).not.toBeNull();
+    expect(standard).not.toBeNull();
+    expect(standard?.authoredGraphNodeIds?.at(-1)).toBe("b1-side-exit");
+    expect(standard?.contextHandoffs?.find((handoff) => handoff.kind === "exit_building")?.targetPoint).toEqual({ x: 2, y: 0 });
+    expect(standard?.steps.map((step) => step.instruction)).toContain("Exit B1 building.");
+    expect(standard?.steps.at(-1)?.instruction).toBe("You've reached the B1 exit.");
+    expect(standard?.authoredGraphNodeIds).not.toContain("b1-entry");
+
+    const accessible = planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "accessible", exitsGraph);
+    expect(accessible?.authoredGraphNodeIds?.at(-1)).toBe("b1-accessible-exit-node");
+    expect(accessible?.contextHandoffs?.find((handoff) => handoff.kind === "exit_building")?.targetPoint).toEqual({ x: 4, y: 0 });
+
+    const noOutboundExit: CampusNavGraph = {
+      ...exitsGraph,
+      buildings: [{
+        ...exitsGraph.buildings![0]!,
+        entrances: [{ id: "b1-main", type: "general", direction: "entrance_only", accessible: true }],
+      }],
+      navNodes: exitsGraph.navNodes!.filter((node) => node.entranceId !== "b1-side" && node.entranceId !== "b1-accessible-exit"),
+      navEdges: exitsGraph.navEdges!.filter((edge) => edge.id !== "b1-hallway-side-exit" && edge.id !== "b1-hallway-accessible-exit"),
+    };
+    expect(planDestinationRoute(room("b1", "r2", 2, "B1"), building("b1", "B1"), "standard", noOutboundExit)).toBeNull();
   });
 
   it("keeps a same-building exterior-stair detour in source → campus → destination order", () => {

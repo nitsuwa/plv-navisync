@@ -104,6 +104,11 @@ export function StudentCampusSelector({ campuses, activeCampusId, activeCampusNa
   const menuId = "student-campus-selector-menu";
   const activeCampus = campuses.find((campus) => campus.id === activeCampusId);
   const campusName = activeCampusName ?? activeCampus?.name ?? "Select Campus";
+  const campusCode = activeCampus?.code?.trim();
+  const campusSuffix = campusCode ? ` ${campusCode}` : "";
+  const compactCampusName = campusSuffix && campusName.toLocaleLowerCase().endsWith(campusSuffix.toLocaleLowerCase())
+    ? campusName.slice(0, -campusSuffix.length).replace(/[\s·–—-]+$/, "").trim()
+    : campusName.replace(/\s*[-·–—]\s*PLV$/i, "").trim();
 
   const measureMenu = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -253,13 +258,16 @@ export function StudentCampusSelector({ campuses, activeCampusId, activeCampusNa
         aria-label={`Change campus. Current campus: ${campusName}`}
         title={campusName}
         className={cn(
-          "student-campus-selector-trigger flex min-h-10 items-center gap-2 rounded-full border border-border/80 bg-card/95 px-3 text-xs font-semibold text-foreground shadow-[0_5px_16px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[background-color,box-shadow] duration-150 hover:bg-muted hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-          "md:min-h-11 md:rounded-2xl md:px-4",
+          "student-campus-selector-trigger flex min-h-11 items-center gap-1.5 rounded-2xl border border-border/80 bg-card/95 px-2.5 text-xs font-semibold text-foreground shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[background-color,box-shadow] duration-150 hover:bg-muted hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+          "md:px-4",
         )}
         style={{ fontFamily: "var(--font-body)" }}
       >
         <MapPin aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
-        <span className="max-w-[190px] truncate md:max-w-[260px]">{campusName}</span>
+        <span className="min-w-0 max-w-[190px] truncate md:max-w-[260px]" title={campusName}>
+          <span className="md:hidden">{compactCampusName}</span>
+          <span className="hidden md:inline">{campusName}</span>
+        </span>
         <ChevronDown aria-hidden="true" className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150", open && "rotate-180")} />
       </button>
       {open && layout && campuses.length > 0 && createPortal(

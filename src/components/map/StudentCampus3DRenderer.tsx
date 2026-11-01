@@ -22,6 +22,7 @@ import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, ca
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
 import type { EventVenue } from "../../lib/eventMapView";
 import type { Pt, RouteMode } from "../../lib/routePlanner";
+import { measureRouteDoorCrossings, routeDoorTransitOpacity, ROUTE_DOOR_TRANSIT_RADIUS, ROUTE_DOOR_TRANSIT_OPACITY } from "../../lib/routeDoorTransit";
 import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
@@ -58,6 +59,8 @@ interface StudentCampus3DRendererProps {
   exploreTransitionCues?: readonly StudentRouteExploreTransitionMarker[];
   focusPoint?: Pt | null;
   focusNonce?: number;
+  youAreHerePoint?: Pt | null;
+  youAreHereLabel?: string | null;
   /** Refit a selected tour stop when its responsive viewport layout changes. */
   focusOnViewportChange?: boolean;
   /** Selected exterior tour stop; only this selection uses entrance-facing showcase framing. */
@@ -100,6 +103,22 @@ interface StudentCampus3DRendererProps {
   onCameraPoseRestoreComplete?: (nonce: number) => void;
 }
 const EMPTY_EVENT_VENUES: readonly EventVenue[] = Object.freeze([]);
+const EMPTY_CAMPUS_POINTS: readonly Pt[] = Object.freeze([]);
+
+interface EntranceDoorMaterialState {
+  material: THREE.Material;
+  baseOpacity: number;
+  baseTransparent: boolean;
+  baseDepthWrite: boolean;
+  targetOpacity: number;
+}
+
+function restoreEntranceDoorMaterial(state: EntranceDoorMaterialState) {
+  state.material.opacity = state.baseOpacity;
+  state.material.transparent = state.baseTransparent;
+  state.material.depthWrite = state.baseDepthWrite;
+  state.material.needsUpdate = true;
+}
 
 class SceneErrorBoundary extends Component<{ children: ReactNode; onError: () => void }, { failed: boolean }> {
   state = { failed: false };
@@ -1503,11 +1522,130 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
     {levels.length > 1 && [-1, 1].map((side) => <SculptureLimb key={"support-" + side} from={[side * runLength * 0.48, 0, stairZ + treadDepth * 0.56]} to={[side * runLength * 0.48, levels[levels.length - 1].elevation, stairZ + treadDepth * 0.56]} radius={0.008} color={steel} />)}
   </group>;
 }
-function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTransition, onEnterBuilding, shouldSuppressClick }: { campus: ReadonlyOutdoorCampus; hasRoute: boolean; exploreTransitionsEnabled?: boolean; activeTransition?: StudentCampus3DRendererProps["activeTransition"]; onEnterBuilding?: (buildingId: string) => void; shouldSuppressClick: () => boolean }) {
+function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTransition, onEnterBuilding, shouldSuppressClick, routePoints, walkProgressRef, followMode, followPlaying, reducedMotion }: {
+  campus: ReadonlyOutdoorCampus;
+  hasRoute: boolean;
+  exploreTransitionsEnabled?: boolean;
+  activeTransition?: StudentCampus3DRendererProps["activeTransition"];
+  onEnterBuilding?: (buildingId: string) => void;
+  shouldSuppressClick: () => boolean;
+  routePoints: readonly Pt[];
+  walkProgressRef?: MutableRefObject<number>;
+  followMode?: boolean;
+  followPlaying?: boolean;
+  reducedMotion?: boolean;
+}) {
+  const invalidate = useThree((state) => state.invalidate);
+  const doorMaterialsRef = useRef(new Map<string, EntranceDoorMaterialState>());
+  const doorMaterialCallbacksRef = useRef(new Map<string, (material: THREE.Material | null) => void>());
+  const transitCheckElapsedRef = useRef(1);
+  const entranceDoorMaterialRef = (entranceId: string) => {
+    let callback = doorMaterialCallbacksRef.current.get(entranceId);
+    if (!callback) {
+      callback = (material) => {
+        const previous = doorMaterialsRef.current.get(entranceId);
+        if (!material) {
+          if (previous) restoreEntranceDoorMaterial(previous);
+          doorMaterialsRef.current.delete(entranceId);
+          return;
+        }
+        if (previous?.material === material) return;
+        if (previous) restoreEntranceDoorMaterial(previous);
+        doorMaterialsRef.current.set(entranceId, {
+          material,
+          baseOpacity: material.opacity,
+          baseTransparent: material.transparent,
+          baseDepthWrite: material.depthWrite,
+          targetOpacity: 1,
+        });
+      };
+      doorMaterialCallbacksRef.current.set(entranceId, callback);
+    }
+    return callback;
+  };
   const physicalEntrances = useMemo(
     () => resolveCampusEntrancePresentations(campus.entrances, campus.buildings, canEnterOutdoorBuilding),
     [campus.buildings, campus.entrances],
   );
+  const transitRoutePoints = routePoints.length ? routePoints : EMPTY_CAMPUS_POINTS;
+  const entranceCrossings = useMemo(() => {
+    const crossings = new Map<string, ReturnType<typeof measureRouteDoorCrossings>>();
+    for (const { entrance } of physicalEntrances) {
+      const building = campus.buildings.find((item) => item.id === entrance.buildingId);
+      if (!building) continue;
+      const center = entrance.legacyPosition ?? entranceWorldPosition(building, entrance);
+      const angle = entrance.legacyPosition ? 0 : campusEntranceFacingYaw((center as { angle?: number }).angle);
+      // The authored physical entrance leaf is 0.19–0.20 Three world units.
+      // Convert its local X axis into the shared campus-map coordinate space.
+      const halfWidth = 0.1 / STUDENT_CAMPUS_3D_SCALE;
+      const axisX = Math.cos(angle) * halfWidth;
+      const axisY = -Math.sin(angle) * halfWidth;
+      crossings.set(entrance.id, measureRouteDoorCrossings(
+        transitRoutePoints,
+        { x: center.x - axisX, y: center.y - axisY },
+        { x: center.x + axisX, y: center.y + axisY },
+      ));
+    }
+    return crossings;
+  }, [campus.buildings, physicalEntrances, transitRoutePoints]);
+
+  useEffect(() => () => {
+    for (const state of doorMaterialsRef.current.values()) restoreEntranceDoorMaterial(state);
+    doorMaterialsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    // Route changes, pause, seek, and renderer context changes restore any
+    // previously active entrance leaf before new progress is considered.
+    for (const state of doorMaterialsRef.current.values()) state.targetOpacity = 1;
+    invalidate();
+  }, [entranceCrossings, followMode, followPlaying, invalidate]);
+
+  useFrame((_, delta) => {
+    const activeTransit = Boolean(followMode && followPlaying && walkProgressRef);
+    transitCheckElapsedRef.current += Math.min(delta, 0.05);
+    if (transitCheckElapsedRef.current >= 0.08) {
+      transitCheckElapsedRef.current = 0;
+      const progress = walkProgressRef?.current ?? 0;
+      for (const [entranceId, state] of doorMaterialsRef.current) {
+        const target = routeDoorTransitOpacity(
+          progress,
+          activeTransit,
+          entranceCrossings.get(entranceId) ?? { totalLength: 0, crossings: [] },
+          ROUTE_DOOR_TRANSIT_RADIUS / STUDENT_CAMPUS_3D_SCALE,
+          ROUTE_DOOR_TRANSIT_OPACITY,
+        );
+        state.targetOpacity = target;
+      }
+    }
+
+    let needsAnotherFrame = false;
+    const fade = 1 - Math.exp(-Math.min(delta, 0.05) * 10);
+    for (const state of doorMaterialsRef.current.values()) {
+      const target = state.baseOpacity * state.targetOpacity;
+      if (target < state.baseOpacity - 0.001
+        && (!state.material.transparent || state.material.depthWrite)) {
+        state.material.transparent = true;
+        state.material.depthWrite = false;
+        state.material.needsUpdate = true;
+      }
+      state.material.opacity = reducedMotion ? target : state.material.opacity + (target - state.material.opacity) * fade;
+      if (Math.abs(state.material.opacity - target) < 0.008) {
+        state.material.opacity = target;
+        if (target >= state.baseOpacity - 0.008) {
+          state.material.opacity = state.baseOpacity;
+          if (state.material.transparent !== state.baseTransparent || state.material.depthWrite !== state.baseDepthWrite) {
+            state.material.transparent = state.baseTransparent;
+            state.material.depthWrite = state.baseDepthWrite;
+            state.material.needsUpdate = true;
+          }
+        }
+      } else {
+        needsAnotherFrame = true;
+      }
+    }
+    if (needsAnotherFrame) invalidate();
+  });
   const physicalDoorPoints = physicalEntrances.map(({ entrance }) => {
     const building = campus.buildings.find((item) => item.id === entrance.buildingId);
     return building ? { buildingId: building.id, point: entrance.legacyPosition ?? entranceWorldPosition(building, entrance) } : null;
@@ -1534,7 +1672,7 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
       {/* One quiet physical doorway is always drawn, regardless of whether
           Campus context permits an action at this authored door. */}
       <group name="student-3d-physical-entrance" userData={{ entranceId: entrance.id }} position={[0, raisedSingleFloorThreshold ? CAMPUS_GROUND_EXIT_LANDING_ELEVATION : 0, 0]}>
-        <mesh position={[0, 0.17, 0.025]}><boxGeometry args={[emergencyDoor ? 0.2 : 0.19, 0.32, 0.045]} /><meshStandardMaterial color={emergencyDoor ? "#3b454a" : "#324754"} roughness={0.85} metalness={emergencyDoor ? 0.28 : 0} /></mesh>
+        <mesh position={[0, 0.17, 0.025]}><boxGeometry args={[emergencyDoor ? 0.2 : 0.19, 0.32, 0.045]} /><meshStandardMaterial ref={entranceDoorMaterialRef(entrance.id)} color={emergencyDoor ? "#3b454a" : "#324754"} roughness={0.85} metalness={emergencyDoor ? 0.28 : 0} /></mesh>
         <mesh position={[-0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
         <mesh position={[0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
         <mesh position={[0, 0.35, 0.045]}><boxGeometry args={[0.265, 0.035, 0.075]} /><meshStandardMaterial color="#d6e0e5" roughness={0.7} /></mesh>
@@ -2276,6 +2414,7 @@ function FollowHumanMarker({ route, progressRef, initialPoint }: { route: readon
 function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTMLCanvasElement | null>; draggedRef: MutableRefObject<boolean> }) {
   const { campus } = props;
   const invalidate = useThree((state) => state.invalidate);
+  const camera = useThree((state) => state.camera);
   const initialExploreGroups = useMemo(
     () => groupStudentRouteExploreTransitions((props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices), 0),
     [props.exploreTransitionCues],
@@ -2378,7 +2517,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       if (event.pointerType === "touch" && pointers.current.size >= 2 && touchGestureStart.current) {
         const pair = [...pointers.current.values()].slice(0, 2);
         const motion = student3dTouchGestureMotion(touchGestureStart.current, [pair[0], pair[1]]);
-        gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointers.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance });
+        gesture = student3dCameraGesture({ pointerType: "touch", button: start.button, pointerCount: pointers.current.size, movement: motion.centroidDistance, pinchMovement: motion.pinchDistance, rotationMovement: motion.rotationRadians });
       } else {
         const movement = Math.hypot(point.x - start.x, point.y - start.y);
         gesture = student3dCameraGesture({ pointerType: start.pointerType, button: start.button, pointerCount: 1, movement });
@@ -2485,7 +2624,9 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
     </group>)}
     <MemoOutdoorAssetLayer assets={campus.decorAssets} suhayHusaySelected={suhayHusaySelected} />
     {campus.buildings.map((building) => <MemoBuilding key={building.id} building={building} selected={props.selectedBuildingId === building.id} onSelectBuilding={selectBuilding} shouldSuppressClick={shouldSuppressClick} />)}
-    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={props.onEnterBuilding ? enterBuilding : undefined} shouldSuppressClick={shouldSuppressClick} />
+    <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={props.onEnterBuilding ? enterBuilding : undefined} shouldSuppressClick={shouldSuppressClick}
+      routePoints={props.followRoutePoints?.length ? props.followRoutePoints : route}
+      walkProgressRef={props.walkProgressRef} followMode={props.followMode} followPlaying={props.followPlaying} reducedMotion={props.reducedMotion} />
     {campus.markers.map((marker) => {
       const position = worldTuple(marker, STUDENT_CAMPUS_3D_GROUND_EPSILON);
       const selected = props.selectedPlaceId === marker.id;
@@ -2567,6 +2708,23 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </Html>
     </group>}
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
+    {props.youAreHerePoint && !route.length && <group data-testid="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
+      <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
+        <ringGeometry args={[0.16, 0.22, 24]} />
+        <meshBasicMaterial color="#2563eb" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh raycast={() => {}} position={[0, 0.28, 0]} renderOrder={25}>
+        <cylinderGeometry args={[0.025, 0.045, 0.48, 10]} />
+        <meshStandardMaterial color="#2563eb" roughness={0.45} />
+      </mesh>
+      <mesh raycast={() => {}} position={[0, 0.56, 0]} renderOrder={26}>
+        <sphereGeometry args={[0.085, 14, 10]} />
+        <meshStandardMaterial color="#60a5fa" emissive="#1d4ed8" emissiveIntensity={0.35} />
+      </mesh>
+      <Html position={[0, 0.82, 0]} center occlude distanceFactor={13} zIndexRange={[96, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
+        <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-[9px] font-extrabold tracking-wide text-white shadow-lg">{props.youAreHereLabel ?? "You are here"}</span>
+      </Html>
+    </group>}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
     {screenExploreTransitionGroups.map((transition) => transition.choices.length > 1
       ? <group key={`explore-${transition.id}`} position={worldTuple(transition.point, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>

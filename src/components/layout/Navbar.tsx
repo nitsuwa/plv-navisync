@@ -202,7 +202,7 @@ export function Navbar() {
 
           {/* ── Right actions ── */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isStudent && <ThemeToggle theme={theme} onToggle={toggleTheme} />}
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
             {isStudent && !authLoading && profile?.id && (
               <StudentNotificationBell

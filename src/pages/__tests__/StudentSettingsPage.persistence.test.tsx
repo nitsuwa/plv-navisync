@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAP_HAPTIC_PREFERENCE_KEY, MAP_SOUND_PREFERENCE_KEY } from "../../lib/mapFeedback";
 
 const authState = vi.hoisted(() => ({
   loading: false,
@@ -19,7 +20,7 @@ const passwordService = vi.hoisted(() => ({ updateStudentPassword: vi.fn() }));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => authState }));
 const themeService = vi.hoisted(() => ({ setThemePreference: vi.fn() }));
-vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ theme: "light", themePreference: "system", toggleTheme: vi.fn(), setThemePreference: themeService.setThemePreference }) }));
+vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ theme: "light", preference: "system", toggleTheme: vi.fn(), setThemePreference: themeService.setThemePreference }) }));
 vi.mock("../../hooks/useScrollReveal", () => ({
   useScrollReveal: () => ({ ref: vi.fn(), visible: true }),
 }));
@@ -34,6 +35,7 @@ import { StudentSettingsPage } from "../StudentSettingsPage";
 describe("StudentSettingsPage persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     authState.profile = { id: "student-a" };
     window.scrollTo = vi.fn();
     preferenceService.loadStudentPreferences.mockResolvedValue({
@@ -46,6 +48,20 @@ describe("StudentSettingsPage persistence", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("keeps map sound off and haptics on by default, then persists their settings locally", async () => {
+    render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    const sound = screen.getByRole("switch", { name: "Sound effects" });
+    const haptics = screen.getByRole("switch", { name: "Haptic feedback" });
+    expect(sound).toHaveAttribute("aria-checked", "false");
+    expect(haptics).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(localStorage.getItem(MAP_SOUND_PREFERENCE_KEY)).toBe("on");
+    fireEvent.click(screen.getByRole("switch", { name: "Haptic feedback" }));
+    expect(localStorage.getItem(MAP_HAPTIC_PREFERENCE_KEY)).toBe("off");
+  });
 
   it("persists the active report-status category without exposing inactive categories", async () => {
     render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });

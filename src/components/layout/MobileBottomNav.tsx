@@ -31,7 +31,7 @@ export function MobileBottomNav() {
       data-testid="mobile-bottom-navigation"
       data-layout-mode={isMapPage ? "map-row" : "fixed-overlay"}
     >
-      <div className={cn("mx-auto grid min-h-16 max-w-screen-sm gap-1 px-3", links.length === 3 ? "grid-cols-3" : "grid-cols-2")}>
+      <div data-testid="mobile-bottom-navigation-content" className={cn("mx-auto grid min-h-[60px] max-w-screen-sm gap-0.5 px-3", links.length === 3 ? "grid-cols-3" : "grid-cols-2")}>
         {links.map(({ label, path, icon: Icon }) => {
           const active = path === "/"
             ? pathname === "/"
@@ -45,7 +45,7 @@ export function MobileBottomNav() {
               aria-label={path === "/student/events" && unreadCount ? `Events, ${unreadCount} unread layout updates` : undefined}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1 text-[11px] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+                "flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-0.5 text-[11px] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                 active ? "text-primary" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
               )}
             >
