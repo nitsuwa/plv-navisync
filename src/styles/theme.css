@@ -468,6 +468,18 @@
   transform-origin: 0 0;
 }
 
+/* Iskolar's small step bounce while route playback is moving. */
+.student-route-walker-bob {
+  animation: student-route-walker-bob 0.35s ease-in-out infinite alternate;
+}
+@keyframes student-route-walker-bob {
+  from { transform: translateY(0); }
+  to { transform: translateY(-0.9px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .student-route-walker-bob { animation: none; }
+}
+
 .student-transition-marker-lod {
   transform: scale(var(--student-map-transition-marker-scale, 1));
   transform-box: view-box;
