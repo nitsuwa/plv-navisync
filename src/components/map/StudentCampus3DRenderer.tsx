@@ -26,6 +26,7 @@ import { measureRouteDoorCrossings, routeDoorTransitOpacity, ROUTE_DOOR_TRANSIT_
 import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
+import { IskolarWalker3D } from "./IskolarWalker3D";
 import { SUHAY_HUSAY_V3_LIMBS, SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V4_LIMBS, SUHAY_HUSAY_V4_POINTS, SUHAY_HUSAY_V4_SUPPORTS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V5_ROCKS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, type SuhayPointName, type SuhayV4PointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
 
 declare module "react" {
@@ -2387,7 +2388,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   return null;
 }
 
-function FollowHumanMarker({ route, progressRef, initialPoint }: { route: readonly Pt[]; progressRef?: MutableRefObject<number>; initialPoint?: Pt | null }) {
+function FollowHumanMarker({ route, progressRef, initialPoint, reducedMotion }: { route: readonly Pt[]; progressRef?: MutableRefObject<number>; initialPoint?: Pt | null; reducedMotion?: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
   const samplePoint = useRef<Pt>({ x: 0, y: 0 });
@@ -2403,11 +2404,7 @@ function FollowHumanMarker({ route, progressRef, initialPoint }: { route: readon
     group.position.set(world.x, world.y, world.z);
   });
   return <group ref={groupRef}>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={20}><circleGeometry args={[0.23, 24]} /><meshBasicMaterial color="#0f172a" depthWrite={false} /></mesh>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.008, 0]} renderOrder={21}><circleGeometry args={[0.19, 24]} /><meshBasicMaterial color="#ffffff" depthWrite={false} /></mesh>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.016, 0]} renderOrder={22}><circleGeometry args={[0.15, 24]} /><meshBasicMaterial color="#0f766e" depthWrite={false} /></mesh>
-    <mesh position={[0, 0.065, 0]} renderOrder={23}><cylinderGeometry args={[0.105, 0.13, 0.1, 16]} /><meshStandardMaterial color="#0f766e" roughness={0.55} /></mesh>
-    <mesh position={[0, 0.15, 0]} renderOrder={24}><sphereGeometry args={[0.045, 12, 8]} /><meshStandardMaterial color="#f8fafc" roughness={0.5} /></mesh>
+    <IskolarWalker3D reducedMotion={reducedMotion} />
   </group>;
 }
 
@@ -2707,7 +2704,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
         <span data-testid="student-3d-route-destination-pin" className="student-destination-pin block -translate-y-full drop-shadow-sm"><MapPin className="h-6 w-6 fill-rose-600 stroke-white stroke-[2.25]" /></span>
       </Html>
     </group>}
-    {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} />}
+    {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} reducedMotion={props.reducedMotion} />}
     {props.youAreHerePoint && !route.length && <group data-testid="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
       <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
         <ringGeometry args={[0.16, 0.22, 24]} />

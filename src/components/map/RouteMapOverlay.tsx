@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { cn } from "../../lib/utils";
 import { useReducedMotion } from "../../hooks";
+import { IskolarMarkerArt } from "./IskolarMarkerArt";
 
 interface RouteMapOverlayProps {
   points: Pt[];
@@ -119,26 +120,30 @@ export interface RouteProgressGeometry {
   completedPoints: Pt[];
   remainingPoints: Pt[];
   position: Pt;
+  /** SVG bearing of the segment under the progress point. */
+  bearing: number;
 }
 
 /** Split one canonical route polyline at its progress point. The completed
  * stroke endpoint and current-position marker share the exact same geometry. */
 export function routeProgressGeometry(points: readonly Pt[], progress: number): RouteProgressGeometry {
-  if (points.length === 0) return { completedPoints: [], remainingPoints: [], position: { x: 0, y: 0 } };
+  if (points.length === 0) return { completedPoints: [], remainingPoints: [], position: { x: 0, y: 0 }, bearing: 0 };
   const t = Math.max(0, Math.min(1, progress));
   if (points.length === 1 || t <= 0) {
-    return { completedPoints: [points[0]], remainingPoints: [...points], position: points[0] };
+    const bearing = points.length > 1 ? segmentBearing(points[0], points[1]) : 0;
+    return { completedPoints: [points[0]], remainingPoints: [...points], position: points[0], bearing };
   }
+  const finalBearing = segmentBearing(points[points.length - 2], points[points.length - 1]);
   if (t >= 1) {
     const last = points[points.length - 1];
-    return { completedPoints: [...points], remainingPoints: [last], position: last };
+    return { completedPoints: [...points], remainingPoints: [last], position: last, bearing: finalBearing };
   }
 
   let totalLength = 0;
   for (let index = 0; index < points.length - 1; index += 1) {
     totalLength += Math.hypot(points[index + 1].x - points[index].x, points[index + 1].y - points[index].y);
   }
-  if (totalLength <= 0) return { completedPoints: [points[0]], remainingPoints: [...points], position: points[0] };
+  if (totalLength <= 0) return { completedPoints: [points[0]], remainingPoints: [...points], position: points[0], bearing: 0 };
 
   const target = totalLength * t;
   let consumed = 0;
@@ -151,12 +156,12 @@ export function routeProgressGeometry(points: readonly Pt[], progress: number): 
       const position = { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
       const completedPoints = [...points.slice(0, index + 1), position];
       const remainingPoints = [position, ...points.slice(index + 1)];
-      return { completedPoints, remainingPoints, position };
+      return { completedPoints, remainingPoints, position, bearing: segmentBearing(from, to) };
     }
     consumed += length;
   }
   const last = points[points.length - 1];
-  return { completedPoints: [...points], remainingPoints: [last], position: last };
+  return { completedPoints: [...points], remainingPoints: [last], position: last, bearing: finalBearing };
 }
 
 /** Student route strokes and their markers are separate layers when embedded in authored map SVGs. */
@@ -263,6 +268,7 @@ export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fad
     const current = root.querySelector<SVGGElement>("[data-route-current-position]");
     current?.setAttribute("transform", `translate(${geometry.position.x},${geometry.position.y})`);
     current?.setAttribute("data-progress", String(progress));
+    current?.querySelector("[data-route-heading]")?.setAttribute("transform", `rotate(${geometry.bearing})`);
   }, [points, totalRouteLength]);
 
   useLayoutEffect(() => {
@@ -314,13 +320,7 @@ export const RouteMapOverlay = memo(function RouteMapOverlay({ points, mode, fad
           const { x, y } = progressGeometry.position;
           return <g data-route-current-position data-progress={progress} transform={`translate(${x},${y})`} style={{ pointerEvents: "none" }}>
             <g className="student-map-screen-marker">
-            <circle cx={0} cy={0} r={13} fill="rgba(249,115,22,0.24)" />
-            <circle cx={0} cy={0} r={10.2} fill="#0f172a" />
-            <circle cx={0} cy={0} r={8.6} fill="#0f766e" stroke="white" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
-            <g transform="scale(0.55)">
-              <circle cy={-4.5} r={3.4} fill="white" />
-              <path d="M -3.4 7 L 0 0 L 3.4 7 M 0 0 L 0 -4.5" fill="none" stroke="white" strokeWidth={2.4} strokeLinecap="round" />
-            </g>
+              <IskolarMarkerArt bearing={progressGeometry.bearing} walking={flowEnabled && !flowPaused && progress !== null && progress > 0 && progress < 1} />
             </g>
           </g>;
         })()}
