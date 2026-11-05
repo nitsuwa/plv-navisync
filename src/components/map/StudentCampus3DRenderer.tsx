@@ -15,7 +15,7 @@ import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
 import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } from "../../lib/studentCampus3dCoordinates";
 import { buildStudentRouteRibbonGeometry, studentRouteHaloColor } from "../../lib/studentRouteRibbonGeometry";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle, student3dCameraRecenterTweenCompletionNonce } from "../../lib/student3dCameraRecenter";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
@@ -286,13 +286,10 @@ function RouteArrows({ points, reducedMotion = false, animate = true }: { points
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh || reducedMotion || !animate || arrows.length === 0) return;
-    const usable = routeSampler.totalLength - 1.8;
-    if (usable <= 0) return;
     elapsedRef.current += Math.min(delta, 0.05);
-    const spacing = usable / arrows.length;
-    const phase = (elapsedRef.current * 0.36) % spacing;
     for (let index = 0; index < arrows.length; index += 1) {
-      const distance = 0.9 + ((index * spacing + phase) % usable);
+      const distance = routeArrowDistanceAt(routeSampler.totalLength, arrows.length, index, elapsedRef.current, 0.36);
+      if (distance === null) continue;
       const point = routeSampler.sample(distance, pointScratch);
       if (!point) continue;
       const [x, y, z] = worldTuple(point, 0.145);
@@ -308,7 +305,10 @@ function RouteArrows({ points, reducedMotion = false, animate = true }: { points
     mesh.instanceMatrix.needsUpdate = true;
   });
   if (!arrows.length) return null;
-  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled />;
+  // The instances move around the entire route but their initial computed
+  // bounds do not. Letting Three.js cull against that stale sphere hides every
+  // arrow once Follow moves the camera away from the initial placement.
+  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled={false} />;
 }
 
 function softBuildingColor(value: string): string {

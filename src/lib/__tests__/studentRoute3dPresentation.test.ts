@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../studentRoute3dPresentation";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../studentRoute3dPresentation";
 
 describe("3D route arrow presentation", () => {
   it("samples route progress from a cached polyline and reuses an output point", () => {
@@ -76,5 +76,38 @@ describe("3D route arrow presentation", () => {
     expect(before).toBeGreaterThan(atCorner);
     expect(atCorner).toBeGreaterThan(after);
     expect(sampler.sample(1)).toEqual({ x: 100, y: 0 });
+  });
+
+  it("keeps a bounded arrow set on-route through many full animation cycles", () => {
+    const totalLength = 31.8;
+    const count = 16;
+    const usable = totalLength - 1.8;
+    const spacing = usable / count;
+    const cycleSeconds = spacing / 0.36;
+    for (let cycle = 0; cycle <= 12; cycle += 1) {
+      for (let frame = 0; frame <= 30; frame += 1) {
+        const elapsed = cycle * cycleSeconds + (frame / 30) * cycleSeconds;
+        const distances = Array.from({ length: count }, (_, index) => routeArrowDistanceAt(totalLength, count, index, elapsed, 0.36));
+        expect(distances.every((distance) => distance !== null && distance >= 0.9 && distance <= totalLength - 0.9)).toBe(true);
+        expect(new Set(distances).size).toBe(count);
+      }
+    }
+  });
+
+  it("preserves phase while paused and resumes without a loop-boundary jump", () => {
+    const totalLength = 18;
+    const count = 8;
+    const beforePause = routeArrowDistanceAt(totalLength, count, 3, 7.25, 0.3);
+    const paused = routeArrowDistanceAt(totalLength, count, 3, 7.25, 0.3);
+    const afterResume = routeArrowDistanceAt(totalLength, count, 3, 7.26, 0.3);
+    expect(paused).toBe(beforePause);
+    expect(afterResume).not.toBeNull();
+    expect(Math.abs(afterResume! - beforePause!)).toBeLessThan(0.01);
+  });
+
+  it("does not create arrows outside the valid route margins", () => {
+    expect(routeArrowDistanceAt(3, 1, 0, 0, 0.3)).toBeCloseTo(0.9);
+    expect(routeArrowDistanceAt(1.7, 1, 0, 0, 0.3)).toBeNull();
+    expect(routeArrowDistanceAt(20, 2, 2, 0, 0.3)).toBeNull();
   });
 });

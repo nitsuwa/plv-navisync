@@ -14,6 +14,28 @@ export interface RouteWorldSampler {
   isNearCorner(distance: number, clearance?: number): boolean;
 }
 
+/** Return one arrow's cyclic distance along a route. The end margins keep the
+ * chevrons on valid route geometry; modulo spacing distributes the bounded
+ * arrow set so a loop boundary never leaves the route empty. */
+export function routeArrowDistanceAt(
+  totalLength: number,
+  arrowCount: number,
+  arrowIndex: number,
+  elapsedSeconds: number,
+  speedWorldPerSecond: number,
+): number | null {
+  const usable = totalLength - 1.8;
+  if (!Number.isFinite(usable) || usable <= 0
+    || !Number.isInteger(arrowCount) || arrowCount < 1
+    || !Number.isInteger(arrowIndex) || arrowIndex < 0 || arrowIndex >= arrowCount
+    || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0
+    || !Number.isFinite(speedWorldPerSecond) || speedWorldPerSecond < 0) return null;
+  const spacing = usable / arrowCount;
+  if (spacing <= 0) return null;
+  const phase = (elapsedSeconds * speedWorldPerSecond) % spacing;
+  return 0.9 + ((arrowIndex * spacing + phase) % usable);
+}
+
 /** Cache canonical route segments in rendered world-distance units so small
  * directional chevrons can flow over the same route without React state or
  * rebuilding route geometry. */
