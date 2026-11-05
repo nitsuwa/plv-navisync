@@ -22,6 +22,9 @@ import { allowedNextStatuses, isReopen, transitionRequirement, validateTransitio
 import { presentReport } from "../lib/reportPresentation";
 import { downloadCsv } from "../lib/exporters";
 import { formatManilaDateStamp, toAdminReportExportRows } from "../lib/adminCsvExports";
+import { getSupabase } from "../lib/supabase";
+import { buildingCoverPublicUrl } from "../services/buildingImageService";
+import { BuildingCover } from "../components/map/BuildingCover";
 
 const CampusMapPage = lazy(() => import("./CampusMapPage").then(module => ({ default: module.CampusMapPage })));
 
@@ -95,6 +98,45 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   const shown = presentReport(report);
   const issueLabel = shown.issue ?? formatCategoryLabel(report.category);
   const nextStatuses = allowedNextStatuses(currentStatus);
+
+  // Fetch the building's cover image so it appears in the map panel even for
+  // room-level reports where only buildingId is known.
+  const [buildingImageUrl, setBuildingImageUrl] = useState<string | undefined>(undefined);
+  const [buildingCode, setBuildingCode] = useState<string>("");
+  const [buildingName, setBuildingName] = useState<string>(report.buildingName ?? "");
+  useEffect(() => {
+    if (!report.buildingId) {
+      setBuildingImageUrl(undefined);
+      setBuildingCode("");
+      setBuildingName(report.buildingName ?? "");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await getSupabase()
+          .from("buildings")
+          .select("code, name, metadata")
+          .eq("id", report.buildingId!)
+          .single();
+        if (cancelled || !data) return;
+        setBuildingCode(data.code ?? "");
+        setBuildingName(data.name ?? report.buildingName ?? "");
+        // The cover image path is stored inside the building's metadata.ui object.
+        const meta = data.metadata;
+        const ui = meta && typeof meta === "object" && !Array.isArray(meta)
+          ? (meta as Record<string, unknown>).ui
+          : undefined;
+        const coverImagePath = ui && typeof ui === "object" && !Array.isArray(ui)
+          ? (ui as Record<string, unknown>).coverImagePath as string | undefined
+          : undefined;
+        setBuildingImageUrl(coverImagePath ? buildingCoverPublicUrl(coverImagePath) : undefined);
+      } catch {
+        // Non-critical — image just won't be shown.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [report.buildingId, report.buildingName]);
 
   useEffect(() => {
     setPendingStatus(null);
@@ -345,6 +387,17 @@ function ReportDetailModal({ report, onClose, onChanged }: {
                 initialFloorId={report.floorId ?? undefined}
                 locationPreviewPanel={(
                   <>
+                    {/* Building cover image — shown for both building-level and room-level reports */}
+                    {(buildingImageUrl !== undefined || buildingCode) && (
+                      <div className="shrink-0">
+                        <BuildingCover
+                          imageUrl={buildingImageUrl}
+                          code={buildingCode}
+                          name={buildingName}
+                          className="rounded-none"
+                        />
+                      </div>
+                    )}
                     <div className="shrink-0 border-b border-border px-5 py-5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">Report location</p>

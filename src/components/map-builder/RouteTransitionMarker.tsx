@@ -1,5 +1,6 @@
 import type { TestRouteContinuationMarker, TestRouteTransitionMarker } from "./TestNavigationPanel";
-import { Accessibility, ArrowUpDown, Building2, Footprints, MapPin, PersonStanding } from "lucide-react";
+import { Accessibility, ArrowUpDown, Building2, Footprints, MapPin } from "lucide-react";
+import { IskolarBust } from "../map/IskolarMarkerArt";
 
 export type RouteMarkerKind = "start" | "destination" | TestRouteTransitionMarker["kind"];
 
@@ -159,7 +160,10 @@ export function RouteEndpointMarker({ x, y, kind, color }: { x: number; y: numbe
       <g transform={`translate(${offsetX} ${offsetY})`}>
         <circle r={kind === "start" ? 9 : 10} fill={fill} stroke="white" strokeWidth={2} />
         {kind === "start" ? (
-          <PersonStanding x={-5} y={-5} width={10} height={10} color="white" strokeWidth={2.4} />
+          <>
+            <circle r={7} fill="#ffffff" />
+            <IskolarBust radius={7} />
+          </>
         ) : (
           <MapPin x={-6} y={-6} width={12} height={12} color="white" strokeWidth={2.2} />
         )}
