@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../studentRoute3dPresentation";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements, routePolylineWorldLength, routeVisualProgressWithEndpointClearance } from "../studentRoute3dPresentation";
 
 describe("3D route arrow presentation", () => {
   it("samples route progress from a cached polyline and reuses an output point", () => {
@@ -109,5 +109,20 @@ describe("3D route arrow presentation", () => {
     expect(routeArrowDistanceAt(3, 1, 0, 0, 0.3)).toBeCloseTo(0.9);
     expect(routeArrowDistanceAt(1.7, 1, 0, 0, 0.3)).toBeNull();
     expect(routeArrowDistanceAt(20, 2, 2, 0, 0.3)).toBeNull();
+  });
+
+  it("smoothly eases only the visual marker to a safe stop before doorway endpoints", () => {
+    const route = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }];
+    const length = routePolylineWorldLength(route, 0.025);
+    expect(length).toBeCloseTo(1);
+    const start = routeVisualProgressWithEndpointClearance(0.52, length, 0.08);
+    const nearEnd = routeVisualProgressWithEndpointClearance(0.99, length, 0.08);
+    const arrival = routeVisualProgressWithEndpointClearance(1, length, 0.08);
+    expect(start).toBeCloseTo(0.52);
+    expect(nearEnd).toBeGreaterThan(start);
+    expect(arrival).toBeCloseTo(0.92);
+    expect(arrival).toBeLessThan(1);
+    expect(routeVisualProgressWithEndpointClearance(1, 0.2, 0.08)).toBeCloseTo(0.88);
+    expect(routeVisualProgressWithEndpointClearance(1, 0, 0.24)).toBe(1);
   });
 });

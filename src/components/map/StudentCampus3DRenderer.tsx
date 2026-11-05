@@ -15,8 +15,8 @@ import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
 import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } from "../../lib/studentCampus3dCoordinates";
 import { buildStudentRouteRibbonGeometry, studentRouteHaloColor } from "../../lib/studentRouteRibbonGeometry";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
-import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection } from "../../lib/student3dCameraFocus";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements, routePolylineWorldLength, routeVisualProgressWithEndpointClearance } from "../../lib/studentRoute3dPresentation";
+import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection, student3dIndoorArrivalCameraDirection } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle, student3dCameraRecenterTweenCompletionNonce } from "../../lib/student3dCameraRecenter";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
@@ -70,6 +70,7 @@ interface StudentCampus3DRendererProps {
   /** Selected exterior tour stop; only this selection uses entrance-facing showcase framing. */
   showcaseBuildingId?: string | null;
   arrivalFocusPoint?: Pt | null;
+  arrivalApproachPoint?: Pt | null;
   arrivalFocusKey?: string | null;
   arrivalFocusBuildingId?: string | null;
   arrivalFocusPlaceId?: string | null;
@@ -1937,7 +1938,7 @@ function ActiveTransitionMarker({ transition, reducedMotion, shouldSuppressClick
   </group>;
 }
 
-function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, focusOnViewportChange, showcaseBuildingId, emergencyRouteSegments, emergencyRouteOverview, emergencyRouteOverviewNonce, arrivalFocusPoint, arrivalFocusKey, arrivalFocusBuildingId, arrivalFocusPlaceId, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, recenterFollowOffset, onRecenterComplete, surfaceRef, onCameraPoseChange, cameraPoseRestore, cameraPoseRestoreNonce, onCameraPoseRestoreComplete }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "focusOnViewportChange" | "showcaseBuildingId" | "emergencyRouteSegments" | "emergencyRouteOverview" | "emergencyRouteOverviewNonce" | "arrivalFocusPoint" | "arrivalFocusKey" | "arrivalFocusBuildingId" | "arrivalFocusPlaceId" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion" | "onRecenterComplete" | "onCameraPoseChange" | "cameraPoseRestore" | "cameraPoseRestoreNonce" | "onCameraPoseRestoreComplete"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null>; recenterFollowOffset?: Student3dCameraOffset | null }) {
+function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followRoutePoints, routePreview, focusPoint, focusNonce, focusOnViewportChange, showcaseBuildingId, emergencyRouteSegments, emergencyRouteOverview, emergencyRouteOverviewNonce, arrivalFocusPoint, arrivalApproachPoint, arrivalFocusKey, arrivalFocusBuildingId, arrivalFocusPlaceId, routeInspectionFocusPoint, routeInspectionFocusKey, selectedBuildingId, selectedPlaceId, followMode, followPlaying, freeLook, followSessionKey, reducedMotion, orbitRef, recenterNonce, recenterFollowOffset, onRecenterComplete, surfaceRef, onCameraPoseChange, cameraPoseRestore, cameraPoseRestoreNonce, onCameraPoseRestoreComplete }: Pick<StudentCampus3DRendererProps, "campus" | "humanPoint" | "walkProgressRef" | "routePoints" | "followRoutePoints" | "routePreview" | "focusPoint" | "focusNonce" | "focusOnViewportChange" | "showcaseBuildingId" | "emergencyRouteSegments" | "emergencyRouteOverview" | "emergencyRouteOverviewNonce" | "arrivalFocusPoint" | "arrivalApproachPoint" | "arrivalFocusKey" | "arrivalFocusBuildingId" | "arrivalFocusPlaceId" | "routeInspectionFocusPoint" | "routeInspectionFocusKey" | "selectedBuildingId" | "selectedPlaceId" | "followMode" | "followPlaying" | "freeLook" | "followSessionKey" | "reducedMotion" | "onRecenterComplete" | "onCameraPoseChange" | "cameraPoseRestore" | "cameraPoseRestoreNonce" | "onCameraPoseRestoreComplete"> & { orbitRef: RefObject<any>; recenterNonce: number; surfaceRef: RefObject<HTMLCanvasElement | null>; recenterFollowOffset?: Student3dCameraOffset | null }) {
   const { invalidate, camera, size } = useThree();
   const initialized = useRef(false);
   const owner = useRef<"fit" | "focus" | "follow" | "arrival" | "user" | "recenter">("fit");
@@ -1959,6 +1960,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   // against the full route can pull Follow back toward an earlier building.
   const followRoute = followRoutePoints?.length ? followRoutePoints : route;
   const sampleFollowRoute = useMemo(() => createRoutePointSampler(followRoute), [followRoute]);
+  const followRouteLengthWorld = useMemo(() => routePolylineWorldLength(followRoute, STUDENT_CAMPUS_3D_SCALE), [followRoute]);
   const routeFrameKey = useMemo(() => emergencyRouteOverview && emergencyRouteSegments?.length
     ? `emergency-overview:${emergencyRouteOverviewNonce ?? 0}:${emergencyRouteSegments.flatMap((segment) => segment.points).map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")}`
     : routePreview && route.length > 1
@@ -2067,7 +2069,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     }
     return { target, position: target.clone().add(offsetDirection.multiplyScalar(distance)) };
   }, [camera, campus, emergencyRouteOverview, emergencyRouteSegments, route, size.height, size.width, surfaceRef]);
-  const focusTarget = useCallback((point: Pt, override?: { buildingId?: string | null; placeId?: string | null }) => {
+  const focusTarget = useCallback((point: Pt, override?: { buildingId?: string | null; placeId?: string | null; approachPoint?: Pt | null }) => {
     const focusBuildingId = override ? override.buildingId : selectedBuildingId;
     const focusPlaceId = override ? override.placeId : selectedPlaceId;
     const selectedBuilding = campus.buildings.find((building) => building.id === focusBuildingId);
@@ -2117,6 +2119,10 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     // adding a restrained side offset for a recognizable three-quarter view.
     // Ordinary map selections retain the established camera direction.
     let offsetDirection = new THREE.Vector3(0.43, 0.72, 0.55).normalize();
+    if (override?.approachPoint) {
+      const arrivalDirection = student3dIndoorArrivalCameraDirection([override.approachPoint, point]);
+      if (arrivalDirection) offsetDirection.set(arrivalDirection.x, arrivalDirection.y, arrivalDirection.z).normalize();
+    }
     if (isShowcaseBuilding && selectedBuilding) {
       const entrances = [...(selectedBuilding.entrances ?? [])];
       const preferredEntrance = entrances
@@ -2236,6 +2242,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       const pose = focusTarget(arrivalFocusPoint, {
         buildingId: arrivalFocusBuildingId,
         placeId: arrivalFocusPlaceId,
+        approachPoint: arrivalApproachPoint,
       });
       if (reducedMotion) {
         tween.current = null;
@@ -2250,7 +2257,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       startTween(pose.target, "arrival", pose.position);
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, focusTarget, invalidate, orbitRef, reducedMotion, restoreDamping, size.height, size.width, startTween]);
+  }, [arrivalApproachPoint, arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, focusTarget, invalidate, orbitRef, reducedMotion, restoreDamping, size.height, size.width, startTween]);
 
   useEffect(() => { enteredFollow.current = false; }, [followSessionKey]);
   useEffect(() => {
@@ -2271,7 +2278,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     // also rebinds the camera when a route crosses a scene boundary.
     if (arrivalFocusKey || !followMode || freeLook || enteredFollow.current || !orbitRef.current) return;
     tween.current = null;
-    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(routeVisualProgressWithEndpointClearance(walkProgressRef.current, followRouteLengthWorld), samplePointRef.current) : humanPoint;
     const pose = currentPoint ? followPoseForPoint(currentPoint) : null;
     const target = pose ? pose.target : desired.current.clone();
     followViewportOffset.current.copy(pose?.viewportOffset ?? new THREE.Vector3());
@@ -2281,7 +2288,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     startTween(target, "follow", position);
     enteredFollow.current = true;
     invalidate();
-  }, [arrivalFocusKey, followMode, freeLook, followSessionKey, followPoseForPoint, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
+  }, [arrivalFocusKey, followMode, freeLook, followSessionKey, followPoseForPoint, followRouteLengthWorld, humanPoint, invalidate, orbitRef, sampleFollowRoute, startTween, walkProgressRef]);
 
   useEffect(() => {
     // Selection focus is a presentation action; it must never take camera
@@ -2381,7 +2388,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   }, [arrivalFocusKey, invalidate, orbitRef, reducedMotion, restoreDamping, routeFrameKey, routeFramePose, routePreview, startTween]);
   const lastRecenterNonce = useRef(0);
   useEffect(() => {
-    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(routeVisualProgressWithEndpointClearance(walkProgressRef.current, followRouteLengthWorld), samplePointRef.current) : humanPoint;
     if (currentPoint) {
       const source = campusMapPointToWorld(currentPoint);
       desired.current.set(source.x, 0, source.z);
@@ -2395,6 +2402,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       const pose = focusTarget(arrivalFocusPoint, {
         buildingId: arrivalFocusBuildingId,
         placeId: arrivalFocusPlaceId,
+        approachPoint: arrivalApproachPoint,
       });
       startTween(pose.target, "arrival", pose.position);
       return;
@@ -2461,7 +2469,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const destinationPosition = target.clone().add(new THREE.Vector3(0, distance * 0.74, distance * 0.673));
     startTween(target, "recenter", destinationPosition);
     pendingRecenterNonce.current = student3dCameraRecenterTweenCompletionNonce(requestedNonce, "recenter");
-  }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, followPoseForPoint, freeLook, humanPoint, invalidate, onRecenterComplete, orbitRef, recenterFollowOffset, recenterNonce, reducedMotion, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
+  }, [arrivalApproachPoint, arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, followPoseForPoint, freeLook, humanPoint, invalidate, onRecenterComplete, orbitRef, recenterFollowOffset, recenterNonce, reducedMotion, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
 
   useEffect(() => {
     if (arrivalFocusKey) return;
@@ -2529,7 +2537,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       }
       else invalidate();
     }
-    const currentPoint = walkProgressRef ? sampleFollowRoute(walkProgressRef.current, samplePointRef.current) : humanPoint;
+    const currentPoint = walkProgressRef ? sampleFollowRoute(routeVisualProgressWithEndpointClearance(walkProgressRef.current, followRouteLengthWorld), samplePointRef.current) : humanPoint;
     if (!tweenOwnsFrame && !arrivalFocusKey && followPlaying && followMode && currentPoint && !freeLook) {
       owner.current = "follow";
       if (Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015) {
@@ -2549,11 +2557,14 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
 function FollowHumanMarker({ route, progressRef, initialPoint, reducedMotion }: { route: readonly Pt[]; progressRef?: MutableRefObject<number>; initialPoint?: Pt | null; reducedMotion?: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
   const sampleRoute = useMemo(() => createRoutePointSampler(route), [route]);
+  const routeLengthWorld = useMemo(() => routePolylineWorldLength(route, STUDENT_CAMPUS_3D_SCALE), [route]);
   const samplePoint = useRef<Pt>({ x: 0, y: 0 });
   useFrame(() => {
     const group = groupRef.current;
     if (!group) return;
-    const point = progressRef ? sampleRoute(progressRef.current, samplePoint.current) : initialPoint;
+    const point = progressRef
+      ? sampleRoute(routeVisualProgressWithEndpointClearance(progressRef.current, routeLengthWorld), samplePoint.current)
+      : initialPoint;
     if (!point) { group.visible = false; return; }
     // Route ribbons sit at 0.12 world units. Keep the tracked marker just
     // above that plane so its dark outline cannot be sliced by the route.
@@ -2572,7 +2583,9 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const camera = useThree((state) => state.camera);
   const occlusionRegistryRef = useRef<OutdoorOcclusionRegistry>(new Map());
   const occlusionProbeTimeRef = useRef(0);
-  const occlusionPointSampler = useMemo(() => createRoutePointSampler(props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? []), [props.followRoutePoints, props.routePoints]);
+  const occlusionRoutePoints = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
+  const occlusionPointSampler = useMemo(() => createRoutePointSampler(occlusionRoutePoints), [occlusionRoutePoints]);
+  const occlusionRouteLengthWorld = useMemo(() => routePolylineWorldLength(occlusionRoutePoints, STUDENT_CAMPUS_3D_SCALE), [occlusionRoutePoints]);
   const occlusionPointRef = useRef<Pt>({ x: 0, y: 0 });
   const occlusionTargetRef = useRef(new THREE.Vector3());
   const occlusionProjectedRef = useRef(new THREE.Vector3());
@@ -2607,7 +2620,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       occlusionProbeTimeRef.current = clock.elapsedTime;
       const route = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
       const point = props.walkProgressRef && route.length > 1
-        ? occlusionPointSampler(props.walkProgressRef.current, occlusionPointRef.current)
+        ? occlusionPointSampler(routeVisualProgressWithEndpointClearance(props.walkProgressRef.current, occlusionRouteLengthWorld), occlusionPointRef.current)
         : props.humanPoint ?? route[0];
       if (point) {
         const world = campusMapPointToWorld(point, 0.23);
@@ -2962,7 +2975,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       : <ActiveTransitionMarker key={`explore-${transition.id}`} transition={transition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />)}
     <OrbitControls ref={orbitRef} makeDefault enableDamping={!props.reducedMotion} dampingFactor={0.08} enablePan enableRotate enableZoom minPolarAngle={0.38} maxPolarAngle={1.15} minDistance={4} maxDistance={Math.max(18, Math.min(60, Math.hypot(worldW, worldH) * 2.2))} />
     <EventPreviewCamera session={props.previewCameraSession} request={props.previewCamera} frame={{ scale: STUDENT_CAMPUS_3D_SCALE, originX: 0, originY: 0 }} />
-    {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} focusOnViewportChange={props.focusOnViewportChange} showcaseBuildingId={props.showcaseBuildingId} emergencyRouteSegments={props.emergencyRouteSegments} emergencyRouteOverview={props.emergencyRouteOverview} emergencyRouteOverviewNonce={props.emergencyRouteOverviewNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} recenterFollowOffset={props.recenterFollowOffset} onRecenterComplete={props.onRecenterComplete} surfaceRef={props.surfaceRef} onCameraPoseChange={props.onCameraPoseChange} cameraPoseRestore={props.cameraPoseRestore} cameraPoseRestoreNonce={props.cameraPoseRestoreNonce} onCameraPoseRestoreComplete={props.onCameraPoseRestoreComplete} />}
+    {!props.previewCamera && <WorldCamera campus={campus} humanPoint={props.humanPoint} walkProgressRef={props.walkProgressRef} routePoints={route} followRoutePoints={props.followRoutePoints} routePreview={props.routePreview} focusPoint={props.focusPoint} focusNonce={props.focusNonce} focusOnViewportChange={props.focusOnViewportChange} showcaseBuildingId={props.showcaseBuildingId} emergencyRouteSegments={props.emergencyRouteSegments} emergencyRouteOverview={props.emergencyRouteOverview} emergencyRouteOverviewNonce={props.emergencyRouteOverviewNonce} arrivalFocusPoint={props.arrivalFocusPoint} arrivalApproachPoint={props.arrivalApproachPoint} arrivalFocusKey={props.arrivalFocusKey} arrivalFocusBuildingId={props.arrivalFocusBuildingId} arrivalFocusPlaceId={props.arrivalFocusPlaceId} routeInspectionFocusPoint={props.routeInspectionFocusPoint} routeInspectionFocusKey={props.routeInspectionFocusKey} selectedBuildingId={props.selectedBuildingId} selectedPlaceId={props.selectedPlaceId} followMode={props.followMode} followPlaying={props.followPlaying} freeLook={props.freeLook} followSessionKey={props.followSessionKey} reducedMotion={props.reducedMotion} orbitRef={orbitRef} recenterNonce={props.recenterNonce ?? 0} recenterFollowOffset={props.recenterFollowOffset} onRecenterComplete={props.onRecenterComplete} surfaceRef={props.surfaceRef} onCameraPoseChange={props.onCameraPoseChange} cameraPoseRestore={props.cameraPoseRestore} cameraPoseRestoreNonce={props.cameraPoseRestoreNonce} onCameraPoseRestoreComplete={props.onCameraPoseRestoreComplete} />}
   </>;
 }
 

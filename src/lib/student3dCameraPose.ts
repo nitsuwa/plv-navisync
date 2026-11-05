@@ -26,6 +26,36 @@ export function student3dFollowCameraOrientationChanged(
   return directionDot < Math.max(-1, Math.min(1, minimumDirectionDot));
 }
 
+/** Follow's heading target also tracks OrbitControls dolly distance. Without
+ * the magnitude check, indoor heading smoothing can restore its stale zoom. */
+export function student3dFollowCameraOffsetChanged(
+  current: { x: number; y: number; z: number } | null | undefined,
+  desired: { x: number; y: number; z: number },
+  minimumDirectionDot = 0.985,
+  minimumDistanceDelta = 0.035,
+): boolean {
+  if (student3dFollowCameraOrientationChanged(current, desired, minimumDirectionDot)) return true;
+  if (!current) return true;
+  return Math.abs(Math.hypot(current.x, current.y, current.z) - Math.hypot(desired.x, desired.y, desired.z)) >= Math.max(0, minimumDistanceDelta);
+}
+
+/** Preserve a user-selected Follow zoom while smoothing camera heading. */
+export function synchronizeStudent3dFollowCameraOffsetDistance(
+  offset: { x: number; y: number; z: number },
+  distance: number,
+  minimumDistanceDelta = 0.035,
+  minimumDistance = 0.1,
+): boolean {
+  if (![offset.x, offset.y, offset.z, distance].every(Number.isFinite) || distance <= minimumDistance) return false;
+  const currentDistance = Math.hypot(offset.x, offset.y, offset.z);
+  if (currentDistance <= 1e-8 || Math.abs(distance - currentDistance) < Math.max(0, minimumDistanceDelta)) return false;
+  const scale = distance / currentDistance;
+  offset.x *= scale;
+  offset.y *= scale;
+  offset.z *= scale;
+  return true;
+}
+
 /** A saved pose belongs only to the campus or Floor that produced it. */
 export function student3dCameraPoseRestoreForContext(
   request: Student3dCameraPoseRestoreRequest | null | undefined,

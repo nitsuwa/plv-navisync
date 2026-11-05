@@ -1,5 +1,44 @@
 import type { Pt } from "./routePlanner";
 
+/** Authored indoor floor coordinates to Three.js world units. */
+export const STUDENT_FLOOR_3D_SCALE = 0.025;
+const DEFAULT_AVATAR_ENDPOINT_CLEARANCE_WORLD = 0.08;
+
+/** Route length in rendered world units, used only for presentation decisions. */
+export function routePolylineWorldLength(points: readonly Pt[], worldScale: number): number {
+  if (!Number.isFinite(worldScale) || worldScale <= 0) return 0;
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    if (!Number.isFinite(previous.x) || !Number.isFinite(previous.y)
+      || !Number.isFinite(current.x) || !Number.isFinite(current.y)) continue;
+    length += Math.hypot(current.x - previous.x, current.y - previous.y) * worldScale;
+  }
+  return length;
+}
+
+/** Keep the rendered avatar slightly before a possibly wall-adjacent endpoint.
+ * This never changes canonical route progress, destination, or arrival state. */
+export function routeVisualProgressWithEndpointClearance(
+  progress: number,
+  routeLengthWorld: number,
+  clearanceWorld = DEFAULT_AVATAR_ENDPOINT_CLEARANCE_WORLD,
+): number {
+  const clampedProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+  if (!Number.isFinite(routeLengthWorld) || routeLengthWorld <= 0
+    || !Number.isFinite(clearanceWorld) || clearanceWorld <= 0) return clampedProgress;
+  // On short room-to-room paths, keep the correction proportional so the
+  // character still arrives close to its destination.
+  const clearance = Math.min(clearanceWorld, routeLengthWorld * 0.12);
+  const start = Math.max(0, 1 - (clearance * 2) / routeLengthWorld);
+  if (clampedProgress <= start) return clampedProgress;
+  const amount = Math.min(1, (clampedProgress - start) / (1 - start));
+  // Smoothstep keeps walking movement continuous as the avatar eases to rest.
+  const eased = amount * amount * (3 - 2 * amount);
+  return start + eased * (clearance / routeLengthWorld);
+}
+
 export interface RouteArrowPlacement {
   point: Pt;
   /** Yaw for a flat arrow whose local forward axis is +X, with map Y mapped to world +Z. */
