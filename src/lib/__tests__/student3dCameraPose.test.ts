@@ -6,6 +6,8 @@ import {
   student3dCameraPoseRestoreCompletionMatches,
   student3dCameraPoseRestoreForContext,
   student3dFollowCameraOffsetForRecovery,
+  student3dFollowCameraOffsetChanged,
+  synchronizeStudent3dFollowCameraOffsetDistance,
   student3dFollowCameraOrientationChanged,
   shouldPreserveStudent3dFollowCameraOffset,
   type Student3dCameraPoseRestoreRequest,
@@ -106,6 +108,22 @@ describe("Student 3D camera pose ownership and recovery", () => {
     expect(student3dFollowCameraOrientationChanged({ x: 0, y: 7, z: -7 }, { x: 7, y: 7, z: 0 })).toBe(true);
     expect(student3dFollowCameraOrientationChanged({ x: 1, y: 7, z: -7 }, { x: 0.9, y: 7, z: -7 })).toBe(false);
     expect(student3dFollowCameraOrientationChanged(null, { x: 0, y: 7, z: -7 })).toBe(true);
+  });
+
+  it("recognizes a Follow zoom change even when the route heading is unchanged", () => {
+    expect(student3dFollowCameraOffsetChanged({ x: 0, y: 7, z: -7 }, { x: 0, y: 10, z: -10 })).toBe(true);
+    expect(student3dFollowCameraOffsetChanged({ x: 0, y: 7, z: -7 }, { x: 0, y: 7.01, z: -7.01 })).toBe(false);
+  });
+
+  it("preserves a manual Follow zoom through camera updates and a route turn", () => {
+    const followedOffset = { x: 0, y: 7, z: -7 };
+    expect(synchronizeStudent3dFollowCameraOffsetDistance(followedOffset, 12)).toBe(true);
+    expect(Math.hypot(followedOffset.x, followedOffset.y, followedOffset.z)).toBeCloseTo(12);
+
+    const turnedOffset = { x: 8.485281374, y: 8.485281374, z: 0 };
+    expect(student3dFollowCameraOffsetChanged(followedOffset, turnedOffset)).toBe(true);
+    expect(synchronizeStudent3dFollowCameraOffsetDistance(turnedOffset, 12)).toBe(false);
+    expect(Math.hypot(turnedOffset.x, turnedOffset.y, turnedOffset.z)).toBeCloseTo(12);
   });
 
   it("does not carry a Follow offset into a replaced route or resized canvas", () => {

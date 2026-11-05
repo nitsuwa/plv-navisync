@@ -31,7 +31,8 @@ import {
 import { hasNavigableRoute, planAuthoredDestinationRoutes, planBuildingRoute, planDestinationRoute, planPointToDestinationRoute, planRouteFromPoint, type PlannedRoute, type RouteIndoorSegment, type RouteStep, type StandardRoutePreference } from "../lib/routePlanner";
 import type { CampusPlaceDest, Destination, RoomDest } from "../lib/combinedPathfinding";
 import { pointAlongPolyline, snapToNearest } from "../lib/geo";
-import { createRoutePointSampler } from "../lib/studentRoute3dPresentation";
+import { createRoutePointSampler, routePolylineWorldLength, routeVisualProgressWithEndpointClearance, STUDENT_FLOOR_3D_SCALE } from "../lib/studentRoute3dPresentation";
+import { STUDENT_CAMPUS_3D_SCALE } from "../lib/studentCampus3dCoordinates";
 import { NODES as STATIC_NAV_NODES } from "../lib/pathfinding";
 import { projectReadonlyOutdoorCampus } from "../lib/readonlyOutdoorCampus";
 import {
@@ -158,9 +159,11 @@ type StudentArrivalCameraTarget = {
   context: "campus" | "floor";
   /** Canonical final point retained for the avatar marker. */
   avatarPoint: Pt;
+  /** Safe rendered stop point, eased to before doorway geometry while preserving the canonical endpoint above. */
+  visualAvatarPoint: Pt;
   /** Last distinct point on the final indoor leg, used to face the arrival camera through its authored approach. */
   approachPoint?: Pt;
-  /** Presentation focus may center a destination building/room around this point. */
+  /** Presentation focus tracks the visible avatar at the destination entrance. */
   cameraPoint: Pt;
   buildingId?: string;
   floorNumber?: number;
@@ -7187,6 +7190,14 @@ const buildingFill = (id: string) =>
     const avatarPoint = endpointPoints.length > 0
       ? pointAlongPolyline(endpointPoints, endpoint.context === "floor" ? endpoint.segmentProgress : endpoint.routeProgress)
       : null;
+    const endpointProgress = endpoint.context === "floor" ? endpoint.segmentProgress : endpoint.routeProgress;
+    const endpointWorldScale = endpoint.context === "floor" ? STUDENT_FLOOR_3D_SCALE : STUDENT_CAMPUS_3D_SCALE;
+    const visualAvatarPoint = avatarPoint && !route.emergencyAssemblyPointId
+      ? pointAlongPolyline(endpointPoints, routeVisualProgressWithEndpointClearance(
+        endpointProgress,
+        routePolylineWorldLength(endpointPoints, endpointWorldScale),
+      ))
+      : avatarPoint;
     if (endpoint.context === "campus") {
       walkProgressRef.current = 1;
       setWalkProgress(1);
@@ -7195,28 +7206,20 @@ const buildingFill = (id: string) =>
       setIndoorWalkProgress(1);
     }
     if (avatarPoint) {
-      const approachPoint = endpoint.context === "floor"
-        ? [...endpointPoints].reverse().find((point) => Math.hypot(avatarPoint.x - point.x, avatarPoint.y - point.y) > 0.001)
-        : undefined;
-      let buildingCenterPoint: { x: number; y: number } | null = null;
-      let campusPlacePoint: { x: number; y: number } | null = null;
+      const approachPoint = [...endpointPoints].reverse().find((point) => Math.hypot(avatarPoint.x - point.x, avatarPoint.y - point.y) > 0.001);
       let buildingId = endpoint.context === "floor" ? endpoint.segment?.buildingId : undefined;
       let floorNumber = endpoint.context === "floor" ? endpoint.segment?.floorNumber : undefined;
       let roomId = endpoint.context === "floor" ? route.destinationRoom?.roomId : undefined;
       let campusPlaceId: string | undefined;
       if (endpoint.context === "campus" && toBuilding) {
-        const building = activeCampus?.buildings.find((candidate) => candidate.id === toBuilding.id);
-        if (building) buildingCenterPoint = { x: building.x + building.width / 2, y: building.y + building.height / 2 };
         buildingId = toBuilding.id;
       } else if (endpoint.context === "campus" && toCampusPlace) {
-        const place = campusPlaceEntity(activeCampus, toCampusPlace.campusPlaceId);
-        if (place) campusPlacePoint = { x: place.x, y: place.y };
         campusPlaceId = toCampusPlace.campusPlaceId;
       }
       // SOS may retain the selected origin building/place in planner state
       // while its real endpoint is an outdoor Assembly Point. That approved
       // destination owns the arrival frame.
-      const cameraPoint = studentRouteArrivalCameraPoint(route, avatarPoint, buildingCenterPoint, campusPlacePoint);
+      const cameraPoint = studentRouteArrivalCameraPoint(route, visualAvatarPoint ?? avatarPoint);
       const assemblyArrival = Boolean(route.emergencyAssemblyPointId && endpoint.context === "campus");
       const targetKey = [
         routeKey,
@@ -7232,6 +7235,7 @@ const buildingFill = (id: string) =>
         key: targetKey,
         context: endpoint.context,
         avatarPoint,
+        visualAvatarPoint: visualAvatarPoint ?? avatarPoint,
         cameraPoint,
         ...(approachPoint ? { approachPoint } : {}),
         ...(!assemblyArrival && buildingId ? { buildingId } : {}),
@@ -7679,7 +7683,10 @@ const buildingFill = (id: string) =>
     && arrivalCameraTarget?.context === "floor"
     && arrivalCameraTarget.buildingId === floorView?.building.id
     && arrivalCameraTarget.floorNumber === floorView?.floor
-    && visibleIndoorRouteIsActive,
+    // Once playback reaches "arrived", activeIndoorSegment can be cleared.
+    // Keep the final avatar visible on its destination Floor while that
+    // authored route is still the one displayed.
+    && visibleIndoorRoute,
   );
   const routeStartsIndoors = routeIndoorSegments.some((segment) => !segment.afterOutdoor);
   const routeEndsIndoors = Boolean(route?.destinationRoom)
@@ -9464,12 +9471,21 @@ const buildingFill = (id: string) =>
   const campus2DProgressMarkerProgress = routePlaybackMarkerTarget?.context === "campus"
     ? routePlaybackMarkerTarget.routeProgress
     : undefined;
+  const campus3DFollowRouteLengthWorld = useMemo(
+    () => routePolylineWorldLength(campus3DFollowRoutePoints, STUDENT_CAMPUS_3D_SCALE),
+    [campus3DFollowRoutePoints],
+  );
   const campus3DHumanPoint = studentRouteUi.phase === "navigating"
     && routePlaybackMarkerVisibleOnCampus
     && navigationPhase === "outdoor"
     && campus3DFollowRoutePoints.length > 0
-    ? pointAlongPolyline(campus3DFollowRoutePoints, routePlaybackMarkerTarget?.context === "campus" ? routePlaybackMarkerTarget.routeProgress : walkProgress)
-    : null;
+    ? pointAlongPolyline(campus3DFollowRoutePoints, routeVisualProgressWithEndpointClearance(
+      routePlaybackMarkerTarget?.context === "campus" ? routePlaybackMarkerTarget.routeProgress : walkProgress,
+      campus3DFollowRouteLengthWorld,
+    ))
+    : arrivalCameraActive && arrivalCameraTarget?.context === "campus"
+      ? arrivalCameraTarget.visualAvatarPoint
+      : null;
   const campus3DFocusPoint = useMemo(() => {
     const buildingId = selected?.id ?? searchFocusRef.current?.buildingId;
     const building = activeCampus?.buildings.find((item) => item.id === buildingId);
@@ -9902,6 +9918,7 @@ const buildingFill = (id: string) =>
               focusOnViewportChange={discoverTour.active}
               showcaseBuildingId={discoverTour.active && discoverTour.view === "showcase" ? currentDiscoverStop?.published.id ?? null : null}
               arrivalFocusPoint={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.cameraPoint : null}
+              arrivalApproachPoint={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.approachPoint ?? null : null}
               arrivalFocusKey={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.key : null}
               arrivalFocusBuildingId={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.buildingId ?? null : null}
               arrivalFocusPlaceId={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.campusPlaceId ?? null : null}
@@ -9971,7 +9988,8 @@ const buildingFill = (id: string) =>
               showStartMarker={!discoverTour.active && indoorShowsStartMarker && indoorRouteMatchesVisibleFloor}
               showDestinationMarker={!discoverTour.active && indoorShowsEndMarker && indoorRouteMatchesVisibleFloor}
               humanVisible={!discoverTour.active && ((studentRouteUi.phase === "preview" && showEmergencyFloorProgressMarker)
-                || (studentRouteUi.phase === "navigating" && routePlaybackMarkerVisibleOnActiveIndoorSegment))}
+                || (studentRouteUi.phase === "navigating" && routePlaybackMarkerVisibleOnActiveIndoorSegment)
+                || arrivalIndoorContextActive)}
               selectedRoomId={discoverTour.active ? selectedRoomContext?.roomId ?? highlightedRoom : arrivalIndoorContextActive && arrivalCameraTarget?.roomId ? arrivalCameraTarget.roomId : routePlannerMapPickRoomOnFloor?.roomId ?? selectedRoomContext?.roomId ?? highlightedRoom}
               interactiveExitDoorIds={discoverTour.active ? new Set<string>() : interactiveExitDoorIds}
               routeRelevantExitDoorIds={discoverTour.active ? new Set<string>() : routeRelevantExitDoorIds}
@@ -9993,7 +10011,7 @@ const buildingFill = (id: string) =>
                 ? indoorQrLocation.point : null}
               youAreHereLabel={qrLocationStale ? "Last scanned location" : "You are here"}
               arrivalFocusKey={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.key : undefined}
-              arrivalFocusPoint={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.avatarPoint ?? null : null}
+              arrivalFocusPoint={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.visualAvatarPoint ?? null : null}
               arrivalApproachPoint={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.approachPoint ?? null : null}
               routeInspectionFocusPoint={!discoverTour.active && routeInspectionFocus?.target.context === "floor"
                 && routeInspectionFocus.target.segment?.buildingId === floorView?.building.id
