@@ -7,6 +7,7 @@ import { AuthProvider, useAuthBootstrap } from "../contexts/StudentAuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { OfflineIndicator, PwaUpdateNotifier } from "../components/layout/PwaPrompts";
+import { DiagnosticsCenter } from "../components/diagnostics/DiagnosticsCenter";
 
 function AppRuntime() {
   const auth = useAuthBootstrap();
@@ -51,6 +52,7 @@ function AppRuntime() {
           />
           <PwaUpdateNotifier />
           <OfflineIndicator />
+          <DiagnosticsCenter />
         </CampusDataProvider>
       )}
       {loadingScreenVisible && (

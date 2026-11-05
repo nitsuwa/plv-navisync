@@ -87,7 +87,7 @@ describe("published campus search connectivity", () => {
     ]));
   });
 
-  it("indexes connected Assembly Points as distinct routable destinations", () => {
+  it("keeps emergency assembly points out of ordinary campus search", () => {
     const withAssemblyPoint = {
       ...campus,
       assemblyPoints: [
@@ -108,15 +108,8 @@ describe("published campus search connectivity", () => {
     expect([...connected.assemblyPointIds]).toEqual(["ap-east"]);
 
     const { result } = renderHook(() => useCampusSearch(withAssemblyPoint));
-    expect(result.current.destinations).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: "ap-east",
-        campusPlaceId: "ap-east",
-        kind: "destination",
-        category: "assembly_point",
-        name: "East Assembly Point",
-      }),
-    ]));
-    expect(result.current.destinations.some((entry) => entry.id === "ap-unconnected")).toBe(false);
+    expect(result.current.results.some((entry) => entry.category === "assembly_point")).toBe(false);
+    expect(result.current.destinations.some((entry) => entry.category === "assembly_point")).toBe(false);
+    expect(result.current.destinations.map((entry) => entry.name)).toContain("Student Center");
   });
 });

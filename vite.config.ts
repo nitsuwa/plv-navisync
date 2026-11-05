@@ -5,6 +5,7 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { configDefaults } from 'vitest/config'
+import { diagnosticsUnlockPlugin } from './scripts/diagnosticsUnlockPlugin'
 
 
 function figmaAssetResolver() {
@@ -83,7 +84,16 @@ function publicAppOrigin(mode: string): string {
   }
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const serverEnv = loadEnv(mode, '.', '')
+  const diagnosticsConfigPath = path.resolve(__dirname, '.env.diagnostics.local')
+  const diagnosticsConfig = fs.existsSync(diagnosticsConfigPath)
+    ? Object.fromEntries(fs.readFileSync(diagnosticsConfigPath, 'utf8').split(/\r?\n/).flatMap(line => {
+      const match = /^(PLV_DIAGNOSTICS_DEVELOPER_ID|PLV_DIAGNOSTICS_PASSWORD_HASH)=(.*)$/.exec(line.trim())
+      return match ? [[match[1], match[2]]] : []
+    })) as Record<string, string>
+    : {}
+  return ({
   // Worktrees may share node_modules; keep optimizer output local to each checkout.
   cacheDir: path.resolve(__dirname, '.tmp/vite-cache'),
   define: {
@@ -91,6 +101,11 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     figmaAssetResolver(),
+    diagnosticsUnlockPlugin({
+      mode,
+      developerId: serverEnv.PLV_DIAGNOSTICS_DEVELOPER_ID ?? diagnosticsConfig.PLV_DIAGNOSTICS_DEVELOPER_ID,
+      passwordHash: serverEnv.PLV_DIAGNOSTICS_PASSWORD_HASH ?? diagnosticsConfig.PLV_DIAGNOSTICS_PASSWORD_HASH,
+    }),
     pwaServiceWorkerPlugin(),
     // The React and Tailwind plugins are both required for Make, even if
     // Tailwind is not being actively used – do not remove them
@@ -145,4 +160,5 @@ export default defineConfig(({ mode }) => ({
     css: true,
     testTimeout: 10000,
   },
-}))
+  })
+})

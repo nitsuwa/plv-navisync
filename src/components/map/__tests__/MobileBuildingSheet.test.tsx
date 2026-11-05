@@ -110,7 +110,7 @@ describe("mobile building details sheet", () => {
     expect(screen.queryByRole("menuitem", { name: /report/i })).not.toBeInTheDocument();
   });
 
-  it("shows the building QR after the QR action is activated", async () => {
+  it("activates the shared QR viewer from the building action", () => {
     const props = {
       selected: building, campusId: "campus-1", onClose: vi.fn(), onDirections: vi.fn(), onEnterBuilding: vi.fn(),
       onSave: vi.fn(), onReport: vi.fn(), onSignInPrompt: vi.fn(), saved: new Set<string>(),
@@ -124,9 +124,9 @@ describe("mobile building details sheet", () => {
     render(<InteractiveBuildingSheet />);
 
     fireEvent.click(screen.getByRole("button", { name: "Show building QR code" }));
-    expect(await screen.findByLabelText(`QR code for ${building.name}`)).toBeVisible();
-    expect(screen.getByTestId("building-qr")).toBeVisible();
-    expect(screen.getByText(`Scan to set ${building.name} as your current location`)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide building QR code" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Hide building QR code" }));
+    expect(screen.getByRole("button", { name: "Show building QR code" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("places an authored building cover in the default mobile state", () => {

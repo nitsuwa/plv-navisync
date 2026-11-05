@@ -126,7 +126,7 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
           </button>
         </header>
 
-        <div data-testid="location-qr-scanner-content" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 sm:flex-initial sm:gap-4 sm:overflow-visible sm:p-4">
+        <div data-testid="location-qr-scanner-content" className="flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 sm:flex-initial sm:justify-start sm:gap-4 sm:overflow-visible sm:p-4">
           <div data-testid="location-qr-viewfinder" className="relative mx-auto flex min-h-[min(58vw,14rem)] max-h-[58dvh] w-full flex-1 overflow-hidden rounded-2xl bg-black sm:aspect-[4/3] sm:min-h-0 sm:max-h-none sm:flex-initial">
             <video ref={videoRef} data-testid="location-qr-video" autoPlay muted playsInline className="h-full w-full object-cover" aria-label="Camera preview for scanning a location QR" />
             {!cameraError && <div aria-hidden="true" data-testid="location-qr-scan-frame" data-scan-state={scanSuccess ? "success" : "scanning"} className="location-qr-scan-frame absolute left-1/2 top-1/2 aspect-square w-[min(78%,16rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border-2 border-white/90">

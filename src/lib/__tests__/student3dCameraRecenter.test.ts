@@ -4,6 +4,7 @@ import {
   student3dCameraRecenterCompletionMatches,
   student3dCameraRecenterNonceForContext,
   student3dCameraRecenterNonceToHandle,
+  student3dCameraRecenterTweenCompletionNonce,
 } from "../student3dCameraRecenter";
 
 describe("student 3D camera recenter ownership", () => {
@@ -36,5 +37,14 @@ describe("student 3D camera recenter ownership", () => {
     expect(student3dCameraRecenterNonceToHandle(8, 0)).toBe(8);
     expect(student3dCameraRecenterNonceToHandle(8, 8)).toBeNull();
     expect(student3dCameraRecenterNonceToHandle(7, 8)).toBeNull();
+  });
+
+  it("tracks completion for a recenter tween while renderer Follow props are transitioning", () => {
+    const requestNonce = student3dCameraRecenterNonceToHandle(9, 0);
+
+    // A mode handoff can briefly take the focus target branch before Follow
+    // props settle. The recenter tween still owns a completion callback.
+    expect(student3dCameraRecenterTweenCompletionNonce(requestNonce, "recenter")).toBe(9);
+    expect(student3dCameraRecenterTweenCompletionNonce(requestNonce, "focus")).toBeNull();
   });
 });

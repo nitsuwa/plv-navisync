@@ -19,6 +19,7 @@ import { useArrivalChime } from "../hooks/useArrivalChime";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
+import { recordDiagnosticEvent, setMapDiagnosticContext, type MapDiagnosticContext } from "../lib/diagnostics";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import {
@@ -82,6 +83,7 @@ import { StudentSelectedPlaceCard } from "../components/map/StudentSelectedPlace
 import { CampusPlaceDetails } from "../components/map/CampusPlaceDetails";
 import { DiscoverTourPanel, type DiscoverTourView } from "../components/map/DiscoverTourPanel";
 import { StudentMapControls } from "../components/map/StudentMapControls";
+import { LocationQR } from "../components/map/LocationQR";
 import { authoredFloorTransitionPoint, studentActiveRouteTransitionAnchor, groupStudentRouteExploreTransitions, initialStudentRouteUiState, panForRouteFocusPoint, routeProgressForStepIndex, routeStepIndexForAuthoredTransition, routeStepIndexForBuildingTransition, routeStepIndexForProgress, routeTransitionForStep, screenSpaceMarkerScale, canonicalActiveRouteStepIndex, studentDisplayedRouteProgress, studentFacingRouteSteps, studentIndoorSegmentForFloor, studentInstructionWithoutUncalibratedDistance, studentRoomFocusTargetId, studentRouteArrivalCameraPoint, studentRouteArrivalTarget, studentRouteCampusMarkerTarget, studentRouteExploreInspectionTarget, studentRouteExploreTransitionCues, studentRouteInspectionTransitionDisplayLabel, studentRouteExploreTransitionTarget, studentRouteFloorLabel, studentRouteFocusAtProgress, studentRouteInitialContext, studentRoutePlaybackTarget, studentRoutePositionForLeg, studentRouteProgressForIndoorSegment, studentRouteSeekDistanceM, studentRouteSeekGeometryDistance, studentRouteStepInstruction, studentRouteSeekTarget, studentRouteShouldPauseAtZeroWalkVerticalAccess, studentRouteStepSeekIndex, studentRouteTransitionCueStepIndex, studentRoutePreviewTransitionTarget, studentRouteTransitionCues as deriveStudentRouteTransitionCues, studentRouteVerticalTransitionContinuesRun, studentRouteVerticalTransitionGroupId, studentRouteVerticalTransitionRunId, studentRoutePrimaryAction, studentRouteCanResumeAfterTransition, studentRouteInitialPhysicalTransitionStepIndex, studentRouteReachedFinalEndpoint, studentRouteFollowNeedsCameraReacquisition, studentRouteFollowCursorActive, studentRouteTerminalSameBuildingExit, studentRouteUiReducer, studentTransitionMarkerLodScale } from "../lib/studentRouteFlow";
 import { studentRoutePreferenceFallbackNotice } from "../lib/studentRouteFlow";
 import { studentRoutePlaybackAfterCameraReacquisition } from "../lib/studentRouteFlow";
@@ -3663,6 +3665,10 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setDirectionsMode(true);
       return;
     }
+    // Planner-only mode and endpoint changes have no route side effects to
+    // invalidate. Avoid cancelling camera/clock work and dispatching a long
+    // list of already-empty states on every mobile tab selection.
+    if (!routeRef.current && (studentRouteUiRef.current.phase === "idle" || studentRouteUiRef.current.phase === "planning")) return;
     completedRouteEditSnapshotRef.current = null;
     emergencyVideoPauseLatchRef.current = false;
     stopEmergencyRouteClocks();
@@ -7552,6 +7558,56 @@ const buildingFill = (id: string) =>
     && !routeContextRecoveryFailed;
   const routeTransitionBusy = navigationTransitioning || Boolean(stairLoading) || routeContextRecoveryPending || routeContextRecoveryFailed;
   const routeNavigationSteps = useMemo(() => route ? studentFacingRouteSteps(route) : [], [route]);
+  useEffect(() => {
+    const navigationState = studentRouteUi.phase;
+    const routeStatus = navigationState === "navigating"
+      ? studentRouteUi.playback === "paused" ? "paused" : "active"
+      : navigationState === "preview" ? "preview"
+        : navigationState === "arrived" ? "arrived" : "none";
+    const context: MapDiagnosticContext = {
+      mapMode: student3DActive ? "3D" as const : campusViewMode === "2d" ? "2D" as const : "unknown" as const,
+      navigationState,
+      cameraMode: studentRouteUi.camera,
+      cameraRecovery: routeContextRecoveryFailed ? "failed" as const : routeContextRecoveryPending ? "pending" as const : navigationState === "navigating" ? "idle" as const : "unknown" as const,
+      campus: activeCampus?.name ?? null,
+      selectedBuilding: floorView?.building.code || floorView?.building.name || selected?.code || selected?.name || selectedCampusPlace?.name || null,
+      floor: floorView?.floor ?? null,
+      route: route ? {
+        start: route.fromCode,
+        destination: route.toCode,
+        type: route.mode,
+        currentStep: navigationState === "navigating" ? Math.floor(playbackCursor) + 1 : null,
+        stepCount: routeNavigationSteps.length,
+      } : null,
+      routeStatus,
+      mapDataStatus: isCampusLoading ? "loading" as const : activeCampus ? "ready" as const : "unavailable" as const,
+      context: floorView ? "indoor" as const : "outdoor" as const,
+      outdoorTransparency: student3DActive && navigationState === "navigating" && navigationPhase === "outdoor" && Boolean(route) ? "enabled" : "disabled",
+    };
+    setMapDiagnosticContext(context);
+    return () => setMapDiagnosticContext(null);
+  }, [activeCampus?.name, activeCampus?.id, campusViewMode, floorView?.building.code, floorView?.building.name, floorView?.floor, isCampusLoading, navigationPhase, playbackCursor, route?.fromCode, route?.mode, route?.toCode, routeNavigationSteps.length, routeContextRecoveryFailed, routeContextRecoveryPending, selected?.code, selected?.name, selectedCampusPlace?.name, student3DActive, studentRouteUi.camera, studentRouteUi.phase, studentRouteUi.playback]);
+  const diagnosticsTransitionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const next = `${studentRouteUi.phase}|${studentRouteUi.camera}|${navigationPhase}|${campusViewMode}|${route?.routeId ?? `${route?.fromCode ?? ""}:${route?.toCode ?? ""}`}`;
+    const previous = diagnosticsTransitionRef.current;
+    if (previous && previous !== next) {
+      const [previousPhase, previousCamera, previousContext, previousView] = previous.split("|");
+      if (previousPhase !== studentRouteUi.phase) {
+        recordDiagnosticEvent({ category: "navigation", severity: "info", summary: `Navigation state changed: ${previousPhase} → ${studentRouteUi.phase}.`, source: "student map" });
+      }
+      if (previousCamera !== studentRouteUi.camera) {
+        recordDiagnosticEvent({ category: "navigation", severity: "info", summary: `Camera mode changed: ${previousCamera} → ${studentRouteUi.camera}.`, source: "student map" });
+      }
+      if (previousContext !== navigationPhase || previousView !== campusViewMode) {
+        recordDiagnosticEvent({ category: "navigation", severity: "info", summary: `Map context changed to ${navigationPhase} ${campusViewMode}.`, source: "student map" });
+      }
+    }
+    diagnosticsTransitionRef.current = next;
+  }, [campusViewMode, navigationPhase, route?.fromCode, route?.routeId, route?.toCode, studentRouteUi.camera, studentRouteUi.phase]);
+  useEffect(() => {
+    if (campusError) recordDiagnosticEvent({ category: "map-data", severity: "error", summary: campusError, source: "published campus loading" });
+  }, [campusError]);
   const arrivalCameraActive = Boolean(arrivalCameraTarget
     && (studentRouteUi.phase === "arrived" || directionsMode && completedRouteEditSnapshotRef.current));
   const routePlaybackMarkerTarget = route && studentRouteUi.phase === "navigating"
@@ -8407,6 +8463,7 @@ const buildingFill = (id: string) =>
     followCameraReacquiringRef.current = true;
     followCameraPoseCaptureSuppressedRef.current = true;
     const routeAtRequest = routeRef.current;
+    recordDiagnosticEvent({ category: "camera-recovery", severity: "info", summary: "Camera recovery requested.", source: `${routeAtRequest?.fromCode ?? "route"} → ${routeAtRequest?.toCode ?? "route"}` });
     setFollowCameraRecoveryFailed(false);
     clearFollowCameraRecoveryTimer();
     const failRecovery = () => {
@@ -8421,6 +8478,7 @@ const buildingFill = (id: string) =>
       setFollowCameraDetached(true);
       setNavigationPauseReason("pan");
       setFollowCameraRecoveryFailed(true);
+      recordDiagnosticEvent({ category: "camera-recovery", severity: "error", summary: "Could not return to the route position after the recovery timeout.", source: `${routeAtRequest?.fromCode ?? "route"} → ${routeAtRequest?.toCode ?? "route"}` });
       dispatchStudentRouteUi({ type: "PAUSE" });
     };
     const onComplete = () => {
@@ -8429,6 +8487,7 @@ const buildingFill = (id: string) =>
       followRecenterIntentRef.current = null;
       followCameraReacquiringRef.current = false;
       setFollowCameraRecoveryFailed(false);
+      recordDiagnosticEvent({ category: "camera-recovery", severity: "info", summary: "Camera recovery completed.", source: `${routeAtRequest?.fromCode ?? "route"} → ${routeAtRequest?.toCode ?? "route"}` });
       followCameraPoseCaptureSuppressedRef.current = false;
       const currentRoute = routeRef.current;
       const currentSteps = currentRoute ? studentFacingRouteSteps(currentRoute) : [];
@@ -10010,6 +10069,7 @@ const buildingFill = (id: string) =>
         </div>
       )}
 
+      <AnimatePresence initial={false} mode="wait">
       {isFloorMode && selectedRoomContext
         && selectedRoomContext.buildingId === floorView?.building.id
         && selectedRoomContext.floorNumber === floorView?.floor
@@ -10054,6 +10114,7 @@ const buildingFill = (id: string) =>
           }}
         />
       )}
+      </AnimatePresence>
 
       {navigationTransitioning && isFloorMode && !stairLoading && (
         <div data-no-drag className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+8rem)] z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground/90 px-3 py-1.5 text-[11px] font-bold text-background shadow-xl animate-fade-in md:top-16">
@@ -11347,7 +11408,7 @@ const buildingFill = (id: string) =>
         aria-hidden={searchFocused}
         inert={searchFocused ? ("" as never) : undefined}
         className={cn(
-          "student-map-floating-account-controls absolute right-2 map-layer-controls pointer-events-auto flex items-start gap-2 transition-[opacity,transform] duration-200 ease-out motion-reduce:duration-0 md:right-4 md:w-[min(360px,calc(100vw-2rem))] md:justify-end",
+          "student-map-floating-account-controls absolute right-2 map-layer-controls pointer-events-auto flex items-center gap-2 transition-[opacity,transform] duration-200 ease-out motion-reduce:duration-0 md:right-4 md:w-[min(360px,calc(100vw-2rem))] md:justify-end",
           searchFocused && "pointer-events-none translate-x-1 scale-95 opacity-0",
         )}
       >
@@ -11555,6 +11616,13 @@ const buildingFill = (id: string) =>
           />
       ) : null}
       </AnimatePresence>
+      {showQR && selected && <LocationQR
+        displaySize="large"
+        onClose={() => setShowQR(false)}
+        campusId={activeCampus?.id}
+        buildingId={selected.id}
+        buildingName={selected.name}
+      />}
       <AnimatePresence initial={false}>
         {selectedCampusPlace && !discoverTour.active && !isFloorMode && !locationPreviewPanel && !routePanelVisible && (
           <CampusPlaceDetails
@@ -11953,7 +12021,7 @@ const buildingFill = (id: string) =>
           <StudentMapLoadingIndicator label="Switching campus" />
         </div>
       )}
-      {!discoverTour.active && activeCampus && (
+      {!discoverTour.active && activeCampus && !(isFloorMode && selectedRoomContext) && (
         <div data-testid="student-map-action-row" data-no-drag className="map-layer-controls absolute left-3 bottom-[max(0.75rem,env(safe-area-inset-bottom,0px))] z-20 flex items-center gap-2 md:bottom-5">
           {!directionsMode && studentRouteUi.phase === "idle" && !route && !navigationTransitioning && !showEventMaps && (
             <button type="button" data-testid="discover-plv-mobile-entry" onClick={requestDiscoverTour} className="pointer-events-auto inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-primary/20 bg-card/95 px-3 text-[11px] font-extrabold text-primary shadow-md shadow-slate-950/10 backdrop-blur-xl transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden">

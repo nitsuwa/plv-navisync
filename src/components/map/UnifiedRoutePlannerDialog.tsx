@@ -1051,9 +1051,9 @@ export function UnifiedRoutePlannerDialog({
     else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
   }, [exploreMode, safeFollowStepIndex, safeStepIndex, showAllSteps, visibleNavigationSteps.length, visibleNavigationSteps[exploreMode ? safeFollowStepIndex : safeStepIndex]]);
   /** Obvious FOLLOW | EXPLORE segmented control with a clearly active state. */
-  const cameraModeSegmented = (testid: string) => (
+  const cameraModeSegmented = (testid: string, mobileTopGap = false) => (
     <div role="group" aria-label="Route camera mode" data-testid={testid}
-      className="flex shrink-0 items-center rounded-full border border-primary/20 bg-card p-px">
+      className={cn("flex shrink-0 items-center rounded-full border border-primary/20 bg-card p-px", mobileTopGap && isMobileViewport && "mt-1")}>
       <button type="button" aria-label={exploreMode ? "Return to Follow mode" : "Switch to Follow mode"} aria-pressed={!exploreMode}
         onClick={() => onCameraModeChange?.("follow")}
         className={cn("min-h-11 rounded-full px-2 text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 max-[360px]:px-1.5 lg:min-h-8",
@@ -1423,7 +1423,7 @@ export function UnifiedRoutePlannerDialog({
                 </details>
               </div>
             ) : navigatingPhase && route ? (
-              <div data-testid="guided-navigation-summary" data-camera-mode={exploreMode ? "explore" : "follow"} className={cn("flex min-h-0 flex-col gap-2", showAllSteps && (isMobileViewport ? "flex-none" : "flex-1"))}>
+              <div data-testid="guided-navigation-summary" data-camera-mode={exploreMode ? "explore" : "follow"} className={cn("flex min-h-0 flex-col gap-2", isMobileViewport && "pt-2", showAllSteps && (isMobileViewport ? "flex-none" : "flex-1"))}>
                 {exploreMode && <div data-testid="explore-route-summary" className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                     <div className="flex min-w-0 flex-[1_1_14rem] items-center gap-2">
@@ -1446,7 +1446,7 @@ export function UnifiedRoutePlannerDialog({
                       </div>
                     </div>
                     <div className="ml-auto flex shrink-0 justify-end">
-                      {cameraModeSegmented("camera-mode")}
+                      {cameraModeSegmented("camera-mode", true)}
                     </div>
                   </div>
                   <div data-testid="explore-route-facts" className="mt-2 hidden flex-wrap gap-1.5 md:flex">{routeFacts.map((fact) => <span key={fact} className="rounded-full border border-border/70 bg-card px-2 py-1 text-[10px] font-bold text-muted-foreground">{fact}</span>)}</div>
@@ -1464,7 +1464,7 @@ export function UnifiedRoutePlannerDialog({
                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-muted-foreground">{showAllSteps ? "Hide" : "Show"}<ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", showAllSteps && "rotate-180")} /></span>
                 </button>}
                 {!exploreMode && <div className="shrink-0 rounded-2xl border border-primary/20 bg-primary/[0.055] p-3">
-                  <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground max-[360px]:hidden"><Navigation className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p><div data-testid="guided-destination-row" className="flex min-w-0 items-center gap-1">{mode === "emergency" ? <p data-testid="guided-destination" title={activeDestinationName} className="line-clamp-2 break-words text-[11px] font-extrabold leading-tight">{activeDestinationName}</p> : renderActiveRouteDestination()}</div></div>{cameraModeSegmented("camera-mode")}</div>
+                    <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground max-[360px]:hidden"><Navigation className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-extrabold uppercase tracking-wider text-primary">Step {safeStepIndex + 1} of {Math.max(1, visibleNavigationSteps.length)}</p><div data-testid="guided-destination-row" className="flex min-w-0 items-center gap-1">{mode === "emergency" ? <p data-testid="guided-destination" title={activeDestinationName} className="line-clamp-2 break-words text-[11px] font-extrabold leading-tight">{activeDestinationName}</p> : renderActiveRouteDestination()}</div></div>{cameraModeSegmented("camera-mode", true)}</div>
                     <motion.p key={`guided-step-${safeStepIndex}-${currentInstruction}`} data-testid="current-route-instruction" role="status" aria-live="polite" aria-atomic="true" className="mt-2 min-h-[2.5rem] text-[14px] font-bold leading-snug text-foreground"
                       initial={reducedMotion ? false : { opacity: 0.35, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0.01 : 0.16, ease: "easeOut" }}>{currentInstruction}</motion.p>
                     {inspectionPaused && <p data-testid="route-paused-for-inspection" role="status" className="mt-2 rounded-lg bg-primary/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-foreground">Paused for map inspection. Resume to return the map to your route.</p>}

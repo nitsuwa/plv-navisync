@@ -42,6 +42,7 @@ describe("LocationQRScanner", () => {
     const frame = screen.getByTestId("location-qr-scan-frame");
     expect(scanner).toHaveClass("fixed", "inset-0", "z-[1000]");
     expect(dialog).toHaveClass("h-full", "w-full", "max-w-none", "sm:max-w-md");
+    expect(screen.getByTestId("location-qr-scanner-content")).toHaveClass("flex-1", "justify-center", "overflow-y-auto", "sm:justify-start");
     expect(viewfinder).toHaveClass("flex-1", "min-h-[min(58vw,14rem)]", "max-h-[58dvh]");
     expect(frame).toHaveClass("aspect-square", "left-1/2", "top-1/2");
     expect(screen.getByTestId("location-qr-video")).toHaveClass("object-cover");

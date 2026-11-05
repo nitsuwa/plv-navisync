@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { createPortal } from "react-dom";
+import { motion, useIsPresent } from "motion/react";
 import { ChevronDown, Navigation, Play, QrCode, X } from "lucide-react";
 import type { RoomDest } from "../../lib/combinedPathfinding";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
@@ -57,7 +58,9 @@ export function StudentSelectedPlaceCard({
   onEmergencyVideoPlaybackStateChange,
 }: StudentSelectedPlaceCardProps) {
   const [qrOpen, setQrOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [sheetState, setSheetState] = useState<"default" | "expanded">("default");
+  const isPresent = useIsPresent();
   const [hasRoomVideo, setHasRoomVideo] = useState(false);
   const [roomPhotoResult, setRoomPhotoResult] = useState<{ key: string; url: string } | null>(null);
   const [roomPhotoLoadingKey, setRoomPhotoLoadingKey] = useState<string | null>(null);
@@ -229,9 +232,9 @@ export function StudentSelectedPlaceCard({
         data-no-drag
         data-testid="student-room-and-video-stack"
         data-suspended-for-search={suspendedForSearch}
-        aria-hidden={suspendedForSearch || undefined}
-        inert={suspendedForSearch ? ("" as never) : undefined}
-        className={`fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-[55] flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-9rem-env(safe-area-inset-bottom,0px)))] flex-col-reverse gap-2 overflow-y-auto overscroll-contain md:absolute md:inset-x-auto md:bottom-auto md:left-auto md:right-3 md:top-[calc(env(safe-area-inset-top,0px)+4.5rem)] md:max-h-[calc(100%-5.5rem)] md:flex-col md:overflow-y-auto ${hasRoomVideo ? "md:w-[min(440px,calc(100vw-1.5rem))]" : "md:w-[min(380px,calc(100vw-1.5rem))]"} ${suspendedForSearch ? "invisible pointer-events-none" : ""}`}
+        aria-hidden={suspendedForSearch || !isPresent || undefined}
+        inert={suspendedForSearch || !isPresent ? ("" as never) : undefined}
+        className={`fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-[55] flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-9rem-env(safe-area-inset-bottom,0px)))] flex-col-reverse gap-2 ${hasRoomVideo ? "overflow-y-auto overscroll-contain" : "overflow-visible"} md:absolute md:inset-x-auto md:bottom-auto md:left-auto md:right-3 md:top-[calc(env(safe-area-inset-top,0px)+4.5rem)] md:max-h-[calc(100%-5.5rem)] md:flex-col ${hasRoomVideo ? "md:overflow-y-auto md:overscroll-contain md:w-[min(440px,calc(100vw-1.5rem))]" : "md:overflow-visible md:w-[min(380px,calc(100vw-1.5rem))]"} ${suspendedForSearch || !isPresent ? "pointer-events-none" : ""}`}
       >
       <motion.section
         key={`${room.buildingId}:${room.floorNumber}:${room.roomId}`}
@@ -239,17 +242,17 @@ export function StudentSelectedPlaceCard({
         data-map-layer="room-sheet"
         data-sheet-state={sheetState}
         data-no-drag
-        aria-hidden={suspendedForSearch || undefined}
-        inert={suspendedForSearch ? ("" as never) : undefined}
+        aria-hidden={suspendedForSearch || !isPresent || undefined}
+        inert={suspendedForSearch || !isPresent ? ("" as never) : undefined}
         aria-label={`${room.roomName} place details`}
-        initial={reducedMotion ? false : { opacity: 0, y: -7, scale: 0.99 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 10, scale: 0.99 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 0.99 }}
+        exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.99 }}
         transition={reducedMotion
           ? { duration: 0.01, layout: { duration: 0.01 } }
           : { duration: 0.19, ease: "easeOut", layout: { duration: 0.22, ease: "easeOut" }}}
         layout="size"
-        className={`map-layer-room-sheet relative isolate flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card bg-clip-padding text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.2)] transition-[height] duration-200 ease-out motion-reduce:transition-none md:max-h-none ${suspendedForSearch ? "invisible pointer-events-none" : ""}`}
+        className={`map-layer-room-sheet relative isolate flex max-h-[var(--student-map-mobile-panel-max-height,calc(100dvh-10rem-env(safe-area-inset-bottom,0px)))] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card bg-clip-padding text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.2)] md:max-h-none ${suspendedForSearch || !isPresent ? "pointer-events-none" : ""}`}
         style={{ height: "auto" }}
         onPointerDown={(event) => { if ((event.target as HTMLElement).closest("button")) event.stopPropagation(); }}
       >
@@ -313,8 +316,12 @@ export function StudentSelectedPlaceCard({
           </div>
 
           {sheetState === "default" && description?.trim() && <p data-testid="student-room-description-preview" className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{description}</p>}
+          {sheetState === "default" && roomPhotoUrl && <button type="button" data-testid="student-room-photo-preview" onClick={() => setPhotoOpen(true)} aria-label={`View photo of ${room.roomName}`} className="mt-2 flex h-16 w-full items-center gap-2 overflow-hidden rounded-xl border border-border/70 bg-muted/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+            <img src={roomPhotoUrl} alt="" loading="lazy" decoding="async" className="h-full w-24 shrink-0 object-cover" />
+            <span className="text-[10px] font-bold text-muted-foreground">Room photo · View</span>
+          </button>}
           {sheetState === "default" && (roomPhotoPath || hasRoomVideo) && <div data-testid="student-room-content-hints" className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-muted-foreground">
-            {roomPhotoPath && <span className="rounded-full bg-muted px-2 py-1">Photo available</span>}
+            {roomPhotoPath && !roomPhotoUrl && <span className="rounded-full bg-muted px-2 py-1">Photo available</span>}
             {hasRoomVideo && <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">Room video</span>}
           </div>}
           {campusId && <div className={sheetState === "expanded" ? "" : "hidden"} aria-hidden={sheetState !== "expanded"}>
@@ -405,50 +412,23 @@ export function StudentSelectedPlaceCard({
       )}
       </div>
 
-      <AnimatePresence>
-        {qrOpen && (
-          <motion.div
-            data-no-drag
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
-            role="presentation"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onMouseDown={(event) => { if (event.target === event.currentTarget) setQrOpen(false); }}
-          >
-            <motion.section
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="room-location-qr-title"
-              className="w-full max-w-sm rounded-2xl border border-border bg-card p-4 text-foreground shadow-2xl"
-              initial={reducedMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 4, scale: 0.98 }}
-              transition={{ duration: reducedMotion ? 0.01 : 0.16 }}
-            >
-              <div className="mb-3 flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <h2 id="room-location-qr-title" className="truncate text-sm font-extrabold">Room location QR</h2>
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground">{room.roomName} · {room.buildingLabel} · {room.floorLabel ?? `Floor ${room.floorNumber}`}</p>
-                </div>
-                <button type="button" onClick={() => setQrOpen(false)} aria-label="Close room QR" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
-              </div>
-              <div className="rounded-xl bg-muted p-4">
-                <LocationQR
-                  displaySize="large"
-                  buildingId={room.buildingId}
-                  buildingName={room.buildingLabel}
-                  campusId={campusId}
-                  roomId={room.roomId}
-                  roomName={room.roomName}
-                  floorId={floorId}
-                  floorNumber={room.floorNumber}
-                />
-              </div>
-            </motion.section>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {photoOpen && isPresent && roomPhotoUrl && createPortal(<div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/55 p-3 pt-[max(.75rem,env(safe-area-inset-top,0px))] pb-[max(.75rem,env(safe-area-inset-bottom,0px))]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPhotoOpen(false); }}>
+        <section role="dialog" aria-modal="true" aria-label={`${room.roomName} photo`} className="relative flex max-h-full w-full max-w-3xl items-center justify-center overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl">
+          <button type="button" onClick={() => setPhotoOpen(false)} aria-label="Close room photo" className="absolute right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-card/90 text-foreground shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
+          <img src={roomPhotoUrl} alt={`${room.roomName} room`} className="max-h-[calc(100dvh-2rem)] w-full rounded-xl object-contain" />
+        </section>
+      </div>, document.body)}
+      {qrOpen && isPresent && <LocationQR
+        displaySize="large"
+        buildingId={room.buildingId}
+        buildingName={room.buildingLabel}
+        campusId={campusId}
+        roomId={room.roomId}
+        roomName={room.roomName}
+        floorId={floorId}
+        floorNumber={room.floorNumber}
+        onClose={() => setQrOpen(false)}
+      />}
     </>
   );
 }

@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { useEffect } from "react";
+import { act, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomDest } from "../../../lib/combinedPathfinding";
 import { StudentSelectedPlaceCard } from "../StudentSelectedPlaceCard";
@@ -63,13 +64,19 @@ describe("Student room information", () => {
     mocks.photo.mockResolvedValue("https://signed.example/published-room-photo.webp");
   });
 
-  it("keeps compact details short and reveals the signed photo after expanding", async () => {
+  it("shows a compact signed photo preview and reveals the full photo after expanding", async () => {
     render(<StudentSelectedPlaceCard
       room={room} campusId="campus-a" buildingId="building-a" floorId="floor-a"
       description="A quiet room for study." roomPhotoPath="campus-a/building-a/floor-a/room-a/photo.webp"
       {...actions}
     />);
-    expect(await screen.findByTestId("student-room-content-hints")).toHaveTextContent("Photo available");
+    const roomCard = await screen.findByTestId("student-selected-place-card");
+    const roomStack = screen.getByTestId("student-room-and-video-stack");
+    expect(await screen.findByTestId("student-room-photo-preview")).toBeInTheDocument();
+    expect(roomCard).toHaveClass("overflow-hidden", "rounded-2xl", "bg-card");
+    expect(roomCard).not.toHaveClass("transition-[height]");
+    expect(roomStack).toHaveClass("overflow-visible", "md:overflow-visible");
+    expect(roomStack.querySelectorAll("[data-map-layer='room-sheet']")).toHaveLength(1);
     expect(screen.queryByAltText("Room 204")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand room information" }));
     expect(await screen.findByAltText("Room 204")).toHaveAttribute("src", "https://signed.example/published-room-photo.webp");
@@ -88,6 +95,22 @@ describe("Student room information", () => {
     expect(screen.queryByText(/No image uploaded|No description available/i)).not.toBeInTheDocument();
   });
 
+  it("animates room dismissal while making the exiting card immediately inert", async () => {
+    function RoomCardHarness() {
+      const [open, setOpen] = useState(true);
+      return <AnimatePresence initial={false}>
+        {open && <StudentSelectedPlaceCard room={room} {...actions} onClose={() => setOpen(false)} />}
+      </AnimatePresence>;
+    }
+
+    render(<RoomCardHarness />);
+    const card = screen.getByTestId("student-selected-place-card");
+    fireEvent.click(within(card).getAllByRole("button", { name: "Close selected place" })[0]);
+    expect(card).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("student-room-and-video-stack")).toHaveAttribute("inert");
+    await waitFor(() => expect(screen.queryByTestId("student-selected-place-card")).not.toBeInTheDocument());
+  });
+
   it("supports description-only and photo-only Rooms without empty media sections", async () => {
     const descriptionOnly = render(<StudentSelectedPlaceCard room={room} description="A quiet study room." {...actions} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand room information" }));
@@ -100,7 +123,7 @@ describe("Student room information", () => {
       room={room} campusId="campus-a" buildingId="building-a" floorId="floor-a"
       roomPhotoPath="campus-a/building-a/floor-a/room-a/photo.webp" {...actions}
     />);
-    expect(await screen.findByTestId("student-room-content-hints")).toHaveTextContent("Photo available");
+    expect(await screen.findByTestId("student-room-photo-preview")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand room information" }));
     expect(await screen.findByAltText("Room 204")).toHaveAttribute("src", "https://signed.example/published-room-photo.webp");
     expect(screen.queryByText("About This Room")).not.toBeInTheDocument();

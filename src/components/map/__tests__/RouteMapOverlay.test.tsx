@@ -257,8 +257,18 @@ describe("RouteMapOverlay", () => {
     expect(container.querySelector('[data-route-marker="destination"] .student-map-screen-marker')).toBeInTheDocument();
     expect(container.querySelector("[data-route-current-position] .student-map-screen-marker")).toBeInTheDocument();
     const progressMarker = container.querySelector("[data-route-current-position]");
-    expect(progressMarker?.querySelector('circle[r="10.2"]')).toHaveAttribute("fill", "#0f172a");
-    expect(progressMarker?.querySelector('circle[r="8.6"]')).toHaveAttribute("fill", "#0f766e");
+    expect(progressMarker?.querySelector('[data-testid="route-iskolar-marker"]')).toBeInTheDocument();
+    expect(progressMarker?.querySelector('circle[r="10.2"]')).toHaveAttribute("fill", "#0e2a6e");
+    expect(progressMarker?.querySelector('circle[r="8.6"]')).toHaveAttribute("fill", "#ffffff");
+  });
+
+  it("points the Iskolar heading notch along the route segment under the marker", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+    expect(routeProgressGeometry(route, 0.25).bearing).toBe(0);
+    expect(routeProgressGeometry(route, 0.75).bearing).toBe(90);
+    expect(routeProgressGeometry(route, 1).bearing).toBe(90);
+    const { container } = render(<svg><RouteMapOverlay points={route} mode="standard" walkProgress={0.75} layer="markers" /></svg>);
+    expect(container.querySelector("[data-route-current-position] [data-route-heading]")).toHaveAttribute("transform", "rotate(90)");
   });
 
   it("gives Start a short green reveal and renders a destination pin at the final route point", () => {

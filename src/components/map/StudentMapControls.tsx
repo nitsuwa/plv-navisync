@@ -187,14 +187,11 @@ export function StudentMapControls({
                     <button
                       type="button"
                       onClick={onBackToCampus}
-                      className="flex h-11 w-10 shrink-0 items-center justify-center gap-1 rounded-2xl px-1 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-auto md:w-auto md:max-w-[118px] md:justify-start md:px-2"
-                      aria-label={`Back to campus map${floorLabel ? ` from ${floorLabel}` : ""}`}
+                      className="flex h-11 min-h-11 w-11 min-w-11 shrink-0 items-center justify-center rounded-l-[13px] border-r border-border/70 p-0 text-primary transition-colors hover:bg-primary/5 active:bg-primary/10 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+                      aria-label="Back to campus"
                       title={floorLabel ? `Back to campus map from ${floorLabel}` : "Back to campus map"}
                     >
                       <ChevronLeft className="h-4 w-4 shrink-0" />
-                      <span className="sr-only md:not-sr-only md:truncate md:text-[10px] md:font-extrabold md:leading-tight">
-                        {floorLabel ?? "Campus map"}
-                      </span>
                     </button>
                   ) : undefined}
                 />
@@ -217,14 +214,13 @@ export function StudentMapControls({
           onClick={onBackToCampus}
           aria-label="Back to campus"
           title="Back to campus"
-          className="map-layer-controls pointer-events-auto absolute left-3 top-[max(0.75rem,env(safe-area-inset-top,0px))] z-40 inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border/80 bg-card/95 px-3 text-[11px] font-extrabold text-primary shadow-md shadow-slate-950/10 backdrop-blur-xl transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden max-[359px]:px-2"
+          className="map-layer-controls pointer-events-auto absolute left-3 top-[max(0.75rem,env(safe-area-inset-top,0px))] z-40 inline-flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-xl border border-border/70 bg-card/95 p-0 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[transform,background-color,box-shadow] duration-150 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <ChevronLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span className="max-[359px]:hidden">Back to campus</span>
         </button>
       )}
 
-      {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus map" className="map-layer-controls pointer-events-auto absolute left-3 top-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-bold text-primary shadow-md lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" />Campus map</button>}
+      {isFloorMode && eventMode && onBackToCampus && <button data-testid="student-event-back-campus" type="button" onClick={onBackToCampus} aria-label="Back to campus" title="Back to campus" className="map-layer-controls pointer-events-auto absolute left-3 top-[max(0.75rem,env(safe-area-inset-top,0px))] inline-flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-xl border border-border/70 bg-card/95 p-0 text-primary shadow-[0_6px_18px_rgba(15,23,42,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:left-auto lg:right-3"><ChevronLeft aria-hidden="true" className="h-4 w-4" /></button>}
 
       {(utilityControlsVisible || mapModeToggleVisible) && (
         <div
