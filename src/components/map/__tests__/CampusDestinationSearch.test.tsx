@@ -97,8 +97,23 @@ describe("CampusDestinationSearch", () => {
   it("expands map-header search results to the usable mobile width while retaining a desktop dropdown", () => {
     render(<CampusDestinationSearch {...props({ mapHeaderSafeZone: true })} />);
     const panel = screen.getByTestId("map-search-results-panel");
-    expect(panel).toHaveClass("absolute", "w-[calc(100vw-1.5rem)]", "md:static", "md:w-full");
-    expect(screen.getByRole("listbox", { name: "Campus destination results" })).toBeInTheDocument();
+    expect(panel).not.toHaveClass("absolute");
+    expect(panel).toHaveClass("overflow-hidden");
+    const list = screen.getByRole("listbox", { name: "Campus destination results" });
+    const controlSurface = screen.getByTestId("map-search-control-surface");
+    expect(list).toBeInTheDocument();
+    expect(controlSurface).toContainElement(screen.getByRole("searchbox", { name: "Search campus destinations" }));
+    expect(controlSurface).toContainElement(panel);
+    expect(controlSurface).toHaveClass("border", "bg-card", "shadow-[0_8px_24px_rgba(15,23,42,0.12)]");
+    expect(list).toHaveClass("bg-transparent", "border-t");
+    expect(list).not.toHaveClass("rounded-2xl", "shadow-xl");
+  });
+
+  it("keeps the collapsed map search as a single solid surface", () => {
+    render(<CampusDestinationSearch {...props({ focused: false, mapHeaderSafeZone: true })} />);
+    const surface = screen.getByTestId("map-search-control-surface");
+    expect(surface).toHaveClass("rounded-[20px]", "border", "bg-card");
+    expect(screen.queryByRole("group", { name: "Destination type filters" })).not.toBeInTheDocument();
   });
 
   it("marks duplicate endpoints unavailable and never selects a result for plain Enter", () => {

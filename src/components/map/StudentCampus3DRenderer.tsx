@@ -14,9 +14,10 @@ import { DECOR_ASSET_MAP } from "../map-builder/constants";
 import { decorRenderScale, decorWorldSize } from "../../lib/decorVisual";
 import { entranceWorldPosition } from "../../lib/buildingEntrances";
 import { campusMapPointToWorld, campusMapSizeToWorld, STUDENT_CAMPUS_3D_SCALE } from "../../lib/studentCampus3dCoordinates";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
+import { buildStudentRouteRibbonGeometry, studentRouteHaloColor } from "../../lib/studentRouteRibbonGeometry";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection } from "../../lib/student3dCameraFocus";
-import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
+import { student3dCameraRecenterNonceToHandle, student3dCameraRecenterTweenCompletionNonce } from "../../lib/student3dCameraRecenter";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
@@ -25,6 +26,8 @@ import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { measureRouteDoorCrossings, routeDoorTransitOpacity, ROUTE_DOOR_TRANSIT_RADIUS, ROUTE_DOOR_TRANSIT_OPACITY } from "../../lib/routeDoorTransit";
 import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
+import { cameraSegmentIntersectsOutdoorBuilding, outdoorBuildingFadeMaterialState } from "../../lib/studentOutdoorOcclusion";
+import { recordDiagnosticEvent } from "../../lib/diagnostics";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
 import { SUHAY_HUSAY_V3_LIMBS, SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V4_LIMBS, SUHAY_HUSAY_V4_POINTS, SUHAY_HUSAY_V4_SUPPORTS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V5_ROCKS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, type SuhayPointName, type SuhayV4PointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
@@ -108,6 +111,7 @@ const EMPTY_CAMPUS_POINTS: readonly Pt[] = Object.freeze([]);
 
 interface EntranceDoorMaterialState {
   material: THREE.Material;
+  buildingId: string;
   baseOpacity: number;
   baseTransparent: boolean;
   baseDepthWrite: boolean;
@@ -168,7 +172,14 @@ function campusContentBounds(campus: ReadonlyOutdoorCampus) {
 function buildRibbonGeometry(points: readonly Pt[], width: number, elevation: number): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   if (points.length < 2) return geometry;
-  const mapped = points.map((point) => worldPoint(point, elevation));
+  // Authored routes can repeat entrance/landing coordinates. Remove those
+  // before constructing joins so a zero length segment cannot create a
+  // degenerate triangle or unstable miter at an otherwise clean corner.
+  const mapped = points
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => worldPoint(point, elevation))
+    .filter((point, index, all) => index === 0 || Math.hypot(point.x - all[index - 1].x, point.z - all[index - 1].z) > 1e-4);
+  if (mapped.length < 2) return geometry;
   const positions: number[] = [];
   const indices: number[] = [];
   const half = Math.max(0.012, campusMapSizeToWorld(width)) / 2;
@@ -195,9 +206,16 @@ function buildRibbonGeometry(points: readonly Pt[], width: number, elevation: nu
       const mz = inNz + outNz;
       const miterLength = Math.max(1e-5, Math.hypot(mx, mz));
       const miterDot = (mx / miterLength) * outNx + (mz / miterLength) * outNz;
-      const miterScale = Math.min(2.2, 1 / Math.max(0.45, miterDot));
-      nx = (mx / miterLength) * miterScale;
-      nz = (mz / miterLength) * miterScale;
+      if (miterLength > 1e-4) {
+        const miterScale = Math.min(2.2, 1 / Math.max(0.45, miterDot));
+        nx = (mx / miterLength) * miterScale;
+        nz = (mz / miterLength) * miterScale;
+      } else {
+        // A near reversal has no stable bisector. Use the outgoing normal and
+        // let the bounded join meet at the authored point instead of spiking.
+        nx = outNx;
+        nz = outNz;
+      }
     }
     positions.push(mapped[i].x + nx * half, elevation, mapped[i].z + nz * half);
     positions.push(mapped[i].x - nx * half, elevation, mapped[i].z - nz * half);
@@ -216,13 +234,21 @@ type RouteSurfacePath = { id: string; points: Pt[]; width: number; type: string;
 
 function PathSurface({ path, route = false, halo = false }: { path: CampusPath | RouteSurfacePath; route?: boolean; halo?: boolean }) {
   const road = !route && path.type === "road";
-  const width = (path.width || (route ? 10 : 12)) + (halo ? (route ? 14 : 7) : 0);
-  const geometry = useMemo(() => buildRibbonGeometry(path.points, width, route ? (halo ? 0.105 : 0.12) : road ? (halo ? 0.006 : 0.009) : (halo ? 0.012 : 0.015)), [path.points, width, road, route, halo]);
+  const width = route
+    ? (path.width || 8) + (halo ? 2 : 0)
+    : (path.width || 12) + (halo ? 7 : 0);
+  const elevation = route ? (halo ? 0.105 : 0.12) : road ? (halo ? 0.006 : 0.009) : (halo ? 0.012 : 0.015);
+  const geometry = useMemo(() => route
+    ? buildStudentRouteRibbonGeometry(path.points, width, elevation)
+    : buildRibbonGeometry(path.points, width, elevation), [path.points, width, elevation, route]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const color = route ? (halo ? "#ffffff" : path.color ?? "#1769e0") : halo ? "#8c9d89" : road ? "#77818b" : path.type === "accessible" ? "#c5d8e8" : path.color || "#f8f6ef";
-  const opacity = route ? (halo ? 0.92 : ("opacity" in path ? path.opacity ?? 1 : 1)) : 1;
+  const routeColor = route ? path.color ?? "#1769e0" : undefined;
+  // A narrow, subdued casing preserves contrast without reading as a second
+  // broad strip around the blue, green, or emergency red route core.
+  const color = route ? (halo ? studentRouteHaloColor(routeColor!) : routeColor!) : halo ? "#8c9d89" : road ? "#77818b" : path.type === "accessible" ? "#c5d8e8" : path.color || "#f8f6ef";
+  const opacity = route ? (halo ? 1 : ("opacity" in path ? path.opacity ?? 1 : 1)) : 1;
   return <mesh geometry={geometry} receiveShadow={false} renderOrder={route ? (halo ? 8 : 9) : 2}>
-    <meshStandardMaterial color={color} roughness={0.94} metalness={0} transparent={route && (halo || opacity < 1)} opacity={opacity} side={THREE.DoubleSide} depthWrite={opacity > 0.8} />
+    <meshStandardMaterial color={color} roughness={0.94} metalness={0} transparent={route && !halo && opacity < 1} opacity={opacity} side={THREE.DoubleSide} depthWrite={!route && opacity > 0.8} />
   </mesh>;
 }
 const MemoPathSurface = memo(PathSurface);
@@ -260,26 +286,29 @@ function RouteArrows({ points, reducedMotion = false, animate = true }: { points
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh || reducedMotion || !animate || arrows.length === 0) return;
-    const usable = routeSampler.totalLength - 1.8;
-    if (usable <= 0) return;
     elapsedRef.current += Math.min(delta, 0.05);
-    const spacing = usable / arrows.length;
-    const phase = (elapsedRef.current * 0.36) % spacing;
     for (let index = 0; index < arrows.length; index += 1) {
-      const distance = 0.9 + ((index * spacing + phase) % usable);
+      const distance = routeArrowDistanceAt(routeSampler.totalLength, arrows.length, index, elapsedRef.current, 0.36);
+      if (distance === null) continue;
       const point = routeSampler.sample(distance, pointScratch);
       if (!point) continue;
       const [x, y, z] = worldTuple(point, 0.145);
       transform.position.set(x, y, z);
       transform.rotation.set(0, routeSampler.yawAt(distance), 0);
-      transform.scale.setScalar(routeSampler.isNearCorner(distance) ? 0 : 1);
+      // Keep chevrons visible while crossing corners. Their tangent is sampled
+      // across the bend above, so hiding them here created a visible gap in an
+      // otherwise continuous moving route cue.
+      transform.scale.setScalar(1);
       transform.updateMatrix();
       mesh.setMatrixAt(index, transform.matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
   });
   if (!arrows.length) return null;
-  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled />;
+  // The instances move around the entire route but their initial computed
+  // bounds do not. Letting Three.js cull against that stale sphere hides every
+  // arrow once Follow moves the camera away from the initial placement.
+  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled={false} />;
 }
 
 function softBuildingColor(value: string): string {
@@ -289,7 +318,26 @@ function softBuildingColor(value: string): string {
   catch { return "#c8d5df"; }
 }
 
-function Building({ building, selected, onSelectBuilding, shouldSuppressClick }: { building: ReadonlyOutdoorCampus["buildings"][number]; selected: boolean; onSelectBuilding?: (buildingId: string) => void; shouldSuppressClick: () => boolean }) {
+type OutdoorFadeMaterial = { material: THREE.Material; opacity: number; transparent: boolean; depthWrite: boolean };
+type OutdoorOcclusionEntry = { box: { center: [number, number, number]; halfSize: [number, number, number]; yaw: number }; materials: OutdoorFadeMaterial[]; fadeProgress: number; targetOpacity: number; animating: boolean };
+type OutdoorOcclusionRegistry = Map<string, OutdoorOcclusionEntry>;
+
+function restoreOutdoorOcclusion(registry: OutdoorOcclusionRegistry) {
+  for (const entry of registry.values()) {
+    for (const item of entry.materials) {
+      item.material.opacity = item.opacity;
+      item.material.transparent = item.transparent;
+      item.material.depthWrite = item.depthWrite;
+      item.material.needsUpdate = true;
+    }
+    entry.fadeProgress = 1;
+    entry.targetOpacity = 1;
+    entry.animating = false;
+  }
+}
+
+function Building({ building, selected, onSelectBuilding, shouldSuppressClick, occlusionRegistry }: { building: ReadonlyOutdoorCampus["buildings"][number]; selected: boolean; onSelectBuilding?: (buildingId: string) => void; shouldSuppressClick: () => boolean; occlusionRegistry: OutdoorOcclusionRegistry }) {
+  const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const floors = Math.max(1, building.floors?.length ?? 1);
   const width = campusMapSizeToWorld(building.width);
@@ -302,7 +350,32 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick }:
   const shortBays = Math.max(2, Math.min(5, Math.floor(depth / 0.38)));
   const paneHeight = Math.min(0.082, floorHeight * 0.42);
   const paneColor = "#5e8396";
-  return <group position={[world.x, 0, world.z]} rotation={[0, -(building.rotation ?? 0) * Math.PI / 180, 0]}>
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const materials = new Map<THREE.Material, OutdoorFadeMaterial>();
+    group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of list) {
+        if (material.opacity <= 0 || materials.has(material)) continue;
+        materials.set(material, { material, opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite });
+      }
+    });
+    const entry: OutdoorOcclusionEntry = { box: { center: [world.x, height / 2, world.z], halfSize: [width / 2, height / 2, depth / 2], yaw: -(building.rotation ?? 0) * Math.PI / 180 }, materials: [...materials.values()], fadeProgress: 1, targetOpacity: 1, animating: false };
+    occlusionRegistry.set(building.id, entry);
+    return () => {
+      for (const item of entry.materials) {
+        item.material.opacity = item.opacity;
+        item.material.transparent = item.transparent;
+        item.material.depthWrite = item.depthWrite;
+        item.material.needsUpdate = true;
+      }
+      occlusionRegistry.delete(building.id);
+    };
+  }, [building.id, depth, height, occlusionRegistry, width, world.x, world.z, building.rotation]);
+  return <group ref={groupRef} position={[world.x, 0, world.z]} rotation={[0, -(building.rotation ?? 0) * Math.PI / 180, 0]}>
     <mesh position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}
       onPointerOver={(event) => { event.stopPropagation(); setHovered(true); (event.nativeEvent.target as HTMLElement).style.cursor = "pointer"; }} onPointerOut={(event) => { event.stopPropagation(); setHovered(false); (event.nativeEvent.target as HTMLElement).style.cursor = "grab"; }}>
       <boxGeometry args={[width, height, depth]} />
@@ -1523,7 +1596,7 @@ function ExteriorFireEscapeModel({ facadeWidth, outwardDepth, levels, suppressGr
     {levels.length > 1 && [-1, 1].map((side) => <SculptureLimb key={"support-" + side} from={[side * runLength * 0.48, 0, stairZ + treadDepth * 0.56]} to={[side * runLength * 0.48, levels[levels.length - 1].elevation, stairZ + treadDepth * 0.56]} radius={0.008} color={steel} />)}
   </group>;
 }
-function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTransition, onEnterBuilding, shouldSuppressClick, routePoints, walkProgressRef, followMode, followPlaying, reducedMotion }: {
+function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTransition, onEnterBuilding, shouldSuppressClick, routePoints, walkProgressRef, followMode, followPlaying, reducedMotion, occlusionRegistry }: {
   campus: ReadonlyOutdoorCampus;
   hasRoute: boolean;
   exploreTransitionsEnabled?: boolean;
@@ -1535,13 +1608,18 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
   followMode?: boolean;
   followPlaying?: boolean;
   reducedMotion?: boolean;
+  occlusionRegistry: OutdoorOcclusionRegistry;
 }) {
   const invalidate = useThree((state) => state.invalidate);
   const doorMaterialsRef = useRef(new Map<string, EntranceDoorMaterialState>());
   const doorMaterialCallbacksRef = useRef(new Map<string, (material: THREE.Material | null) => void>());
+  const architectureMaterialsRef = useRef(new Map<string, OutdoorFadeMaterial & { buildingId: string }>());
+  const architectureMaterialCallbacksRef = useRef(new Map<string, (material: THREE.Material | null) => void>());
+  const exteriorStairGroupCallbacksRef = useRef(new Map<string, (group: THREE.Group | null) => void>());
   const transitCheckElapsedRef = useRef(1);
-  const entranceDoorMaterialRef = (entranceId: string) => {
-    let callback = doorMaterialCallbacksRef.current.get(entranceId);
+  const entranceDoorMaterialRef = (entranceId: string, buildingId: string) => {
+    const callbackKey = `${buildingId}:${entranceId}`;
+    let callback = doorMaterialCallbacksRef.current.get(callbackKey);
     if (!callback) {
       callback = (material) => {
         const previous = doorMaterialsRef.current.get(entranceId);
@@ -1554,13 +1632,76 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
         if (previous) restoreEntranceDoorMaterial(previous);
         doorMaterialsRef.current.set(entranceId, {
           material,
+          buildingId,
           baseOpacity: material.opacity,
           baseTransparent: material.transparent,
           baseDepthWrite: material.depthWrite,
           targetOpacity: 1,
         });
       };
-      doorMaterialCallbacksRef.current.set(entranceId, callback);
+      doorMaterialCallbacksRef.current.set(callbackKey, callback);
+    }
+    return callback;
+  };
+  const entranceArchitectureMaterialRef = (entranceId: string, buildingId: string, partId: string) => {
+    const key = `${buildingId}:${entranceId}:${partId}`;
+    let callback = architectureMaterialCallbacksRef.current.get(key);
+    if (!callback) {
+      callback = (material) => {
+        const previous = architectureMaterialsRef.current.get(key);
+        if (!material) {
+          if (previous) {
+            previous.material.opacity = previous.opacity;
+            previous.material.transparent = previous.transparent;
+            previous.material.depthWrite = previous.depthWrite;
+            previous.material.needsUpdate = true;
+          }
+          architectureMaterialsRef.current.delete(key);
+          return;
+        }
+        if (previous?.material === material) return;
+        if (previous) {
+          previous.material.opacity = previous.opacity;
+          previous.material.transparent = previous.transparent;
+          previous.material.depthWrite = previous.depthWrite;
+          previous.material.needsUpdate = true;
+        }
+        architectureMaterialsRef.current.set(key, { material, buildingId, opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite });
+      };
+      architectureMaterialCallbacksRef.current.set(key, callback);
+    }
+    return callback;
+  };
+  const exteriorStairGroupRef = (stairId: string, buildingId: string) => {
+    let callback = exteriorStairGroupCallbacksRef.current.get(stairId);
+    if (!callback) {
+      callback = (group) => {
+        const keyPrefix = `${buildingId}:stair:${stairId}:`;
+        if (!group) {
+          for (const [key, state] of architectureMaterialsRef.current) {
+            if (!key.startsWith(keyPrefix)) continue;
+            state.material.opacity = state.opacity;
+            state.material.transparent = state.transparent;
+            state.material.depthWrite = state.depthWrite;
+            state.material.needsUpdate = true;
+            architectureMaterialsRef.current.delete(key);
+          }
+          return;
+        }
+        group.traverse((object) => {
+          const mesh = object as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          list.forEach((material, index) => {
+            if (material.opacity <= 0) return;
+            const key = `${keyPrefix}${material.uuid}:${index}`;
+            if (!architectureMaterialsRef.current.has(key)) {
+              architectureMaterialsRef.current.set(key, { material, buildingId, opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite });
+            }
+          });
+        });
+      };
+      exteriorStairGroupCallbacksRef.current.set(stairId, callback);
     }
     return callback;
   };
@@ -1593,6 +1734,13 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
   useEffect(() => () => {
     for (const state of doorMaterialsRef.current.values()) restoreEntranceDoorMaterial(state);
     doorMaterialsRef.current.clear();
+    for (const state of architectureMaterialsRef.current.values()) {
+      state.material.opacity = state.opacity;
+      state.material.transparent = state.transparent;
+      state.material.depthWrite = state.depthWrite;
+      state.material.needsUpdate = true;
+    }
+    architectureMaterialsRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -1623,7 +1771,8 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
     let needsAnotherFrame = false;
     const fade = 1 - Math.exp(-Math.min(delta, 0.05) * 10);
     for (const state of doorMaterialsRef.current.values()) {
-      const target = state.baseOpacity * state.targetOpacity;
+      const buildingFade = occlusionRegistry.get(state.buildingId)?.fadeProgress ?? 1;
+      const target = state.baseOpacity * state.targetOpacity * buildingFade;
       if (target < state.baseOpacity - 0.001
         && (!state.material.transparent || state.material.depthWrite)) {
         state.material.transparent = true;
@@ -1644,6 +1793,13 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
       } else {
         needsAnotherFrame = true;
       }
+    }
+    for (const state of architectureMaterialsRef.current.values()) {
+      const buildingFade = occlusionRegistry.get(state.buildingId)?.fadeProgress ?? 1;
+      const next = outdoorBuildingFadeMaterialState(state, buildingFade);
+      if (Math.abs(state.material.opacity - next.opacity) > 0.001) state.material.opacity = next.opacity;
+      if (state.material.transparent !== next.transparent) { state.material.transparent = next.transparent; state.material.needsUpdate = true; }
+      if (state.material.depthWrite !== next.depthWrite) state.material.depthWrite = next.depthWrite;
     }
     if (needsAnotherFrame) invalidate();
   });
@@ -1673,14 +1829,14 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
       {/* One quiet physical doorway is always drawn, regardless of whether
           Campus context permits an action at this authored door. */}
       <group name="student-3d-physical-entrance" userData={{ entranceId: entrance.id }} position={[0, raisedSingleFloorThreshold ? CAMPUS_GROUND_EXIT_LANDING_ELEVATION : 0, 0]}>
-        <mesh position={[0, 0.17, 0.025]}><boxGeometry args={[emergencyDoor ? 0.2 : 0.19, 0.32, 0.045]} /><meshStandardMaterial ref={entranceDoorMaterialRef(entrance.id)} color={emergencyDoor ? "#3b454a" : "#324754"} roughness={0.85} metalness={emergencyDoor ? 0.28 : 0} /></mesh>
-        <mesh position={[-0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
-        <mesh position={[0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial color="#e8edf0" roughness={0.76} /></mesh>
-        <mesh position={[0, 0.35, 0.045]}><boxGeometry args={[0.265, 0.035, 0.075]} /><meshStandardMaterial color="#d6e0e5" roughness={0.7} /></mesh>
-        <mesh position={[0.055, 0.17, 0.052]}><boxGeometry args={[0.012, 0.055, 0.012]} /><meshStandardMaterial color="#f2c875" metalness={0.25} roughness={0.38} /></mesh>
+        <mesh position={[0, 0.17, 0.025]}><boxGeometry args={[emergencyDoor ? 0.2 : 0.19, 0.32, 0.045]} /><meshStandardMaterial ref={entranceDoorMaterialRef(entrance.id, building.id)} color={emergencyDoor ? "#3b454a" : "#324754"} roughness={0.85} metalness={emergencyDoor ? 0.28 : 0} /></mesh>
+        <mesh position={[-0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "left-frame")} color="#e8edf0" roughness={0.76} /></mesh>
+        <mesh position={[0.115, 0.18, 0.045]}><boxGeometry args={[0.035, 0.36, 0.075]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "right-frame")} color="#e8edf0" roughness={0.76} /></mesh>
+        <mesh position={[0, 0.35, 0.045]}><boxGeometry args={[0.265, 0.035, 0.075]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "header-frame")} color="#d6e0e5" roughness={0.7} /></mesh>
+        <mesh position={[0.055, 0.17, 0.052]}><boxGeometry args={[0.012, 0.055, 0.012]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "handle")} color="#f2c875" metalness={0.25} roughness={0.38} /></mesh>
         {emergencyDoor && <>
-          <mesh position={[0, 0.21, 0.083]}><boxGeometry args={[0.145, 0.015, 0.015]} /><meshStandardMaterial color="#dce3e4" metalness={0.48} roughness={0.38} /></mesh>
-          <mesh position={[0, 0.405, 0.048]}><boxGeometry args={[0.13, 0.035, 0.018]} /><meshStandardMaterial color="#167a53" roughness={0.72} /></mesh>
+          <mesh position={[0, 0.21, 0.083]}><boxGeometry args={[0.145, 0.015, 0.015]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "emergency-door-bar")} color="#dce3e4" metalness={0.48} roughness={0.38} /></mesh>
+          <mesh position={[0, 0.405, 0.048]}><boxGeometry args={[0.13, 0.035, 0.018]} /><meshStandardMaterial ref={entranceArchitectureMaterialRef(entrance.id, building.id, "emergency-door-plate")} color="#167a53" roughness={0.72} /></mesh>
           <Html position={[0, 0.405, 0.061]} center transform occlude distanceFactor={7} zIndexRange={[3, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap", userSelect: "none" }}><span className="rounded-[2px] bg-emerald-700 px-1 text-[7px] font-black tracking-wide text-white shadow">EXIT</span></Html>
         </>}
       </group>
@@ -1710,7 +1866,7 @@ function EntranceLayer({ campus, hasRoute, exploreTransitionsEnabled, activeTran
       const floorCount = Math.max(1, building.floors?.length ?? 1);
       const buildingHeight = 0.38 + floorCount * 0.15;
       const levels = campusFireEscapeLevels(building.floors, stair.servedFloorIds, buildingHeight / floorCount);
-      return <group key={stair.id} position={[p.x, p.y, p.z]} rotation={[0, angle, 0]}>
+      return <group key={stair.id} ref={exteriorStairGroupRef(stair.id, building.id)} position={[p.x, p.y, p.z]} rotation={[0, angle, 0]}>
         <ExteriorFireEscapeModel facadeWidth={facadeWidth} outwardDepth={outwardDepth} levels={levels} suppressGroundDoor={hasAuthoredDoor} />
       </group>;
     })}
@@ -2260,6 +2416,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       camera.lookAt(pose.target);
       orbitRef.current.update();
       owner.current = "user";
+      pendingRecenterNonce.current = null;
       onRecenterComplete?.(requestedNonce);
       invalidate();
       return;
@@ -2290,6 +2447,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       distance = pose.distance;
       target = pose.target;
       startTween(target, "recenter", pose.position);
+      pendingRecenterNonce.current = student3dCameraRecenterTweenCompletionNonce(requestedNonce, "recenter");
       return;
     } else {
       const content = campusContentBounds(campus);
@@ -2301,8 +2459,8 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       distance = Math.max(campusMapSizeToWorld(content.width) / (2 * tangent * aspect), campusMapSizeToWorld(content.height) / (2 * tangent)) * 1.5;
     }
     const destinationPosition = target.clone().add(new THREE.Vector3(0, distance * 0.74, distance * 0.673));
-    if (followMode && currentPoint) pendingRecenterNonce.current = requestedNonce;
     startTween(target, "recenter", destinationPosition);
+    pendingRecenterNonce.current = student3dCameraRecenterTweenCompletionNonce(requestedNonce, "recenter");
   }, [arrivalFocusBuildingId, arrivalFocusKey, arrivalFocusPlaceId, arrivalFocusPoint, camera, campus, focusPoint, focusTarget, followMode, followPlaying, followPoseForPoint, freeLook, humanPoint, invalidate, onRecenterComplete, orbitRef, recenterFollowOffset, recenterNonce, reducedMotion, sampleFollowRoute, selectedBuildingId, selectedPlaceId, size.height, size.width, startTween, walkProgressRef]);
 
   useEffect(() => {
@@ -2412,6 +2570,22 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const { campus } = props;
   const invalidate = useThree((state) => state.invalidate);
   const camera = useThree((state) => state.camera);
+  const occlusionRegistryRef = useRef<OutdoorOcclusionRegistry>(new Map());
+  const occlusionProbeTimeRef = useRef(0);
+  const occlusionPointSampler = useMemo(() => createRoutePointSampler(props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? []), [props.followRoutePoints, props.routePoints]);
+  const occlusionPointRef = useRef<Pt>({ x: 0, y: 0 });
+  const occlusionTargetRef = useRef(new THREE.Vector3());
+  const occlusionProjectedRef = useRef(new THREE.Vector3());
+  const occlusionCameraRef = useRef(new THREE.Vector3());
+  const exploreProjectedRef = useRef(new THREE.Vector3());
+  const exploreTransitionChoices = useMemo(
+    () => (props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices),
+    [props.exploreTransitionCues],
+  );
+  const projectedExplorePoints = useMemo(
+    () => new Map<string, Pt>(exploreTransitionChoices.map((choice) => [choice.id, { x: 0, y: 0 }])),
+    [exploreTransitionChoices],
+  );
   const initialExploreGroups = useMemo(
     () => groupStudentRouteExploreTransitions((props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices), 0),
     [props.exploreTransitionCues],
@@ -2419,8 +2593,54 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const [screenExploreTransitionGroups, setScreenExploreTransitionGroups] = useState(initialExploreGroups);
   const exploreGroupSourceRef = useRef(props.exploreTransitionCues);
   const exploreGroupSignatureRef = useRef(initialExploreGroups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|"));
-  useFrame(({ camera, size }) => {
-    const choices = (props.exploreTransitionCues ?? []).flatMap((cue) => cue.choices);
+  useFrame(({ camera, size, clock }, delta) => {
+    const registry = occlusionRegistryRef.current;
+    const active = Boolean((props.followMode || props.humanPoint) && ((props.followRoutePoints?.length || props.routePoints?.length || 0) > 1));
+    if (!active) {
+      let changed = false;
+      for (const entry of registry.values()) if (entry.targetOpacity !== 1) { entry.targetOpacity = 1; changed = true; }
+      if (changed) {
+        for (const entry of registry.values()) if (entry.targetOpacity === 1) entry.animating = true;
+        invalidate();
+      }
+    } else if (clock.elapsedTime - occlusionProbeTimeRef.current >= 0.09) {
+      occlusionProbeTimeRef.current = clock.elapsedTime;
+      const route = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
+      const point = props.walkProgressRef && route.length > 1
+        ? occlusionPointSampler(props.walkProgressRef.current, occlusionPointRef.current)
+        : props.humanPoint ?? route[0];
+      if (point) {
+        const world = campusMapPointToWorld(point, 0.23);
+        const target = occlusionTargetRef.current.set(world.x, world.y, world.z);
+        camera.updateMatrixWorld();
+        const projected = occlusionProjectedRef.current.copy(target).project(camera);
+        const inView = projected.z > -1 && projected.z < 1 && Math.abs(projected.x) <= 1.08 && Math.abs(projected.y) <= 1.08;
+        const cam = occlusionCameraRef.current.setFromMatrixPosition(camera.matrixWorld);
+        for (const entry of registry.values()) {
+          const blocked = inView && cameraSegmentIntersectsOutdoorBuilding([cam.x, cam.y, cam.z], [target.x, target.y, target.z], entry.box, entry.targetOpacity < 1 ? 0.09 : 0.015);
+          const nextOpacity = blocked ? 0.42 : 1;
+          if (entry.targetOpacity !== nextOpacity) { entry.targetOpacity = nextOpacity; entry.animating = true; }
+        }
+      }
+    }
+    let fading = false;
+    for (const entry of registry.values()) {
+      if (!entry.animating) continue;
+      let progress = THREE.MathUtils.damp(entry.fadeProgress, entry.targetOpacity, 16, delta);
+      if (Math.abs(progress - entry.targetOpacity) < 0.006) progress = entry.targetOpacity;
+      entry.fadeProgress = progress;
+      const entryFading = Math.abs(progress - entry.targetOpacity) >= 0.006;
+      for (const item of entry.materials) {
+        const next = outdoorBuildingFadeMaterialState(item, progress);
+        if (Math.abs(next.opacity - item.material.opacity) > 0.001) item.material.opacity = next.opacity;
+        if (item.material.transparent !== next.transparent) { item.material.transparent = next.transparent; item.material.needsUpdate = true; }
+        if (item.material.depthWrite !== next.depthWrite) item.material.depthWrite = next.depthWrite;
+      }
+      entry.animating = entryFading;
+      fading ||= entryFading;
+    }
+    if (fading) invalidate();
+    const choices = exploreTransitionChoices;
     if (choices.length === 0) {
       if (exploreGroupSourceRef.current !== props.exploreTransitionCues || exploreGroupSignatureRef.current) {
         exploreGroupSourceRef.current = props.exploreTransitionCues;
@@ -2429,15 +2649,17 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       }
       return;
     }
-    const projectedPoints = new Map<string, Pt>();
     for (const choice of choices) {
-      const projected = new THREE.Vector3(...worldTuple(choice.point, STUDENT_CAMPUS_3D_GROUND_EPSILON + 0.8)).project(camera);
-      projectedPoints.set(choice.id, {
-        x: (projected.x * 0.5 + 0.5) * size.width,
-        y: (-projected.y * 0.5 + 0.5) * size.height,
-      });
+      const projected = exploreProjectedRef.current
+        .set(choice.point.x * STUDENT_CAMPUS_3D_SCALE, STUDENT_CAMPUS_3D_GROUND_EPSILON + 0.8, choice.point.y * STUDENT_CAMPUS_3D_SCALE)
+        .project(camera);
+      const screenPoint = projectedExplorePoints.get(choice.id);
+      if (screenPoint) {
+        screenPoint.x = (projected.x * 0.5 + 0.5) * size.width;
+        screenPoint.y = (-projected.y * 0.5 + 0.5) * size.height;
+      }
     }
-    const groups = groupStudentRouteExploreTransitions(choices, 164, (choice) => projectedPoints.get(choice.id) ?? choice.point);
+    const groups = groupStudentRouteExploreTransitions(choices, 164, (choice) => projectedExplorePoints.get(choice.id) ?? choice.point);
     const signature = groups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|");
     if (exploreGroupSourceRef.current !== props.exploreTransitionCues || exploreGroupSignatureRef.current !== signature) {
       exploreGroupSourceRef.current = props.exploreTransitionCues;
@@ -2445,6 +2667,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       setScreenExploreTransitionGroups(groups);
     }
   });
+  useEffect(() => () => restoreOutdoorOcclusion(occlusionRegistryRef.current), []);
   useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const worldW = campusMapSizeToWorld(campus.canvasW);
   const worldH = campusMapSizeToWorld(campus.canvasH);
@@ -2595,12 +2818,12 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       .filter((segment) => segment.points.length > 1)
       .filter((segment) => props.emergencyRouteOverview || !props.activeEmergencyRouteId || segment.id.startsWith(`${props.activeEmergencyRouteId}-`))
       .map((segment) => ({
-      id: segment.id, points: segment.points, width: 12, type: "route", color: segment.color,
+      id: segment.id, points: segment.points, width: 8, type: "route", color: segment.color,
       opacity: props.emergencyRouteOverview || Boolean(props.activeEmergencyRouteId && segment.id.startsWith(`${props.activeEmergencyRouteId}-campus-`)) ? 1 : 0.34,
       label: segment.label,
     }))
     : routeSegments.map((points, index) => ({
-      id: `canonical-route-${index}`, points, width: 12, type: "route",
+      id: `canonical-route-${index}`, points, width: 8, type: "route",
       color: props.routeColor ?? (props.routeMode === "emergency" ? "#dc2626" : props.routeMode === "accessible" ? "#16a34a" : "#1769e0"),
     })),
   [props.activeEmergencyRouteId, props.emergencyRouteOverview, props.emergencyRouteSegments, props.routeColor, props.routeMode, routeSegments]);
@@ -2620,9 +2843,9 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       <MemoPathSurface path={path} />
     </group>)}
     <MemoOutdoorAssetLayer assets={campus.decorAssets} suhayHusaySelected={suhayHusaySelected} />
-    {campus.buildings.map((building) => <MemoBuilding key={building.id} building={building} selected={props.selectedBuildingId === building.id} onSelectBuilding={selectBuilding} shouldSuppressClick={shouldSuppressClick} />)}
+    {campus.buildings.map((building) => <MemoBuilding key={building.id} building={building} selected={props.selectedBuildingId === building.id} onSelectBuilding={selectBuilding} shouldSuppressClick={shouldSuppressClick} occlusionRegistry={occlusionRegistryRef.current} />)}
     <MemoEntranceLayer campus={campus} hasRoute={hasRoute} exploreTransitionsEnabled={props.exploreTransitionsEnabled} activeTransition={props.activeTransition} onEnterBuilding={props.onEnterBuilding ? enterBuilding : undefined} shouldSuppressClick={shouldSuppressClick}
-      routePoints={props.followRoutePoints?.length ? props.followRoutePoints : route}
+      routePoints={props.followRoutePoints?.length ? props.followRoutePoints : route} occlusionRegistry={occlusionRegistryRef.current}
       walkProgressRef={props.walkProgressRef} followMode={props.followMode} followPlaying={props.followPlaying} reducedMotion={props.reducedMotion} />
     {campus.markers.map((marker) => {
       const position = worldTuple(marker, STUDENT_CAMPUS_3D_GROUND_EPSILON);
@@ -2758,7 +2981,11 @@ function StudentCampus3DRenderer(props: StudentCampus3DRendererProps & { onFallb
   useEffect(() => {
     const canvas = surfaceRef.current;
     if (!canvas) return;
-    const contextLost = (event: Event) => { event.preventDefault(); props.onFallback(); };
+    const contextLost = (event: Event) => {
+      event.preventDefault();
+      recordDiagnosticEvent({ category: "renderer", severity: "error", summary: "The outdoor 3D WebGL context was lost.", source: "campus renderer" });
+      props.onFallback();
+    };
     canvas.addEventListener("webglcontextlost", contextLost);
     return () => canvas.removeEventListener("webglcontextlost", contextLost);
   }, [props.onFallback]);

@@ -82,6 +82,14 @@ describe("Admin activity notifications", () => {
     mocks.getPreferences.mockResolvedValue({ reports: true, events: true, campus: true, announcements: true, users: true });
   });
 
+  it("does not expose Diagnostics in the Admin profile area or navigation", async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    render(<AdminLayout />);
+    expect(await screen.findByRole("status", { name: "Current user" })).toBeInTheDocument();
+    expect(screen.queryByText(/Diagnostics/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /profile menu/i })).not.toBeInTheDocument();
+  });
+
   it("shows an error and retry instead of a false empty state, then loads restored activity", async () => {
     render(<AdminLayout />);
     fireEvent.click(await screen.findByRole("button", { name: "Notifications" }));

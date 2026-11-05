@@ -17,7 +17,7 @@ import { groupStudentRouteExploreTransitions } from "../../lib/studentRouteFlow"
 import { shouldPreserveStudent3dFollowCameraOffset, student3dFollowCameraOffsetForRecovery, student3dFollowCameraOrientationChanged, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
+import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements } from "../../lib/studentRoute3dPresentation";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dIndoorArrivalCameraDirection, student3dIndoorFollowCameraOffset, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
@@ -724,25 +724,26 @@ function IndoorRouteArrows({ arrows, points, viewport, ramps, reducedMotion = fa
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh || reducedMotion || !animate || arrows.length === 0) return;
-    const usable = sampler.totalLength - 1.8;
-    if (usable <= 0) return;
     elapsedRef.current += Math.min(delta, 0.05);
-    const spacing = usable / arrows.length;
-    const phase = (elapsedRef.current * 0.3) % spacing;
     for (let index = 0; index < arrows.length; index += 1) {
-      const distance = 0.9 + ((index * spacing + phase) % usable);
+      const distance = routeArrowDistanceAt(sampler.totalLength, arrows.length, index, elapsedRef.current, 0.3);
+      if (distance === null) continue;
       const point = sampler.sample(distance, pointScratch);
       if (!point) continue;
       transform.position.set(...pointToWorld(point, viewport, 0.1 + rampHeightAt(point, ramps)));
       transform.rotation.set(0, sampler.yawAt(distance), 0);
-      transform.scale.setScalar(sampler.isNearCorner(distance) ? 0 : 1);
+      // Keep the same smoothed corner traversal as outdoor routes. Hiding an
+      // arrow near each corner creates visible gaps on short indoor routes.
+      transform.scale.setScalar(1);
       transform.updateMatrix();
       mesh.setMatrixAt(index, transform.matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
   });
   if (!arrows.length) return null;
-  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled />;
+  // Instances circulate across the full route; the initial sphere is stale
+  // as soon as arrows begin moving and can otherwise cull the whole batch.
+  return <instancedMesh ref={meshRef} args={[geometry, material, arrows.length]} renderOrder={11} frustumCulled={false} />;
 }
 
 function ChairGeometry({ width, depth, color, tablet = false }: { width: number; depth: number; color: string; tablet?: boolean }) {
@@ -2656,7 +2657,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
           ?? props.routeColor
           ?? (props.routeMode === "emergency" ? "#dc2626" : props.routeMode === "accessible" ? "#16a34a" : "#1769e0")}
           emissive={props.routeMode === "emergency" ? "#7f1d1d" : props.routeMode === "accessible" ? "#14532d" : "#0b4eb3"}
-          emissiveIntensity={0.17} side={THREE.DoubleSide} />
+          emissiveIntensity={0.17} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>}
       {visibleRoute && !props.emergencyRouteOverview && <IndoorRouteArrows arrows={routeArrows} points={route} viewport={viewport} ramps={ramps} reducedMotion={props.reducedMotion} animate={props.animateRouteArrows} />}
       {emergencyRouteModels.map((model) => <Fragment key={`emergency-route-${model.id}`}>

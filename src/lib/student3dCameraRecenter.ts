@@ -38,3 +38,11 @@ export function student3dCameraRecenterNonceToHandle(
 ): number | null {
   return requestedNonce > 0 && requestedNonce > lastHandledNonce ? requestedNonce : null;
 }
+
+/** A recenter tween must report completion regardless of which target branch produced it. */
+export function student3dCameraRecenterTweenCompletionNonce(
+  requestNonce: number | null,
+  tweenKind: "focus" | "recenter" | "follow" | "arrival",
+): number | null {
+  return tweenKind === "recenter" ? requestNonce : null;
+}

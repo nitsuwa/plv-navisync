@@ -7,7 +7,6 @@ import { useEscToClose } from "../../hooks/useEscToClose";
 import { BuildingCover } from "./BuildingCover";
 import { BuildingDetailsActions } from "./BuildingDetailsActions";
 import { BuildingDetailsSections } from "./BuildingDetailsSections";
-import { LocationQR } from "./LocationQR";
 
 export type MobileBuildingSheetState = "peek" | "default" | "expanded";
 
@@ -240,9 +239,15 @@ export function MobileBuildingSheet({
         y: dragY,
         opacity: sheetOpacity,
       }}
+      variants={{
+        visible: { y: 0, opacity: 1 },
+        exit: (enteringFloor: boolean) => enteringFloor
+          ? { y: 0, opacity: 0, transition: { duration: 0.01 } }
+          : reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 },
+      }}
       initial={reducedMotion ? false : { y: "100%", opacity: 0.96 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 0 }}
+      animate="visible"
+      exit="exit"
       transition={reducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-border/50 bg-card/95 px-2 backdrop-blur-xl">
@@ -323,8 +328,6 @@ export function MobileBuildingSheet({
               facilities={facilities}
               accessibility={accessibility}
               floorCount={floorPlanCount}
-              showQR={showQR}
-              qrContent={<LocationQR campusId={campusId} buildingId={selected.id} buildingName={selected.name} />}
             />
           </div>
         )}

@@ -314,7 +314,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     try {
-      render(<RoutePlannerDialog {...plannerProps({
+      const view = render(<RoutePlannerDialog {...plannerProps({
         from: building("gate", "GATE", "Campus Gate"),
         to: building("canteen", "CANT", "Canteen"),
         route: route(),
@@ -744,6 +744,55 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.getByRole("button", { name: "Return to Follow mode" })).toBeInTheDocument();
     expect(screen.getByTestId("guided-navigation-summary")).toHaveAttribute("data-camera-mode", "explore");
     expect(screen.queryByRole("button", { name: "Return to Follow" })).not.toBeInTheDocument();
+  });
+
+  it.each([320, 360, 390, 430, 585])("adds mobile-only breathing room above the Guided toggle at %ipx", (width) => {
+    const originalWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    try {
+      const view = render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+        cameraMode: "follow",
+      })} />);
+      expect(screen.getByTestId("guided-navigation-summary")).toHaveClass("pt-2");
+      expect(screen.getByTestId("camera-mode")).toHaveClass("mt-1");
+      expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toBeInTheDocument();
+      expect(screen.getByTestId("guided-playback-controls")).toBeInTheDocument();
+      const exploreView = <RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+        cameraMode: "explore",
+      })} />;
+      view.rerender(exploreView);
+      expect(screen.getByTestId("camera-mode")).toHaveClass("mt-1");
+    } finally {
+      if (originalWidth) Object.defineProperty(window, "innerWidth", originalWidth);
+      else Reflect.deleteProperty(window, "innerWidth");
+    }
+  });
+
+  it("keeps desktop Guided Navigation spacing unchanged", () => {
+    const originalWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("canteen", "CANT", "Canteen"),
+        route: route(),
+        phase: "navigating",
+      })} />);
+      expect(screen.getByTestId("guided-navigation-summary")).not.toHaveClass("pt-2");
+      expect(screen.getByTestId("camera-mode")).not.toHaveClass("mt-1");
+    } finally {
+      if (originalWidth) Object.defineProperty(window, "innerWidth", originalWidth);
+      else Reflect.deleteProperty(window, "innerWidth");
+    }
   });
 
   it("keeps desktop guided navigation compact by default when requested and exposes the mode switch", () => {

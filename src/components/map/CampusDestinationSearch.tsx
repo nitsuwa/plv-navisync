@@ -153,19 +153,22 @@ export function CampusDestinationSearch({
   };
 
   return (
-    <div ref={panelRef} className={cn("relative min-w-0", fillResults && "flex min-h-0 min-w-0 flex-1 flex-col")}>
-      <div className={cn(
-        "rounded-[18px] border border-white/50 bg-card/95 backdrop-blur-xl dark:border-white/10",
-        compact ? "shadow-[0_6px_18px_rgba(15,23,42,0.14)]" : "rounded-[20px] shadow-[0_10px_30px_rgba(15,23,42,0.14)]",
-        dense ? "p-2" : compact ? "p-1" : "p-1.5",
-        fillResults && "flex min-h-0 flex-1 flex-col",
-        embedded && "rounded-none border-0 bg-transparent p-0 shadow-none backdrop-blur-none",
-      )}>
-        <div className="flex items-center gap-1.5" data-map-search-header={mapHeaderSafeZone ? "true" : undefined}>
+    <div
+      ref={panelRef}
+      data-testid={mapHeaderSafeZone ? "map-search-control-surface" : undefined}
+      className={cn(
+        "relative min-w-0 rounded-[20px] border border-border/70 bg-card text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/35 focus-within:ring-2 focus-within:ring-primary/15",
+        compact ? "p-1" : dense ? "p-2" : "p-1.5",
+        fillResults && "flex min-h-0 min-w-0 flex-1 flex-col",
+        embedded && "rounded-none border-0 bg-transparent p-0 shadow-none ring-0 focus-within:border-0 focus-within:ring-0",
+        "overflow-hidden",
+      )}
+    >
+        <div className={cn("flex items-center", leading ? "gap-0" : "gap-1.5")} data-map-search-header={mapHeaderSafeZone ? "true" : undefined}>
           {leading}
           <div className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 transition-colors",
-            focused && "ring-2 ring-primary/15",
+            "flex min-w-0 flex-1 items-center gap-2 px-2",
+            leading ? "rounded-r-2xl" : "rounded-2xl",
           )}>
             <Search className={cn("shrink-0 text-muted-foreground", dense ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden="true" />
             <input
@@ -205,7 +208,7 @@ export function CampusDestinationSearch({
                   setActiveResultKey(null);
                   onClear();
                 }}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 aria-label={clearAriaLabel}
               >
                 <X className="h-4 w-4" />
@@ -220,17 +223,16 @@ export function CampusDestinationSearch({
             <motion.div
               key="destination-search-results"
               data-testid={mapHeaderSafeZone ? "map-search-results-panel" : undefined}
-              initial={reducedMotion ? false : { opacity: 0, height: 0, y: -4 }}
+              initial={reducedMotion ? false : { opacity: 0, height: 0, y: -5 }}
               animate={{ opacity: 1, height: "auto", y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -3 }}
-              transition={{ duration: reducedMotion ? 0.01 : 0.17, ease: "easeOut" }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -4 }}
+              transition={{ duration: reducedMotion ? 0.01 : 0.21, ease: [0.22, 1, 0.36, 1] }}
               className={cn(
                 "overflow-hidden",
                 fillResults && "flex min-h-0 flex-1 flex-col",
-                mapHeaderSafeZone && "absolute left-0 right-auto top-full z-[70] mt-1.5 w-[calc(100vw-1.5rem)] max-w-none md:static md:mt-1.5 md:w-full",
               )}
             >
-            <div className="mt-1.5 flex shrink-0 gap-1 overflow-x-auto px-0.5 pb-0.5 no-scrollbar" role="group" aria-label="Destination type filters">
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-t border-border/60 px-2 py-2 no-scrollbar" role="group" aria-label="Destination type filters">
               {FILTERS.map((item) => (
                 <button
                   key={item.value}
@@ -243,11 +245,11 @@ export function CampusDestinationSearch({
                     onFilterChange(item.value);
                   }}
                   className={cn(
-                    "shrink-0 rounded-full border text-[10px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                    "min-h-9 px-3",
+                    "shrink-0 rounded-full border border-transparent text-[10px] font-extrabold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    "min-h-8 px-3",
                     filter === item.value
-                      ? "border-primary/30 bg-primary text-primary-foreground"
-                      : "border-border/70 bg-muted/55 text-muted-foreground hover:border-primary/30 hover:text-primary",
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
                   {item.label}
@@ -261,11 +263,10 @@ export function CampusDestinationSearch({
               data-map-layer={mapHeaderSafeZone ? "transient" : undefined}
               aria-label="Campus destination results"
               className={cn(
-                "max-h-[min(22rem,55dvh)] overscroll-contain overflow-y-auto rounded-2xl border border-border/60 bg-card shadow-xl no-scrollbar",
-                dense ? "mt-2" : "mt-1.5",
+                "max-h-[min(22rem,55dvh)] overscroll-contain overflow-y-auto border-t border-border/60 bg-transparent no-scrollbar",
                 fillResults && "min-h-0 max-h-none flex-1",
               )}
-              style={compact && !fillResults ? { maxHeight: "min(22rem, calc(100dvh - var(--student-map-search-safe-top, 4rem) - 6.5rem - env(safe-area-inset-bottom, 0px)))" } : undefined}
+              style={compact && !fillResults ? { maxHeight: "min(22rem, calc(100dvh - var(--student-map-search-safe-top, 4rem) - 7rem - env(safe-area-inset-bottom, 0px)))" } : undefined}
               onWheelCapture={(event) => event.stopPropagation()}
               onTouchMoveCapture={(event) => event.stopPropagation()}
             >
@@ -337,7 +338,6 @@ export function CampusDestinationSearch({
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
     </div>
   );
 }

@@ -658,7 +658,10 @@ describe("CampusMapPage event overlays", () => {
       renderCampusMap({ previewCampus });
       const sheet = await screen.findByTestId("mobile-building-sheet");
       fireEvent.click(within(sheet).getByRole("button", { name: "Show building QR code" }));
-      expect(within(sheet).getByLabelText("QR code for Science Hall")).toBeInTheDocument();
+      const qrDialogs = await screen.findAllByRole("dialog", { name: "Location QR" });
+      expect(qrDialogs).toHaveLength(1);
+      const qrDialog = qrDialogs[0];
+      expect(within(qrDialog).getByLabelText("QR code for Science Hall")).toBeInTheDocument();
       expect(screen.getAllByText("Science Hall").length).toBeGreaterThan(1);
       expect(window.location.search).toBe("");
     } finally {
@@ -1738,7 +1741,7 @@ describe("CampusMapPage event overlays", () => {
     // The indoor scene is code-split. Wait for it to resolve before exercising
     // the mobile Back control so this test checks navigation behavior, not the
     // transient Suspense fallback used while the fixture loads the SVG scene.
-    fireEvent.click(screen.getByRole("button", { name: /Back to campus map from SCI/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to campus" }));
     expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume navigation" })).toBeInTheDocument();
     expect(screen.getByTestId("route-paused-for-inspection-dock")).toBeInTheDocument();
@@ -1761,7 +1764,7 @@ describe("CampusMapPage event overlays", () => {
     const exploreProgress = screen.getByTestId("collapsed-route-progress").textContent;
     expect(screen.getByRole("button", { name: "Show full origin name: Navigation Test Room" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit route to Campus Gate" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Back to campus map from SCI/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to campus" }));
 
     expect(screen.queryByTestId("readonly-floor-plan-scene")).not.toBeInTheDocument();
     expect(routeSurface).toHaveAttribute("data-route-phase", "navigating");

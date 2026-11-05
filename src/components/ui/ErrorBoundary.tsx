@@ -1,6 +1,7 @@
 import { Component, createRef, useEffect, useRef, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw, ChevronDown, Home, HelpCircle, FileWarning, Bug } from "lucide-react";
 import { useLocation, useRouteError } from "react-router";
+import { recordDiagnosticEvent } from "../../lib/diagnostics";
 
 /** Errors emitted by browsers/Vite when a lazy page chunk cannot be fetched. */
 export function isDynamicImportError(error: unknown): boolean {
@@ -42,6 +43,9 @@ export function RouteErrorElement() {
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+  useEffect(() => {
+    recordDiagnosticEvent({ category: "runtime", severity: "error", summary: getRouteErrorMessage(error), source: `route error · ${pathname}` });
+  }, [error, pathname]);
 
   return (
     <main
@@ -149,6 +153,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     console.error("[ErrorBoundary] Uncaught error:", error.message, errorInfo.componentStack);
+    recordDiagnosticEvent({ category: "runtime", severity: "error", summary: error.message, source: "React error boundary" });
     this.props.onError?.(error, errorInfo);
   }
 

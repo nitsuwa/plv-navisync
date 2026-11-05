@@ -11,7 +11,7 @@ import { buildingCoverPublicUrl } from "../../services/buildingImageService";
 import { useToast } from "../../hooks/useToast";
 import { StudentReportAction } from "./StudentReportAction";
 import { cn } from "../../lib/utils";
-import { CampusGateQR } from "./CampusGateQR";
+import { LocationQR } from "./LocationQR";
 
 interface CampusPlaceDetailsProps {
   place: CampusMarker;
@@ -115,7 +115,7 @@ export function CampusPlaceDetails({ place, campusId = "", qrLocationId, canRout
         <StudentReportAction testId="campus-place-report" ariaLabel={`Report an issue with ${place.name}`} onClick={() => studentAuth.isStudent ? onReport() : onSignInPrompt("report issues")} className="h-9 gap-1 px-1 text-[10px]" />
       </div>
       )}
-      {isGate && showGateQR && <CampusGateQR gate={place} campusId={campusId} locationId={qrLocationId || place.navNodeId || place.id} />}
+      {isGate && showGateQR && <LocationQR displaySize="large" onClose={() => setShowGateQR(false)} buildingId={place.id} buildingName={place.name || "Campus Gate"} campusId={campusId} locationId={qrLocationId || place.navNodeId || place.id} />}
       {!canRouteTo && !canStartAt && showSecondary && <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">This place is not connected to the walking network yet.</p>}
       {!mobile && schedule && <p className="text-[11px] text-muted-foreground"><span className="font-bold text-foreground">Operating hours</span> · {schedule}</p>}
     </div>

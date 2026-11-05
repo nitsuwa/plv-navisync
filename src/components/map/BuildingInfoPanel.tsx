@@ -6,7 +6,6 @@ import { useEscToClose } from "../../hooks/useEscToClose";
 import { BuildingCover } from "./BuildingCover";
 import { BuildingDetailsActions } from "./BuildingDetailsActions";
 import { BuildingDetailsSections } from "./BuildingDetailsSections";
-import { LocationQR } from "./LocationQR";
 
 export type PanelTab = "overview" | "departments" | "facilities" | "accessibility" | "route";
 
@@ -109,7 +108,6 @@ export function BuildingInfoPanel({
           accessibility={accessibility}
           floorCount={floorPlanCount}
           showQR={showQR}
-          qrContent={<LocationQR campusId={campusId} buildingId={selected.id} buildingName={selected.name} />}
         />
       </div>
     </motion.aside>

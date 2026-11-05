@@ -14,6 +14,28 @@ export interface RouteWorldSampler {
   isNearCorner(distance: number, clearance?: number): boolean;
 }
 
+/** Return one arrow's cyclic distance along a route. The end margins keep the
+ * chevrons on valid route geometry; modulo spacing distributes the bounded
+ * arrow set so a loop boundary never leaves the route empty. */
+export function routeArrowDistanceAt(
+  totalLength: number,
+  arrowCount: number,
+  arrowIndex: number,
+  elapsedSeconds: number,
+  speedWorldPerSecond: number,
+): number | null {
+  const usable = totalLength - 1.8;
+  if (!Number.isFinite(usable) || usable <= 0
+    || !Number.isInteger(arrowCount) || arrowCount < 1
+    || !Number.isInteger(arrowIndex) || arrowIndex < 0 || arrowIndex >= arrowCount
+    || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0
+    || !Number.isFinite(speedWorldPerSecond) || speedWorldPerSecond < 0) return null;
+  const spacing = usable / arrowCount;
+  if (spacing <= 0) return null;
+  const phase = (elapsedSeconds * speedWorldPerSecond) % spacing;
+  return 0.9 + ((arrowIndex * spacing + phase) % usable);
+}
+
 /** Cache canonical route segments in rendered world-distance units so small
  * directional chevrons can flow over the same route without React state or
  * rebuilding route geometry. */
@@ -60,7 +82,10 @@ export function createRouteWorldSampler(points: readonly Pt[], worldScale: numbe
     return output;
   };
   const yawAt = (distance: number) => {
-    const delta = Math.min(0.24, Math.max(0.06, totalLength * 0.008));
+    // Sample a short chord around the current point. A wider chord blends the
+    // heading across a corner so animated chevrons rotate continuously
+    // instead of snapping between authored segment tangents.
+    const delta = Math.min(0.42, Math.max(0.18, totalLength * 0.012));
     const before = sample(Math.max(0, distance - delta));
     const after = sample(Math.min(totalLength, distance + delta));
     if (!before || !after) return 0;
@@ -125,17 +150,13 @@ export function routeArrowPlacements(
   points: readonly Pt[],
   {
     worldScale,
-    spacingWorld = 2.4,
+    spacingWorld = 1.8,
     endMarginWorld = 0.9,
-    cornerClearanceWorld = 0.48,
-    cornerThresholdDegrees = 38,
     maxArrows = 36,
   }: {
     worldScale: number;
     spacingWorld?: number;
     endMarginWorld?: number;
-    cornerClearanceWorld?: number;
-    cornerThresholdDegrees?: number;
     maxArrows?: number;
   },
 ): RouteArrowPlacement[] {
@@ -160,19 +181,6 @@ export function routeArrowPlacements(
   if (count < 1) return [];
   const spacing = Math.min(spacingWorld, usable / count);
   const first = (total - (count - 1) * spacing) / 2;
-  const cornerThreshold = (cornerThresholdDegrees * Math.PI) / 180;
-  const corners: number[] = [];
-  for (let index = 1; index < clean.length - 1; index += 1) {
-    const before = clean[index - 1]; const vertex = clean[index]; const after = clean[index + 1];
-    const incoming = { x: vertex.x - before.x, y: vertex.y - before.y };
-    const outgoing = { x: after.x - vertex.x, y: after.y - vertex.y };
-    const inLength = Math.hypot(incoming.x, incoming.y);
-    const outLength = Math.hypot(outgoing.x, outgoing.y);
-    if (inLength <= 1e-8 || outLength <= 1e-8) continue;
-    const cosine = Math.max(-1, Math.min(1, (incoming.x * outgoing.x + incoming.y * outgoing.y) / (inLength * outLength)));
-    if (Math.acos(cosine) >= cornerThreshold) corners.push(cumulative[index]);
-  }
-
   const pointAt = (distance: number): Pt => {
     const target = Math.max(0, Math.min(total, distance));
     let index = segmentLengths.findIndex((length, segment) => target <= cumulative[segment + 1] || segment === segmentLengths.length - 1);
@@ -187,7 +195,6 @@ export function routeArrowPlacements(
   const placements: RouteArrowPlacement[] = [];
   for (let index = 0; index < count; index += 1) {
     const distance = first + index * spacing;
-    if (corners.some((corner) => Math.abs(corner - distance) < cornerClearanceWorld)) continue;
     const before = pointAt(distance - tangentDelta / 2);
     const after = pointAt(distance + tangentDelta / 2);
     const dx = after.x - before.x;

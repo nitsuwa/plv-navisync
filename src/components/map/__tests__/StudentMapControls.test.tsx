@@ -327,8 +327,35 @@ describe("StudentMapControls", () => {
 
     const backButton = screen.getByRole("button", { name: "Back to campus" });
     expect(backButton).toHaveAttribute("data-testid", "student-map-back-campus-mobile");
-    expect(backButton).toHaveClass("min-h-11", "md:hidden");
+    expect(backButton).toHaveClass("min-h-11", "w-11", "h-11");
+    expect(backButton).not.toHaveClass("md:hidden");
+    expect(backButton).toHaveClass("h-11", "w-11", "rounded-xl", "bg-card/95", "shadow-[0_6px_18px_rgba(15,23,42,0.14)]");
+    expect(backButton.querySelector("span")).toBeNull();
     expect(screen.queryByTestId("student-map-search-panel")).not.toBeInTheDocument();
+    fireEvent.click(backButton);
+    expect(onBackToCampus).toHaveBeenCalledOnce();
+  });
+
+  it("uses an icon-only mobile back control beside indoor search", () => {
+    const onBackToCampus = vi.fn();
+    render(<StudentMapControls {...props({ isFloorMode: true, onBackToCampus })} />);
+
+    const backButton = screen.getByRole("button", { name: "Back to campus" });
+    expect(backButton).toHaveClass("h-11", "w-11", "border-r");
+    expect(backButton.querySelector("span")).toBeNull();
+    fireEvent.click(backButton);
+    expect(onBackToCampus).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the event floor back action compact and icon-only on mobile", () => {
+    const onBackToCampus = vi.fn();
+    render(<StudentMapControls {...props({ isFloorMode: true, eventMode: true, onBackToCampus })} />);
+
+    const backButton = screen.getByRole("button", { name: "Back to campus" });
+    expect(backButton).toHaveAttribute("data-testid", "student-event-back-campus");
+    expect(backButton).toHaveClass("h-11", "w-11");
+    expect(backButton).not.toHaveClass("md:w-auto");
+    expect(backButton.querySelector("span")).toBeNull();
     fireEvent.click(backButton);
     expect(onBackToCampus).toHaveBeenCalledOnce();
   });

@@ -231,30 +231,9 @@ export function useCampusSearch(
       });
     });
 
-    // Assembly Points share the authored outdoor graph, but retain their own
-    // stable identity and destination type. Requiring the point-owned anchor
-    // plus an actual incident graph edge prevents a visual marker from being
-    // presented as a routable destination.
-    (campus.assemblyPoints ?? []).forEach((point) => {
-      const connectedPoint = connected?.assemblyPointIds.has(point.id)
-        ?? Boolean(point.navNodeId && (campus.navNodes ?? []).some((node) =>
-          node.id === point.navNodeId && node.assemblyPointId === point.id)
-          && (campus.navEdges ?? []).some((edge) => !edge.closed
-            && edge.startNodeId !== edge.endNodeId
-            && (edge.startNodeId === point.navNodeId || edge.endNodeId === point.navNodeId)));
-      if (!connectedPoint) return;
-      entries.push({
-        id: point.id,
-        name: point.name || "Emergency Assembly Point",
-        kind: "destination",
-        category: "assembly_point",
-        campusPlaceId: point.id,
-        description: "Emergency Assembly Point",
-        accessible: Boolean(point.accessible),
-        keywords: [point.name || "Emergency Assembly Point", "assembly point", "emergency destination"]
-          .map((value) => value.toLowerCase()),
-      });
-    });
+    // Assembly points remain available to the dedicated emergency routing
+    // flow, but must not appear in ordinary map search or route endpoint
+    // selection. Those contexts are for places students can choose directly.
 
     // 4. Index active event overlays so campus search and event discovery share
     // one destination model.
