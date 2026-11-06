@@ -19,6 +19,8 @@ import { useArrivalChime } from "../hooks/useArrivalChime";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
+import { useNaviBuddy } from "../contexts/NaviBuddyStore";
+import { NaviBuddyReactionBubble } from "../components/map/NaviBuddyPortrait";
 import { recordDiagnosticEvent, setMapDiagnosticContext, type MapDiagnosticContext } from "../lib/diagnostics";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
@@ -920,6 +922,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const { theme } = useTheme();
   const darkMode = theme === "dark";
   const studentAuth = useStudentAuth();
+  const naviBuddy = useNaviBuddy();
   const mobileStudentNotificationRef = useRef<HTMLDivElement>(null);
   const studentEventUpdates = useStudentOrgEventUpdates(
     studentAuth.profile?.id,
@@ -4372,6 +4375,27 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     return toBuilding ? `building:${toBuilding.id}` : null;
   }, [roomDestination, toBuilding, toCampusPlace]);
   const [route, setRoute] = useState<PlannedRoute | null>(null);
+  const previousBuddyRoutePhaseRef = useRef(studentRouteUi.phase);
+  const lastBuddyReadyRouteRef = useRef<string | null>(null);
+  const lastBuddyArrivalRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousBuddyRoutePhaseRef.current;
+    previousBuddyRoutePhaseRef.current = studentRouteUi.phase;
+    if (studentRouteUi.phase === "idle") {
+      lastBuddyReadyRouteRef.current = null;
+      lastBuddyArrivalRouteRef.current = null;
+    }
+    if (previous === studentRouteUi.phase || !route || !naviBuddy.appearance.companionEnabled) return;
+    const routeKey = route.routeId ?? `${route.fromCode}:${route.toCode}:${route.destinationRoom?.roomId ?? ""}`;
+    if (studentRouteUi.phase === "preview" && lastBuddyReadyRouteRef.current !== routeKey) {
+      lastBuddyReadyRouteRef.current = routeKey;
+      naviBuddy.react("Found a path. Ready when you are!");
+    }
+    if (studentRouteUi.phase === "arrived" && lastBuddyArrivalRouteRef.current !== routeKey) {
+      lastBuddyArrivalRouteRef.current = routeKey;
+      naviBuddy.react("You made it. Nice work!");
+    }
+  }, [naviBuddy.appearance.companionEnabled, naviBuddy.react, route, studentRouteUi.phase]);
   const [automaticRouteChoices, setAutomaticRouteChoices] = useState<Array<{ id: string; label: string; route: PlannedRoute }>>([]);
   const [activeAutomaticRouteId, setActiveAutomaticRouteId] = useState<string | null>(null);
   const [activeEmergencyRouteId, setActiveEmergencyRouteId] = useState<string | null>(null);
@@ -9884,6 +9908,8 @@ const buildingFill = (id: string) =>
       onTouchEnd={student3DActive ? undefined : onTouchEnd}
       onPointerDown={student3DActive ? undefined : onPointerDown} onPointerMove={student3DActive ? undefined : onPointerMove}
       onPointerUp={student3DActive ? undefined : onPointerEnd} onPointerCancel={student3DActive ? undefined : onPointerEnd}>
+
+      <NaviBuddyReactionBubble />
 
       {activeCampus && readonlyOutdoorCampus && campus3DActive && (
         <div className="student-map-renderer-crossfade absolute inset-0 z-0" style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }}>

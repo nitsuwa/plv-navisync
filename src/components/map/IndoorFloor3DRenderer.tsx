@@ -17,7 +17,7 @@ import { groupStudentRouteExploreTransitions } from "../../lib/studentRouteFlow"
 import { shouldPreserveStudent3dFollowCameraOffset, student3dFollowCameraOffsetForRecovery, student3dFollowCameraOffsetChanged, synchronizeStudent3dFollowCameraOffsetDistance, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
-import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt, routeArrowPlacements, routePolylineWorldLength, routeVisualProgressWithEndpointClearance, STUDENT_FLOOR_3D_SCALE } from "../../lib/studentRoute3dPresentation";
+import { createRoutePointSampler, createRouteWorldSampler, navigationWalkerGroundElevation, routeArrowDistanceAt, routeArrowPlacements, routePolylineWorldLength, routeVisualProgressWithEndpointClearance, STUDENT_FLOOR_3D_SCALE } from "../../lib/studentRoute3dPresentation";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
 import { student3dFocusDistance, student3dFocusDistanceForViewport, student3dIndoorArrivalCameraDirection, student3dIndoorFollowCameraOffset, student3dSafeFocusRect } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle } from "../../lib/student3dCameraRecenter";
@@ -2253,7 +2253,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     if (humanMarkerRef.current) {
       if (props.humanVisible && livePoint) {
         humanMarkerRef.current.visible = true;
-        humanMarkerRef.current.position.set(...pointToWorld(livePoint, viewport, 0.1 + rampHeightAt(livePoint, ramps)));
+        humanMarkerRef.current.position.set(...pointToWorld(livePoint, viewport, navigationWalkerGroundElevation(FLOOR_SURFACE_Y, rampHeightAt(livePoint, ramps))));
       } else humanMarkerRef.current.visible = false;
     }
     if (selectionTweenRef.current) {
@@ -2703,8 +2703,8 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
           <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-[9px] font-extrabold tracking-wide text-white shadow-lg">{props.youAreHereLabel ?? "You are here"}</span>
         </Html>
       </group>}
-      {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, 0.1 + humanRampHeight) : [0, FLOOR_SURFACE_Y, 0]}>
-        <IskolarWalker3D reducedMotion={props.reducedMotion} />
+      {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, navigationWalkerGroundElevation(FLOOR_SURFACE_Y, humanRampHeight)) : [0, FLOOR_SURFACE_Y, 0]}>
+        <IskolarWalker3D reducedMotion={props.reducedMotion} navigationPresentation />
       </group>}
       {props.activeTransition && activeTransitionPoint && <Html position={pointToWorld(activeTransitionPoint, viewport, 0.42)} center zIndexRange={[100, 0]}>
         <button type="button" onClick={(event) => { event.stopPropagation(); if (!props.shouldSuppressClick()) props.activeTransition?.onActivate?.(); }} style={{ width: "max-content", maxWidth: "min(18rem, calc(100vw - 2rem))" }} className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border px-3 py-2 text-center text-[12px] font-extrabold shadow-lg whitespace-normal focus-visible:outline-none focus-visible:ring-2 ${activeExitDoor?.isEmergencyExit ? "border-red-300 bg-red-700 text-white ring-red-300 hover:bg-red-800" : "border-blue-200 bg-white/95 text-blue-800 hover:bg-blue-50 focus-visible:ring-blue-500"}`}>{activeExitDoor?.isEmergencyExit ? "Emergency Exit" : props.activeTransition.displayLabel ?? props.activeTransition.label}</button>
