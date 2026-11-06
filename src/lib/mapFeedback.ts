@@ -30,7 +30,7 @@ export function saveMapFeedbackPreference(key: keyof MapFeedbackPreferences, ena
   }
 }
 
-export type MapFeedbackEvent = "scan-success" | "scan-error" | "arrival";
+export type MapFeedbackEvent = "scan-success" | "scan-error" | "arrival" | "save-success";
 
 export function triggerMapHapticFeedback(event: MapFeedbackEvent): void {
   if (!readMapFeedbackPreferences().hapticsEnabled || typeof navigator === "undefined") return;
@@ -59,15 +59,16 @@ export function triggerMapFeedbackSound(event: MapFeedbackEvent): void {
       const gain = context.createGain();
       const now = context.currentTime;
       oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(event === "scan-error" ? 440 : event === "arrival" ? 660 : 880, now);
+      oscillator.frequency.setValueAtTime(event === "scan-error" ? 440 : event === "arrival" ? 660 : event === "save-success" ? 740 : 880, now);
+      if (event === "save-success") oscillator.frequency.linearRampToValueAtTime(988, now + 0.11);
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.055, now + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (event === "arrival" ? 0.19 : 0.105));
+      gain.gain.exponentialRampToValueAtTime(event === "save-success" ? 0.028 : 0.055, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + (event === "arrival" ? 0.19 : event === "save-success" ? 0.23 : 0.105));
       oscillator.connect(gain);
       gain.connect(context.destination);
       oscillator.onended = () => { void context.close().catch(() => undefined); };
       oscillator.start(now);
-      oscillator.stop(now + (event === "arrival" ? 0.2 : 0.115));
+      oscillator.stop(now + (event === "arrival" ? 0.2 : event === "save-success" ? 0.24 : 0.115));
     } catch {
       void context.close().catch(() => undefined);
     }

@@ -8,6 +8,7 @@ import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { OfflineIndicator, PwaUpdateNotifier } from "../components/layout/PwaPrompts";
 import { DiagnosticsCenter } from "../components/diagnostics/DiagnosticsCenter";
+import { NaviBuddyProvider } from "../contexts/NaviBuddyContext";
 
 function AppRuntime() {
   const auth = useAuthBootstrap();
@@ -69,7 +70,9 @@ function AppRuntime() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRuntime />
+      <NaviBuddyProvider>
+        <AppRuntime />
+      </NaviBuddyProvider>
     </AuthProvider>
   );
 }

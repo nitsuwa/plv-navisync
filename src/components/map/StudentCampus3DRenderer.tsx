@@ -2566,14 +2566,15 @@ function FollowHumanMarker({ route, progressRef, initialPoint, reducedMotion }: 
       ? sampleRoute(routeVisualProgressWithEndpointClearance(progressRef.current, routeLengthWorld), samplePoint.current)
       : initialPoint;
     if (!point) { group.visible = false; return; }
-    // Route ribbons sit at 0.12 world units. Keep the tracked marker just
-    // above that plane so its dark outline cannot be sliced by the route.
-    const world = campusMapPointToWorld(point, 0.145);
+    // The rendered route ribbon is the avatar's traversable surface. Keep the
+    // feet on it; the navigation walker renders a small contact shadow rather
+    // than the raised customization display platform.
+    const world = campusMapPointToWorld(point, 0.12);
     group.visible = true;
     group.position.set(world.x, world.y, world.z);
   });
   return <group ref={groupRef}>
-    <IskolarWalker3D reducedMotion={reducedMotion} />
+    <IskolarWalker3D reducedMotion={reducedMotion} navigationPresentation />
   </group>;
 }
 

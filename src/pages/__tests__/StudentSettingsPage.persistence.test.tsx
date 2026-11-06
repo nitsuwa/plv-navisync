@@ -1,13 +1,14 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAP_HAPTIC_PREFERENCE_KEY, MAP_SOUND_PREFERENCE_KEY } from "../../lib/mapFeedback";
+import * as mapFeedback from "../../lib/mapFeedback";
 
 const authState = vi.hoisted(() => ({
   loading: false,
   isStudent: true,
   username: "Maria Santos",
-  role: "student" as const,
+  role: "student" as "student" | "student_org",
   profile: { id: "student-a" } as { id: string } | null,
   signOut: vi.fn(),
 }));
@@ -17,6 +18,11 @@ const preferenceService = vi.hoisted(() => ({
   saveStudentPreferences: vi.fn(),
 }));
 const passwordService = vi.hoisted(() => ({ updateStudentPassword: vi.fn() }));
+const buddyState = vi.hoisted(() => ({
+  appearance: { outfit: "classic" as const, backpack: "classic" as const, companionEnabled: true },
+  loaded: true,
+  saveAppearance: vi.fn(),
+}));
 
 vi.mock("../../hooks/useStudentAuth", () => ({ useStudentAuth: () => authState }));
 const themeService = vi.hoisted(() => ({ setThemePreference: vi.fn() }));
@@ -26,6 +32,10 @@ vi.mock("../../hooks/useScrollReveal", () => ({
 }));
 vi.mock("../../services/studentPreferencesService", () => preferenceService);
 vi.mock("../../lib/studentAccount", () => ({ MIN_ACCOUNT_PASSWORD_LENGTH: 8, ...passwordService }));
+vi.mock("../../contexts/NaviBuddyStore", () => ({
+  useNaviBuddy: () => buddyState,
+  useNaviBuddyAppearance: () => buddyState.appearance,
+}));
 vi.mock("../../hooks/useToast", () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }));
@@ -45,6 +55,9 @@ describe("StudentSettingsPage persistence", () => {
     });
     preferenceService.saveStudentPreferences.mockImplementation(async (value) => value);
     passwordService.updateStudentPassword.mockResolvedValue({ user: { id: "user-1" } });
+    buddyState.appearance = { outfit: "classic", backpack: "classic", companionEnabled: true };
+    buddyState.loaded = true;
+    buddyState.saveAppearance.mockReset().mockImplementation(async (next) => { buddyState.appearance = next; });
   });
 
   afterEach(() => vi.useRealTimers());
@@ -162,5 +175,71 @@ describe("StudentSettingsPage persistence", () => {
     expect(screen.getByRole("radio", { name: /System/ })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("radio", { name: /Dark/ }));
     expect(themeService.setThemePreference).toHaveBeenCalledWith("dark");
+  });
+
+  it("shows the student-only NaviBuddy editor with live outfit and backpack controls", async () => {
+    localStorage.setItem(MAP_SOUND_PREFERENCE_KEY, "on");
+    const saveSound = vi.spyOn(mapFeedback, "triggerMapFeedbackSound");
+    render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("tab", { name: "My NaviBuddy" }));
+
+    const outfits = within(screen.getByRole("radiogroup", { name: "NaviBuddy outfit" }));
+    expect(outfits.getByRole("radio", { name: "Classic" })).toHaveAttribute("aria-checked", "true");
+    const saveButton = screen.getByRole("button", { name: "Save Look" });
+    expect(saveButton).toBeDisabled();
+    expect(screen.getAllByRole("img", { name: "Classic NaviBuddy" }).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(outfits.getByRole("radio", { name: "Adventurer" }));
+    expect(outfits.getByRole("radio", { name: "Adventurer" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByRole("img", { name: "Adventurer NaviBuddy" }).length).toBeGreaterThanOrEqual(1);
+    const backpacks = within(screen.getByRole("radiogroup", { name: "NaviBuddy backpack" }));
+    fireEvent.click(backpacks.getByRole("radio", { name: "Compact Backpack" }));
+    expect(backpacks.getByRole("radio", { name: "Compact Backpack" })).toHaveAttribute("aria-checked", "true");
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(outfits.getByRole("radio", { name: "Classic" }));
+    fireEvent.click(backpacks.getByRole("radio", { name: "Classic Backpack" }));
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(outfits.getByRole("radio", { name: "Adventurer" }));
+    fireEvent.click(backpacks.getByRole("radio", { name: "Compact Backpack" }));
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "adventurer", backpack: "compact", companionEnabled: true }));
+    expect(saveButton).toBeDisabled();
+    expect(await screen.findByText("Look saved!")).toBeInTheDocument();
+    expect(saveSound).toHaveBeenCalledTimes(1);
+    expect(saveSound).toHaveBeenCalledWith("save-success");
+    saveSound.mockRestore();
+  });
+
+  it("keeps a failed save editable and silent, and Reset remains an unsaved draft action", async () => {
+    localStorage.setItem(MAP_SOUND_PREFERENCE_KEY, "on");
+    buddyState.saveAppearance.mockRejectedValueOnce(new Error("offline"));
+    const saveSound = vi.spyOn(mapFeedback, "triggerMapFeedbackSound");
+    render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("tab", { name: "My NaviBuddy" }));
+    const saveButton = screen.getByRole("button", { name: "Save Look" });
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Reset NaviBuddy to default" }));
+    expect(saveButton).toBeDisabled();
+    const outfits = within(screen.getByRole("radiogroup", { name: "NaviBuddy outfit" }));
+    fireEvent.click(outfits.getByRole("radio", { name: "PLV Uniform" }));
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "plv_uniform", backpack: "classic", companionEnabled: true }));
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    expect(screen.queryByText("Look saved!")).not.toBeInTheDocument();
+    expect(saveSound).not.toHaveBeenCalled();
+    saveSound.mockRestore();
+  });
+
+  it("does not expose customization to student organization accounts", async () => {
+    authState.role = "student_org";
+    render(<StudentSettingsPage />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
+    await act(async () => vi.advanceTimersByTime(600));
+    vi.useRealTimers();
+    expect(screen.queryByRole("tab", { name: "My NaviBuddy" })).not.toBeInTheDocument();
+    authState.role = "student";
   });
 });

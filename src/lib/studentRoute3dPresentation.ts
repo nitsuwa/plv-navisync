@@ -2,7 +2,14 @@ import type { Pt } from "./routePlanner";
 
 /** Authored indoor floor coordinates to Three.js world units. */
 export const STUDENT_FLOOR_3D_SCALE = 0.025;
-const DEFAULT_AVATAR_ENDPOINT_CLEARANCE_WORLD = 0.08;
+const DEFAULT_AVATAR_ENDPOINT_CLEARANCE_WORLD = 0.12;
+
+/** Ground elevation for a route avatar on a level surface or authored ramp. */
+export function navigationWalkerGroundElevation(surfaceY: number, rampRise = 0): number {
+  const ground = Number.isFinite(surfaceY) ? surfaceY : 0;
+  const rise = Number.isFinite(rampRise) ? Math.max(0, rampRise) : 0;
+  return ground + rise;
+}
 
 /** Route length in rendered world units, used only for presentation decisions. */
 export function routePolylineWorldLength(points: readonly Pt[], worldScale: number): number {

@@ -54,6 +54,9 @@ describe("StudentHomePage in-scope content", () => {
     expect(screen.getByText("Find campus buildings, locate rooms, and plan your next route.")).toBeInTheDocument();
     // The map stays one tap away in the bottom navigation; Home no longer repeats it as a card.
     expect(screen.queryByText("Find your next stop")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ready to explore PLV?")).not.toBeInTheDocument();
+    expect(screen.queryByText("NaviBuddy is here to help you find your next stop.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /NaviBuddy/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Buildings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument();
