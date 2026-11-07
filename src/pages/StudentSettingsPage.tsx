@@ -21,7 +21,7 @@ import { MIN_ACCOUNT_PASSWORD_LENGTH, updateStudentPassword } from "../lib/stude
 import { useNaviBuddy } from "../contexts/NaviBuddyStore";
 import { DEFAULT_NAVIBUDDY_APPEARANCE, isNaviBuddyLookDirty, NAVIBUDDY_BACKPACKS, NAVIBUDDY_OUTFITS, NAVIBUDDY_OUTFIT_DETAILS, type NaviBuddyAppearance } from "../lib/naviBuddy";
 import { triggerMapFeedbackSound } from "../lib/mapFeedback";
-import { NaviBuddyPortrait } from "../components/map/NaviBuddyPortrait";
+import { NaviBuddyOutfitBust, NaviBuddyPortrait } from "../components/map/NaviBuddyPortrait";
 const NaviBuddy3DPreview = lazy(() => import("../components/map/NaviBuddy3DPreview").then((module) => ({ default: module.NaviBuddy3DPreview })));
 import {
   DEFAULT_STUDENT_PREFERENCES,
@@ -67,9 +67,11 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function Toggle({ on, onToggle, label, disabled = false }: { on: boolean; onToggle: () => void; label: string; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-label={label} aria-checked={on} onClick={onToggle} disabled={disabled}
-      className={cn("group relative inline-flex h-7 w-[50px] shrink-0 cursor-pointer items-center rounded-full p-[3px] transition-colors duration-200 ease-out hover:brightness-[.97] active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none", on ? "bg-primary" : "bg-slate-300 dark:bg-slate-700")}
+      className="group relative inline-flex h-11 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
       data-checked={on ? "true" : "false"}>
-      <span aria-hidden="true" className={cn("h-[22px] w-[22px] rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,.26)] transition-[translate] duration-[220ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none", on ? "translate-x-[22px]" : "translate-x-0")} />
+      <span aria-hidden="true" className={cn("relative inline-flex h-[26px] w-12 items-center rounded-full border border-black/5 p-[3px] shadow-inner transition-colors duration-200 ease-out group-hover:brightness-[.97] group-active:scale-[.97] motion-reduce:transition-none", on ? "bg-primary" : "bg-slate-300 dark:border-white/10 dark:bg-slate-700")}>
+        <span className={cn("h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,.26)] transition-[translate] duration-[200ms] ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none", on ? "translate-x-[22px]" : "translate-x-0")} />
+      </span>
     </button>
   );
 }
@@ -252,7 +254,7 @@ export function StudentSettingsPage() {
     buddySaveInFlight.current = true;
     setBuddySaving(true);
     try {
-      const next = { ...buddyDraft, companionEnabled: appearance.companionEnabled };
+      const next = buddyDraft;
       await saveAppearance(next);
       setBuddyDraft(next);
       setSavedBuddyLook(next);
@@ -265,19 +267,6 @@ export function StudentSettingsPage() {
     catch { showError("Look not saved"); }
     finally { buddySaveInFlight.current = false; setBuddySaving(false); }
   };
-  const toggleBuddyCompanion = async () => {
-    const next = { ...appearance, companionEnabled: !appearance.companionEnabled };
-    const draft = buddyDraft;
-    setBuddyDraft({ ...draft, companionEnabled: next.companionEnabled });
-    try {
-      await saveAppearance(next);
-      setBuddyDraft({ ...draft, companionEnabled: next.companionEnabled });
-    } catch {
-      setBuddyDraft(draft);
-      showError("Companion preference not saved");
-    }
-  };
-
   return (
     <PageTransition>
       <div className="min-h-screen">
@@ -353,10 +342,6 @@ export function StudentSettingsPage() {
                       <SettingRow icon={Volume2} label="Sound effects" desc="Short optional cues for a successful scan and arrival. Off by default." action={<Toggle on={mapFeedback.soundEnabled} onToggle={() => mapFeedback.setSoundEnabled(!mapFeedback.soundEnabled)} label="Sound effects" />} />
                       <SettingRow icon={Smartphone} label="Haptic feedback" desc="A brief vibration after a successful location scan, where supported." action={<Toggle on={mapFeedback.hapticsEnabled} onToggle={() => mapFeedback.setHapticsEnabled(!mapFeedback.hapticsEnabled)} label="Haptic feedback" />} />
                     </div>
-                    <SectionLabel>NaviBuddy companion</SectionLabel>
-                    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                      <SettingRow icon={Sparkles} label="Navigation reactions" desc="Show subtle NaviBuddy reactions when a route is ready and when you arrive." action={<Toggle on={buddyDraft.companionEnabled} onToggle={() => void toggleBuddyCompanion()} label="NaviBuddy navigation reactions" disabled={false} />} />
-                    </div>
                   </div>
                 </Reveal>
               )}
@@ -385,7 +370,7 @@ export function StudentSettingsPage() {
                         <Suspense fallback={<NaviBuddyPortrait appearance={buddyDraft} className="h-[270px] w-[230px]" />}>
                           <NaviBuddy3DPreview appearance={buddyDraft} reducedMotion={reducedMotion} />
                         </Suspense>
-                        <span className="relative -mt-1 rounded-full border border-primary/15 bg-card/90 px-4 py-1.5 text-xs font-extrabold text-foreground shadow-sm">{NAVIBUDDY_OUTFIT_DETAILS[buddyDraft.outfit].label}</span>
+                        <span data-testid="navibuddy-selected-outfit-label" className="relative z-10 -mt-1 inline-flex min-h-8 max-w-full shrink-0 items-center justify-center whitespace-nowrap rounded-full border border-primary/15 bg-card/95 px-5 py-1.5 text-[11px] font-extrabold leading-none text-foreground shadow-sm">{NAVIBUDDY_OUTFIT_DETAILS[buddyDraft.outfit].label}</span>
                       </div>
                       <div data-navi-controls className="flex flex-col rounded-[28px] border border-border/60 bg-card p-4 shadow-sm sm:p-5">
                         <fieldset className="min-w-0 border-0 p-0">
@@ -396,8 +381,8 @@ export function StudentSettingsPage() {
                               const detail = NAVIBUDDY_OUTFIT_DETAILS[outfit];
                               return <button key={outfit} type="button" role="radio" aria-checked={selected} aria-label={detail.label} title={detail.label} onClick={() => setBuddyDraft((value) => ({ ...value, outfit }))}
                                 className={cn("group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-0.5 pb-2 pt-1 transition duration-200 hover:-translate-y-0.5 active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 motion-reduce:transition-none", selected ? "bg-primary/8 ring-2 ring-primary shadow-sm" : "hover:bg-muted/60")}>
-                                <NaviBuddyPortrait appearance={{ ...buddyDraft, outfit }} className="navibuddy-wardrobe-thumb h-[78px] w-[64px] max-w-full" excited={selected} />
-                                <span className={cn("w-full whitespace-nowrap px-0.5 text-center text-[8px] font-bold leading-tight sm:text-[10px]", selected ? "text-primary" : "text-muted-foreground")}>{detail.label === "PLV Uniform" ? <>PLV<br />Uniform</> : detail.label}</span>
+                                <NaviBuddyOutfitBust appearance={{ ...buddyDraft, outfit }} className="navibuddy-wardrobe-thumb h-[60px] w-[54px] max-w-full" />
+                                <span className={cn("box-border w-full max-w-full whitespace-nowrap px-1 text-center text-[7px] font-bold leading-[1.15] tracking-tight sm:text-[9px]", selected ? "text-primary" : "text-muted-foreground")}>{detail.label === "PLV Uniform" ? <>PLV<br />Uniform</> : detail.label}</span>
                                 {selected && <CheckCircle2 aria-hidden="true" className="absolute right-1 top-1 h-3.5 w-3.5 rounded-full bg-card text-primary" />}
                               </button>;
                             })}

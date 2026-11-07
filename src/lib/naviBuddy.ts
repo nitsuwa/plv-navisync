@@ -6,11 +6,10 @@ export type NaviBuddyBackpack = typeof NAVIBUDDY_BACKPACKS[number];
 export interface NaviBuddyAppearance {
   outfit: NaviBuddyOutfit;
   backpack: NaviBuddyBackpack;
-  companionEnabled: boolean;
 }
 
 export const DEFAULT_NAVIBUDDY_APPEARANCE: NaviBuddyAppearance = {
-  outfit: "classic", backpack: "classic", companionEnabled: true,
+  outfit: "classic", backpack: "classic",
 };
 
 export const NAVIBUDDY_OUTFIT_DETAILS: Record<NaviBuddyOutfit, { label: string; description: string; jacket: string; accent: string; pants: string }> = {
@@ -28,7 +27,6 @@ export function normalizeNaviBuddyAppearance(value: unknown): NaviBuddyAppearanc
     // Preserve older saved looks when presets are renamed or replaced.
     outfit: candidate.outfit === "scholar" ? "plv_uniform" : candidate.outfit === "varsity" ? "adventurer" : NAVIBUDDY_OUTFITS.includes(candidate.outfit as NaviBuddyOutfit) ? candidate.outfit as NaviBuddyOutfit : "classic",
     backpack: NAVIBUDDY_BACKPACKS.includes(candidate.backpack as NaviBuddyBackpack) ? candidate.backpack as NaviBuddyBackpack : "classic",
-    companionEnabled: typeof candidate.companionEnabled === "boolean" ? candidate.companionEnabled : true,
   };
 }
 

@@ -89,11 +89,11 @@ describe("Settings to Map NaviBuddy appearance flow", () => {
     expect(outfitGroup.getByRole("radio", { name: "Adventurer" })).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Save Look" }));
-    await waitFor(() => expect(buddyService.save).toHaveBeenCalledWith("student-a", true, { outfit: "adventurer", backpack: "compact", companionEnabled: true }));
+    await waitFor(() => expect(buddyService.save).toHaveBeenCalledWith("student-a", true, { outfit: "adventurer", backpack: "compact" }));
     fireEvent.click(screen.getByRole("button", { name: "Map tab" }));
     expect(screen.getByTestId("map-appearance")).toHaveTextContent("classic:classic");
 
-    await act(async () => { resolveSave({ outfit: "adventurer", backpack: "compact", companionEnabled: true }); });
+    await act(async () => { resolveSave({ outfit: "adventurer", backpack: "compact" }); });
     expect(screen.getByTestId("map-appearance")).toHaveTextContent("adventurer:compact");
     expect(document.querySelector('path[fill="#a77a43"]')).toBeInTheDocument();
   });

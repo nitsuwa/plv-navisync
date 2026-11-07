@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useStudentAuth } from "../hooks/useStudentAuth";
 import { DEFAULT_NAVIBUDDY_APPEARANCE, type NaviBuddyAppearance } from "../lib/naviBuddy";
 import { loadNaviBuddyAppearance, saveNaviBuddyAppearance } from "../services/naviBuddyPreferencesService";
@@ -13,9 +13,6 @@ export function NaviBuddyProvider({ children }: { children: ReactNode }) {
   const appearance = stored.scope === scope ? stored.appearance : DEFAULT_NAVIBUDDY_APPEARANCE;
   const [loadState, setLoadState] = useState({ scope: "guest:default", loaded: false });
   const loaded = loadState.scope === scope && loadState.loaded;
-  const [reaction, setReaction] = useState<string | null>(null);
-  const reactionTimer = useRef<number | null>(null);
-
   useEffect(() => {
     if (loading) return;
     let active = true;
@@ -36,15 +33,7 @@ export function NaviBuddyProvider({ children }: { children: ReactNode }) {
     // prevents a quick Settings → Map switch from exposing an unsaved draft.
     setStored((current) => current.scope === scope ? { scope, appearance: saved } : current);
   }, [canCustomize, scope, userId]);
-  const react = useCallback((message: string) => {
-    if (!appearance.companionEnabled) return;
-    if (reactionTimer.current !== null) window.clearTimeout(reactionTimer.current);
-    setReaction(message);
-    reactionTimer.current = window.setTimeout(() => { setReaction(null); reactionTimer.current = null; }, 2800);
-  }, [appearance.companionEnabled]);
-  useEffect(() => () => { if (reactionTimer.current !== null) window.clearTimeout(reactionTimer.current); }, []);
-  useEffect(() => { if (!appearance.companionEnabled) setReaction(null); }, [appearance.companionEnabled]);
-  const value = useMemo(() => ({ appearance, loaded, saveAppearance, reaction, react }), [appearance, loaded, saveAppearance, reaction, react]);
+  const value = useMemo(() => ({ appearance, loaded, saveAppearance }), [appearance, loaded, saveAppearance]);
   return <NaviBuddyAppearanceContext.Provider value={appearance}>
     <NaviBuddyContext.Provider value={value}>{children}</NaviBuddyContext.Provider>
   </NaviBuddyAppearanceContext.Provider>;

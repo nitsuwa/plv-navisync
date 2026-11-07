@@ -5,25 +5,25 @@ describe("NaviBuddy appearance", () => {
   it("offers five outfits and three backpack choices with Classic as the unchanged default", () => {
     expect(NAVIBUDDY_OUTFITS).toEqual(["classic", "casual", "sporty", "plv_uniform", "adventurer"]);
     expect(NAVIBUDDY_BACKPACKS).toEqual(["classic", "compact", "none"]);
-    expect(DEFAULT_NAVIBUDDY_APPEARANCE).toEqual({ outfit: "classic", backpack: "classic", companionEnabled: true });
+    expect(DEFAULT_NAVIBUDDY_APPEARANCE).toEqual({ outfit: "classic", backpack: "classic" });
   });
 
   it("normalizes unsupported values instead of applying arbitrary appearance data", () => {
     expect(normalizeNaviBuddyAppearance({ outfit: "admin", backpack: "large", companionEnabled: false })).toEqual({
-      outfit: "classic", backpack: "classic", companionEnabled: false,
+      outfit: "classic", backpack: "classic",
     });
     expect(normalizeNaviBuddyAppearance(null)).toBe(DEFAULT_NAVIBUDDY_APPEARANCE);
   });
 
   it("keeps previously saved Scholar looks as the new PLV Uniform", () => {
     expect(normalizeNaviBuddyAppearance({ outfit: "scholar", backpack: "compact", companionEnabled: false })).toEqual({
-      outfit: "plv_uniform", backpack: "compact", companionEnabled: false,
+      outfit: "plv_uniform", backpack: "compact",
     });
   });
 
   it("keeps previously saved Varsity looks as the new Adventurer outfit", () => {
     expect(normalizeNaviBuddyAppearance({ outfit: "varsity", backpack: "compact", companionEnabled: false })).toEqual({
-      outfit: "adventurer", backpack: "compact", companionEnabled: false,
+      outfit: "adventurer", backpack: "compact",
     });
   });
 
