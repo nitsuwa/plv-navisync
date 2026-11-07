@@ -14,9 +14,9 @@ function PreviewModel({ appearance, reducedMotion, groupRef, targetYawRef, onInv
   onInvalidate: (invalidate: () => void) => void;
 }) {
   const invalidate = useThree((state) => state.invalidate);
-  const reactionTime = useRef(0);
+  const appearancePopRemaining = useRef(0);
   useEffect(() => onInvalidate(invalidate), [invalidate, onInvalidate]);
-  useEffect(() => { reactionTime.current = reducedMotion ? 0 : 0.38; invalidate(); }, [appearance.outfit, appearance.backpack, reducedMotion, invalidate]);
+  useEffect(() => { appearancePopRemaining.current = reducedMotion ? 0 : 0.38; invalidate(); }, [appearance.outfit, appearance.backpack, reducedMotion, invalidate]);
   useFrame((_, delta) => {
     const group = groupRef.current;
     if (!group) return;
@@ -25,12 +25,12 @@ function PreviewModel({ appearance, reducedMotion, groupRef, targetYawRef, onInv
       group.rotation.y += difference * (1 - Math.exp(-delta * 18));
       invalidate();
     }
-    if (reactionTime.current > 0) {
-      reactionTime.current = Math.max(0, reactionTime.current - delta);
-      const pop = Math.sin((0.38 - reactionTime.current) / 0.38 * Math.PI);
+    if (appearancePopRemaining.current > 0) {
+      appearancePopRemaining.current = Math.max(0, appearancePopRemaining.current - delta);
+      const pop = Math.sin((0.38 - appearancePopRemaining.current) / 0.38 * Math.PI);
       const scale = 1.42 + pop * 0.045;
       group.scale.setScalar(scale);
-      if (reactionTime.current > 0) invalidate();
+      if (appearancePopRemaining.current > 0) invalidate();
     }
   });
 
@@ -80,7 +80,7 @@ export function NaviBuddy3DPreview({ appearance, reducedMotion }: { appearance: 
     }
   };
 
-  if (!webglAvailable) return <NaviBuddyPortrait appearance={appearance} className="h-52 w-44 drop-shadow-md" waving />;
+  if (!webglAvailable) return <NaviBuddyPortrait appearance={appearance} className="h-52 w-44 drop-shadow-md" />;
 
   return <div className="relative h-[290px] w-full min-w-0 touch-pan-y select-none overflow-hidden sm:h-[360px]" aria-label="Interactive 3D NaviBuddy preview">
     <div

@@ -163,8 +163,9 @@ export function IskolarWalker3D({ reducedMotion = false, idleAnimation = false, 
         <mesh position={[0, 0.329, -0.008]} scale={[1.02, 0.86, 1.04]}><sphereGeometry args={[0.067, 16, 12]} /><meshStandardMaterial color={HAIR} roughness={0.82} /></mesh>
         <mesh position={[-0.026, 0.354, -0.004]} rotation={[0.12, 0, 0.18]} scale={[1.1, 0.8, 0.86]}><sphereGeometry args={[0.034, 14, 10]} /><meshStandardMaterial color={HAIR} roughness={0.8} /></mesh>
         {([-1, 1] as const).map((side) => <group key={side}>
-          <mesh position={[side * 0.056, 0.322, 0.004]} rotation={[0.08, side * 0.18, -side * 0.12]} scale={[0.58, 0.78, 0.68]}><sphereGeometry args={[0.034, 12, 10]} /><meshStandardMaterial color={HAIR} roughness={0.8} /></mesh>
-          <mesh position={[side * 0.061, 0.302, 0.006]} rotation={[0.05, side * 0.16, side * 0.1]} scale={[0.48, 0.86, 0.62]}><sphereGeometry args={[0.027, 12, 8]} /><meshStandardMaterial color={HAIR} roughness={0.82} /></mesh>
+          {/* Keep the side locks tucked into the crown for a smooth silhouette. */}
+          <mesh position={[side * 0.052, 0.322, 0.004]} rotation={[0.08, side * 0.18, -side * 0.12]} scale={[0.46, 0.78, 0.68]}><sphereGeometry args={[0.034, 12, 10]} /><meshStandardMaterial color={HAIR} roughness={0.8} /></mesh>
+          <mesh position={[side * 0.054, 0.302, 0.006]} rotation={[0.05, side * 0.16, side * 0.1]} scale={[0.36, 0.78, 0.62]}><sphereGeometry args={[0.027, 12, 8]} /><meshStandardMaterial color={HAIR} roughness={0.82} /></mesh>
         </group>)}
         {/* Soft swept layers continue across the rear crown without forming a spiky nape. */}
         {[["rear-a", -0.028, 0.328], ["rear-b", 0, 0.335], ["rear-c", 0.029, 0.329]].map(([key, x, y]) => <mesh key={String(key)} position={[Number(x), Number(y), -0.067]} rotation={[0.08, 0, Number(x) * 1.8]} scale={[0.88, 0.72, 0.48]}><sphereGeometry args={[0.024, 12, 9]} /><meshStandardMaterial color={key === "rear-b" ? "#292638" : HAIR} roughness={0.82} /></mesh>)}

@@ -72,7 +72,7 @@ export function useArrivalChime(phase: StudentRoutePhase, camera: StudentCameraM
     arrivalHandledRef.current = true;
     followWasActiveRef.current = false;
     if (camera === "follow") triggerMapHapticFeedback("arrival");
-    if (!enabled || camera !== "follow" || typeof Audio === "undefined") return;
+    if (!enabled || typeof Audio === "undefined") return;
 
     try {
       const audio = audioRef.current ?? new Audio(ARRIVAL_CHIME_SRC);

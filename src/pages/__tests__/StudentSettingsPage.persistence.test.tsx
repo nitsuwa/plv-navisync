@@ -19,7 +19,7 @@ const preferenceService = vi.hoisted(() => ({
 }));
 const passwordService = vi.hoisted(() => ({ updateStudentPassword: vi.fn() }));
 const buddyState = vi.hoisted(() => ({
-  appearance: { outfit: "classic" as const, backpack: "classic" as const, companionEnabled: true },
+  appearance: { outfit: "classic" as const, backpack: "classic" as const },
   loaded: true,
   saveAppearance: vi.fn(),
 }));
@@ -55,7 +55,7 @@ describe("StudentSettingsPage persistence", () => {
     });
     preferenceService.saveStudentPreferences.mockImplementation(async (value) => value);
     passwordService.updateStudentPassword.mockResolvedValue({ user: { id: "user-1" } });
-    buddyState.appearance = { outfit: "classic", backpack: "classic", companionEnabled: true };
+    buddyState.appearance = { outfit: "classic", backpack: "classic" };
     buddyState.loaded = true;
     buddyState.saveAppearance.mockReset().mockImplementation(async (next) => { buddyState.appearance = next; });
   });
@@ -68,6 +68,9 @@ describe("StudentSettingsPage persistence", () => {
     vi.useRealTimers();
     const sound = screen.getByRole("switch", { name: "Sound effects" });
     const haptics = screen.getByRole("switch", { name: "Haptic feedback" });
+    expect(sound).toHaveClass("h-11", "w-12");
+    expect(sound.querySelector("span")).toHaveClass("h-[26px]", "w-12");
+    expect(sound.querySelector("span span")).toHaveClass("h-5", "w-5", "transition-[translate]");
     expect(sound).toHaveAttribute("aria-checked", "false");
     expect(haptics).toHaveAttribute("aria-checked", "true");
     fireEvent.click(sound);
@@ -193,6 +196,10 @@ describe("StudentSettingsPage persistence", () => {
     fireEvent.click(outfits.getByRole("radio", { name: "Adventurer" }));
     expect(outfits.getByRole("radio", { name: "Adventurer" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getAllByRole("img", { name: "Adventurer NaviBuddy" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("navibuddy-selected-outfit-label")).toHaveTextContent("Adventurer");
+    expect(screen.getByTestId("navibuddy-selected-outfit-label")).toHaveClass("whitespace-nowrap");
+    expect(outfits.getByRole("img", { name: "Adventurer NaviBuddy" })).toHaveClass("h-[60px]", "w-[54px]");
+    expect(screen.queryByText("Navigation reactions")).not.toBeInTheDocument();
     const backpacks = within(screen.getByRole("radiogroup", { name: "NaviBuddy backpack" }));
     fireEvent.click(backpacks.getByRole("radio", { name: "Compact Backpack" }));
     expect(backpacks.getByRole("radio", { name: "Compact Backpack" })).toHaveAttribute("aria-checked", "true");
@@ -203,7 +210,7 @@ describe("StudentSettingsPage persistence", () => {
     fireEvent.click(outfits.getByRole("radio", { name: "Adventurer" }));
     fireEvent.click(backpacks.getByRole("radio", { name: "Compact Backpack" }));
     fireEvent.click(saveButton);
-    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "adventurer", backpack: "compact", companionEnabled: true }));
+    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "adventurer", backpack: "compact" }));
     expect(saveButton).toBeDisabled();
     expect(await screen.findByText("Look saved!")).toBeInTheDocument();
     expect(saveSound).toHaveBeenCalledTimes(1);
@@ -227,7 +234,7 @@ describe("StudentSettingsPage persistence", () => {
     fireEvent.click(outfits.getByRole("radio", { name: "PLV Uniform" }));
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
-    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "plv_uniform", backpack: "classic", companionEnabled: true }));
+    await waitFor(() => expect(buddyState.saveAppearance).toHaveBeenCalledWith({ outfit: "plv_uniform", backpack: "classic" }));
     await waitFor(() => expect(saveButton).toBeEnabled());
     expect(screen.queryByText("Look saved!")).not.toBeInTheDocument();
     expect(saveSound).not.toHaveBeenCalled();

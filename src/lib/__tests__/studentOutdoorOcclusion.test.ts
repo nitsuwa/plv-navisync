@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cameraSegmentIntersectsOutdoorBuilding, outdoorBuildingFadeMaterialState, outdoorBuildingFadeOpacity } from "../studentOutdoorOcclusion";
+import * as THREE from "three";
+import { cameraSegmentIntersectsOutdoorBuilding, OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS, outdoorBuildingBlocksAvatarSample, outdoorBuildingFadeMaterialState, outdoorBuildingFadeOpacity, shouldFadeOutdoorBuildingForSamples } from "../studentOutdoorOcclusion";
 
 const box = { center: [0, 1, 0] as const, halfSize: [1, 1, 1] as const, yaw: 0 };
 
@@ -16,6 +17,47 @@ describe("cameraSegmentIntersectsOutdoorBuilding", () => {
   });
   it("supports rotated building footprints", () => {
     expect(cameraSegmentIntersectsOutdoorBuilding([5, 2, 0], [-5, 0.2, 0], { ...box, yaw: Math.PI / 2 })).toBe(true);
+  });
+  it("does not treat a building behind the avatar as an obstruction", () => {
+    expect(cameraSegmentIntersectsOutdoorBuilding([0, 1.2, 5], [0, 0.4, -5], { ...box, center: [0, 1, -6] as const })).toBe(false);
+  });
+  it("rejects a camera ray above the actual building height", () => {
+    expect(cameraSegmentIntersectsOutdoorBuilding([0, 5, 5], [0, 0.46, -5], box)).toBe(false);
+  });
+  it("rejects a camera beside the building when the sight segment clears it", () => {
+    expect(cameraSegmentIntersectsOutdoorBuilding([2.2, 1.4, 5], [2.2, 0.4, -5], box)).toBe(false);
+  });
+  it("keeps the probe points on NaviBuddy rather than above its head", () => {
+    const feet = 0.12;
+    expect(OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS.map((offset) => feet + offset)).toEqual([0.27, 0.37, 0.46]);
+    expect(feet + 0.68).toBeGreaterThan(0.46 + 0.2);
+  });
+  it("requires two useful avatar samples to be blocked", () => {
+    expect(shouldFadeOutdoorBuildingForSamples([true, false, false])).toBe(false);
+    expect(shouldFadeOutdoorBuildingForSamples([false, true, true])).toBe(true);
+    expect(shouldFadeOutdoorBuildingForSamples([false, false, false])).toBe(false);
+  });
+  it("requires an actual building geometry hit in addition to candidate bounds", () => {
+    expect(outdoorBuildingBlocksAvatarSample(true, false)).toBe(false);
+    expect(outdoorBuildingBlocksAvatarSample(true, true)).toBe(true);
+  });
+  it("uses a bounded raycast to confirm an actual facade intersection", () => {
+    const facade = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    facade.position.y = 1;
+    facade.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster(new THREE.Vector3(0, 1, 5), new THREE.Vector3(0, 0, -1), 0.015, 9.955);
+    const hit = ray.intersectObject(facade, false).length > 0;
+    expect(hit).toBe(true);
+    expect(outdoorBuildingBlocksAvatarSample(true, hit)).toBe(true);
+    expect(outdoorBuildingBlocksAvatarSample(true, false)).toBe(false);
+    facade.geometry.dispose();
+    (facade.material as THREE.Material).dispose();
+  });
+  it("restores immediately after a clear-view sample sequence and fades again when blocked", () => {
+    const blocked = [true, true, false];
+    const clear = [false, false, false];
+    const fades = [shouldFadeOutdoorBuildingForSamples(blocked), shouldFadeOutdoorBuildingForSamples(clear), shouldFadeOutdoorBuildingForSamples(blocked)];
+    expect(fades).toEqual([true, false, true]);
   });
 });
 

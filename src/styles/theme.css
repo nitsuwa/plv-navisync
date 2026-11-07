@@ -1240,7 +1240,7 @@
     max-width: min(var(--student-map-campus-selector-max-width, 260px), calc(100vw - 5.5rem));
   }
   .student-map-floating-account-controls {
-    top: max(0.5rem, env(safe-area-inset-top, 0.5rem));
+    top: max(0.75rem, env(safe-area-inset-top, 0.75rem));
   }
   .map-layer-building-sheet { z-index: var(--map-layer-building-sheet); }
   .map-layer-bottom-nav { z-index: var(--map-layer-bottom-nav); }
@@ -1275,6 +1275,10 @@
       0px
       calc(var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px))) - var(--student-map-utility-bottom-inset, var(--student-map-utility-anchor-bottom, calc(0.75rem + env(safe-area-inset-bottom, 0px)))));
     transition: opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes student-map-loading-delayed-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .student-map-surface[data-utility-compact="true"] .student-map-utility-stack,
   .student-map-surface[data-utility-compact="true"] [data-testid="student-map-utility-actions"] {
@@ -1337,7 +1341,7 @@
       max-width: min(360px, calc(100vw - 3rem));
     }
     .student-map-floating-account-controls {
-      top: max(1rem, env(safe-area-inset-top, 1rem));
+      top: max(0.75rem, env(safe-area-inset-top, 0.75rem));
     }
   }
   @media (min-width: 768px) and (max-width: 1023px) {
@@ -2013,17 +2017,7 @@
 /* NaviBuddy uses only SVG transforms; the motion is paused for reduced-motion users. */
 .navibuddy-portrait { transform-origin: 50% 90%; animation: navibuddy-breathe 3.8s ease-in-out infinite; }
 .navibuddy-wardrobe-thumb { animation: none !important; }
-.navibuddy-wardrobe-thumb .navibuddy-eye { animation: none !important; }
-.navibuddy-wardrobe-thumb .navibuddy-excited { animation: navibuddy-excited 520ms cubic-bezier(.2,.8,.3,1) 1; }
-.navibuddy-wave { transform-box: fill-box; transform-origin: 84% 70%; animation: navibuddy-wave 2.8s ease-in-out 1; }
-.navibuddy-excited { transform-box: fill-box; transform-origin: 50% 85%; animation: navibuddy-excited 520ms cubic-bezier(.2,.8,.3,1) 1; }
-.navibuddy-curious { transform-box: fill-box; transform-origin: 50% 65%; animation: navibuddy-curious 680ms ease-in-out 1; }
-.navibuddy-eye { transform-box: fill-box; transform-origin: center; animation: navibuddy-blink 5.2s ease-in-out infinite; }
 @keyframes navibuddy-breathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-1.5px) scale(1.008); } }
-@keyframes navibuddy-wave { 0%, 70%, 100% { transform: rotate(0); } 76%, 86% { transform: rotate(-7deg); } 81%, 91% { transform: rotate(4deg); } }
-@keyframes navibuddy-blink { 0%, 44%, 48%, 100% { transform: scaleY(1); } 46% { transform: scaleY(.08); } }
-@keyframes navibuddy-excited { 0%, 100% { transform: translateY(0) rotate(0); } 35% { transform: translateY(-4px) rotate(-2deg); } 68% { transform: translateY(0) rotate(2deg); } }
-@keyframes navibuddy-curious { 0%, 100% { transform: rotate(0); } 32% { transform: rotate(-4deg); } 68% { transform: rotate(3deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .navibuddy-portrait, .navibuddy-wave, .navibuddy-excited, .navibuddy-curious, .navibuddy-eye { animation: none !important; }
+  .navibuddy-portrait { animation: none !important; }
 }

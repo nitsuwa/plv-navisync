@@ -26,7 +26,7 @@ import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { measureRouteDoorCrossings, routeDoorTransitOpacity, ROUTE_DOOR_TRANSIT_RADIUS, ROUTE_DOOR_TRANSIT_OPACITY } from "../../lib/routeDoorTransit";
 import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
-import { cameraSegmentIntersectsOutdoorBuilding, outdoorBuildingFadeMaterialState } from "../../lib/studentOutdoorOcclusion";
+import { cameraSegmentIntersectsOutdoorBuilding, OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS, outdoorBuildingBlocksAvatarSample, outdoorBuildingFadeMaterialState, shouldFadeOutdoorBuildingForSamples, type OutdoorOccluderBox } from "../../lib/studentOutdoorOcclusion";
 import { recordDiagnosticEvent } from "../../lib/diagnostics";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
@@ -320,7 +320,7 @@ function softBuildingColor(value: string): string {
 }
 
 type OutdoorFadeMaterial = { material: THREE.Material; opacity: number; transparent: boolean; depthWrite: boolean };
-type OutdoorOcclusionEntry = { box: { center: [number, number, number]; halfSize: [number, number, number]; yaw: number }; materials: OutdoorFadeMaterial[]; fadeProgress: number; targetOpacity: number; animating: boolean };
+type OutdoorOcclusionEntry = { box: OutdoorOccluderBox; materials: OutdoorFadeMaterial[]; occluders: THREE.Object3D[]; fadeProgress: number; targetOpacity: number; animating: boolean };
 type OutdoorOcclusionRegistry = Map<string, OutdoorOcclusionEntry>;
 
 function restoreOutdoorOcclusion(registry: OutdoorOcclusionRegistry) {
@@ -355,16 +355,23 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick, o
     const group = groupRef.current;
     if (!group) return;
     const materials = new Map<THREE.Material, OutdoorFadeMaterial>();
+    const occluders: THREE.Object3D[] = [];
     group.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
+      if (mesh.userData.studentOutdoorOccluder === true) occluders.push(mesh);
       const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of list) {
         if (material.opacity <= 0 || materials.has(material)) continue;
         materials.set(material, { material, opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite });
       }
     });
-    const entry: OutdoorOcclusionEntry = { box: { center: [world.x, height / 2, world.z], halfSize: [width / 2, height / 2, depth / 2], yaw: -(building.rotation ?? 0) * Math.PI / 180 }, materials: [...materials.values()], fadeProgress: 1, targetOpacity: 1, animating: false };
+    const roofAllowance = 0.09;
+    const roofEdgeAllowance = 0.07;
+    const entry: OutdoorOcclusionEntry = {
+      box: { center: [world.x, (height + roofAllowance) / 2, world.z], halfSize: [width / 2 + roofEdgeAllowance, (height + roofAllowance) / 2, depth / 2 + roofEdgeAllowance], yaw: -(building.rotation ?? 0) * Math.PI / 180 },
+      materials: [...materials.values()], occluders, fadeProgress: 1, targetOpacity: 1, animating: false,
+    };
     occlusionRegistry.set(building.id, entry);
     return () => {
       for (const item of entry.materials) {
@@ -377,7 +384,7 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick, o
     };
   }, [building.id, depth, height, occlusionRegistry, width, world.x, world.z, building.rotation]);
   return <group ref={groupRef} position={[world.x, 0, world.z]} rotation={[0, -(building.rotation ?? 0) * Math.PI / 180, 0]}>
-    <mesh position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}
+    <mesh userData={{ studentOutdoorOccluder: true }} position={[0, height / 2, 0]} castShadow receiveShadow onClick={(event) => { event.stopPropagation(); if (event.delta < 7 && !shouldSuppressClick()) onSelectBuilding?.(building.id); }}
       onPointerOver={(event) => { event.stopPropagation(); setHovered(true); (event.nativeEvent.target as HTMLElement).style.cursor = "pointer"; }} onPointerOut={(event) => { event.stopPropagation(); setHovered(false); (event.nativeEvent.target as HTMLElement).style.cursor = "grab"; }}>
       <boxGeometry args={[width, height, depth]} />
       <meshStandardMaterial color={hovered && !selected ? "#c8d9e4" : body} roughness={0.78} metalness={0.02} emissive={selected ? "#56a4ff" : hovered ? "#7399ae" : "#000000"} emissiveIntensity={selected ? 0.18 : hovered ? 0.08 : 0} />
@@ -406,8 +413,8 @@ function Building({ building, selected, onSelectBuilding, shouldSuppressClick, o
         })}
       </group>;
     })}
-    <mesh position={[0, height + 0.035, 0]} castShadow><boxGeometry args={[width + 0.09, 0.07, depth + 0.09]} /><meshStandardMaterial color={selected ? "#b6d9fb" : "#f4f7f8"} roughness={0.64} /></mesh>
-    <mesh position={[0, height + 0.078, 0]}><boxGeometry args={[width + 0.13, 0.012, depth + 0.13]} /><meshStandardMaterial color="#8394a0" roughness={0.72} /></mesh>
+    <mesh userData={{ studentOutdoorOccluder: true }} position={[0, height + 0.035, 0]} castShadow><boxGeometry args={[width + 0.09, 0.07, depth + 0.09]} /><meshStandardMaterial color={selected ? "#b6d9fb" : "#f4f7f8"} roughness={0.64} /></mesh>
+    <mesh userData={{ studentOutdoorOccluder: true }} position={[0, height + 0.078, 0]}><boxGeometry args={[width + 0.13, 0.012, depth + 0.13]} /><meshStandardMaterial color="#8394a0" roughness={0.72} /></mesh>
     <Billboard follow>
       <Html position={[0, height + 0.16, 0]} center occlude={false} style={{ pointerEvents: "none" }}>
         <div className="whitespace-nowrap rounded-md border border-white/75 bg-slate-900/85 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-white shadow-sm">{building.code || building.name}</div>
@@ -2584,11 +2591,19 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const camera = useThree((state) => state.camera);
   const occlusionRegistryRef = useRef<OutdoorOcclusionRegistry>(new Map());
   const occlusionProbeTimeRef = useRef(0);
+  const occlusionProbeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const occlusionWasActiveRef = useRef(false);
+  const occlusionProbeCameraPositionRef = useRef(new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0));
+  const occlusionProbeCameraQuaternionRef = useRef(new THREE.Quaternion());
+  const occlusionRaycasterRef = useRef(new THREE.Raycaster());
+  const occlusionIntersectionsRef = useRef<THREE.Intersection[]>([]);
+  const occlusionSampleTargetsRef = useRef(OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS.map(() => new THREE.Vector3()));
+  const occlusionCameraTupleRef = useRef<[number, number, number]>([0, 0, 0]);
+  const occlusionTargetTupleRef = useRef<[number, number, number]>([0, 0, 0]);
   const occlusionRoutePoints = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
   const occlusionPointSampler = useMemo(() => createRoutePointSampler(occlusionRoutePoints), [occlusionRoutePoints]);
   const occlusionRouteLengthWorld = useMemo(() => routePolylineWorldLength(occlusionRoutePoints, STUDENT_CAMPUS_3D_SCALE), [occlusionRoutePoints]);
   const occlusionPointRef = useRef<Pt>({ x: 0, y: 0 });
-  const occlusionTargetRef = useRef(new THREE.Vector3());
   const occlusionProjectedRef = useRef(new THREE.Vector3());
   const occlusionCameraRef = useRef(new THREE.Vector3());
   const exploreProjectedRef = useRef(new THREE.Vector3());
@@ -2610,7 +2625,15 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   useFrame(({ camera, size, clock }, delta) => {
     const registry = occlusionRegistryRef.current;
     const active = Boolean((props.followMode || props.humanPoint) && ((props.followRoutePoints?.length || props.routePoints?.length || 0) > 1));
+    if (active !== occlusionWasActiveRef.current) {
+      occlusionWasActiveRef.current = active;
+      occlusionProbeTimeRef.current = Number.NEGATIVE_INFINITY;
+    }
     if (!active) {
+      if (occlusionProbeTimerRef.current) {
+        clearTimeout(occlusionProbeTimerRef.current);
+        occlusionProbeTimerRef.current = null;
+      }
       let changed = false;
       for (const entry of registry.values()) if (entry.targetOpacity !== 1) { entry.targetOpacity = 1; changed = true; }
       if (changed) {
@@ -2618,23 +2641,70 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
         invalidate();
       }
     } else if (clock.elapsedTime - occlusionProbeTimeRef.current >= 0.09) {
+      if (occlusionProbeTimerRef.current) {
+        clearTimeout(occlusionProbeTimerRef.current);
+        occlusionProbeTimerRef.current = null;
+      }
       occlusionProbeTimeRef.current = clock.elapsedTime;
       const route = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
       const point = props.walkProgressRef && route.length > 1
         ? occlusionPointSampler(routeVisualProgressWithEndpointClearance(props.walkProgressRef.current, occlusionRouteLengthWorld), occlusionPointRef.current)
         : props.humanPoint ?? route[0];
       if (point) {
-        const world = campusMapPointToWorld(point, 0.23);
-        const target = occlusionTargetRef.current.set(world.x, world.y, world.z);
+        // FollowHumanMarker anchors the walker's feet at 0.12. The old probe
+        // used 0.68 (above the hair), which tested a sight line to empty space.
+        const feet = campusMapPointToWorld(point, 0.12);
         camera.updateMatrixWorld();
-        const projected = occlusionProjectedRef.current.copy(target).project(camera);
-        const inView = projected.z > -1 && projected.z < 1 && Math.abs(projected.x) <= 1.08 && Math.abs(projected.y) <= 1.08;
         const cam = occlusionCameraRef.current.setFromMatrixPosition(camera.matrixWorld);
+        occlusionProbeCameraPositionRef.current.copy(cam);
+        occlusionProbeCameraQuaternionRef.current.copy(camera.quaternion);
         for (const entry of registry.values()) {
-          const blocked = inView && cameraSegmentIntersectsOutdoorBuilding([cam.x, cam.y, cam.z], [target.x, target.y, target.z], entry.box, entry.targetOpacity < 1 ? 0.09 : 0.015);
+          const blockedSamples: boolean[] = [];
+          for (let index = 0; index < OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS.length; index++) {
+            const target = occlusionSampleTargetsRef.current[index].set(feet.x, feet.y + OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS[index], feet.z);
+            const projected = occlusionProjectedRef.current.copy(target).project(camera);
+            const inView = projected.z > -1 && projected.z < 1 && Math.abs(projected.x) <= 1.02 && Math.abs(projected.y) <= 1.02;
+            const cameraPoint = occlusionCameraTupleRef.current;
+            cameraPoint[0] = cam.x; cameraPoint[1] = cam.y; cameraPoint[2] = cam.z;
+            const targetPoint = occlusionTargetTupleRef.current;
+            targetPoint[0] = target.x; targetPoint[1] = target.y; targetPoint[2] = target.z;
+            const candidate = inView && cameraSegmentIntersectsOutdoorBuilding(cameraPoint, targetPoint, entry.box, entry.targetOpacity < 1 ? 0.05 : 0.015);
+            let geometryHit = false;
+            if (candidate && entry.occluders.length) {
+              const raycaster = occlusionRaycasterRef.current;
+              const distance = raycaster.ray.direction.subVectors(target, cam).length();
+              if (distance > 0.06) {
+                raycaster.ray.origin.copy(cam);
+                raycaster.ray.direction.multiplyScalar(1 / distance);
+                raycaster.near = 0.015;
+                raycaster.far = distance - 0.045;
+                const intersections = occlusionIntersectionsRef.current;
+                intersections.length = 0;
+                raycaster.intersectObjects(entry.occluders, false, intersections);
+                geometryHit = intersections.length > 0;
+              }
+            }
+            blockedSamples.push(outdoorBuildingBlocksAvatarSample(candidate, geometryHit));
+          }
+          const blocked = shouldFadeOutdoorBuildingForSamples(blockedSamples);
           const nextOpacity = blocked ? 0.42 : 1;
           if (entry.targetOpacity !== nextOpacity) { entry.targetOpacity = nextOpacity; entry.animating = true; }
         }
+      }
+    } else {
+      // R3F runs on demand here. A camera-control frame can land just before
+      // the throttle window, so request one follow-up at the probe deadline;
+      // this prevents stale fades without adding a continuous polling loop.
+      camera.updateMatrixWorld();
+      const cameraPosition = occlusionCameraRef.current.setFromMatrixPosition(camera.matrixWorld);
+      const cameraMoved = cameraPosition.distanceToSquared(occlusionProbeCameraPositionRef.current) > 0.0001
+        || 1 - Math.abs(camera.quaternion.dot(occlusionProbeCameraQuaternionRef.current)) > 0.00005;
+      if (cameraMoved && !occlusionProbeTimerRef.current) {
+        const remainingMs = Math.max(1, (0.09 - (clock.elapsedTime - occlusionProbeTimeRef.current)) * 1000);
+        occlusionProbeTimerRef.current = setTimeout(() => {
+          occlusionProbeTimerRef.current = null;
+          invalidate();
+        }, remainingMs);
       }
     }
     let fading = false;
@@ -2681,7 +2751,11 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       setScreenExploreTransitionGroups(groups);
     }
   });
-  useEffect(() => () => restoreOutdoorOcclusion(occlusionRegistryRef.current), []);
+  useEffect(() => () => {
+    if (occlusionProbeTimerRef.current) clearTimeout(occlusionProbeTimerRef.current);
+    occlusionProbeTimerRef.current = null;
+    restoreOutdoorOcclusion(occlusionRegistryRef.current);
+  }, []);
   useEffect(() => { invalidate(); }, [invalidate, props.darkMode]);
   const worldW = campusMapSizeToWorld(campus.canvasW);
   const worldH = campusMapSizeToWorld(campus.canvasH);
