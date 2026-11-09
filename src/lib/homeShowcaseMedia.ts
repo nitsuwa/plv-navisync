@@ -13,6 +13,8 @@ export interface HomeShowcaseCaptionTrack {
 
 export interface HomeShowcaseMediaConfig {
   videoUrl?: string | null;
+  /** Full-length showreel offered alongside the short overview clip. */
+  fullVideoUrl?: string | null;
   posterUrl?: string | null;
   captions?: HomeShowcaseCaptionTrack | null;
 }
@@ -25,9 +27,12 @@ function optionalPublicUrl(value: string | undefined): string | null {
 const captionsUrl = optionalPublicUrl(import.meta.env.VITE_HOME_SHOWCASE_CAPTIONS_URL);
 const videoUrl = optionalPublicUrl(import.meta.env.VITE_HOME_SHOWCASE_VIDEO_URL)
   ?? "/videos/plv-navisync-showcase.mp4";
+const fullVideoUrl = optionalPublicUrl(import.meta.env.VITE_HOME_SHOWCASE_FULL_VIDEO_URL)
+  ?? "/videos/plv-navisync-showreel-full.mp4";
 
 export const HOME_SHOWCASE_MEDIA: HomeShowcaseMediaConfig = Object.freeze({
   videoUrl,
+  fullVideoUrl,
   posterUrl: optionalPublicUrl(import.meta.env.VITE_HOME_SHOWCASE_POSTER_URL),
   captions: captionsUrl ? {
     url: captionsUrl,
