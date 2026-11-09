@@ -359,8 +359,21 @@ export function groupCampusDecorAssetsByType(assets: readonly CampusDecorAsset[]
  * descriptive asset name retain the single-monument fallback. */
 export function resolveSuhayHusayDecorAssetId(assets: readonly CampusDecorAsset[]): string | null {
   const monuments = assets.filter((asset) => asset.type === "monument");
+  const explicit = monuments.find((asset) => asset.visualVariant === "suhay-husay");
+  if (explicit) return explicit.id;
   const named = monuments.find((asset) => /suhay\s*(?:ng\s*)?husay/i.test(`${asset.id} ${asset.name ?? ""}`));
   return named?.id ?? (monuments.length === 1 ? monuments[0].id : null);
+}
+
+/** Resolve each explicitly identified Suhay instance while retaining the
+ * legacy single-monument fallback. Unnamed monuments in multi-asset maps stay
+ * generic; visual similarity alone never changes their identity. */
+export function resolveSuhayHusayDecorAssetIds(assets: readonly CampusDecorAsset[]): ReadonlySet<string> {
+  const monuments = assets.filter((asset) => asset.type === "monument");
+  const explicit = monuments.filter((asset) => asset.visualVariant === "suhay-husay"
+    || /suhay\s*(?:ng\s*)?husay/i.test(`${asset.id} ${asset.name ?? ""}`));
+  if (explicit.length) return new Set(explicit.map((asset) => asset.id));
+  return monuments.length === 1 ? new Set([monuments[0].id]) : new Set();
 }
 
 function entrancePoint(building: CampusBuilding, entrance: ReadonlyOutdoorEntrance) {

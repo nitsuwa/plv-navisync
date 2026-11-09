@@ -2559,6 +2559,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
       const asset: CampusDecorAsset = {
         id: genId("dec"),
         type: armedDecorAssetType,
+        ...(armedDecorAssetType === "monument" ? { visualVariant: "suhay-husay" as const } : {}),
         x: clampedPt.x,
         y: clampedPt.y,
         rotation: 0,
@@ -11375,7 +11376,7 @@ export function CampusEditor({ campus, onBack, onUpdate, onSave, onPublish, onPr
           onDropAsset={(asset) => {
             const normalizedAsset = isDecorAreaType(asset.type)
               ? { ...asset, width: asset.width ?? DECOR_ASSET_MAP[asset.type]?.defaultWidth, height: asset.height ?? DECOR_ASSET_MAP[asset.type]?.defaultHeight, groundType: asset.groundType ?? groundTypeForDecorType(asset.type), zOrder: -1000 }
-              : { ...asset, scale: lastDecorScalesRef.current[asset.type] ?? 0.82 };
+              : { ...asset, ...(asset.type === "monument" ? { visualVariant: "suhay-husay" as const } : {}), scale: lastDecorScalesRef.current[asset.type] ?? 0.82 };
             const placedAsset = constrainDecorAssetToCanvas(normalizedAsset, cw, ch);
             pushHistory();
             onUpdate({ ...campus, decorAssets: [...decorAssets, placedAsset] });

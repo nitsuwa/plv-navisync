@@ -4,6 +4,14 @@ export interface OutdoorOccluderBox {
   yaw: number;
 }
 
+/** Heights above the walker's feet for torso, upper torso, and face visibility samples. */
+export const OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS = [0.15, 0.25, 0.34] as const;
+
+/** Require most of the useful character silhouette to be hidden before fading a building. */
+export function shouldFadeOutdoorBuildingForSamples(blocked: readonly boolean[]): boolean {
+  return blocked.length >= 3 && blocked.filter(Boolean).length >= 2;
+}
+
 /** Preserve each component's authored alpha while applying one building-wide fade. */
 export function outdoorBuildingFadeOpacity(originalOpacity: number, fadeProgress: number): number {
   const progress = Number.isFinite(fadeProgress) ? Math.max(0, Math.min(1, fadeProgress)) : 1;
@@ -52,4 +60,12 @@ export function cameraSegmentIntersectsOutdoorBuilding(
   }
   // Ignore intersections at the figure itself or camera endpoint.
   return high >= 0.025 && low <= 0.975;
+}
+
+/** Broad phase plus an exact geometry hit; footprint/bounds overlap alone is never enough. */
+export function outdoorBuildingBlocksAvatarSample(
+  candidateBoundsIntersect: boolean,
+  geometryHit: boolean,
+): boolean {
+  return candidateBoundsIntersect && geometryHit;
 }

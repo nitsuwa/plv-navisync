@@ -19,9 +19,8 @@ import { useArrivalChime } from "../hooks/useArrivalChime";
 import { useStudentOrgEventUpdates } from "../hooks/useStudentOrgEventUpdates";
 import { useToast } from "../hooks/useToast";
 import { useTheme } from "../hooks/useTheme";
-import { useNaviBuddy } from "../contexts/NaviBuddyStore";
-import { NaviBuddyReactionBubble } from "../components/map/NaviBuddyPortrait";
 import { recordDiagnosticEvent, setMapDiagnosticContext, type MapDiagnosticContext } from "../lib/diagnostics";
+import { scheduleVisibleTimeout } from "../lib/visibleTimeout";
 
 import { buildingPositionsFromCampus, floorPlansFromCampus, buildingsFromCampus, facilitiesFromCampus, accessibilityFromCampus } from "../lib/mapDataAdapter";
 import {
@@ -54,7 +53,7 @@ import {
 } from "../lib/mapViewport";
 import { campusGroundAppearance } from "../lib/campusCanvas";
 import { isCampusGate } from "../lib/campusGates";
-import { routeEndpointFromSearchResult, routeEndpointKey, routeEndpointLabel, type RouteEndpoint } from "../lib/routeEndpoints";
+import { routeEndpointContext, routeEndpointFromSearchResult, routeEndpointKey, routeEndpointLabel, type RouteEndpoint } from "../lib/routeEndpoints";
 import { guidedRouteProgressDuration, navigationSeekDuration, navigationWalkDuration, outdoorWalkingDistance, reducedMotionWalkingDuration } from "../lib/walkingAnimation";
 import { isStudentEmergencyRouteCurrentAndEligible, planStudentEmergencyRoute } from "../lib/studentEmergencyNavigation";
 import { isAssemblyPointAssignedForBuilding } from "../lib/emergencyAssemblyPoints";
@@ -922,7 +921,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const { theme } = useTheme();
   const darkMode = theme === "dark";
   const studentAuth = useStudentAuth();
-  const naviBuddy = useNaviBuddy();
   const mobileStudentNotificationRef = useRef<HTMLDivElement>(null);
   const studentEventUpdates = useStudentOrgEventUpdates(
     studentAuth.profile?.id,
@@ -1266,7 +1264,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     && !followCameraDetached
     && !followCameraReacquiringRef.current;
   const [followCameraRecoveryFailed, setFollowCameraRecoveryFailed] = useState(false);
-  const followCameraRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followCameraRecoveryWatchdogCleanupRef = useRef<(() => void) | null>(null);
   const [navigationPauseReason, setNavigationPauseReason] = useState<"manual" | "transition" | "pan" | null>(null);
   const [verticalRunPausePending, setVerticalRunPausePending] = useState(false);
   const recenterCurrentRouteStepRef = useRef<(resumePlayback?: "playing" | "paused", afterRecenter?: () => void) => void>(() => {});
@@ -1305,12 +1303,12 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }
   }, [studentRouteUi.camera, studentRouteUi.phase]);
   const clearFollowCameraRecoveryTimer = useCallback(() => {
-    if (followCameraRecoveryTimerRef.current !== null) clearTimeout(followCameraRecoveryTimerRef.current);
-    followCameraRecoveryTimerRef.current = null;
+    followCameraRecoveryWatchdogCleanupRef.current?.();
+    followCameraRecoveryWatchdogCleanupRef.current = null;
   }, []);
   useEffect(() => () => {
-    if (followCameraRecoveryTimerRef.current !== null) clearTimeout(followCameraRecoveryTimerRef.current);
-  }, []);
+    clearFollowCameraRecoveryTimer();
+  }, [clearFollowCameraRecoveryTimer]);
   const directionsWasOpenRef = useRef(false);
   const routeModeTouchedRef = useRef(false);
   const completedRouteEditOpeningRef = useRef(false);
@@ -4375,27 +4373,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     return toBuilding ? `building:${toBuilding.id}` : null;
   }, [roomDestination, toBuilding, toCampusPlace]);
   const [route, setRoute] = useState<PlannedRoute | null>(null);
-  const previousBuddyRoutePhaseRef = useRef(studentRouteUi.phase);
-  const lastBuddyReadyRouteRef = useRef<string | null>(null);
-  const lastBuddyArrivalRouteRef = useRef<string | null>(null);
-  useEffect(() => {
-    const previous = previousBuddyRoutePhaseRef.current;
-    previousBuddyRoutePhaseRef.current = studentRouteUi.phase;
-    if (studentRouteUi.phase === "idle") {
-      lastBuddyReadyRouteRef.current = null;
-      lastBuddyArrivalRouteRef.current = null;
-    }
-    if (previous === studentRouteUi.phase || !route || !naviBuddy.appearance.companionEnabled) return;
-    const routeKey = route.routeId ?? `${route.fromCode}:${route.toCode}:${route.destinationRoom?.roomId ?? ""}`;
-    if (studentRouteUi.phase === "preview" && lastBuddyReadyRouteRef.current !== routeKey) {
-      lastBuddyReadyRouteRef.current = routeKey;
-      naviBuddy.react("Found a path. Ready when you are!");
-    }
-    if (studentRouteUi.phase === "arrived" && lastBuddyArrivalRouteRef.current !== routeKey) {
-      lastBuddyArrivalRouteRef.current = routeKey;
-      naviBuddy.react("You made it. Nice work!");
-    }
-  }, [naviBuddy.appearance.companionEnabled, naviBuddy.react, route, studentRouteUi.phase]);
   const [automaticRouteChoices, setAutomaticRouteChoices] = useState<Array<{ id: string; label: string; route: PlannedRoute }>>([]);
   const [activeAutomaticRouteId, setActiveAutomaticRouteId] = useState<string | null>(null);
   const [activeEmergencyRouteId, setActiveEmergencyRouteId] = useState<string | null>(null);
@@ -6649,7 +6626,8 @@ const buildingFill = (id: string) =>
     setRoutePlannerMapPickCandidate(null);
     setRoutePlannerMapPick(endpoint);
     setRoutePlannerEndpoint(null);
-  }, [invalidateRouteForPlannerChange]);
+    if (!endpoint && routePlannerMapPick && isFloorMode) closeFloorPlan();
+  }, [closeFloorPlan, invalidateRouteForPlannerChange, isFloorMode, routePlannerMapPick]);
 
   const applyRoutePlannerEndpoint = useCallback((endpoint: RouteEndpoint, purpose: "start" | "destination", stageForConfirmation = false) => {
     if (endpoint.kind === "manual-pin") {
@@ -6769,6 +6747,20 @@ const buildingFill = (id: string) =>
     }
   }, [applyRoutePlannerEndpoint, routePlannerMapPickCandidate]);
   const clearRoutePlannerMapPickCandidate = useCallback(() => setRoutePlannerMapPickCandidate(null), []);
+  const enterRoutePlannerMapPickBuilding = useCallback(() => {
+    const candidate = routePlannerMapPickCandidate;
+    if (!candidate || candidate.endpoint.kind !== "building") return;
+    const floorData = FLOOR_PLANS[candidate.endpoint.building.id];
+    if (!floorData?.floors?.length) {
+      setRoutePlannerSelectionError("This building does not have an available indoor map.");
+      return;
+    }
+    // Keep the chosen route endpoint untouched while the existing indoor map
+    // becomes the active surface for the current Choose on Map target.
+    setRoutePlannerSelectionError(null);
+    setRoutePlannerMapPickCandidate(null);
+    openFloorPlan(candidate.endpoint.building);
+  }, [FLOOR_PLANS, openFloorPlan, routePlannerMapPickCandidate]);
 
   const handleOutdoorBuildingSelect = useCallback((buildingId: string) => {
     const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
@@ -6807,9 +6799,16 @@ const buildingFill = (id: string) =>
   const handleOutdoorEntranceClick = useCallback((buildingId: string) => {
     const building = MOCK_BUILDINGS.find((item) => item.id === buildingId);
     if (!building) return;
+    // While Choose on Map is active, an entrance is still a building pick.
+    // Stage the same explicit Select Building / Enter Building choice instead
+    // of silently opening the indoor map.
+    if (routePlannerMapPick) {
+      applyRoutePlannerEndpoint({ kind: "building", building }, routePlannerMapPick, true);
+      return;
+    }
     if (prepareRouteForContextInspection() === "blocked") return;
     openFloorPlan(building);
-  }, [MOCK_BUILDINGS, openFloorPlan, prepareRouteForContextInspection]);
+  }, [MOCK_BUILDINGS, applyRoutePlannerEndpoint, openFloorPlan, prepareRouteForContextInspection, routePlannerMapPick]);
 
   const focusRoutePlannerOrigin = () => {
     if (roomOrigin || isFloorMode) return false;
@@ -6959,7 +6958,10 @@ const buildingFill = (id: string) =>
   // explicit Directions / Start here actions or the planner search workflow.
   const selectIndoorRoom = useCallback((roomId: string) => {
     const room = roomEndpointFromFloor(roomId);
-    if (!room) return;
+    if (!room) {
+      if (routePlannerMapPick) setRoutePlannerSelectionError("This room is not available as a route endpoint. Choose a connected room or building.");
+      return;
+    }
     if (discoverTour.active) {
       searchFocusRef.current = null;
       lastRoomFocusKeyRef.current = null;
@@ -8538,7 +8540,7 @@ const buildingFill = (id: string) =>
     // A successful renderer callback clears this watchdog. If a scene never
     // mounts or a stale context loses the completion, leave an actionable
     // failure state instead of briefly exposing Retry during normal movement.
-    followCameraRecoveryTimerRef.current = setTimeout(failRecovery, 8000);
+    followCameraRecoveryWatchdogCleanupRef.current = scheduleVisibleTimeout(failRecovery, 8000);
 
     const focusTarget = studentRouteFocusAtProgress(
       navigationPhase,
@@ -9909,7 +9911,6 @@ const buildingFill = (id: string) =>
       onPointerDown={student3DActive ? undefined : onPointerDown} onPointerMove={student3DActive ? undefined : onPointerMove}
       onPointerUp={student3DActive ? undefined : onPointerEnd} onPointerCancel={student3DActive ? undefined : onPointerEnd}>
 
-      <NaviBuddyReactionBubble />
 
       {activeCampus && readonlyOutdoorCampus && campus3DActive && (
         <div className="student-map-renderer-crossfade absolute inset-0 z-0" style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }}>
@@ -10226,12 +10227,22 @@ const buildingFill = (id: string) =>
                   }}
                 >
                 <Suspense fallback={(
-                  <g data-testid="student-floor-scene-loading" role="status" aria-label="Preparing floor map" aria-busy="true">
-                    <rect x={viewCX - 82} y={viewCY - 22} width={164} height={44} rx={14} fill="var(--card)" stroke="var(--border)" />
-                    <circle cx={viewCX - 58} cy={viewCY} r={9} fill="none" stroke="var(--border)" strokeWidth={2} />
+                  <g
+                    data-testid="student-floor-scene-loading"
+                    role="status"
+                    aria-label="Preparing map"
+                    aria-busy="true"
+                    // The floor scene lives inside the zoomable SVG camera group.
+                    // Counteract that camera transform so this status stays at
+                    // a compact, readable screen size at every zoom level.
+                    transform={`translate(${(viewCX - (viewCX * (1 - displayZoom) + pan.x)) / Math.max(0.01, displayZoom) - floorViewport.offsetX} ${(viewCY - (viewCY * (1 - displayZoom) + pan.y)) / Math.max(0.01, displayZoom) - floorViewport.offsetY}) scale(${1 / Math.max(0.01, displayZoom)})`}
+                    style={reducedMotion ? undefined : { animation: "student-map-loading-delayed-in 180ms ease-out 100ms both" }}
+                  >
+                    <rect x={-82} y={-22} width={164} height={44} rx={14} fill="var(--card)" stroke="var(--border)" />
+                    <circle cx={-58} cy={0} r={9} fill="none" stroke="var(--border)" strokeWidth={2} />
                     <circle
-                      cx={viewCX - 58}
-                      cy={viewCY}
+                      cx={-58}
+                      cy={0}
                       r={9}
                       fill="none"
                       stroke="var(--primary)"
@@ -10241,8 +10252,8 @@ const buildingFill = (id: string) =>
                       className="motion-safe:animate-spin motion-reduce:animate-none"
                       style={{ transformBox: "fill-box", transformOrigin: "center" }}
                     />
-                    <circle cx={viewCX - 58} cy={viewCY} r={2} fill="var(--primary)" />
-                    <text x={viewCX - 42} y={viewCY + 4} textAnchor="start" fill="var(--muted-foreground)" fontSize={10} fontWeight={600}>Preparing floor map</text>
+                    <circle cx={-58} cy={0} r={2} fill="var(--primary)" />
+                    <text x={-42} y={4} textAnchor="start" fill="var(--muted-foreground)" fontSize={10} fontWeight={600}>Preparing map</text>
                   </g>
                 )}>
                 <LazyReadonlyFloorPlanScene
@@ -10933,8 +10944,14 @@ const buildingFill = (id: string) =>
               onStandardPreferenceChange={setStandardRoutePreference}
               mapSelectionEndpoint={routePlannerMapPick}
               mapSelectionCandidateLabel={routePlannerMapPickCandidate ? routeEndpointLabel(routePlannerMapPickCandidate.endpoint) : null}
+              mapSelectionCandidateKind={routePlannerMapPickCandidate && routePlannerMapPickCandidate.endpoint.kind !== "manual-pin" ? routePlannerMapPickCandidate.endpoint.kind : null}
+              mapSelectionCandidateContext={routePlannerMapPickCandidate ? routeEndpointContext(routePlannerMapPickCandidate.endpoint) : null}
+              mapSelectionIndoor={isFloorMode}
+              onBackToCampus={closeFloorPlan}
               onChooseOnMap={setRoutePlannerMapSelection}
               onConfirmMapSelection={confirmRoutePlannerMapSelection}
+              onEnterMapSelectionBuilding={enterRoutePlannerMapPickBuilding}
+              canEnterMapSelectionBuilding={Boolean(routePlannerMapPickCandidate?.endpoint.kind === "building" && FLOOR_PLANS[routePlannerMapPickCandidate.endpoint.building.id]?.floors?.length)}
               onClearMapSelectionCandidate={clearRoutePlannerMapPickCandidate}
               selectionError={routePlannerSelectionError}
               suspendedForBuilding={Boolean(showBuildingDetailsDuringRoutePlanner && selected && !isFloorMode)}
@@ -10991,6 +11008,12 @@ const buildingFill = (id: string) =>
                   : previousFromPlace ? null : previousFromBuilding);
               }}
               onClose={() => {
+                if (routePlannerMapPick) {
+                  setRoutePlannerMapPick(null);
+                  setRoutePlannerMapPickCandidate(null);
+                  setRoutePlannerSelectionError(null);
+                  if (isFloorMode) closeFloorPlan();
+                }
                 if (completedRouteEditSnapshotRef.current) cancelCompletedRouteEdit();
                 else if (routePanelPhase === "planning") {
                   if (route) { dispatchStudentRouteUi({ type: "END_NAVIGATION" }); setDirectionsMode(false); }
@@ -11458,7 +11481,7 @@ const buildingFill = (id: string) =>
       >
         {activeCampus && isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && !profileMenuOpen && <StudentFloorPicker
           accountAnchor
-          belowAccount={(!directionsMode || routePanelMinimized) && !routePanelOwnsRendererToggle}
+          belowAccount={false}
           buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
           buildingCode={activeFloorBuilding?.code ?? floorView?.building.code}
           floors={availableFloorOptions}

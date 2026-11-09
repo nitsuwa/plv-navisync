@@ -762,6 +762,7 @@ describe("RoutePlannerDialog student accessibility", () => {
       expect(screen.getByRole("button", { name: "Switch to Follow mode" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Switch to Explore mode" })).toBeInTheDocument();
       expect(screen.getByTestId("guided-playback-controls")).toBeInTheDocument();
+      expect(screen.getByTestId("guided-playback-controls")).toHaveAttribute("data-action-count", "4");
       const exploreView = <RoutePlannerDialog {...plannerProps({
         from: building("gate", "GATE", "Campus Gate"),
         to: building("canteen", "CANT", "Canteen"),
@@ -1494,9 +1495,9 @@ describe("RoutePlannerDialog student accessibility", () => {
       expect(screen.getByTestId("route-planner-dialog").style.height).toContain("196px");
       expect(screen.getByTestId("route-planner-map-pick-hint")).toHaveClass("overflow-y-auto");
       expect(screen.getByTestId("route-planner-map-pick-confirmation")).toHaveTextContent("Journal Room");
-      expect(screen.getByRole("button", { name: "Use as destination" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Use as Destination" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Choose another" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Use as destination" }));
+      fireEvent.click(screen.getByRole("button", { name: "Use as Destination" }));
       expect(onConfirmMapSelection).toHaveBeenCalledOnce();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -1894,7 +1895,8 @@ describe("RoutePlannerDialog student accessibility", () => {
       const controls = screen.getByTestId("guided-playback-controls");
       expect(dialog.style.height).toBe("fit-content");
       expect(scrollRegion).toHaveClass("overflow-y-auto", "touch-pan-y");
-      expect(controls).toHaveClass("grid-cols-4");
+      expect(controls).toHaveAttribute("data-action-count", "3");
+      expect(controls.className).toContain("grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]");
       expect(screen.getByTestId("current-route-instruction")).toHaveTextContent("Take the Right Stair down to Ground Floor.");
       fireEvent.click(screen.getByRole("button", { name: "Continue to Ground Floor" }));
       expect(onContinueTransition).toHaveBeenCalledOnce();
@@ -2322,6 +2324,78 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(screen.queryByTestId("route-planner-scroll-region")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onChooseOnMap).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows desktop Back to Campus only for indoor map picking and preserves the active endpoint target", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const onBackToCampus = vi.fn();
+    const onChooseOnMap = vi.fn();
+    const onConfirmMapSelection = vi.fn();
+    try {
+      const props = plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("library", "LIB", "Library"),
+        mapSelectionEndpoint: "destination",
+        mapSelectionIndoor: true,
+        onBackToCampus,
+        onChooseOnMap,
+        onConfirmMapSelection,
+      });
+      const view = render(<RoutePlannerDialog {...props} />);
+
+      const back = screen.getByRole("button", { name: "Back to Campus" });
+      expect(back).toHaveAttribute("title", "Return to the outdoor campus map");
+      expect(back).toHaveClass("md:inline-flex");
+      fireEvent.click(back);
+      expect(onBackToCampus).toHaveBeenCalledOnce();
+      expect(onChooseOnMap).not.toHaveBeenCalled();
+      expect(onConfirmMapSelection).not.toHaveBeenCalled();
+
+      view.rerender(<RoutePlannerDialog {...props} mapSelectionIndoor={false} />);
+      expect(screen.queryByRole("button", { name: "Back to Campus" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("route-planner-map-pick-hint")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
+  it("does not add a second planner Back to Campus control on mobile", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        mapSelectionEndpoint: "start",
+        mapSelectionIndoor: true,
+        onBackToCampus: vi.fn(),
+      })} />);
+      const back = screen.getByRole("button", { name: "Back to Campus" });
+      expect(back).toHaveClass("hidden", "md:inline-flex");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
+  it("offers separate building and indoor-map actions for a staged building pick", () => {
+    const onConfirmMapSelection = vi.fn();
+    const onEnterMapSelectionBuilding = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      mapSelectionEndpoint: "destination",
+      mapSelectionCandidateLabel: "Science Hall",
+      mapSelectionCandidateKind: "building",
+      mapSelectionCandidateContext: "SCI · Building",
+      canEnterMapSelectionBuilding: true,
+      onConfirmMapSelection,
+      onEnterMapSelectionBuilding,
+    })} />);
+
+    const confirmation = screen.getByTestId("route-planner-map-pick-confirmation");
+    expect(confirmation).toHaveTextContent("Science Hall");
+    expect(confirmation).toHaveTextContent("SCI · Building");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Select Building" }));
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Enter Building" }));
+    expect(onConfirmMapSelection).toHaveBeenCalledTimes(1);
+    expect(onEnterMapSelectionBuilding).toHaveBeenCalledTimes(1);
   });
 
   it("exposes a named non-modal dialog and restores focus when it unmounts", () => {

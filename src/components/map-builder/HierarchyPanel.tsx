@@ -546,7 +546,7 @@ function HierarchyPanelView({
                   }}
                 >
                   <div className="w-9 h-9 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform" style={{ backgroundColor: `${asset.color}12`, border: `1px solid ${asset.color}25` }}>
-                    <DecorAssetVisual type={asset.type} className="w-5 h-6" style={{ opacity: 0.85 }} />
+                    <DecorAssetVisual type={asset.type} variant={asset.type === "monument" ? "suhay-husay" : undefined} className="w-5 h-6" style={{ opacity: 0.85 }} />
                   </div>
                   <span className="block max-w-full text-[8px] font-semibold text-foreground/65 group-hover:text-foreground text-center leading-tight line-clamp-2 break-words">
                     {asset.label}

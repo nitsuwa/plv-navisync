@@ -21,7 +21,8 @@ import { validateCampusForPublish } from "../lib/campusPublication";
 import type { Campus, View, BuildingWizardData, FloorSelection } from "../components/map-builder/types";
 
 const LazyCampusEditor = lazy(() => import("../components/map-builder/CampusEditor").then((module) => ({ default: module.CampusEditor })));
-const LazyFloorEditor = lazy(() => import("../components/map-builder/FloorEditor").then((module) => ({ default: module.FloorEditor })));
+const loadFloorEditor = () => import("../components/map-builder/FloorEditor").then((module) => ({ default: module.FloorEditor }));
+const LazyFloorEditor = lazy(loadFloorEditor);
 
 function EditorModuleLoading({ label }: { label: string }) {
   return (
@@ -127,6 +128,7 @@ export function AdminMapBuilderPage() {
   const [studentPreviewCampus, setStudentPreviewCampus] = useState<Campus | null>(null);
   const [previewSaveCampus, setPreviewSaveCampus] = useState<Campus | null>(null);
   const [previewSaving, setPreviewSaving] = useState(false);
+  const [publishedSnapshotRevision, setPublishedSnapshotRevision] = useState(0);
   const directionRef = useRef(1);
   // Keep codes allocated during this editing session reserved even when a
   // draft Building is deleted. The structure-save RPC archives removed rows,
@@ -264,6 +266,24 @@ export function AdminMapBuilderPage() {
       && campusHydration.campusId === activeCampus.id
       && campusHydration.status === "ready",
   );
+
+  // Warm the floor-editor module only after the outdoor editor is usable. This
+  // keeps its first floor transition from paying the entire lazy import cost,
+  // without competing with essential campus hydration or editor startup.
+  useEffect(() => {
+    if (!campusEditorReady || view.type !== "campus") return;
+    const warm = () => { void loadFloorEditor().catch(() => undefined); };
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const idleHandle = idleWindow.requestIdleCallback(warm, { timeout: 3000 });
+      return () => idleWindow.cancelIdleCallback?.(idleHandle);
+    }
+    const timer = window.setTimeout(warm, 1800);
+    return () => window.clearTimeout(timer);
+  }, [campusEditorReady, view.type]);
 
   // ── Campus CRUD ──────────────────────────────────────────────────────────
 
@@ -634,17 +654,21 @@ export function AdminMapBuilderPage() {
             .then((snapshots) => snapshots.find((snapshot) => snapshot.id === campusId) ?? null)
             .catch(() => null)
           : Promise.resolve(null);
-        const [hydrated, publishedSnapshot] = await Promise.all([
-          campusStructureService.load(campus),
-          publishedSnapshotPromise,
-        ]);
-        if (campusHydrationRequestRef.current !== requestId) return;
-        if (publishedSnapshot) {
+        // Publication comparison data is not required to edit the map. Resolve
+        // the complete editable structure first, then let the snapshot lookup
+        // update the unpublished indicator when it finishes. The all-campus
+        // RPC can include expensive snapshot parsing/compilation and must not
+        // hold the editor behind its loading surface.
+        void publishedSnapshotPromise.then((publishedSnapshot) => {
+          if (!publishedSnapshot || campusHydrationRequestRef.current !== requestId) return;
           publishedSnapshotsRef.current = {
             ...publishedSnapshotsRef.current,
             [campusId]: JSON.stringify(publishedSnapshot),
           };
-        }
+          setPublishedSnapshotRevision((revision) => revision + 1);
+        });
+        const hydrated = await campusStructureService.load(campus);
+        if (campusHydrationRequestRef.current !== requestId) return;
         setCampusHydrationState({ campusId, status: "hydrating" });
         const hydratedWithPreview = {
           ...hydrated,
@@ -884,7 +908,7 @@ export function AdminMapBuilderPage() {
     } catch {
       return false;
     }
-  }, [activeCampus?.id, activeSavedSnapshot, activePublishedSnapshot, campusEditorReady]);
+  }, [activeCampus?.id, activeSavedSnapshot, activePublishedSnapshot, campusEditorReady, publishedSnapshotRevision]);
   useEffect(() => {
     if (!activeCampus || !campusEditorReady || !savedSnapshotsRef.current[activeCampus.id]) {
       registerHandler(null);

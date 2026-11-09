@@ -25,7 +25,7 @@ import { CampusGroundPatternDefs } from "./CampusGroundPatternDefs";
 import { CampusGroundSurface } from "./CampusGroundSurface";
 import { Tooltip } from "../ui/Tooltip";
 import { studentOverviewDuplicateIds } from "../../lib/studentRouteFlow";
-import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
+import { resolveSuhayHusayDecorAssetIds } from "../../lib/studentCampus3dPresentation";
 import { SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, suhayHusaySymbolPath, suhayHusaySymbolPoint, suhayHusayV6SymbolPoint, suhayHusayV7SymbolPoint, suhayHusayV8SymbolPoint, suhayHusayV9SymbolPoint, suhayHusayV10SymbolPoint, suhayHusayV11SymbolPoint, type SuhayPointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
 import { exteriorEmergencyStairVisualDimensions } from "./exteriorEmergencyStairGeometry";
 export { exteriorEmergencyStairVisualDimensions, exteriorEmergencyStairSafeOffsetRange } from "./exteriorEmergencyStairGeometry";
@@ -1452,7 +1452,7 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
 }: ReadonlyOutdoorArtworkLayerProps) {
   const stack: { zOrder: number; order: number; node: ReactNode }[] = [];
   const groundAreaAssets = sortOutdoorGroundAssets([...campus.decorAssets]);
-  const suhayHusayAssetId = studentSuhayHusayLandmark ? resolveSuhayHusayDecorAssetId(campus.decorAssets) : null;
+  const suhayHusayAssetIds = studentSuhayHusayLandmark ? resolveSuhayHusayDecorAssetIds(campus.decorAssets) : new Set<string>();
   const selectedPlace = campus.markers.find((marker) => marker.id === selectedCampusPlaceId);
   const suhayHusaySelected = Boolean(selectedPlace && /suhay\s*(?:ng\s*)?husay/i.test(`${selectedPlace.id} ${selectedPlace.name} ${selectedPlace.type}`));
   if (campus.paths.length) stack.push({ zOrder: -1000, order: 0, node: <OutdoorPathNetworkArtwork key="campus-path-network" paths={campus.paths} /> });
@@ -1473,7 +1473,7 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
     stack.push({
       zOrder: effectiveStackKey("decorAsset", asset.zOrder, index),
       order: index,
-      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} studentSuhayHusayLandmark={asset.id === suhayHusayAssetId} selectedLandmark={asset.id === suhayHusayAssetId && suhayHusaySelected} />,
+      node: <OutdoorDecorVisual key={`decor-${asset.id}`} asset={asset} gridSize={campus.gridSize} studentSuhayHusayLandmark={suhayHusayAssetIds.has(asset.id)} selectedLandmark={suhayHusayAssetIds.has(asset.id) && suhayHusaySelected} />,
     });
   });
   stack.sort((a, b) => a.zOrder - b.zOrder || a.order - b.order);

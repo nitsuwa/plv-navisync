@@ -51,16 +51,19 @@ describe("useArrivalChime", () => {
     expect(audio.play).toHaveBeenCalledTimes(1);
   });
 
-  it("does not play in preview or for Explore-only arrival state", () => {
+  it("does not play in preview and plays once for a genuine arrival in Explore", () => {
+    localStorage.setItem(ARRIVAL_SOUND_PREFERENCE_KEY, "on");
     const { rerender } = renderHook<ReturnType<typeof useArrivalChime>, { phase: StudentRoutePhase; camera: StudentCameraMode }>(({ phase, camera }) => useArrivalChime(phase, camera), {
       initialProps: { phase: "preview" as const, camera: "explore" as const },
     });
-    rerender({ phase: "arrived", camera: "explore" });
     expect(MockAudio.instances.every((audio) => audio.play.mock.calls.length === 0)).toBe(true);
+    rerender({ phase: "navigating", camera: "explore" });
+    rerender({ phase: "arrived", camera: "explore" });
+    expect(MockAudio.instances[0]?.play).toHaveBeenCalledOnce();
 
     rerender({ phase: "navigating", camera: "explore" });
     rerender({ phase: "arrived", camera: "explore" });
-    expect(MockAudio.instances.every((audio) => audio.play.mock.calls.length === 0)).toBe(true);
+    expect(MockAudio.instances[0]?.play).toHaveBeenCalledTimes(2);
   });
 
   it("allows one new chime after a new navigation run", () => {

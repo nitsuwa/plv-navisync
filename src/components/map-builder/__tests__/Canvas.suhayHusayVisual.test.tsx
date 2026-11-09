@@ -123,6 +123,16 @@ describe("Admin Campus Canvas Suhay Husay presentation", () => {
     expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-version", "v13");
   });
 
+  it("renders every explicitly identified Suhay instance while leaving other monument records generic", () => {
+    const identified = { ...genericMonument, id: "explicit-suhay", visualVariant: "suhay-husay" as const, x: 80 };
+    const campus = { ...baseCampus, decorAssets: [genericMonument, identified] };
+    const { container } = render(<Canvas {...canvasProps(campus, null)} />);
+
+    expect(container.querySelectorAll('[data-testid="student-suhay-husay-2d-symbol"]')).toHaveLength(1);
+    expect(container.querySelector('[data-campus-decor-id="explicit-suhay"] [data-testid="student-suhay-husay-2d-symbol"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-campus-decor-id="other-monument"] [data-testid="student-suhay-husay-2d-symbol"]')).toBeNull();
+  });
+
   it("keeps the Admin selection hitbox as the interaction owner for the landmark artwork", () => {
     const onItemDown = vi.fn();
     const { container } = render(<Canvas {...canvasProps()} onItemDown={onItemDown} />);

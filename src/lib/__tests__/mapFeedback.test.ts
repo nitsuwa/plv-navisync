@@ -41,4 +41,5 @@ describe("NaviBuddy save confirmation sound", () => {
     expect(oscillator.stop).toHaveBeenCalledWith(2.24);
     expect(oscillator.onended).toBeTypeOf("function");
   });
+
 });

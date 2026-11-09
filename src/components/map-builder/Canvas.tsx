@@ -15,7 +15,7 @@ import { navGroupSelectionBounds } from "../../lib/navigationGraph";
 import { DecorAssetArt, DecorAssetVisual } from "./DecorAssetVisual";
 import { CampusGateVisual } from "./CampusGateVisual";
 import { OutdoorBuildingVisual, OutdoorEmergencyStairVisual, OutdoorEntranceArtwork, OutdoorGroundAreaArtwork, OutdoorMarkerArtwork, StudentSuhayHusayDecorVisual, exteriorEmergencyStairVisualDimensions } from "./ReadonlyOutdoorVisuals";
-import { resolveSuhayHusayDecorAssetId } from "../../lib/studentCampus3dPresentation";
+import { resolveSuhayHusayDecorAssetIds } from "../../lib/studentCampus3dPresentation";
 import { BUILDING_ENTRANCE_TYPE_COLORS, entranceDisplayName, entranceWorldPosition, normalizeEntranceType } from "../../lib/buildingEntrances";
 import { canonicalExteriorEmergencyStairsForBuilding, exteriorEmergencyStairWorldPosition } from "../../lib/exteriorEmergencyStairs";
 import { pathRenderStyle } from "../../lib/outdoorPathVisual";
@@ -443,7 +443,9 @@ const CursorPlacementOverlay = memo(function CursorPlacementOverlay({
               <g data-testid="decor-placement-preview" transform={`translate(${cursorPosition.x},${cursorPosition.y})`} opacity={0.42}>
                 <rect x={-decorDescriptor.defaultWidth / 2 - 4} y={-decorDescriptor.defaultHeight / 2 - 4} width={decorDescriptor.defaultWidth + 8} height={decorDescriptor.defaultHeight + 8} rx={4} fill="rgba(34,197,94,0.12)" stroke="#16a34a" strokeWidth={1.2} />
                 <g transform={`translate(${-decorDescriptor.defaultWidth / 2},${-decorDescriptor.defaultHeight / 2})`}>
-                  <DecorAssetArt descriptor={decorDescriptor} />
+                  {armedDecorAssetType === "monument"
+                    ? <DecorAssetVisual type="monument" variant="suhay-husay" style={{ width: decorDescriptor.defaultWidth, height: decorDescriptor.defaultHeight }} />
+                    : <DecorAssetArt descriptor={decorDescriptor} />}
                 </g>
               </g>
             )}
@@ -968,7 +970,7 @@ function CanvasView({
   const decorAssets = renderCampus.decorAssets ?? [];
   // Keep Admin's landmark identity in sync with Student 2D/3D, including its
   // legacy single-monument fallback.  The authored asset itself stays intact.
-  const suhayHusayDecorAssetId = useMemo(() => resolveSuhayHusayDecorAssetId(decorAssets), [decorAssets]);
+  const suhayHusayDecorAssetIds = useMemo(() => resolveSuhayHusayDecorAssetIds(decorAssets), [decorAssets]);
   // Ground/area assets remain in the dedicated background layer (below paths
   // and foreground objects), but they still honour the same optional z-order
   // field as every other outdoor asset.  Previously this list was rendered in
@@ -2520,7 +2522,7 @@ function CanvasView({
                     transform={`rotate(${rot}, ${da.x}, ${da.y})`}
                   />
                 )}
-                {da.id === suhayHusayDecorAssetId ? (
+                {suhayHusayDecorAssetIds.has(da.id) ? (
                   <StudentSuhayHusayDecorVisual asset={da} descriptor={template} interactive={false} />
                 ) : (
                   <g transform={`translate(${da.x},${da.y}) rotate(${rot}) scale(${s})`}>

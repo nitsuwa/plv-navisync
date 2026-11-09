@@ -6,6 +6,7 @@ import {
   student3dCameraPoseRestoreCompletionMatches,
   student3dCameraPoseRestoreForContext,
   student3dFollowCameraOffsetForRecovery,
+  student3dFollowViewportOffsetScale,
   student3dFollowCameraOffsetChanged,
   synchronizeStudent3dFollowCameraOffsetDistance,
   student3dFollowCameraOrientationChanged,
@@ -113,6 +114,12 @@ describe("Student 3D camera pose ownership and recovery", () => {
   it("recognizes a Follow zoom change even when the route heading is unchanged", () => {
     expect(student3dFollowCameraOffsetChanged({ x: 0, y: 7, z: -7 }, { x: 0, y: 10, z: -10 })).toBe(true);
     expect(student3dFollowCameraOffsetChanged({ x: 0, y: 7, z: -7 }, { x: 0, y: 7.01, z: -7.01 })).toBe(false);
+  });
+
+  it("scales the Follow safe-viewport offset with the current camera dolly distance", () => {
+    expect(student3dFollowViewportOffsetScale(12, 6)).toBe(0.5);
+    expect(student3dFollowViewportOffsetScale(12, 18)).toBe(1.5);
+    expect(student3dFollowViewportOffsetScale(0, 18)).toBe(1);
   });
 
   it("preserves a manual Follow zoom through camera updates and a route turn", () => {

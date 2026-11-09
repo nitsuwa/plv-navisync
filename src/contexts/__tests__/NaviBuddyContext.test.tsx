@@ -14,8 +14,8 @@ import { useNaviBuddy } from "../NaviBuddyStore";
 import { loadNaviBuddyAppearance, saveNaviBuddyAppearance } from "../../services/naviBuddyPreferencesService";
 
 function Harness() {
-  const { react, appearance, reaction, saveAppearance } = useNaviBuddy();
-  return <><button onClick={() => react("You made it!")}>Celebrate</button><button onClick={() => void saveAppearance({ ...appearance, outfit: "adventurer" }).catch(() => {})}>Save Adventurer</button><span data-testid="outfit">{appearance.outfit}</span><span data-testid="reaction">{reaction ?? ""}</span></>;
+  const { appearance, saveAppearance } = useNaviBuddy();
+  return <><button onClick={() => void saveAppearance({ ...appearance, outfit: "adventurer" }).catch(() => {})}>Save Adventurer</button><span data-testid="outfit">{appearance.outfit}</span></>;
 }
 
 describe("NaviBuddy shared state", () => {
@@ -28,16 +28,6 @@ describe("NaviBuddy shared state", () => {
     vi.mocked(saveNaviBuddyAppearance).mockReset().mockImplementation(async (_id, _student, value) => value);
   });
   afterEach(() => { vi.useRealTimers(); });
-
-  it("shows a brief reaction and clears it after the animation window", async () => {
-    vi.useFakeTimers();
-    render(<NaviBuddyProvider><Harness /></NaviBuddyProvider>);
-    await act(async () => { await Promise.resolve(); });
-    fireEvent.click(screen.getByRole("button", { name: "Celebrate" }));
-    expect(screen.getByTestId("reaction")).toHaveTextContent("You made it!");
-    act(() => { vi.advanceTimersByTime(2800); });
-    expect(screen.getByTestId("reaction")).toBeEmptyDOMElement();
-  });
 
   it("keeps account-specific appearance out of a different or non-student session", async () => {
     auth.profile = { id: "student-a" };

@@ -439,7 +439,7 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.queryByText("Accessible Route")).not.toBeInTheDocument();
     expect(screen.queryByText("Emergency Mode")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "SOS routing" }));
+    fireEvent.click(await screen.findByRole("button", { name: "SOS routing" }));
     expect(screen.queryByText("Accessible Route")).not.toBeInTheDocument();
     expect(screen.queryByText("Emergency Mode")).not.toBeInTheDocument();
   });
@@ -490,7 +490,7 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose start" }));
     fireEvent.click(await screen.findByRole("button", { name: "Choose on map" }));
     fireEvent.click((await screen.findAllByTestId("readonly-building"))[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Use as starting point" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select Building" }));
     await waitFor(() => expect(screen.queryByTestId("route-planner-map-pick-confirmation")).not.toBeInTheDocument());
     expect(screen.getByTestId("route-planner-dialog")).toHaveAttribute("data-route-mode", "emergency");
     const findRoute = await screen.findByRole("button", { name: "Find Route" });
@@ -1045,8 +1045,44 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByTestId("readonly-room")).toHaveAttribute("data-room-highlighted", "true");
     const planner = screen.getByTestId("route-planner-dialog");
     expect(within(planner).getByText("Cashier")).toBeInTheDocument();
-    expect(within(planner).getByRole("button", { name: "Use as destination" })).toBeInTheDocument();
-    fireEvent.click(within(planner).getByRole("button", { name: "Use as destination" }));
+    expect(within(planner).getByRole("button", { name: "Use as Destination" })).toBeInTheDocument();
+    fireEvent.click(within(planner).getByRole("button", { name: "Use as Destination" }));
+    await waitFor(() => expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Cashier"));
+    expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
+  });
+
+  it("keeps destination map-picking active when entering a building and confirms an indoor room", async () => {
+    const campus: EditorCampus = withNavigableRooms({ ...previewCampus, buildings: [{
+      ...previewCampus.buildings[0],
+      floors: [{
+        id: "map-pick-enter-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
+        rooms: [{ id: "map-pick-enter-room", name: "Cashier", type: "office", floorId: "map-pick-enter-floor", buildingId: "building-test", x: 20, y: 20, w: 70, h: 50 }],
+        paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }, {
+        id: "map-pick-enter-floor-2", buildingId: "building-test", number: 2, label: "Floor 2",
+        rooms: [], paths: [], walls: [], doors: [], windows: [], furniture: [], stairs: [], ramps: [], elevators: [], labels: [],
+      }],
+    }] }, [{ buildingId: "building-test", floorId: "map-pick-enter-floor", roomId: "map-pick-enter-room" }]);
+    renderCampusMap({ previewCampus: campus });
+    fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose on map" }));
+    fireEvent.click((await screen.findAllByTestId("readonly-building"))[0]);
+
+    const buildingConfirmation = await screen.findByTestId("route-planner-map-pick-confirmation");
+    expect(within(buildingConfirmation).getByRole("button", { name: "Select Building" })).toBeEnabled();
+    expect(within(buildingConfirmation).getByRole("button", { name: "Enter Building" })).toBeEnabled();
+    fireEvent.click(within(buildingConfirmation).getByRole("button", { name: "Enter Building" }));
+
+    expect(await screen.findByRole("button", { name: "Choose floor. Current floor: Ground Floor" })).toBeInTheDocument();
+    expect(screen.getByTestId("route-planner-dialog")).toHaveAttribute("data-map-picking", "true");
+    fireEvent.click(await screen.findByTestId("readonly-room"));
+    const roomConfirmation = await screen.findByTestId("route-planner-map-pick-confirmation");
+    expect(roomConfirmation).toHaveTextContent("Cashier");
+    expect(roomConfirmation).toHaveTextContent("Floor 1");
+    fireEvent.click(within(roomConfirmation).getByRole("button", { name: "Use as Destination" }));
+
+    const planner = screen.getByTestId("route-planner-dialog");
     await waitFor(() => expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Cashier"));
     expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");
   });

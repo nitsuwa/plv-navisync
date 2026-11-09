@@ -1,4 +1,4 @@
-import { Accessibility, ArrowLeft, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, List, MapPin, Minimize2, Navigation, Pause, Pencil, Play, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
+import { Accessibility, ArrowLeft, ArrowUpDown, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, DoorOpen, List, MapPin, Minimize2, Navigation, Pause, Pencil, Play, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { SearchResult } from "../../hooks/useCampusSearch";
@@ -123,8 +123,15 @@ export interface UnifiedRoutePlannerDialogProps {
   onStandardPreferenceChange?: (preference: StandardRoutePreference) => void;
   mapSelectionEndpoint?: RoutePlannerEndpoint | null;
   mapSelectionCandidateLabel?: string | null;
+  mapSelectionCandidateKind?: "building" | "room" | "campus-place" | null;
+  mapSelectionCandidateContext?: string | null;
+  /** The map is indoors while Choose on Map remains active. */
+  mapSelectionIndoor?: boolean;
+  onBackToCampus?: () => void;
   onChooseOnMap?: (endpoint: RoutePlannerEndpoint | null) => void;
   onConfirmMapSelection?: () => void;
+  onEnterMapSelectionBuilding?: () => void;
+  canEnterMapSelectionBuilding?: boolean;
   onClearMapSelectionCandidate?: () => void;
   selectionError?: string | null;
   /** Explain that a location QR code prefilled the route start and prompt for a destination. */
@@ -262,7 +269,7 @@ export function UnifiedRoutePlannerDialog({
   onSwapEndpoints, destinationResults = [], onSelectFromDestination, onSelectToDestination,
   activeEndpoint: controlledEndpoint, onActiveEndpointChange,
   standardPreference = "best", onStandardPreferenceChange,
-  mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, onChooseOnMap, onConfirmMapSelection, onClearMapSelectionCandidate, selectionError = null,
+  mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, mapSelectionCandidateKind = null, mapSelectionCandidateContext = null, mapSelectionIndoor = false, onBackToCampus, onChooseOnMap, onConfirmMapSelection, onEnterMapSelectionBuilding, canEnterMapSelectionBuilding = false, onClearMapSelectionCandidate, selectionError = null,
   suspendedForBuilding = false, suspendedForFloorPicker = false,
   phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, pauseDuringVerticalRun = false, verticalRunPausePending = false, transitionAwaitingAction = false, transitionActionLabel = "Continue", primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
   transitionPrompt = null, arrivalSubtitle, onContinueTransition, contextRecoveryPending = false, contextRecoveryFailed = false, onRetryContextRecovery, inspectionPaused = false,
@@ -1179,7 +1186,19 @@ export function UnifiedRoutePlannerDialog({
           )}
           <div className="min-w-0 flex-1">
             <p className={cn("truncate whitespace-nowrap font-extrabold leading-tight", (activeEndpoint || mapSelectionEndpoint) ? "text-xs xl:text-[15px]" : "text-[13px] md:text-[15px]")}>{mapSelectionEndpoint ? `Choose ${mapSelectionEndpoint === "start" ? "start" : "destination"} on map` : activeEndpoint ? searchTitle : phaseTitle}</p>
-            {(mapSelectionEndpoint || activeEndpoint || phase === "planning") && <p className="mt-0.5 hidden truncate text-[11px] text-muted-foreground md:block">{mapSelectionEndpoint ? "Tap a place or search for a room" : activeEndpoint ? "Search buildings, rooms, and offices" : "Choose a start and destination"}</p>}
+            {mapSelectionEndpoint && mapSelectionIndoor && onBackToCampus ? (
+              <button
+                type="button"
+                data-testid="route-planner-back-to-campus"
+                onClick={onBackToCampus}
+                aria-label="Back to Campus"
+                title="Return to the outdoor campus map"
+                className="mt-1 hidden min-h-8 items-center gap-1.5 self-start rounded-lg border border-primary/20 bg-primary/[0.045] px-2.5 text-[11px] font-extrabold text-primary shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-primary/10 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:scale-[0.98] md:inline-flex"
+              >
+                <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                Back to Campus
+              </button>
+            ) : (mapSelectionEndpoint || activeEndpoint || phase === "planning") && <p className="mt-0.5 hidden truncate text-[11px] text-muted-foreground md:block">{mapSelectionEndpoint ? "Tap a place or search for a room" : activeEndpoint ? "Search buildings, rooms, and offices" : "Choose a start and destination"}</p>}
           </div>
           {!compactPanelLayout && headerUtility && <div data-testid="route-planner-header-controls" className="flex min-w-0 shrink-0 items-center gap-1.5">{headerUtility}</div>}
           <div data-testid="route-planner-header-actions" className={cn("flex shrink-0 items-center gap-1.5", isMobileViewport && navigatingPhase && "relative z-20")}>
@@ -1235,11 +1254,28 @@ export function UnifiedRoutePlannerDialog({
           >
             {mapSelectionCandidateLabel ? (
               <div data-testid="route-planner-map-pick-confirmation" className="flex min-h-0 flex-col justify-center gap-1.5">
-                <div className="min-w-0"><p className="line-clamp-2 text-[13px] font-extrabold leading-tight text-foreground">{mapSelectionCandidateLabel}</p><p className="text-[10px] leading-tight text-muted-foreground">Use this as your {mapSelectionEndpoint === "start" ? "starting point" : "destination"}?</p></div>
-                <div className="flex gap-1.5">
-                  <button type="button" onClick={onClearMapSelectionCandidate} className="min-h-10 shrink-0 rounded-xl border border-border px-2.5 text-[10px] font-bold text-muted-foreground">Choose another</button>
-                  <button type="button" onClick={onConfirmMapSelection} className="min-h-10 min-w-0 flex-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground">Use as {mapSelectionEndpoint === "start" ? "starting point" : "destination"}</button>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
+                    {mapSelectionCandidateKind === "building" ? <Building2 className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}
+                  </span>
+                  <div className="min-w-0"><p className="line-clamp-2 text-[13px] font-extrabold leading-tight text-foreground">{mapSelectionCandidateLabel}</p><p className="truncate text-[10px] leading-tight text-muted-foreground">{mapSelectionCandidateContext ?? `Use as ${mapSelectionEndpoint === "start" ? "starting point" : "destination"}`}</p></div>
                 </div>
+                {mapSelectionCandidateKind === "building" ? (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={onConfirmMapSelection} className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                      <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Select Building
+                    </button>
+                    <button type="button" onClick={onEnterMapSelectionBuilding} disabled={!canEnterMapSelectionBuilding} className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-primary/[0.06] px-2 text-[10px] font-extrabold text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-45">
+                      <DoorOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Enter Building
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <button type="button" onClick={onClearMapSelectionCandidate} className="min-h-10 shrink-0 rounded-xl border border-border px-2.5 text-[10px] font-bold text-muted-foreground">Choose another</button>
+                    <button type="button" onClick={onConfirmMapSelection} className="min-h-10 min-w-0 flex-1 rounded-xl bg-primary px-2 text-[10px] font-extrabold text-primary-foreground">Use as {mapSelectionEndpoint === "start" ? "Starting Point" : "Destination"}</button>
+                  </div>
+                )}
+                {mapSelectionCandidateKind === "building" && !canEnterMapSelectionBuilding && <p className="text-[10px] leading-tight text-muted-foreground">Indoor room selection is not available in this building.</p>}
               </div>
             ) : <p role="status" aria-live="polite" className="py-1 text-center text-[11px] font-bold leading-snug text-muted-foreground">Tap a building or campus place, or enter a building to choose a room.</p>}
             {selectionError && <p role="alert" className="mt-1 text-center text-[10px] font-bold leading-tight text-destructive">{selectionError}</p>}
@@ -1481,7 +1517,7 @@ export function UnifiedRoutePlannerDialog({
                 </div>}
                 {!exploreMode && (
                   <>
-                  <div data-testid="guided-playback-controls" className="grid grid-cols-4 gap-2">
+                  <div data-testid="guided-playback-controls" data-action-count={primaryAction === "continue-transition" || primaryAction === "done" ? 3 : 4} className={cn("grid min-w-0 gap-2", primaryAction === "continue-transition" || primaryAction === "done" ? "grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]")}>
                       <button type="button" onClick={onPreviousStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex <= 0} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Previous</button>
                       {primaryAction === "continue-transition" ? <button type="button" onClick={onContinueTransition} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{transitionActionLabel}</button> : primaryAction === "done" ? <button type="button" onClick={onDone} disabled={transitionBusy || primaryActionDisabled} className="min-h-11 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">Done</button> : <button type="button" onClick={primaryAction === "resume" ? onResume : onPause} disabled={(transitionBusy && !pauseDuringVerticalRun) || primaryActionDisabled || verticalRunPausePending} aria-label={contextRecoveryPending ? "Returning to route" : primaryAction === "resume" ? "Resume navigation" : "Pause navigation"} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-[11px] font-extrabold text-primary-foreground disabled:opacity-45">{contextRecoveryPending ? <><Navigation className="h-3.5 w-3.5 animate-pulse" />Returning…</> : primaryAction === "resume" ? <><Play className="h-3.5 w-3.5" />Resume</> : verticalRunPausePending ? "Pausing…" : <><Pause className="h-3.5 w-3.5" />Pause</>}</button>}
                       {primaryAction !== "continue-transition" && primaryAction !== "done" && <button type="button" onClick={onNextStep} disabled={transitionBusy || seekInProgress || seekControlStepIndex >= visibleNavigationSteps.length - 1} className="min-h-11 rounded-xl border border-border text-[11px] font-extrabold disabled:opacity-40">Next</button>}

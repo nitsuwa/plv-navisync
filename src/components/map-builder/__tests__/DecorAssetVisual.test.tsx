@@ -30,6 +30,20 @@ describe("DecorAssetVisual", () => {
     expect(svg.getAttribute("class")).toContain("w-5");
     expect(svg.getAttribute("style")).toContain("opacity: 0.85");
   });
+
+  it("renders the canonical Suhay Husay silhouette in the Monument asset palette variant", () => {
+    const { container } = render(<DecorAssetVisual type="monument" variant="suhay-husay" />);
+    expect(container.querySelector('[data-testid="suhay-husay-asset-art"]')).not.toBeNull();
+    expect(container.querySelectorAll("[data-suhay-layer]")).toHaveLength(12);
+    expect(container.querySelector('[data-suhay-layer="rockMass"]')).not.toBeNull();
+    expect(container.querySelector('[data-suhay-layer="clasp"]')).not.toBeNull();
+  });
+
+  it("keeps the generic monument artwork outside the asset palette variant", () => {
+    const { container } = render(<DecorAssetVisual type="monument" />);
+    expect(container.querySelector('[data-testid="suhay-husay-asset-art"]')).toBeNull();
+    expect(container.querySelectorAll("path")).toHaveLength(5);
+  });
 });
 
 describe("DecorAssetArt", () => {

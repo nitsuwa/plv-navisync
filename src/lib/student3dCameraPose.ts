@@ -12,6 +12,14 @@ export interface Student3dCameraPoseRestoreRequest {
 
 export type Student3dCameraOffset = [number, number, number];
 
+/** Scale Follow's safe-screen offset with OrbitControls' live dolly distance.
+ * Perspective projection is linear in distance, so this keeps the followed
+ * point at the same usable-viewport position as the user zooms. */
+export function student3dFollowViewportOffsetScale(referenceDistance: number, currentDistance: number): number {
+  if (!Number.isFinite(referenceDistance) || !Number.isFinite(currentDistance) || referenceDistance <= 0 || currentDistance <= 0) return 1;
+  return currentDistance / referenceDistance;
+}
+
 /** Reorient attached Follow only after the route heading changes materially. */
 export function student3dFollowCameraOrientationChanged(
   current: { x: number; y: number; z: number } | null | undefined,
