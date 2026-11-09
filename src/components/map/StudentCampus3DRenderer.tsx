@@ -19,14 +19,15 @@ import { createRoutePointSampler, createRouteWorldSampler, routeArrowDistanceAt,
 import { student3dFocusDistance, student3dSafeFocusCenter, student3dSafeFocusOffset, student3dShowcaseCameraDirection, student3dIndoorArrivalCameraDirection } from "../../lib/student3dCameraFocus";
 import { student3dCameraRecenterNonceToHandle, student3dCameraRecenterTweenCompletionNonce } from "../../lib/student3dCameraRecenter";
 import { clampStudent3dCameraTarget, configureStudent3dInputMappings, shouldPauseFollowForManualCameraGesture, shouldPreventStudent3dContextMenu, student3dCameraGesture, student3dTouchGestureMotion, translateStudent3dFollowCamera, type Student3dCameraTargetBounds, type Student3dTouchPoint } from "../../lib/student3dInput";
-import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
+import { CAMPUS_GROUND_EXIT_LANDING_ELEVATION, campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusFireEscapeLevels, usesCompactGroundEmergencyExit, resolveCampusEntrancePresentations, campusEntranceFacingYaw, campusGateFacingRotation, groundedModelOffset, groupCampusDecorAssetsByType, resolveSuhayHusayDecorAssetId, resolveSuhayHusayDecorAssetIds, campusParkingMarkingSegments, STUDENT_CAMPUS_3D_GROUND_EPSILON } from "../../lib/studentCampus3dPresentation";
 import { canEnterOutdoorBuilding, exteriorEmergencyStairVisualDimensions } from "../map-builder/ReadonlyOutdoorVisuals";
 import type { EventVenue } from "../../lib/eventMapView";
 import type { Pt, RouteMode } from "../../lib/routePlanner";
 import { measureRouteDoorCrossings, routeDoorTransitOpacity, ROUTE_DOOR_TRANSIT_RADIUS, ROUTE_DOOR_TRANSIT_OPACITY } from "../../lib/routeDoorTransit";
-import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
+import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, student3dFollowViewportOffsetScale, type Student3dCameraOffset, type Student3dCameraPose } from "../../lib/student3dCameraPose";
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
 import { cameraSegmentIntersectsOutdoorBuilding, OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS, outdoorBuildingBlocksAvatarSample, outdoorBuildingFadeMaterialState, shouldFadeOutdoorBuildingForSamples, type OutdoorOccluderBox } from "../../lib/studentOutdoorOcclusion";
+import { outdoorOcclusionLifecycleTransition, shouldRunOutdoorOcclusion } from "../../lib/studentOutdoorOcclusionLifecycle";
 import { recordDiagnosticEvent } from "../../lib/diagnostics";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
@@ -326,10 +327,11 @@ type OutdoorOcclusionRegistry = Map<string, OutdoorOcclusionEntry>;
 function restoreOutdoorOcclusion(registry: OutdoorOcclusionRegistry) {
   for (const entry of registry.values()) {
     for (const item of entry.materials) {
+      const transparentChanged = item.material.transparent !== item.transparent;
       item.material.opacity = item.opacity;
       item.material.transparent = item.transparent;
       item.material.depthWrite = item.depthWrite;
-      item.material.needsUpdate = true;
+      if (transparentChanged) item.material.needsUpdate = true;
     }
     entry.fadeProgress = 1;
     entry.targetOpacity = 1;
@@ -562,7 +564,7 @@ function OutdoorAssetLayer({ assets, suhayHusaySelected = false }: { assets: rea
   const benches = [...(groups.get("bench") ?? []), ...(groups.get("bench-long") ?? [])];
   const lamps = groups.get("lamp-post") ?? [];
   const plants = [...(groups.get("plant") ?? []), ...(groups.get("bush") ?? []), ...(groups.get("flower") ?? [])];
-  const suhayAssetId = resolveSuhayHusayDecorAssetId(assets);
+  const suhayAssetIds = resolveSuhayHusayDecorAssetIds(assets);
   const used = new Set(["ground-area", "lawn-area", "garden-area", "plaza-area", "parking-lot", "tree", "tree-large", "palm", "bench", "bench-long", "lamp-post", "plant", "bush", "flower", "monument", "fountain", "gazebo", "guard-booth", "directory-board", "flag", "philippine-flag", "bike-rack", "trash-bin", "recycle-bin", "bollard", "gate-scanner", "picnic-table"]);
   const trunks = useMemo(() => (asset: CampusDecorAsset) => matrixAt(asset, 0, 0, 0, asset.type === "tree-large" ? 0.45 : 0.6, asset.type === "tree-large" ? 0.48 : 0.39, 1, 0, geo.trunk), []);
   const canopies = useMemo(() => (asset: CampusDecorAsset) => matrixAt(asset, 0, asset.type === "tree-large" ? 0.76 : 0.58, 0, asset.type === "tree-large" ? 0.83 : 0.82, asset.type === "tree-large" ? 1.12 : 0.82, asset.type === "tree-large" ? 0.68 : 0.71), []);
@@ -587,7 +589,7 @@ function OutdoorAssetLayer({ assets, suhayHusaySelected = false }: { assets: rea
     <InstancedPart assets={plants} geometry={geo.canopy} material={mat.green} transform={plantCanopies} />
     {assets.filter((asset) => ["ground-area", "lawn-area", "garden-area", "plaza-area", "parking-lot"].includes(asset.type)).map((asset) => <GroundArea key={asset.id} asset={asset} />)}
     {assets.filter((asset) => !used.has(asset.type)).map((asset) => <GenericAsset key={asset.id} asset={asset} />)}
-    {assets.filter((asset) => ["monument", "fountain", "gazebo", "guard-booth", "directory-board", "flag", "philippine-flag", "bike-rack", "trash-bin", "recycle-bin", "bollard", "gate-scanner", "picnic-table"].includes(asset.type)).map((asset) => <GenericAsset key={`known-${asset.id}`} asset={asset} isSuhayHusay={asset.id === suhayAssetId} selectedLandmark={asset.id === suhayAssetId && suhayHusaySelected} />)}
+    {assets.filter((asset) => ["monument", "fountain", "gazebo", "guard-booth", "directory-board", "flag", "philippine-flag", "bike-rack", "trash-bin", "recycle-bin", "bollard", "gate-scanner", "picnic-table"].includes(asset.type)).map((asset) => <GenericAsset key={`known-${asset.id}`} asset={asset} isSuhayHusay={suhayAssetIds.has(asset.id)} selectedLandmark={suhayAssetIds.has(asset.id) && suhayHusaySelected} />)}
   </group>;
 }
 const MemoOutdoorAssetLayer = memo(OutdoorAssetLayer);
@@ -1955,6 +1957,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
   const lastHuman = useRef<Pt>({ x: Number.NaN, y: Number.NaN });
   const desired = useRef(new THREE.Vector3());
   const followViewportOffset = useRef(new THREE.Vector3());
+  const followViewportReferenceDistance = useRef(12);
   const focusKey = useRef("");
   const routeInspectionKey = useRef("");
   const lastArrivalFocusKey = useRef("");
@@ -2289,6 +2292,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const pose = currentPoint ? followPoseForPoint(currentPoint) : null;
     const target = pose ? pose.target : desired.current.clone();
     followViewportOffset.current.copy(pose?.viewportOffset ?? new THREE.Vector3());
+    followViewportReferenceDistance.current = pose ? pose.position.distanceTo(pose.target) : 12;
     desired.current.copy(target);
     if (currentPoint) { lastHuman.current.x = currentPoint.x; lastHuman.current.y = currentPoint.y; }
     const position = pose?.position ?? target.clone().add(new THREE.Vector3(0, 8.88, 8.08));
@@ -2426,6 +2430,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       );
       const pose = followPoseForPoint(currentPoint, 12, followOffset);
       followViewportOffset.current.copy(pose.viewportOffset);
+      followViewportReferenceDistance.current = pose.position.distanceTo(pose.target);
       orbitRef.current.target.copy(pose.target);
       camera.position.copy(pose.position);
       camera.lookAt(pose.target);
@@ -2451,6 +2456,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       const pose = followPoseForPoint(currentPoint, 12, followOffset);
       target = pose.target;
       followViewportOffset.current.copy(pose.viewportOffset);
+      followViewportReferenceDistance.current = pose.position.distanceTo(pose.target);
       distance = 12;
     } else if (focusPoint) {
       const selectedBuilding = campus.buildings.find((building) => focusPoint.x >= building.x - 1 && focusPoint.x <= building.x + building.width + 1
@@ -2545,17 +2551,26 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
       else invalidate();
     }
     const currentPoint = walkProgressRef ? sampleFollowRoute(routeVisualProgressWithEndpointClearance(walkProgressRef.current, followRouteLengthWorld), samplePointRef.current) : humanPoint;
-    if (!tweenOwnsFrame && !arrivalFocusKey && followPlaying && followMode && currentPoint && !freeLook) {
-      owner.current = "follow";
-      if (Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015) {
+    if (!tweenOwnsFrame && !arrivalFocusKey && followMode && currentPoint && !freeLook) {
+      const moved = Math.abs(currentPoint.x - lastHuman.current.x) > 0.015 || Math.abs(currentPoint.y - lastHuman.current.y) > 0.015;
+      const cameraDistance = controls.object.position.distanceTo(controls.target);
+      const offsetScale = student3dFollowViewportOffsetScale(followViewportReferenceDistance.current, cameraDistance);
+      desired.current.set(currentPoint.x * STUDENT_CAMPUS_3D_SCALE, 0, currentPoint.y * STUDENT_CAMPUS_3D_SCALE)
+        .addScaledVector(followViewportOffset.current, offsetScale);
+      const targetChanged = desired.current.distanceToSquared(controls.target) > 0.0004;
+      if (moved) {
         lastHuman.current.x = currentPoint.x;
         lastHuman.current.y = currentPoint.y;
-        const next = campusMapPointToWorld(currentPoint);
-        desired.current.set(next.x, 0, next.z).add(followViewportOffset.current);
       }
-      const amount = 1 - Math.exp(-safeDelta * 2.7);
-      translateStudent3dFollowCamera(controls.object.position, controls.target, desired.current, amount, { y: false });
-      controls.update();
+      // Follow keeps the character at the same safe screen position as the
+      // orbit distance changes. While paused, apply only the correction caused
+      // by a user zoom; playback keeps the established eased tracking.
+      if (followPlaying || targetChanged) {
+        owner.current = followPlaying ? "follow" : owner.current;
+        const amount = followPlaying ? 1 - Math.exp(-safeDelta * 2.7) : 1;
+        translateStudent3dFollowCamera(controls.object.position, controls.target, desired.current, amount);
+        controls.update();
+      }
     }
   });
   return null;
@@ -2601,6 +2616,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const occlusionCameraTupleRef = useRef<[number, number, number]>([0, 0, 0]);
   const occlusionTargetTupleRef = useRef<[number, number, number]>([0, 0, 0]);
   const occlusionRoutePoints = props.followRoutePoints?.length ? props.followRoutePoints : props.routePoints ?? [];
+  const occlusionActive = shouldRunOutdoorOcclusion(Boolean(props.followPlaying), occlusionRoutePoints.length);
   const occlusionPointSampler = useMemo(() => createRoutePointSampler(occlusionRoutePoints), [occlusionRoutePoints]);
   const occlusionRouteLengthWorld = useMemo(() => routePolylineWorldLength(occlusionRoutePoints, STUDENT_CAMPUS_3D_SCALE), [occlusionRoutePoints]);
   const occlusionPointRef = useRef<Pt>({ x: 0, y: 0 });
@@ -2622,10 +2638,24 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
   const [screenExploreTransitionGroups, setScreenExploreTransitionGroups] = useState(initialExploreGroups);
   const exploreGroupSourceRef = useRef(props.exploreTransitionCues);
   const exploreGroupSignatureRef = useRef(initialExploreGroups.map((group) => `${group.choices.map((choice) => choice.id).join("+")}@${group.point.x},${group.point.y}`).join("|"));
+  useEffect(() => {
+    // Pause/resume can switch the Canvas to demand rendering. Do lifecycle
+    // work here as well as in useFrame so paused buildings are restored even
+    // when no further animation frame would otherwise be requested.
+    occlusionWasActiveRef.current = false;
+    occlusionProbeTimeRef.current = Number.NEGATIVE_INFINITY;
+    if (occlusionProbeTimerRef.current) {
+      clearTimeout(occlusionProbeTimerRef.current);
+      occlusionProbeTimerRef.current = null;
+    }
+    if (!occlusionActive) restoreOutdoorOcclusion(occlusionRegistryRef.current);
+    invalidate();
+  }, [invalidate, occlusionActive]);
   useFrame(({ camera, size, clock }, delta) => {
     const registry = occlusionRegistryRef.current;
-    const active = Boolean((props.followMode || props.humanPoint) && ((props.followRoutePoints?.length || props.routePoints?.length || 0) > 1));
-    if (active !== occlusionWasActiveRef.current) {
+    const lifecycle = outdoorOcclusionLifecycleTransition(occlusionWasActiveRef.current, occlusionActive);
+    const active = lifecycle.active;
+    if (lifecycle.changed) {
       occlusionWasActiveRef.current = active;
       occlusionProbeTimeRef.current = Number.NEGATIVE_INFINITY;
     }
@@ -2640,7 +2670,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
         for (const entry of registry.values()) if (entry.targetOpacity === 1) entry.animating = true;
         invalidate();
       }
-    } else if (clock.elapsedTime - occlusionProbeTimeRef.current >= 0.09) {
+    } else if (lifecycle.evaluateImmediately || clock.elapsedTime - occlusionProbeTimeRef.current >= 0.09) {
       if (occlusionProbeTimerRef.current) {
         clearTimeout(occlusionProbeTimerRef.current);
         occlusionProbeTimerRef.current = null;

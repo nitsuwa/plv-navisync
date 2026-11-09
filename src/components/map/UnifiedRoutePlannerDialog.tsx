@@ -125,6 +125,9 @@ export interface UnifiedRoutePlannerDialogProps {
   mapSelectionCandidateLabel?: string | null;
   mapSelectionCandidateKind?: "building" | "room" | "campus-place" | null;
   mapSelectionCandidateContext?: string | null;
+  /** The map is indoors while Choose on Map remains active. */
+  mapSelectionIndoor?: boolean;
+  onBackToCampus?: () => void;
   onChooseOnMap?: (endpoint: RoutePlannerEndpoint | null) => void;
   onConfirmMapSelection?: () => void;
   onEnterMapSelectionBuilding?: () => void;
@@ -266,7 +269,7 @@ export function UnifiedRoutePlannerDialog({
   onSwapEndpoints, destinationResults = [], onSelectFromDestination, onSelectToDestination,
   activeEndpoint: controlledEndpoint, onActiveEndpointChange,
   standardPreference = "best", onStandardPreferenceChange,
-  mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, mapSelectionCandidateKind = null, mapSelectionCandidateContext = null, onChooseOnMap, onConfirmMapSelection, onEnterMapSelectionBuilding, canEnterMapSelectionBuilding = false, onClearMapSelectionCandidate, selectionError = null,
+  mapSelectionEndpoint = null, mapSelectionCandidateLabel = null, mapSelectionCandidateKind = null, mapSelectionCandidateContext = null, mapSelectionIndoor = false, onBackToCampus, onChooseOnMap, onConfirmMapSelection, onEnterMapSelectionBuilding, canEnterMapSelectionBuilding = false, onClearMapSelectionCandidate, selectionError = null,
   suspendedForBuilding = false, suspendedForFloorPicker = false,
   phase = "planning", cameraMode = "follow", onCameraModeChange, collapsed = false, playbackPaused = true, transitionBusy = false, pauseDuringVerticalRun = false, verticalRunPausePending = false, transitionAwaitingAction = false, transitionActionLabel = "Continue", primaryAction = transitionAwaitingAction ? "continue-transition" : playbackPaused ? "resume" : "pause", primaryActionDisabled = false,
   transitionPrompt = null, arrivalSubtitle, onContinueTransition, contextRecoveryPending = false, contextRecoveryFailed = false, onRetryContextRecovery, inspectionPaused = false,
@@ -1183,7 +1186,19 @@ export function UnifiedRoutePlannerDialog({
           )}
           <div className="min-w-0 flex-1">
             <p className={cn("truncate whitespace-nowrap font-extrabold leading-tight", (activeEndpoint || mapSelectionEndpoint) ? "text-xs xl:text-[15px]" : "text-[13px] md:text-[15px]")}>{mapSelectionEndpoint ? `Choose ${mapSelectionEndpoint === "start" ? "start" : "destination"} on map` : activeEndpoint ? searchTitle : phaseTitle}</p>
-            {(mapSelectionEndpoint || activeEndpoint || phase === "planning") && <p className="mt-0.5 hidden truncate text-[11px] text-muted-foreground md:block">{mapSelectionEndpoint ? "Tap a place or search for a room" : activeEndpoint ? "Search buildings, rooms, and offices" : "Choose a start and destination"}</p>}
+            {mapSelectionEndpoint && mapSelectionIndoor && onBackToCampus ? (
+              <button
+                type="button"
+                data-testid="route-planner-back-to-campus"
+                onClick={onBackToCampus}
+                aria-label="Back to Campus"
+                title="Return to the outdoor campus map"
+                className="mt-1 hidden min-h-8 items-center gap-1.5 self-start rounded-lg border border-primary/20 bg-primary/[0.045] px-2.5 text-[11px] font-extrabold text-primary shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-primary/10 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:scale-[0.98] md:inline-flex"
+              >
+                <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                Back to Campus
+              </button>
+            ) : (mapSelectionEndpoint || activeEndpoint || phase === "planning") && <p className="mt-0.5 hidden truncate text-[11px] text-muted-foreground md:block">{mapSelectionEndpoint ? "Tap a place or search for a room" : activeEndpoint ? "Search buildings, rooms, and offices" : "Choose a start and destination"}</p>}
           </div>
           {!compactPanelLayout && headerUtility && <div data-testid="route-planner-header-controls" className="flex min-w-0 shrink-0 items-center gap-1.5">{headerUtility}</div>}
           <div data-testid="route-planner-header-actions" className={cn("flex shrink-0 items-center gap-1.5", isMobileViewport && navigatingPhase && "relative z-20")}>

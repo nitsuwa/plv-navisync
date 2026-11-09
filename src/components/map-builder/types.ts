@@ -1341,6 +1341,9 @@ export interface CampusDecorAsset {
   locked?: boolean;
   /** Optional custom display name (separate from the asset type label) */
   name?: string;
+  /** Explicit authored landmark identity. Legacy assets without this field
+   * keep their existing name/single-monument resolution behavior. */
+  visualVariant?: "suhay-husay";
   /** Visual stacking order shared with buildings (cross-type layer ordering).
    *  Optional — legacy data defaults to array order (decor above buildings). */
   zOrder?: number;

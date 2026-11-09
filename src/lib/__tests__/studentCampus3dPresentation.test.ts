@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CampusBuilding, CampusDecorAsset, CampusMarker } from "../../components/map-builder/types";
 import { canEnterOutdoorBuilding } from "../../components/map-builder/ReadonlyOutdoorVisuals";
 import type { ReadonlyOutdoorCampus, ReadonlyOutdoorEntrance } from "../readonlyOutdoorCampus";
-import { campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, STUDENT_CAMPUS_3D_GROUND_EPSILON, studentEntranceStairFlightLayout, resolveStudentEntranceRampPlacement, resolveStudentEntranceStairPlacement, resolveStudentEntranceStairYaw, resolveSuhayHusayDecorAssetId, studentEntranceRampGroundDirection, studentExteriorZone3dHeights, studentExteriorZone3dPresentation, usesCompactGroundEmergencyExit } from "../studentCampus3dPresentation";
+import { campusEmergencyExitDoorHeight, campusEmergencyExitVisualElevation, campusEntranceFacingYaw, campusFireEscapeLevels, campusGateFacingRotation, campusParkingMarkingSegments, dedupePhysicalCampusEntrances, groundedModelOffset, groupCampusDecorAssetsByType, resolveCampusEntrancePresentations, STUDENT_CAMPUS_3D_GROUND_EPSILON, studentEntranceStairFlightLayout, resolveStudentEntranceRampPlacement, resolveStudentEntranceStairPlacement, resolveStudentEntranceStairYaw, resolveSuhayHusayDecorAssetId, resolveSuhayHusayDecorAssetIds, studentEntranceRampGroundDirection, studentExteriorZone3dHeights, studentExteriorZone3dPresentation, usesCompactGroundEmergencyExit } from "../studentCampus3dPresentation";
 import { exteriorZoneAccessFeatureGeometry } from "../exteriorFloorZones";
 
 const building = { id: "b1", x: 0, y: 0, width: 100, height: 60, floors: [] } as unknown as CampusBuilding;
@@ -272,6 +272,16 @@ describe("Student Campus 3D presentation helpers", () => {
     expect(resolveSuhayHusayDecorAssetId(assets)).toBe("plaza-statue");
     expect(resolveSuhayHusayDecorAssetId([assets[1]])).toBe("another-statue");
     expect(resolveSuhayHusayDecorAssetId([])).toBeNull();
+  });
+
+  it("resolves explicitly identified Suhay instances without reclassifying unnamed legacy monuments", () => {
+    const assets = [
+      { id: "new-suhay-a", type: "monument", visualVariant: "suhay-husay", x: 10, y: 10 },
+      { id: "legacy-statue", type: "monument", name: "Memorial", x: 30, y: 30 },
+      { id: "named-suhay-b", type: "monument", name: "Suhay Husay South", x: 50, y: 50 },
+    ] as CampusDecorAsset[];
+    expect([...resolveSuhayHusayDecorAssetIds(assets)]).toEqual(["new-suhay-a", "named-suhay-b"]);
+    expect([...resolveSuhayHusayDecorAssetIds(assets.slice(0, 2))]).toEqual(["new-suhay-a"]);
   });
 
   it("uses the nearest campus path direction to face the gate toward campus circulation", () => {

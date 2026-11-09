@@ -2326,6 +2326,56 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onChooseOnMap).toHaveBeenLastCalledWith(null);
   });
 
+  it("shows desktop Back to Campus only for indoor map picking and preserves the active endpoint target", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const onBackToCampus = vi.fn();
+    const onChooseOnMap = vi.fn();
+    const onConfirmMapSelection = vi.fn();
+    try {
+      const props = plannerProps({
+        from: building("gate", "GATE", "Campus Gate"),
+        to: building("library", "LIB", "Library"),
+        mapSelectionEndpoint: "destination",
+        mapSelectionIndoor: true,
+        onBackToCampus,
+        onChooseOnMap,
+        onConfirmMapSelection,
+      });
+      const view = render(<RoutePlannerDialog {...props} />);
+
+      const back = screen.getByRole("button", { name: "Back to Campus" });
+      expect(back).toHaveAttribute("title", "Return to the outdoor campus map");
+      expect(back).toHaveClass("md:inline-flex");
+      fireEvent.click(back);
+      expect(onBackToCampus).toHaveBeenCalledOnce();
+      expect(onChooseOnMap).not.toHaveBeenCalled();
+      expect(onConfirmMapSelection).not.toHaveBeenCalled();
+
+      view.rerender(<RoutePlannerDialog {...props} mapSelectionIndoor={false} />);
+      expect(screen.queryByRole("button", { name: "Back to Campus" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("route-planner-map-pick-hint")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
+  it("does not add a second planner Back to Campus control on mobile", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<RoutePlannerDialog {...plannerProps({
+        mapSelectionEndpoint: "start",
+        mapSelectionIndoor: true,
+        onBackToCampus: vi.fn(),
+      })} />);
+      const back = screen.getByRole("button", { name: "Back to Campus" });
+      expect(back).toHaveClass("hidden", "md:inline-flex");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
   it("offers separate building and indoor-map actions for a staged building pick", () => {
     const onConfirmMapSelection = vi.fn();
     const onEnterMapSelectionBuilding = vi.fn();

@@ -10946,6 +10946,8 @@ const buildingFill = (id: string) =>
               mapSelectionCandidateLabel={routePlannerMapPickCandidate ? routeEndpointLabel(routePlannerMapPickCandidate.endpoint) : null}
               mapSelectionCandidateKind={routePlannerMapPickCandidate && routePlannerMapPickCandidate.endpoint.kind !== "manual-pin" ? routePlannerMapPickCandidate.endpoint.kind : null}
               mapSelectionCandidateContext={routePlannerMapPickCandidate ? routeEndpointContext(routePlannerMapPickCandidate.endpoint) : null}
+              mapSelectionIndoor={isFloorMode}
+              onBackToCampus={closeFloorPlan}
               onChooseOnMap={setRoutePlannerMapSelection}
               onConfirmMapSelection={confirmRoutePlannerMapSelection}
               onEnterMapSelectionBuilding={enterRoutePlannerMapPickBuilding}
