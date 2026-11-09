@@ -79,7 +79,13 @@ function ShowcaseArtwork({ posterUrl, videoAvailable }: { posterUrl?: string | n
   );
 }
 
-function HomeShowcasePlayer({ media }: { media: HomeShowcaseMediaConfig }) {
+function HomeShowcasePlayer({ media, videoUrl, isFullVersion, playRequest }: {
+  media: HomeShowcaseMediaConfig;
+  videoUrl?: string | null;
+  isFullVersion: boolean;
+  playRequest: number;
+}) {
+  const videoName = isFullVersion ? "PLV NaviSync full showreel video" : "PLV NaviSync showcase video";
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -104,7 +110,16 @@ function HomeShowcasePlayer({ media }: { media: HomeShowcaseMediaConfig }) {
       clearLoadingTimer();
       video?.pause();
     };
-  }, [media.videoUrl, retry]);
+  }, [videoUrl, retry]);
+
+  useEffect(() => {
+    if (playRequest === 0) return;
+    setHasFrame(false);
+    setPlaying(false);
+    void startPlayback();
+    // Only an explicit switch of version should start playback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRequest]);
 
   useEffect(() => {
     const exitFullscreenOnEscape = (event: KeyboardEvent) => {
@@ -174,14 +189,14 @@ function HomeShowcasePlayer({ media }: { media: HomeShowcaseMediaConfig }) {
       className="relative isolate aspect-video w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#071440] shadow-[0_24px_70px_rgba(7,20,64,.22)] ring-1 ring-black/5 dark:ring-white/10 sm:rounded-[1.75rem]"
       data-testid="home-showcase-player"
     >
-      <ShowcaseArtwork posterUrl={media.posterUrl} videoAvailable={Boolean(media.videoUrl)} />
-      {media.videoUrl && <video
-          key={`${media.videoUrl}-${retry}`}
+      <ShowcaseArtwork posterUrl={media.posterUrl} videoAvailable={Boolean(videoUrl)} />
+      {videoUrl && <video
+          key={`${videoUrl}-${retry}`}
           ref={videoRef}
           data-testid="home-showcase-video"
-          aria-label="PLV NaviSync showcase video"
+          aria-label={videoName}
           className={`home-showcase-video absolute inset-0 h-full w-full bg-black object-contain transition-opacity duration-200 motion-reduce:transition-none ${hasFrame && !failed ? "opacity-100" : "opacity-0"}`}
-          src={media.videoUrl}
+          src={videoUrl}
           poster={media.posterUrl ?? undefined}
           controls={hasFrame && !failed}
           autoPlay={false}
@@ -198,13 +213,13 @@ function HomeShowcasePlayer({ media }: { media: HomeShowcaseMediaConfig }) {
           {media.captions && <track kind="captions" src={media.captions.url} srcLang={media.captions.language} label={media.captions.label} />}
         </video>}
 
-      {media.videoUrl && starting && !failed && <span role="status" className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur">
+      {videoUrl && starting && !failed && <span role="status" className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur">
         Loading video…
       </span>}
-      {media.videoUrl && !failed && !playing && !starting && <button
+      {videoUrl && !failed && !playing && !starting && <button
         type="button"
         onClick={() => void (ended ? replay() : startPlayback())}
-        aria-label={ended ? "Replay PLV NaviSync showcase video" : "Play PLV NaviSync showcase video"}
+        aria-label={`${ended ? "Replay" : "Play"} ${videoName}`}
         className="absolute left-1/2 top-1/2 z-10 inline-flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/35 bg-white/95 text-primary shadow-[0_8px_32px_rgba(0,0,0,.28)] transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan-200/70 active:scale-95 sm:h-[4.25rem] sm:w-[4.25rem]"
       >
         {ended ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : <Play className="ml-0.5 h-5 w-5 fill-current" aria-hidden="true" />}
@@ -222,6 +237,25 @@ function HomeShowcasePlayer({ media }: { media: HomeShowcaseMediaConfig }) {
 }
 
 export function HomeShowcaseSection({ media = HOME_SHOWCASE_MEDIA }: { media?: HomeShowcaseMediaConfig }) {
+  const [showFull, setShowFull] = useState(false);
+  const [playRequest, setPlayRequest] = useState(0);
+  const hasFullVersion = Boolean(media.videoUrl && media.fullVideoUrl);
+  const isFullVersion = showFull && hasFullVersion;
+  const toggleVersion = () => {
+    setShowFull((value) => !value);
+    setPlayRequest((value) => value + 1);
+  };
+  const versionButton = hasFullVersion && (
+    <button
+      type="button"
+      onClick={toggleVersion}
+      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-card px-4 text-sm font-bold text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <Play className="h-4 w-4 fill-current" aria-hidden="true" />
+      {isFullVersion ? "Watch Overview" : "Watch Full Showreel"}
+    </button>
+  );
+
   return (
     <section
       id="landing-showcase"
@@ -244,20 +278,36 @@ export function HomeShowcaseSection({ media = HOME_SHOWCASE_MEDIA }: { media?: H
           <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground sm:mt-4 sm:text-base">
             Discover an easier way to explore and navigate the PLV campus.
           </p>
+          {hasFullVersion && (
+            <p className="mt-2 text-xs font-semibold text-muted-foreground" aria-live="polite">
+              {isFullVersion ? "Now showing the full showreel (1:40)." : "This is a 25-second overview. The full showreel runs 1:40."}
+            </p>
+          )}
+          <div className="mt-6 hidden flex-wrap items-center gap-3 lg:flex">
+            <Link
+              to="/map"
+              className="group inline-flex min-h-11 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              Explore Campus Map <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" aria-hidden="true" />
+            </Link>
+            {versionButton}
+          </div>
+        </div>
+        <HomeShowcasePlayer
+          media={media}
+          videoUrl={isFullVersion ? media.fullVideoUrl : media.videoUrl}
+          isFullVersion={isFullVersion}
+          playRequest={playRequest}
+        />
+        <div className="flex flex-wrap items-center gap-3 lg:hidden">
           <Link
             to="/map"
-            className="group mt-6 hidden min-h-11 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:inline-flex"
+            className="group inline-flex min-h-11 w-fit items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            Explore Campus Map <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" aria-hidden="true" />
+            Explore Campus Map <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
           </Link>
+          {versionButton}
         </div>
-        <HomeShowcasePlayer media={media} />
-        <Link
-          to="/map"
-          className="group inline-flex min-h-11 w-fit items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:hidden"
-        >
-          Explore Campus Map <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
       </div>
     </section>
   );
