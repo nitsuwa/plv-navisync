@@ -28,7 +28,7 @@ import { clampStudent3dCameraOffset, student3dFollowCameraOffsetForRecovery, stu
 import { groupStudentRouteExploreTransitions, type StudentRouteExploreTransitionMarker } from "../../lib/studentRouteFlow";
 import { cameraSegmentIntersectsOutdoorBuilding, OUTDOOR_AVATAR_OCCLUSION_SAMPLE_HEIGHTS, outdoorBuildingBlocksAvatarSample, outdoorBuildingFadeMaterialState, shouldFadeOutdoorBuildingForSamples, type OutdoorOccluderBox } from "../../lib/studentOutdoorOcclusion";
 import { outdoorOcclusionLifecycleTransition, shouldRunOutdoorOcclusion } from "../../lib/studentOutdoorOcclusionLifecycle";
-import { recordDiagnosticEvent } from "../../lib/diagnostics";
+import { useStudentWebGLRecovery } from "../../hooks/useStudentWebGLRecovery";
 import { StudentExploreTransitionChoiceControl } from "./StudentExploreTransitionChoiceControl";
 import { IskolarWalker3D } from "./IskolarWalker3D";
 import { SUHAY_HUSAY_V3_LIMBS, SUHAY_HUSAY_V3_POINTS, SUHAY_HUSAY_V3_ROCKS, SUHAY_HUSAY_V4_LIMBS, SUHAY_HUSAY_V4_POINTS, SUHAY_HUSAY_V4_SUPPORTS, SUHAY_HUSAY_V5_LIMBS, SUHAY_HUSAY_V5_POINTS, SUHAY_HUSAY_V5_ROCKS, SUHAY_HUSAY_V6_SHAPES, SUHAY_HUSAY_V7_SHAPES, SUHAY_HUSAY_V8_SHAPES, SUHAY_HUSAY_V9_SHAPES, SUHAY_HUSAY_V10_SHAPES, SUHAY_HUSAY_V11_SHAPES, type SuhayPointName, type SuhayV4PointName, type SuhayV5PointName, type SuhayV6ShapeName, type SuhayV7ShapeName, type SuhayV8ShapeName, type SuhayV9ShapeName, type SuhayV10ShapeName, type SuhayV11ShapeName } from "../../lib/suhayHusayLandmark";
@@ -3046,7 +3046,7 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </Html>
     </group>}
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} reducedMotion={props.reducedMotion} />}
-    {props.youAreHerePoint && !route.length && <group data-testid="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
+    {props.youAreHerePoint && !route.length && <group name="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
       <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
         <ringGeometry args={[0.16, 0.22, 24]} />
         <meshBasicMaterial color="#2563eb" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
@@ -3096,17 +3096,7 @@ function StudentCampus3DRenderer(props: StudentCampus3DRendererProps & { onFallb
     window.addEventListener("pageshow", update);
     return () => { document.removeEventListener("visibilitychange", update); window.removeEventListener("pageshow", update); };
   }, []);
-  useEffect(() => {
-    const canvas = surfaceRef.current;
-    if (!canvas) return;
-    const contextLost = (event: Event) => {
-      event.preventDefault();
-      recordDiagnosticEvent({ category: "renderer", severity: "error", summary: "The outdoor 3D WebGL context was lost.", source: "campus renderer" });
-      props.onFallback();
-    };
-    canvas.addEventListener("webglcontextlost", contextLost);
-    return () => canvas.removeEventListener("webglcontextlost", contextLost);
-  }, [props.onFallback]);
+  useStudentWebGLRecovery(interactionSurfaceRef, invalidateRef, "campus renderer", props.onFallback);
   return <SceneErrorBoundary onError={props.onFallback}>
     <div ref={interactionSurfaceRef} data-testid="student-campus-3d-surface" className="absolute inset-0 touch-none" style={{ touchAction: "none" }} onContextMenu={(event) => {
       if (shouldPreventStudent3dContextMenu(event.nativeEvent.button, event.currentTarget.dataset.rightButtonDragging === "true")) {

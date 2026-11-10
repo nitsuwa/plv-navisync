@@ -220,7 +220,7 @@ function endpointText(
   youAreHereLabel?: string | null,
 ) {
   if (purpose === "start" && useMyLocation && youAreHere) {
-    return { label: "You are here", context: youAreHereLabel ?? "Current map location" };
+    return { label: youAreHereLabel ?? "You are here", context: youAreHereLabel ? "Scanned location" : "Current map location" };
   }
   if (room) return { label: room.roomName, context: `${room.buildingLabel} · ${room.floorLabel ?? `Floor ${room.floorNumber}`}` };
   if (campusPlace) return { label: campusPlace.label, context: "Campus place" };
@@ -1593,7 +1593,7 @@ export function UnifiedRoutePlannerDialog({
                     ))}
                   </div>
                 )}
-                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} onChange={() => openSearch("start")} compact={isMobileViewport} />
+                <EndpointCard purpose="start" building={from} campusPlace={fromCampusPlace} room={fromRoom} useMyLocation={useMyLocation} youAreHere={youAreHere} youAreHereLabel={youAreHereLabel} onChange={() => openSearch("start")} compact={isMobileViewport} />
                 {isEmergency && emergencyRouteStatus}
                 {canSwapEndpoints && (
                   <div data-testid="route-planner-swap-row" className="flex h-10 shrink-0 items-center justify-center">

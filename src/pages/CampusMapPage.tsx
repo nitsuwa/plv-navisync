@@ -9595,7 +9595,7 @@ const buildingFill = (id: string) =>
   const handleCampus3DFallback = useCallback(() => {
     setCampus3DFallback(true);
     setCampusViewMode("2d");
-    showInfo("3D view isn't available on this device. Using 2D map.");
+    showInfo("The 3D map couldn't load or recover. Using the 2D map.");
   }, [showInfo]);
   const toggleStudentMapView = useCallback(() => {
     if (discoverTour.active) {
