@@ -10,7 +10,7 @@
  */
 import type { Json } from "../types/database.generated";
 import { getSupabase } from "../lib/supabase";
-import { countOpenFeedbackPins } from "../lib/eventFeedbackPins";
+import { countOpenFeedbackPins, isFeedbackPinAddressed } from "../lib/eventFeedbackPins";
 import { stableEventJson } from "../lib/stableEventJson";
 import { genId } from "../components/map-builder/constants";
 import { campusService, resolveActiveCampusId } from "./campusService";
@@ -681,14 +681,24 @@ export async function submitEventOverlayLayout(
  */
 export async function setEventFeedbackPinAddressed(overlay: CampusEventOverlay, locationId: string, pinId: string, addressed: boolean, note: string, expectedGrantId?: string): Promise<CampusEventOverlay> {
   const latest = await getEventOverlay(overlay.id);
-  if (!latest || !latest.updatedAt || latest.locationFeedback?.[locationId] !== overlay.locationFeedback?.[locationId]) throw new Error("Feedback changed. Refresh before updating the checklist.");
+  const feedback = latest?.locationFeedback?.[locationId];
+  if (!latest?.updatedAt || typeof feedback !== "string" || feedback !== overlay.locationFeedback?.[locationId]) throw new Error("Feedback changed. Refresh before updating the checklist.");
   if(latest.organizationId&&!expectedGrantId)throw new Error('Your representative assignment is missing. Refresh the organization workspace before updating feedback.');
+  const noteToSave = note.trim();
   const { data, error } = await getSupabase().rpc(latest.organizationId?'set_organization_event_feedback_pin_addressed':"set_event_feedback_pin_addressed", {
     p_overlay_id: overlay.id, p_expected_updated_at: latest.updatedAt, ...(latest.organizationId?{p_expected_grant_id:expectedGrantId}:{}), p_location_id: locationId,
-    p_pin_id: pinId, p_addressed: addressed, p_note: note,
+    p_pin_id: pinId, p_addressed: addressed, p_note: noteToSave,
   });
   if (error) throw eventCommandError(error);
-  return overlayFromAdminResult(data);
+  const saved = overlayFromAdminResult(data);
+  const resolution = saved.feedbackResolutions?.[locationId]?.[pinId];
+  const confirmed = addressed
+    ? isFeedbackPinAddressed(feedback, resolution) && resolution?.note === noteToSave
+    : resolution === undefined;
+  if (saved.id !== overlay.id || saved.locationFeedback?.[locationId] !== feedback || !confirmed) {
+    throw new Error("The server could not confirm the checklist update. Refresh the event and try again.");
+  }
+  return saved;
 }
 
 /** Admin-only identity enrichment; never added to the public event feed or saved metadata. */

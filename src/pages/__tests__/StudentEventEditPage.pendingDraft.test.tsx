@@ -286,6 +286,64 @@ describe("StudentEventEditPage pending interaction boundaries", () => {
     expect(fixture.service.setEventFeedbackPinAddressed).toHaveBeenCalledOnce();
     expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
   });
+  it("keeps a failed resolution open and shows an error while preserving the note for retry", async () => {
+    const feedback = '@event-feedback/v1:{"text":"","pins":[{"id":"pin","x":24,"y":24,"comment":"Move this chair"}]}';
+    fixture.service.getEventOverlay.mockResolvedValue({
+      ...overlay,
+      status: "draft",
+      organizationId: "org-a",
+      locationFeedback: { "location-a": feedback },
+    });
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });
+    fixture.service.setEventFeedbackPinAddressed.mockRejectedValueOnce(new Error("The server could not confirm the checklist update."));
+
+    renderPage();
+    fireEvent.click(await screen.findByText(/Feedback checklist/));
+    const note = screen.getByRole("textbox", { name: /Resolution note/ });
+    fireEvent.change(note, { target: { value: "Moved the chair" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as addressed" }));
+
+    await waitFor(() => expect(fixture.toast.error).toHaveBeenCalledWith("Checklist not saved", "The server could not confirm the checklist update."));
+    expect(fixture.toast.success).not.toHaveBeenCalled();
+    expect(screen.getByText("0/1 addressed")).toBeVisible();
+    expect(screen.getByText("Open", { exact: true })).toBeVisible();
+    expect(note).toHaveValue("Moved the chair");
+  });
+  it("shows the saved resolution after reopening the editor and lets the representative resubmit", async () => {
+    const feedback = '@event-feedback/v1:{"text":"","pins":[{"id":"pin","x":24,"y":24,"comment":"Move this chair"}]}';
+    let saved: CampusEventOverlay = {
+      ...overlay,
+      status: "draft",
+      organizationId: "org-a",
+      locationFeedback: { "location-a": feedback },
+    };
+    fixture.service.getEventOverlay.mockImplementation(async () => saved);
+    fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });
+    fixture.service.setEventFeedbackPinAddressed.mockImplementationOnce(async (_overlay, locationId, pinId, _addressed, note) => {
+      saved = {
+        ...saved,
+        feedbackResolutions: { [locationId]: { [pinId]: { feedback, addressedAt: "2026-11-10T08:00:00Z", addressedBy: "org-a", note } } },
+      };
+      return saved;
+    });
+
+    const editor = renderPage();
+    fireEvent.click(await screen.findByText(/Feedback checklist/));
+    fireEvent.change(screen.getByRole("textbox", { name: /Resolution note/ }), { target: { value: "Moved the chair" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as addressed" }));
+    await screen.findByText("1/1 addressed");
+    editor.unmount();
+
+    renderPage();
+    fireEvent.click(await screen.findByText(/Feedback checklist/));
+    expect(screen.getByText("1/1 addressed")).toBeVisible();
+    expect(screen.getByText("Addressed", { exact: true })).toBeVisible();
+    expect(screen.getByText(/Student note: Moved the chair/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Review & Submit/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm submission" }));
+    expect(await screen.findByText("My Events landing")).toBeVisible();
+    expect(fixture.service.submitEventOverlayLayout).toHaveBeenCalledWith(saved.id, expect.any(Array), saved.updatedAt, "grant-a");
+  });
   it('opens approved maps for inspection without save or submit controls', async () => {
     fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, status: 'approved' });
     fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: null, grantId: null, isArchived: false, canEditContent: false, canAddressFeedback: true });
