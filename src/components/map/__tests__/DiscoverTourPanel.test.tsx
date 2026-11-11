@@ -14,8 +14,8 @@ describe("DiscoverTourPanel", () => {
     />);
     expect(screen.getByTestId("discover-building-name")).toHaveTextContent("Science Building");
     expect(screen.getByTestId("discover-tour-position")).toHaveTextContent("Building 2 of 3");
-    fireEvent.click(screen.getByRole("button", { name: "Previous Building" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next Building" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous building" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next building" }));
     fireEvent.click(screen.getByRole("button", { name: "See What's Inside" }));
     expect(handlers.onPrevious).toHaveBeenCalledOnce();
     expect(handlers.onNext).toHaveBeenCalledOnce();
@@ -26,8 +26,26 @@ describe("DiscoverTourPanel", () => {
       stopIndex={1} stopCount={3} {...handlers}
     />);
     expect(screen.getByRole("button", { name: "Back to Building" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Next Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next building" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("discover-building-description")).not.toBeInTheDocument();
+  });
+
+  it("renders discovery navigation on one clean surface without stacked borders or shadows", () => {
+    render(<DiscoverTourPanel
+      open view="showcase" building={{ name: "Science Building", code: "SCI", floorCount: 3 }}
+      stopIndex={1} stopCount={3} {...handlers}
+    />);
+
+    const panel = screen.getByTestId("discover-tour-panel");
+    const actions = screen.getByTestId("discover-tour-actions");
+    const previous = screen.getByRole("button", { name: "Previous building" });
+    const next = screen.getByRole("button", { name: "Next building" });
+    expect(panel).not.toHaveClass("shadow-2xl", "border-border/80");
+    expect(actions).not.toHaveClass("border-t", "shadow-[0_-8px_16px_-16px_rgba(15,23,42,.45)]");
+    expect(previous).not.toHaveClass("shadow-sm");
+    expect(next).not.toHaveClass("shadow-sm");
+    expect(previous).toHaveClass("focus-visible:ring-2");
+    expect(next).toHaveClass("focus-visible:ring-2");
   });
 
   it("preserves useful scroll position when switching buildings and returning from inside", () => {
@@ -64,9 +82,12 @@ describe("DiscoverTourPanel", () => {
   });
 
   it("handles a single stop and unavailable published content without fake building details", () => {
-    const view = render(<DiscoverTourPanel open view="showcase" building={{ name: "Library", code: "LIB", floorCount: 0 }} stopIndex={0} stopCount={1} {...handlers} />);
-    expect(screen.queryByRole("button", { name: "Previous Building" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Next Building" })).not.toBeInTheDocument();
+    const onPrevious = vi.fn();
+    const view = render(<DiscoverTourPanel open view="showcase" building={{ name: "Library", code: "LIB", floorCount: 0 }} stopIndex={0} stopCount={1} {...handlers} onPrevious={onPrevious} />);
+    expect(screen.getByRole("button", { name: "Previous building" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous building" }));
+    expect(onPrevious).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Next building" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "See What's Inside" })).toBeDisabled();
     view.rerender(<DiscoverTourPanel open view="showcase" stopIndex={0} stopCount={0} unavailable {...handlers} />);
     expect(screen.getByText("No published buildings are available to explore yet.")).toBeInTheDocument();
@@ -96,6 +117,9 @@ describe("DiscoverTourPanel", () => {
     expect(screen.getByTestId("discover-building-description")).toHaveClass("block");
     expect(screen.getByTestId("discover-building-cover")).toHaveClass("block");
     expect(screen.getByRole("button", { name: "Collapse Discover details" })).toBeInTheDocument();
+    expect(screen.queryByText("Swipe up for details")).not.toBeInTheDocument();
+    expect(screen.getByTestId("discover-sheet-handle")).toHaveClass("items-center", "justify-center");
+    expect(screen.getByTestId("discover-tour-panel")).toHaveClass("bg-card");
   });
 
   it("reveals the full building name when expanded and supports handle swipe gestures", () => {

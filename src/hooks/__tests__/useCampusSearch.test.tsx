@@ -33,13 +33,13 @@ const campus = {
 } as unknown as Campus;
 
 describe("published campus search connectivity", () => {
-  it("indexes explicitly authored room destinations, independent of edge completeness", () => {
+  it("searches visible rooms while keeping route destinations limited to authored membership", () => {
     const connected = connectedCampusDestinations(campus);
     expect([...connected.buildingIds]).toEqual(["connected"]);
     expect([...connected.roomKeys]).toEqual(["connected:ground:copy"]);
 
     const { result } = renderHook(() => useCampusSearch(campus));
-    expect(result.current.results.map((entry) => entry.name)).toEqual(["Student Center", "Copy Shop"]);
+    expect(result.current.results.map((entry) => entry.name)).toEqual(["Student Center", "Copy Shop", "Unlinked Room"]);
     act(() => result.current.setSelectedCategory("office"));
     expect(result.current.results).toHaveLength(0);
     expect(result.current.destinations.map((entry) => entry.name)).toEqual(["Student Center", "Copy Shop"]);
@@ -57,12 +57,13 @@ describe("published campus search connectivity", () => {
     expect(connectedCampusDestinations(linked).roomKeys.has("connected:ground:semantic")).toBe(true);
   });
 
-  it("excludes visual-only rooms from both campus and floor search", () => {
+  it("keeps visual-only rooms in ordinary search but excludes them from route destinations", () => {
     const { result } = renderHook(() => useCampusSearch(campus));
     expect(result.current.destinations.map((entry) => entry.id)).not.toContain("unlinked");
 
     const floor = campus.buildings[0].floors[0];
-    expect(searchFloorRooms(floor, campus.buildings[0], "Unlinked")).toEqual([]);
+    expect(searchFloorRooms(floor, campus.buildings[0], "Unlinked").map((entry) => entry.id)).toEqual(["unlinked"]);
+    expect(searchFloorRooms(floor, campus.buildings[0], "Unlinked", new Set(["copy"]))).toEqual([]);
     expect(searchFloorRooms(floor, campus.buildings[0], "Copy", new Set(["copy"])).map((entry) => entry.id)).toEqual(["copy"]);
   });
 

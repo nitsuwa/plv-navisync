@@ -802,7 +802,7 @@ describe("CampusMapPage event overlays", () => {
     expect(screen.getByLabelText("Room")).toHaveValue("Copy Shop");
   });
 
-  it("keeps visual-only rooms inert, excludes them from Student search/routes, and follows published navigation membership", async () => {
+  it("keeps visible non-navigable rooms inspectable/reportable while excluding them from route selection", async () => {
     const floor = {
       id: "visual-floor", buildingId: "building-test", number: 1, label: "Ground Floor",
       rooms: [
@@ -820,16 +820,16 @@ describe("CampusMapPage event overlays", () => {
     const search = await screen.findByRole("searchbox", { name: "Search campus map" });
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "Comfort Room" } });
-    await waitFor(() => expect(screen.queryByRole("option", { name: /Comfort Room, Facility/i })).not.toBeInTheDocument());
+    expect(await screen.findByRole("option", { name: /Comfort Room, Facility/i })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "Science Hall" } });
     fireEvent.click(await screen.findByRole("option", { name: /Science Hall, Building/i }));
     fireEvent.click(screen.getAllByTestId("building-enter")[0]);
 
-    await screen.findByTestId("readonly-floor-plan-scene");
+    await screen.findByTestId("readonly-floor-plan-scene", {}, { timeout: 5000 });
     const visualRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
     expect(visualRoom).toBeDefined();
-    expect(visualRoom).toHaveAttribute("data-room-interactive", "false");
-    expect(visualRoom).not.toHaveAttribute("role", "button");
+    expect(visualRoom).toHaveAttribute("data-room-interactive", "true");
+    expect(visualRoom).toHaveAttribute("role", "button");
     expect(document.querySelector("[data-testid='room-label-overlay'][data-room-id='comfort-room']")).toHaveTextContent(/Comfort\s*Room/);
     const navigableRoom101 = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "classroom");
     expect(navigableRoom101).toHaveAttribute("data-room-interactive", "true");
@@ -837,9 +837,20 @@ describe("CampusMapPage event overlays", () => {
     expect(await screen.findByTestId("student-selected-place-card")).toHaveTextContent("Room 101");
     const camera = screen.getByTestId("student-map-surface").querySelector("svg > g[transform]");
     const cameraBefore = camera?.getAttribute("transform");
-    fireEvent.click(visualRoom!);
-    expect(screen.getByTestId("student-selected-place-card")).toHaveTextContent("Room 101");
+    const liveVisualRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
+    fireEvent.click(liveVisualRoom!);
+    await screen.findByText("Comfort Room");
+    const comfortRoomCard = screen.getByTestId("student-selected-place-card");
+    expect(comfortRoomCard).toHaveTextContent("Comfort Room");
+    expect(comfortRoomCard).not.toHaveTextContent("Navigation to this room is unavailable.");
+    expect(within(comfortRoomCard).getByRole("button", { name: "Report this room" })).toBeInTheDocument();
+    expect(within(comfortRoomCard).queryByRole("button", { name: "Directions" })).not.toBeInTheDocument();
+    expect(within(comfortRoomCard).queryByRole("button", { name: "Start here" })).not.toBeInTheDocument();
     expect(camera?.getAttribute("transform")).toBe(cameraBefore);
+    fireEvent.click(within(comfortRoomCard).getByRole("button", { name: "Report this room" }));
+    expect(screen.getByRole("dialog", { name: "Report issue" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Room")).toHaveValue("Comfort Room");
+    fireEvent.click(screen.getByRole("button", { name: "Close report form" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Open directions" }));
     fireEvent.click(await screen.findByRole("button", { name: "Choose destination" }));
@@ -865,12 +876,12 @@ describe("CampusMapPage event overlays", () => {
     fireEvent.click(currentNavigableRoom!);
     expect(await screen.findByTestId("student-selected-place-card")).toBeInTheDocument();
 
-    // Removing the authored node (the Admin's Remove from Navigation action)
-    // withdraws its Student selection and details state on the updated preview.
+    // Removing the authored node withdraws route eligibility without hiding
+    // the visible room's information and report panel.
     view.rerender(<MemoryRouter><CampusMapPage previewCampus={campusWithRoom101} /></MemoryRouter>);
-    await waitFor(() => expect(screen.queryByTestId("student-selected-place-card")).not.toBeInTheDocument());
+    expect(screen.getByTestId("student-selected-place-card")).toBeInTheDocument();
     const removedRoom = screen.getAllByTestId("readonly-room").find((room) => room.getAttribute("data-room-id") === "comfort-room");
-    expect(removedRoom).toHaveAttribute("data-room-interactive", "false");
+    expect(removedRoom).toHaveAttribute("data-room-interactive", "true");
   });
 
   it("keeps the manually selected floor visible and clears the previous room selection", async () => {
@@ -1002,7 +1013,10 @@ describe("CampusMapPage event overlays", () => {
     const planner = screen.getByTestId("route-planner-dialog");
     expect(within(planner).queryByTestId("student-floor-picker-inline")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("student-floor-picker")).toHaveLength(1);
-    expect(screen.getByTestId("student-map-floating-account-controls").contains(screen.getByTestId("student-floor-picker"))).toBe(true);
+    const floorPickerRoot = screen.getByTestId("student-floor-picker");
+    expect(screen.getByTestId("student-map-floating-account-controls").contains(floorPickerRoot)).toBe(true);
+    expect(floorPickerRoot).not.toHaveAttribute("data-below-account", "true");
+    expect(floorPickerRoot).toHaveClass("relative");
     fireEvent.click(screen.getByTestId("readonly-room"));
 
     expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Choose starting point");

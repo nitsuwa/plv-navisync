@@ -95,6 +95,16 @@ describe("Student room information", () => {
     expect(screen.queryByText(/No image uploaded|No description available/i)).not.toBeInTheDocument();
   });
 
+  it("keeps a visible non-navigable room reportable without showing a navigation warning", () => {
+    render(<StudentSelectedPlaceCard room={{ ...room, roomName: "Comfort Room" }} routeUnavailable {...actions} />);
+    expect(screen.getByText("Comfort Room")).toBeInTheDocument();
+    expect(screen.getByTestId("room-report")).toBeInTheDocument();
+    expect(screen.queryByText("Navigation to this room is unavailable.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Directions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("room-action-footer")).getAllByRole("button")).toHaveLength(1);
+  });
+
   it("animates room dismissal while making the exiting card immediately inert", async () => {
     function RoomCardHarness() {
       const [open, setOpen] = useState(true);

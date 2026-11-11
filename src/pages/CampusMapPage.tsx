@@ -122,6 +122,9 @@ import { buildEventVenues, eventLocationOnMap, eventVenueCandidates, resolveEven
 import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
 import { StudentCampusSelector, computeStudentCampusSelectorMaxWidth } from "../components/map/StudentCampusSelector";
+import { CampusOverviewPanel } from "../components/map/CampusOverviewPanel";
+import { previousDiscoverTourTarget } from "../lib/discoveryTourNavigation";
+import { explorablePublishedCampuses } from "../lib/studentCampusListing";
 import {
   student3dCameraOffsetFromPose,
   student3dCameraPoseRestoreCompletionMatches,
@@ -939,12 +942,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     isEmpty: isCampusEmpty,
     isCached: isCampusCached,
     offlinePackages = [],
-    saveActiveCampusOffline = async () => {},
-    removeActiveCampusOffline = async () => {},
-    offlinePackageBusy = false,
-    offlinePackageError = null,
     setNavigationActive: setPublishedNavigationActive = () => {},
-    activeCampusVersionId = null,
     refetch: refetchCampus,
   } = publishedCampusState;
 
@@ -1029,6 +1027,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [indoor3DLoaded, setIndoor3DLoaded] = useState(false);
   const [campus3DFallback, setCampus3DFallback] = useState(false);
   const [discoverTour, setDiscoverTour] = useState<DiscoverTourState>({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
+  const [campusOverviewOpen, setCampusOverviewOpen] = useState(false);
+  const pendingDiscoverCampusSwitchRef = useRef<string | null>(null);
   const discoverSnapshotRef = useRef<DiscoverMapSnapshot | null>(null);
   const discoverExitHandlerRef = useRef<(() => void) | null>(null);
   const discoverStopIndexRef = useRef(0);
@@ -1457,23 +1457,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [reportCampusPlace, setReportCampusPlace] = useState<CampusMarker | null>(null);
   const [reportRoomContext, setReportRoomContext] = useState<{ floorId: string; roomId: string } | null>(null);
   const [signInPrompt,  setSignInPrompt]  = useState<string|null>(null);
-  const wasCampusCachedRef = useRef(false);
-  const lastCampusRefreshWarningAtRef = useRef(0);
-
-  useEffect(() => {
-    const warningCooldownMs = 5 * 60_000;
-    const warningIsDue = Date.now() - lastCampusRefreshWarningAtRef.current >= warningCooldownMs;
-    if (isCampusCached && !wasCampusCachedRef.current && warningIsDue) {
-      lastCampusRefreshWarningAtRef.current = Date.now();
-      showWarning("Campus map refresh unavailable", {
-        description: "Using the latest available campus map.",
-        duration: 4000,
-        action: { label: "Refresh", onClick: () => { void refetchCampus(); } },
-      });
-    }
-    wasCampusCachedRef.current = isCampusCached;
-  }, [isCampusCached, refetchCampus, showWarning]);
-
   useEffect(() => {
     setMobileBuildingSheetState((current) => current === "default" ? current : "default");
   }, [selected?.id]);
@@ -2064,20 +2047,16 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     [activeCampus, floorView],
   );
   const interactiveFloorRoomIds = useMemo(() => new Set((activeFloorPlan?.rooms ?? [])
-    .filter((room) => navigableRoomKeys.has(authoredRoomNavigationKey(
-      activeFloorBuilding?.id ?? floorView?.building.id ?? "",
-      activeFloorPlan?.id ?? "",
-      room.id,
-    )))
-    .map((room) => room.id)), [activeFloorBuilding?.id, activeFloorPlan, floorView?.building.id, navigableRoomKeys]);
+    .filter((room) => room.visible !== false)
+    .map((room) => room.id)), [activeFloorPlan]);
   useEffect(() => {
     if (!activeCampus || !selectedRoomContext) return;
     const building = activeCampus.buildings.find((candidate) => candidate.id === selectedRoomContext.buildingId);
     const floor = building?.floors.find((candidate) => candidate.number === selectedRoomContext.floorNumber);
-    if (building && floor && navigableRoomKeys.has(authoredRoomNavigationKey(building.id, floor.id, selectedRoomContext.roomId))) return;
+    if (building && floor?.rooms.some((room) => room.id === selectedRoomContext.roomId && room.visible !== false)) return;
     setSelectedRoomContext(null);
     if (highlightedRoom === selectedRoomContext.roomId) setHighlightedRoom(null);
-  }, [activeCampus, highlightedRoom, navigableRoomKeys, selectedRoomContext]);
+  }, [activeCampus, highlightedRoom, selectedRoomContext]);
   const activeFloorEntrances = useMemo(() => activeFloorBuilding?.entrances ?? [], [activeFloorBuilding]);
   const activeFloorExteriorStairs = useMemo(
     () => activeFloorBuilding?.exteriorEmergencyStairs ?? [],
@@ -4165,6 +4144,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const stopIndex = discoverStops.length ? 0 : 0;
     discoverStopIndexRef.current = stopIndex;
     setDiscoverTour({ active: true, navigationGuard: false, campusId: activeCampus.id, view: "showcase", stopIndex, mobileExpanded: false });
+    setCampusOverviewOpen(!navigationEnded);
     setCampus3DFallback(false);
     setCampus3DLoaded(true);
     setCampusViewMode("3d");
@@ -4190,6 +4170,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }
     const snapshot = discoverSnapshotRef.current;
     setDiscoverTour({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
+    setCampusOverviewOpen(false);
     discoverSnapshotRef.current = null;
     discoverExteriorCameraPoseRef.current = null;
     pending2DRendererReframeRef.current = null;
@@ -4241,6 +4222,13 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setDiscoverTour((current) => ({ ...current, stopIndex: nextIndex, view: "showcase" }));
     focusDiscoverStop(nextIndex);
   }, [discoverStops, focusDiscoverStop]);
+  const backDiscoverStop = useCallback(() => {
+    const target = previousDiscoverTourTarget(discoverStopIndexRef.current, discoverStops.length);
+    if (target.kind !== "building") return;
+    discoverStopIndexRef.current = target.index;
+    setDiscoverTour((current) => ({ ...current, stopIndex: target.index, view: "showcase" }));
+    focusDiscoverStop(target.index);
+  }, [discoverStops.length, focusDiscoverStop]);
   const enterDiscoverBuilding = useCallback(() => {
     const stop = discoverStops[discoverTour.stopIndex];
     if (!stop?.published.floors?.length) return;
@@ -4276,8 +4264,21 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
 
   useEffect(() => {
     if (!discoverTour.active || discoverTour.campusId === activeCampus?.id) return;
+    if (activeCampus && pendingDiscoverCampusSwitchRef.current === activeCampus.id) {
+      pendingDiscoverCampusSwitchRef.current = null;
+      discoverStopIndexRef.current = 0;
+      setDiscoverTour((current) => ({ ...current, campusId: activeCampus.id, stopIndex: 0, view: "showcase", mobileExpanded: false }));
+      setCampusOverviewOpen(true);
+      setSelected(null);
+      setSelectedCampusPlaceId(null);
+      setFloorView(null);
+      setSelectedRoomContext(null);
+      setHighlightedRoom(null);
+      return;
+    }
     discoverSnapshotRef.current = null;
     setDiscoverTour({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
+    setCampusOverviewOpen(false);
   }, [activeCampus?.id, discoverTour.active, discoverTour.campusId]);
 
   const changeStudentFloor = useCallback((floorNumber: number) => {
@@ -5857,10 +5858,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
           (item.floorId ? floor.id === item.floorId : false)
           || (item.floorNumber !== undefined && floor.number === item.floorNumber),
         );
-        if (!campusBuilding || !publishedFloor
-          || !navigableRoomKeys.has(authoredRoomNavigationKey(campusBuilding.id, publishedFloor.id, item.id))) {
-          // Ignore stale/non-navigable room results without selecting or focusing
-          // the underlying visual-only room.
+        if (!campusBuilding || !publishedFloor) {
+          // Ignore stale results whose published room context no longer exists.
           setSearch(item.name);
           dismissSearch();
           return;
@@ -5924,8 +5923,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       if (building) handleSelectSearchResult({ id: building.id, name: building.name, kind: "building", buildingId: building.id, accessible: false, keywords: [] });
       return;
     }
-    if (navigableRoomKeys.has(authoredRoomNavigationKey(campusBuilding.id, floor.id, room.id))) {
-      handleSelectSearchResult({
+    handleSelectSearchResult({
         id: room.id,
         name: room.name,
         kind: "room",
@@ -5937,12 +5935,6 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
         accessible: false,
         keywords: [],
       });
-      return;
-    }
-    // Rooms outside the navigation graph can't be selected like search
-    // results; still open their building on the right floor.
-    handleSelectSearchResult({ id: building.id, name: building.name, kind: "building", buildingId: building.id, accessible: false, keywords: [] });
-    setFloorView({ building, floor: floor.number });
   }, [pendingRoomLink, activeCampus, MOCK_BUILDINGS, handleSelectSearchResult, navigableRoomKeys]);
 
   const startDirectionsTo = useCallback((b: Building) => {
@@ -6568,7 +6560,7 @@ const buildingFill = (id: string) =>
    * building when the walking dot arrives. Without one, the destination
    * building itself is the start and the indoor leg is shown right away.
    */
-  const roomEndpointFromFloor = useCallback((roomId: string): RoomDest | null => {
+  const roomEndpointFromFloor = useCallback((roomId: string, requireNavigationEligibility = true): RoomDest | null => {
     const fv = floorViewRef.current;
     if (!fv) return null;
     const room =
@@ -6579,7 +6571,8 @@ const buildingFill = (id: string) =>
       .find((building) => building.id === fv.building.id)
       ?.floors.find((floor) => floor.number === fv.floor);
     const floorId = activeFloorPlan?.id ?? publishedFloor?.id;
-    if (!floorId || !navigableRoomKeys.has(authoredRoomNavigationKey(fv.building.id, floorId, roomId))) return null;
+    if (!floorId) return null;
+    if (requireNavigationEligibility && !navigableRoomKeys.has(authoredRoomNavigationKey(fv.building.id, floorId, roomId))) return null;
     const publishedRoom = publishedFloor?.rooms.find((candidate) => candidate.id === roomId);
     return {
       type: "room",
@@ -6968,9 +6961,14 @@ const buildingFill = (id: string) =>
   // A map-tapped room is inspection only. Route endpoints change through the
   // explicit Directions / Start here actions or the planner search workflow.
   const selectIndoorRoom = useCallback((roomId: string) => {
-    const room = roomEndpointFromFloor(roomId);
+    const room = roomEndpointFromFloor(roomId, false);
     if (!room) {
-      if (routePlannerMapPick) setRoutePlannerSelectionError("This room is not available as a route endpoint. Choose a connected room or building.");
+      return;
+    }
+    const floorId = activeFloorPlan?.id;
+    const isRouteEligible = Boolean(floorId && navigableRoomKeys.has(authoredRoomNavigationKey(room.buildingId, floorId, room.roomId)));
+    if (routePlannerMapPick && !isRouteEligible) {
+      setRoutePlannerSelectionError("Navigation to this room is unavailable. Choose a connected room or building.");
       return;
     }
     if (discoverTour.active) {
@@ -6991,7 +6989,7 @@ const buildingFill = (id: string) =>
     setHighlightedRoom(roomId);
     setSelectedRoomContext(room);
     setSearchFocusNonce((nonce) => nonce + 1);
-  }, [applyRoutePlannerEndpoint, discoverTour.active, MOCK_BUILDINGS, roomEndpointFromFloor, routePlannerMapPick]);
+  }, [activeFloorPlan?.id, applyRoutePlannerEndpoint, discoverTour.active, MOCK_BUILDINGS, navigableRoomKeys, roomEndpointFromFloor, routePlannerMapPick]);
 
   const enterDestinationRouteFloor = useCallback((destination: NonNullable<PlannedRoute["destinationRoom"]>) => {
     if (!route) return;
@@ -7129,20 +7127,35 @@ const buildingFill = (id: string) =>
       </div>
   ) : null;
 
+  const offlineUnavailable = Boolean(campusError?.includes("No campus map is saved"));
+  const offlineIncompatible = Boolean(campusError?.includes("incomplete or incompatible"));
+  const storageUnavailable = Boolean(campusError?.includes("storage is unavailable"));
+  const offlineMessage = offlineUnavailable || offlineIncompatible || storageUnavailable;
   const campusErrorScreen = campusError && !activeCampus ? (
       <div className={cn("relative flex w-full flex-col items-center justify-center p-6", fullScreen && fullScreenHeight ? "h-full" : "")} style={{ height: fullScreen ? fullScreenHeight ?? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
         <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-destructive/20 shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4 text-destructive">
             <AlertCircle className="h-8 w-8" />
           </div>
-          <h3 className="text-lg font-extrabold text-foreground mb-2">Unable to refresh campus map</h3>
-          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">We couldn&apos;t retrieve campus data right now.</p>
+          <h3 className="text-lg font-extrabold text-foreground mb-2">
+            {offlineUnavailable ? "No offline campus map available" : offlineIncompatible ? "Saved campus map cannot be opened" : storageUnavailable ? "Offline storage unavailable" : "Unable to refresh campus map"}
+          </h3>
+          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">
+            {offlineUnavailable
+              ? "Connect to the internet and save a campus map before using navigation offline."
+              : offlineIncompatible
+                ? "The saved campus data is incomplete or no longer compatible. Reconnect and download the campus again."
+                : storageUnavailable
+                  ? "This browser could not read the saved map storage. Reconnect to download the campus map again."
+                  : "We couldn't retrieve campus data right now."}
+          </p>
           <button
             onClick={() => refetchCampus()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer"
+            disabled={!navigator.onLine}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Retry
+            {offlineMessage ? "Retry when online" : "Retry"}
           </button>
         </div>
       </div>
@@ -9960,7 +9973,7 @@ const buildingFill = (id: string) =>
               youAreHerePoint={youAreHere}
               youAreHereLabel={qrLocationScannedAt === null ? "Dropped pin" : qrLocationStale ? "Last scanned location" : "You are here"}
               focusOnViewportChange={discoverTour.active}
-              showcaseBuildingId={discoverTour.active && discoverTour.view === "showcase" ? currentDiscoverStop?.published.id ?? null : null}
+              showcaseBuildingId={discoverTour.active && !campusOverviewOpen && discoverTour.view === "showcase" ? currentDiscoverStop?.published.id ?? null : null}
               arrivalFocusPoint={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.cameraPoint : null}
               arrivalApproachPoint={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.approachPoint ?? null : null}
               arrivalFocusKey={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.key : null}
@@ -10146,7 +10159,8 @@ const buildingFill = (id: string) =>
           buildingId={selectedRoomContext.buildingId}
           description={activeFloorPlan?.rooms.find((room) => room.id === selectedRoomContext.roomId)?.description}
           roomPhotoPath={activeFloorPlan?.rooms.find((room) => room.id === selectedRoomContext.roomId)?.roomPhotoPath}
-          hideRouteActions={discoverTour.active}
+          hideRouteActions={discoverTour.active || !navigableRoomKeys.has(authoredRoomNavigationKey(selectedRoomContext.buildingId, activeFloorPlan?.id ?? "", selectedRoomContext.roomId))}
+          routeUnavailable={!discoverTour.active && !navigableRoomKeys.has(authoredRoomNavigationKey(selectedRoomContext.buildingId, activeFloorPlan?.id ?? "", selectedRoomContext.roomId))}
           suspendedForFloorPicker={floorPickerFallbackActive}
           suspendedForSearch={searchFocused}
           emergencyVideoGuide={!discoverTour.active && selectedEmergencyVideo?.room.id === selectedRoomContext.roomId
@@ -11498,7 +11512,7 @@ const buildingFill = (id: string) =>
       >
         {activeCampus && isFloorMode && availableFloorOptions.length > 1 && !showEventMaps && !profileMenuOpen && <StudentFloorPicker
           accountAnchor
-          belowAccount={false}
+          belowAccount={!discoverTour.active && !(directionsMode && !routePanelMinimized || routePanelOwnsRendererToggle) && !showEventMaps}
           buildingName={activeFloorBuilding?.name ?? floorView?.building.name ?? "Building"}
           buildingCode={activeFloorBuilding?.code ?? floorView?.building.code}
           floors={availableFloorOptions}
@@ -11881,18 +11895,11 @@ const buildingFill = (id: string) =>
       )}
 
       {/* ══════════════ CAMPUS SELECTOR ══════════════ */}
-      {!discoverTour.active && !route && !directionsMode && !searchFocused && !search && !showEventMaps && !showArrival && !locationPreviewPanel && !profileMenuOpen && (
+      {(!discoverTour.active || (!campusOverviewOpen && discoverTour.view === "showcase" && !discoverTour.navigationGuard)) && !route && !directionsMode && !searchFocused && !search && !showEventMaps && !showArrival && !locationPreviewPanel && !profileMenuOpen && (
         <StudentCampusSelector
-          campuses={availableCampuses}
+          campuses={discoverTour.active ? explorablePublishedCampuses(availableCampuses) : availableCampuses}
           activeCampusId={activeCampus?.id}
           activeCampusName={activeCampus?.name}
-          offlineReady={Boolean(activeCampus && offlinePackages.some((item) => item.campusId === activeCampus.id))}
-          offlineNeedsUpdate={Boolean(activeCampus && activeCampusVersionId && offlinePackages.some((item) => item.campusId === activeCampus.id && item.versionId !== activeCampusVersionId))}
-          offlineBusy={offlinePackageBusy}
-          offlineUpdatedAt={offlinePackages.find((item) => item.campusId === activeCampus?.id)?.downloadedAt ?? null}
-          offlineError={offlinePackageError}
-          onSaveOffline={() => saveActiveCampusOffline()}
-          onRemoveOffline={() => removeActiveCampusOffline()}
           mobileTop={campusSelectorTop}
           mobileMaxWidth={campusSelectorMaxWidth}
           onSelect={(campusId) => {
@@ -11900,10 +11907,16 @@ const buildingFill = (id: string) =>
             const hasActiveRouteSession = Boolean(route || directionsMode || studentRouteUi.phase !== "idle");
             if (hasActiveRouteSession && !window.confirm("Switching campuses will end the current route session. Continue?")) return false;
             if (hasActiveRouteSession) clearStudentRoute();
+            if (discoverTour.active) pendingDiscoverCampusSwitchRef.current = campusId;
             setSelectedCampusId(campusId);
             return true;
           }}
         />
+      )}
+      {discoverTour.active && !discoverTour.navigationGuard && !campusOverviewOpen && !isFloorMode && !route && activeCampus && (
+        <button type="button" data-no-drag onClick={() => setCampusOverviewOpen(true)} className="absolute left-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[72] inline-flex min-h-10 items-center gap-2 rounded-full border border-border/80 bg-card/95 px-3 text-[11px] font-bold text-foreground shadow-lg backdrop-blur-xl transition hover:bg-muted md:left-5" aria-label="Open campus information">
+          <MapPin className="h-4 w-4 text-primary" />Campus Info
+        </button>
       )}
 
       {/* ══════════════ MOBILE: immersive floating UI ══════════════ */}
@@ -12149,7 +12162,7 @@ const buildingFill = (id: string) =>
         onBackToEvents={() => { setInspectedEventVenueId(null); setSelectedEventId(null); setSelectedLocationId(null); }}
       />}
       <DiscoverTourPanel
-        open={discoverTour.active || discoverTour.navigationGuard}
+        open={(discoverTour.active && !campusOverviewOpen) || discoverTour.navigationGuard}
         view={discoverTour.view}
         building={currentDiscoverStop ? {
           name: currentDiscoverStop.name,
@@ -12170,7 +12183,7 @@ const buildingFill = (id: string) =>
         roomSelected={discoverTour.view === "inside" && Boolean(selectedRoomContext)}
         reducedMotion={reducedMotion}
         navigationGuard={discoverTour.navigationGuard}
-        onPrevious={() => moveDiscoverStop(-1)}
+        onPrevious={backDiscoverStop}
         onNext={() => moveDiscoverStop(1)}
         onEnter={enterDiscoverBuilding}
         onBack={backToDiscoverBuilding}
@@ -12178,6 +12191,16 @@ const buildingFill = (id: string) =>
         onEndNavigationAndStart={confirmDiscoverTourAfterEndingNavigation}
         onCancelNavigationGuard={() => setDiscoverTour((current) => ({ ...current, navigationGuard: false }))}
       />
+      {discoverTour.active && campusOverviewOpen && activeCampus && (
+        <CampusOverviewPanel
+          campus={activeCampus}
+          campuses={explorablePublishedCampuses(availableCampuses)}
+          offline={!navigator.onLine}
+          reducedMotion={reducedMotion}
+          onExplore={() => setCampusOverviewOpen(false)}
+          onClose={() => setCampusOverviewOpen(false)}
+        />
+      )}
     </div>
   );
 }

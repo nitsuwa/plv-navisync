@@ -92,16 +92,6 @@ export function StudentEmergencyVideoCard({
     try {
       const saved = await getOfflineVideo(offlineVideoKey(campusId, videoId));
       if (generation !== requestGenerationRef.current) return null;
-      if (saved?.metadata && saved.routeFingerprint === routeFingerprint && navigator.onLine) {
-        const published = await getPublishedEmergencyEvacuationVideo({ videoId, roomId, campusId, routeFingerprint }).catch(() => null);
-        if (generation !== requestGenerationRef.current) return null;
-        if (published) {
-          setGuide(published);
-          setOfflineReady(true);
-          setOfflineNeedsUpdate(published.updated_at !== saved.updatedAt);
-          return published;
-        }
-      }
       if (saved?.metadata && saved.routeFingerprint === routeFingerprint) {
         const playbackUrl = URL.createObjectURL(saved.video);
         const captionsUrl = saved.captions ? URL.createObjectURL(saved.captions) : null;
@@ -114,6 +104,10 @@ export function StudentEmergencyVideoCard({
       }
       setOfflineReady(false);
       setOfflineNeedsUpdate(false);
+      if (!navigator.onLine) {
+        setError("This video is not available offline yet. Reconnect to load it.");
+        return null;
+      }
       const next = await getPublishedEmergencyEvacuationVideo({ videoId, roomId, campusId, routeFingerprint });
       if (generation !== requestGenerationRef.current) return null;
       setGuide(next);
@@ -139,6 +133,16 @@ export function StudentEmergencyVideoCard({
       videoRef.current?.pause();
     };
   }, [load, savePlaybackState]);
+
+  useEffect(() => {
+    const onConnectionChange = () => { void load(); };
+    window.addEventListener("offline", onConnectionChange);
+    window.addEventListener("online", onConnectionChange);
+    return () => {
+      window.removeEventListener("offline", onConnectionChange);
+      window.removeEventListener("online", onConnectionChange);
+    };
+  }, [load]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -278,7 +282,10 @@ export function StudentEmergencyVideoCard({
       setOfflineReady(true);
       setOfflineNeedsUpdate(false);
       setOfflineDownloadProgress(100);
-      if (!guide) await load();
+      // Re-read the saved bytes and switch the player to its local Blob URL.
+      // Keeping the signed playback URL here made a successful save appear
+      // offline-ready while the player still depended on the network.
+      await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "This guide could not be saved for offline use.");
     } finally { setDownloadBusy(false); window.setTimeout(() => setOfflineDownloadProgress(null), 900); }
@@ -372,7 +379,7 @@ export function StudentEmergencyVideoCard({
         {expanded && (error || autoplayBlocked) && <p role="status" className="mt-2 text-[9px] leading-relaxed text-muted-foreground">{error ?? "Muted autoplay was blocked. Press Play to start the guide."}</p>}
         {expanded && guide && error && <button type="button" onClick={() => { mediaRefreshAttemptedRef.current = false; void load(); }} disabled={loading} className="mt-2 min-h-9 rounded-lg border border-border px-3 text-[9px] font-bold text-primary disabled:opacity-60">{loading ? "Refreshing guide…" : "Reload guide"}</button>}
         {expanded && guide && <p className="mt-2 text-[8px] leading-relaxed text-muted-foreground">Follow posted instructions and campus personnel.</p>}
-        {!guide && <div className="mt-2 flex items-center justify-between gap-2 text-[8px] text-muted-foreground"><span>{loading ? "Checking publication…" : "Guide unavailable"}</span>{!loading && <button type="button" onClick={() => void load()} aria-label="Retry loading evacuation video" className="font-bold text-primary">Retry</button>}</div>}
+        {!guide && <div className="mt-2 flex items-center justify-between gap-2 text-[8px] text-muted-foreground"><span role={error ? "status" : undefined}>{loading ? "Checking publication…" : error ?? "Guide unavailable"}</span>{!loading && navigator.onLine && <button type="button" onClick={() => void load()} aria-label="Retry loading evacuation video" className="font-bold text-primary">Retry</button>}</div>}
       </div>
     </section>
   );

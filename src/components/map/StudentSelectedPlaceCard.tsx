@@ -26,6 +26,7 @@ interface StudentSelectedPlaceCardProps {
   suspendedForSearch?: boolean;
   /** Hides route actions while the same room card is reused in Discover PLV. */
   hideRouteActions?: boolean;
+  routeUnavailable?: boolean;
   emergencyVideoGuide?: RoomEmergencyEvacuationConfiguration["videoGuide"];
   emergencyVideoRouteFingerprint?: string;
   emergencyMode?: boolean;
@@ -49,6 +50,7 @@ export function StudentSelectedPlaceCard({
   suspendedForFloorPicker = false,
   suspendedForSearch = false,
   hideRouteActions = false,
+  routeUnavailable = false,
   emergencyVideoGuide,
   emergencyVideoRouteFingerprint,
   emergencyMode = false,
@@ -371,8 +373,8 @@ export function StudentSelectedPlaceCard({
           )}
 
         </div>
-        <div data-testid="room-action-footer" className={`grid shrink-0 gap-1.5 border-t border-border/50 bg-card px-3 pb-[max(.5rem,env(safe-area-inset-bottom,0px))] pt-2 ${hideRouteActions ? "grid-cols-1" : "grid-cols-3"}`}>
-            {!hideRouteActions && <>
+        <div data-testid="room-action-footer" className={`grid shrink-0 gap-1.5 border-t border-border/50 bg-card px-3 pb-[max(.5rem,env(safe-area-inset-bottom,0px))] pt-2 ${hideRouteActions || routeUnavailable ? "grid-cols-1" : "grid-cols-3"}`}>
+            {!hideRouteActions && !routeUnavailable && <>
             <button type="button" onClick={onDirections} className="flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-xl bg-primary px-1.5 text-[10px] font-extrabold text-primary-foreground shadow-sm transition-[filter,background-color] hover:brightness-110 active:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:gap-1.5 sm:px-2 sm:text-[11px]">
               <Navigation className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Directions
             </button>
@@ -381,7 +383,7 @@ export function StudentSelectedPlaceCard({
             </button>
             <StudentReportAction testId="room-report" ariaLabel="Report this room" onClick={onReport} className="min-h-10 gap-1 px-1.5 text-[10px] active:scale-100 sm:gap-1.5 sm:px-2 sm:text-[11px]" />
             </>}
-            {hideRouteActions && <StudentReportAction testId="room-report" ariaLabel="Report this room" onClick={onReport} className="min-h-10 gap-1 px-1.5 text-[10px] active:scale-100 sm:gap-1.5 sm:px-2 sm:text-[11px]" />}
+            {(hideRouteActions || routeUnavailable) && <StudentReportAction testId="room-report" ariaLabel="Report this room" onClick={onReport} className="min-h-10 gap-1 px-1.5 text-[10px] active:scale-100 sm:gap-1.5 sm:px-2 sm:text-[11px]" />}
         </div>
       </motion.section>
       {publishedVideoGuide && emergencyVideoRouteFingerprint && campusId && (

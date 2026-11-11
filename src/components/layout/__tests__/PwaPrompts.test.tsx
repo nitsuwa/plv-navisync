@@ -3,7 +3,7 @@ import { MotionGlobalConfig } from "motion/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PwaState } from "../../../lib/pwa";
-import { InstallAppBanner, PwaUpdateNotifier } from "../PwaPrompts";
+import { InstallAppBanner, OfflineIndicator, PwaUpdateNotifier } from "../PwaPrompts";
 
 const pwa = vi.hoisted(() => ({
   state: {} as PwaState,
@@ -137,5 +137,20 @@ describe("PwaUpdateNotifier", () => {
     fireEvent.click(screen.getByRole("button", { name: "Later" }));
     await expectRemoved("pwa-update-card");
     expect(pwa.applyPwaUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("OfflineIndicator", () => {
+  it("uses a compact, non-intercepting status when offline and disappears online", () => {
+    setState({ online: false });
+    const { rerender } = render(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
+    const status = screen.getByRole("status", { name: /using saved campus data/i });
+    expect(status).toHaveTextContent("Offline");
+    expect(status).toHaveClass("pointer-events-none");
+    expect(screen.queryByText(/live services need a connection/i)).not.toBeInTheDocument();
+
+    setState({ online: true });
+    rerender(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

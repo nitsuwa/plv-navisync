@@ -85,16 +85,19 @@ export function PwaUpdateNotifier() {
 /** Small pill shown while the device has no connection. */
 export function OfflineIndicator() {
   const { online } = usePwaState();
-  if (online) return null;
+  const { pathname } = useLocation();
+  if (online || pathname === "/map") return null;
   return (
     <div
       role="status"
-      className="pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-4"
-      style={{ top: "max(0.5rem, env(safe-area-inset-top, 0px))" }}
+      aria-label="Offline. Using saved campus data; live updates are unavailable."
+      title="Using saved campus data. Live updates are unavailable."
+      className="pointer-events-none fixed right-3 z-[35] flex max-w-[5.5rem] items-center justify-center"
+      style={{ top: "calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 3.75rem)" }}
     >
-      <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs font-bold text-foreground shadow-lg backdrop-blur-xl">
-        <WifiOff className="h-3.5 w-3.5 text-amber-500" aria-hidden />
-        Offline — saved maps work when available; live services need a connection
+      <div className="pointer-events-none inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-card/95 px-2.5 py-1.5 text-[10px] font-bold text-foreground shadow-sm backdrop-blur-xl">
+        <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
+        <span>Offline</span>
       </div>
     </div>
   );

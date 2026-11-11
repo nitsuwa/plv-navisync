@@ -143,6 +143,7 @@ export function AdminMapBuilderPage() {
   // level so Floor Editor mutations (which update the same campus draft through
   // onUpdate) still enable the outer Save when the user returns.
   const savedSnapshotsRef = useRef<Record<string, string>>({});
+  const canvasSetupUpdatedCampusRef = useRef<Record<string, Campus>>({});
   // Immutable live snapshots are kept separately from the editable saved
   // draft. This is what lets a clean draft remain visibly unpublished after a
   // save and after a later campus re-entry.
@@ -1088,9 +1089,15 @@ export function AdminMapBuilderPage() {
   const handleCanvasSetupComplete = useCallback(async (updates: Partial<Campus>) => {
     if (!canvasSetupCampus) return;
     try {
-      const updated = await campusService.update(canvasSetupCampus.id, {
-        canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
-      }, canvasSetupCampus.databaseUpdatedAt!);
+      const previousUpdate = canvasSetupUpdatedCampusRef.current[canvasSetupCampus.id];
+      const updated = previousUpdate
+        && previousUpdate.canvasW === updates.canvasW
+        && previousUpdate.canvasH === updates.canvasH
+        ? previousUpdate
+        : await campusService.update(canvasSetupCampus.id, {
+          canvas_width: updates.canvasW, canvas_height: updates.canvasH, canvas_configured: true,
+        }, (previousUpdate ?? canvasSetupCampus).databaseUpdatedAt!);
+      canvasSetupUpdatedCampusRef.current[canvasSetupCampus.id] = updated;
       // Appearance is stored in the existing structure JSON channel; the
       // campus row continues to own only dimensions/configuration.
       const saved = await campusStructureService.save({ ...updated, ...updates, canvasConfigured: true });
@@ -1106,7 +1113,11 @@ export function AdminMapBuilderPage() {
       updateCampusMetadata(complete);
       setCampusHydrationState({ campusId: complete.id, status: "ready" });
       setView({ type: "campus", campusId: canvasSetupCampus.id });
-    } catch (error) { toast.error("Could not save canvas", { description: (error as Error).message }); }
+      delete canvasSetupUpdatedCampusRef.current[canvasSetupCampus.id];
+    } catch (error) {
+      toast.error("Could not save canvas", { description: (error as Error).message });
+      throw error;
+    }
   }, [canvasSetupCampus, setCampusHydrationState, updateCampusMetadata]);
 
   const [showCanvasSettings, setShowCanvasSettings] = useState(false);

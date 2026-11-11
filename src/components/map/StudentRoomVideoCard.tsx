@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, FileVideo2 } from "lucide-react";
 import { getPublishedRoomVideosForRoom, type PublishedRoomVideo } from "../../services/emergencyEvacuationVideoService";
 import { cn } from "../../lib/utils";
+import { listOfflineVideosForRoom } from "../../lib/offlineCampusStore";
+import { cachePublishedVideoForOffline } from "../../lib/offlineMediaPreparation";
 import { BrandedRoomVideoPlayer } from "./BrandedRoomVideoPlayer";
 
 // Signed Room Video URLs last 15 minutes. Briefly reuse settled availability
@@ -62,6 +64,7 @@ export function StudentRoomVideoCard({
   }>(() => ({ key: lookupKey, videos: [], settled: false, error: false }));
   const [showMore, setShowMore] = useState(false);
   const generationRef = useRef(0);
+  const objectUrlsRef = useRef<string[]>([]);
   const currentAvailability = availability.key === lookupKey ? availability : null;
   const videos = currentAvailability?.videos ?? [];
   const settled = currentAvailability?.settled ?? false;
@@ -76,14 +79,39 @@ export function StudentRoomVideoCard({
       error: false,
     }));
     try {
+      if (!navigator.onLine) {
+        const saved = await listOfflineVideosForRoom(campusId, roomId);
+        if (generation !== generationRef.current) return false;
+        const localVideos = saved.map((item) => {
+          const playbackUrl = URL.createObjectURL(item.video);
+          const captionsUrl = item.captions ? URL.createObjectURL(item.captions) : null;
+          objectUrlsRef.current.push(playbackUrl, ...(captionsUrl ? [captionsUrl] : []));
+          return { ...item.metadata!, playbackUrl, downloadUrl: playbackUrl, captionsUrl } as PublishedRoomVideo;
+        }).sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at));
+        setAvailability({ key: lookupKey, videos: localVideos, settled: true, error: localVideos.length === 0 });
+        return localVideos.length > 0;
+      }
       const rows = await getCachedPublishedVideos(campusId, roomId, force);
       if (generation === generationRef.current) {
+        const sortedRows = [...rows].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at));
         setAvailability({
           key: lookupKey,
-          videos: [...rows].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at)),
+          videos: sortedRows,
           settled: true,
           error: false,
         });
+        // The room's public media is already authorized by the published
+        // listing response. Save complete files sequentially in the background.
+        void (async () => {
+          let remaining = 150 * 1024 * 1024;
+          for (const video of sortedRows) {
+            if (!navigator.onLine || remaining <= 0) break;
+            try {
+              const saved = await cachePublishedVideoForOffline(video, `published-room-video:${video.updated_at}`, remaining);
+              if (saved) remaining -= saved.sizeBytes;
+            } catch { /* Online playback remains available when local storage fails. */ }
+          }
+        })();
       }
       return generation === generationRef.current;
     } catch {
@@ -102,7 +130,11 @@ export function StudentRoomVideoCard({
   useEffect(() => {
     setShowMore(false);
     void load();
-    return () => { generationRef.current += 1; };
+    return () => {
+      generationRef.current += 1;
+      objectUrlsRef.current.forEach(URL.revokeObjectURL);
+      objectUrlsRef.current = [];
+    };
   }, [load]);
 
   useEffect(() => {
@@ -116,6 +148,17 @@ export function StudentRoomVideoCard({
       window.removeEventListener("focus", invalidateWhenForegrounded);
     };
   }, []);
+
+  useEffect(() => {
+    const onOffline = () => { void load(); };
+    const onOnline = () => { void load(true); };
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [load]);
 
   useEffect(() => {
     if (!settled) return;
@@ -134,7 +177,7 @@ export function StudentRoomVideoCard({
 
   if (!primary) return <div className={cn("flex shrink-0 items-center gap-2 rounded-xl border border-border/60 bg-card/90 px-3 py-2.5 text-muted-foreground", className)} data-testid="student-room-video-unavailable">
     <FileVideo2 className="h-4 w-4 shrink-0" />
-    <span role="status" className="min-w-0 flex-1 text-[11px]">Room video is temporarily unavailable.</span>
+    <span role="status" className="min-w-0 flex-1 text-[11px]">{navigator.onLine ? "Room video is temporarily unavailable." : "This video is not saved for offline playback."}</span>
     <button type="button" onClick={() => void load(true)} className="min-h-9 shrink-0 rounded-lg px-2 text-[11px] font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">Retry</button>
   </div>;
 

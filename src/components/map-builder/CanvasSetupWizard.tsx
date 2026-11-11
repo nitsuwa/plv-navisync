@@ -16,7 +16,7 @@ import type { Campus } from "./types";
 interface CanvasSetupWizardProps {
   open: boolean;
   campus: Campus;
-  onComplete: (updates: Partial<Campus>) => void;
+  onComplete: (updates: Partial<Campus>) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -33,23 +33,6 @@ const STEP_INFO: { step: SetupStep; label: string; icon: React.ElementType }[] =
 // ── Loading overlay ────────────────────────────────────────────────────────
 
 function LoadingOverlay({ campusName }: { campusName: string }) {
-  const [phase, setPhase] = useState(0);
-  const steps = [
-    "Preparing canvas…",
-    "Generating workspace…",
-    "Applying settings…",
-    "Finalizing…",
-    "Opening editor…",
-  ];
-
-  useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    steps.forEach((_, i) => {
-      timers.push(setTimeout(() => setPhase(i), i * 200));
-    });
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center"
       style={{ background: "radial-gradient(ellipse 80% 60% at 50% 40%, #0d2470 0%, #071440 55%, #020a1c 100%)" }}
@@ -62,21 +45,9 @@ function LoadingOverlay({ campusName }: { campusName: string }) {
           <p className="text-white/40 text-xs font-semibold tracking-widest uppercase mb-1">{campusName}</p>
           <h2 className="text-lg font-extrabold text-white tracking-tight">Creating Canvas</h2>
         </div>
-        <div className="w-64 space-y-2">
-          {steps.map((label, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className={cn(
-                "w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all duration-300",
-                i < phase ? "bg-green-400" : i === phase ? "bg-white/20 ring-2 ring-white/40" : "bg-white/5"
-              )}>
-                {i < phase && <CheckCircle2 className="w-3 h-3 text-white" />}
-                {i === phase && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
-              </div>
-              <span className={cn("text-[11px] font-medium transition-colors duration-300",
-                i <= phase ? "text-white/80" : "text-white/20"
-              )}>{label}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-2 text-xs font-medium text-white/70" role="status">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-white/80" />
+          Saving canvas and opening the editor…
         </div>
       </div>
     </div>
@@ -188,6 +159,8 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
   // ── Loading & success states ──
   const [showLoading, setShowLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [creationError, setCreationError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   // ── Unsaved changes dialog ──
   const [showUnsaved, setShowUnsaved] = useState(false);
@@ -214,28 +187,40 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
 
   const dims = getCanvasDimensions();
 
-  const handleComplete = useCallback(() => {
+  const handleComplete = useCallback(async () => {
+    if (submittingRef.current) return;
+    const minWidth = 320;
+    const minHeight = 240;
+    if (dims.w < minWidth || dims.h < minHeight || dims.w > 5000 || dims.h > 5000) {
+      setSizeError(`Canvas dimensions must be between ${minWidth}×${minHeight} and 5000×5000.`);
+      setStep("size");
+      return;
+    }
+    submittingRef.current = true;
+    setCreationError(null);
     setShowLoading(true);
-    setTimeout(() => {
-      setShowLoading(false);
+    try {
+      await onComplete({
+        canvasW: dims.w,
+        canvasH: dims.h,
+        canvasConfigured: true,
+        canvasColor: canvasColor || undefined,
+        defaultZoom,
+      });
       setShowSuccess(true);
-      setTimeout(() => {
-        onComplete({
-          canvasW: dims.w,
-          canvasH: dims.h,
-          canvasConfigured: true,
-          canvasColor: canvasColor || undefined,
-          defaultZoom,
-        });
-        setShowSuccess(false);
-      }, 1500);
-    }, 1200);    }, [dims, canvasColor, defaultZoom, onComplete]);
+    } catch (error) {
+      setCreationError(error instanceof Error ? error.message : "Could not save canvas. Please try again.");
+    } finally {
+      submittingRef.current = false;
+      setShowLoading(false);
+    }
+  }, [dims, canvasColor, defaultZoom, onComplete]);
 
   const totalSteps = STEP_INFO.length;
   const currentIdx = STEP_INFO.findIndex((s) => s.step === step);
   const canAdvance = selectedSizeId !== "custom"
-    ? dims.w >= 200 && dims.h >= 200
-    : customWStr.trim() !== "" && customHStr.trim() !== "" && !isNaN(parsedW) && !isNaN(parsedH) && parsedW >= 200 && parsedH >= 200 && parsedW <= 5000 && parsedH <= 5000;
+    ? dims.w >= 320 && dims.h >= 240 && dims.w <= 5000 && dims.h <= 5000
+    : customWStr.trim() !== "" && customHStr.trim() !== "" && !isNaN(parsedW) && !isNaN(parsedH) && parsedW >= 320 && parsedH >= 240 && parsedW <= 5000 && parsedH <= 5000;
 
   const goNext = useCallback(() => {
     const next = STEP_INFO[currentIdx + 1]?.step;
@@ -473,15 +458,16 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                         animate={{ opacity: 1, height: "auto" }}
                         className="grid grid-cols-2 gap-2.5 overflow-hidden"
                       >                            <div>
-                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Width (px)</label>
+                          <label htmlFor="canvas-custom-width" className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Width (px)</label>
                           <input
+                            id="canvas-custom-width"
                             type="text" inputMode="numeric" pattern="[0-9]*"
                             value={customWStr}
                             onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setCustomWStr(v); setSizeError(null); markChanged(); }}
                             onBlur={() => {
                               const v = parseInt(customWStr);
                               if (customWStr.trim() === "" || isNaN(v)) { setSizeError("Width is required"); }
-                              else if (v < 200) { setSizeError("Width must be at least 200"); }
+                              else if (v < 320) { setSizeError("Width must be at least 320"); }
                               else if (v > 5000) { setSizeError("Width cannot exceed 5000"); }
                               else { setSizeError(null); }
                             }}
@@ -491,15 +477,16 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
                           />
                         </div>
                         <div>
-                          <label className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Height (px)</label>
+                          <label htmlFor="canvas-custom-height" className="block text-[9px] font-bold uppercase tracking-wider mb-1 text-muted-foreground">Height (px)</label>
                           <input
+                            id="canvas-custom-height"
                             type="text" inputMode="numeric" pattern="[0-9]*"
                             value={customHStr}
                             onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setCustomHStr(v); setSizeError(null); markChanged(); }}
                             onBlur={() => {
                               const v = parseInt(customHStr);
                               if (customHStr.trim() === "" || isNaN(v)) { setSizeError("Height is required"); }
-                              else if (v < 200) { setSizeError("Height must be at least 200"); }
+                              else if (v < 240) { setSizeError("Height must be at least 240"); }
                               else if (v > 5000) { setSizeError("Height cannot exceed 5000"); }
                               else { setSizeError(null); }
                             }}
@@ -680,6 +667,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
             ) : (
               <button
                 onClick={handleComplete}
+                disabled={showLoading || showSuccess || !canAdvance}
                 className="flex items-center gap-1.5 h-8 px-4 rounded-lg bg-primary text-primary-foreground text-[11px] font-extrabold hover:bg-primary/90 transition-all shadow-sm active:scale-[0.97]"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -687,6 +675,7 @@ export function CanvasSetupWizard({ open, campus, onComplete, onClose }: CanvasS
               </button>
             )}
           </div>
+          {creationError && <p role="alert" className="mx-5 mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{creationError}</p>}
         </motion.div>
       </div>
 
