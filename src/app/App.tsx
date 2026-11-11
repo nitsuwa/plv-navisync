@@ -12,8 +12,11 @@ import { NaviBuddyProvider } from "../contexts/NaviBuddyContext";
 
 function AppRuntime() {
   const auth = useAuthBootstrap();
-  const authReady = auth.status === "authenticated" || auth.status === "unauthenticated";
   const authFailed = auth.status === "error";
+  // Public Guest navigation is useful offline. A failed auth/profile check
+  // grants no role and must never block the public campus map shell.
+  const authReady = auth.status === "authenticated" || auth.status === "unauthenticated"
+    || (authFailed && typeof navigator !== "undefined" && !navigator.onLine);
   const { retryBootstrap } = auth;
   const [appStarted, setAppStarted] = useState(false);
   const [loadingScreenVisible, setLoadingScreenVisible] = useState(true);

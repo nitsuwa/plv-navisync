@@ -938,6 +938,13 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     error: campusError,
     isEmpty: isCampusEmpty,
     isCached: isCampusCached,
+    offlinePackages = [],
+    saveActiveCampusOffline = async () => {},
+    removeActiveCampusOffline = async () => {},
+    offlinePackageBusy = false,
+    offlinePackageError = null,
+    setNavigationActive: setPublishedNavigationActive = () => {},
+    activeCampusVersionId = null,
     refetch: refetchCampus,
   } = publishedCampusState;
 
@@ -1250,6 +1257,10 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [campusSelectorTop, setCampusSelectorTop] = useState<number | null>(null);
   const [campusSelectorMaxWidth, setCampusSelectorMaxWidth] = useState<number | null>(null);
   const [studentRouteUi, dispatchStudentRouteUi] = useReducer(studentRouteUiReducer, initialStudentRouteUiState);
+  useEffect(() => {
+    if (previewCampus) return;
+    setPublishedNavigationActive(studentRouteUi.phase !== "idle");
+  }, [previewCampus, setPublishedNavigationActive, studentRouteUi.phase]);
   const minimizedRoutePanelRestoreRef = useRef<HTMLButtonElement | null>(null);
   const previousRoutePanelMinimizedRef = useRef(false);
   const studentRouteUiRef = useRef(studentRouteUi);
@@ -9911,6 +9922,12 @@ const buildingFill = (id: string) =>
       onPointerDown={student3DActive ? undefined : onPointerDown} onPointerMove={student3DActive ? undefined : onPointerMove}
       onPointerUp={student3DActive ? undefined : onPointerEnd} onPointerCancel={student3DActive ? undefined : onPointerEnd}>
 
+      {!navigator.onLine && mapMode === "emergency" && activeCampus && (
+        <div role="alert" className="absolute left-1/2 top-3 z-[75] w-[min(92vw,34rem)] -translate-x-1/2 rounded-xl border border-amber-300 bg-amber-50/95 px-3 py-2 text-[10px] font-semibold text-amber-950 shadow-lg backdrop-blur">
+          <strong className="block text-[11px] font-extrabold">OFFLINE REFERENCE GUIDANCE</strong>
+          <span>Live hazards and exit conditions cannot be verified. Map saved {new Date(offlinePackages.find((item) => item.campusId === activeCampus.id)?.downloadedAt ?? activeCampus.publishedAt ?? activeCampus.updatedAt).toLocaleDateString()}. Follow posted evacuation signs and campus emergency personnel.</span>
+        </div>
+      )}
 
       {activeCampus && readonlyOutdoorCampus && campus3DActive && (
         <div className="student-map-renderer-crossfade absolute inset-0 z-0" style={{ animationDuration: reducedMotion ? "0.01ms" : "150ms" }}>
@@ -11869,6 +11886,13 @@ const buildingFill = (id: string) =>
           campuses={availableCampuses}
           activeCampusId={activeCampus?.id}
           activeCampusName={activeCampus?.name}
+          offlineReady={Boolean(activeCampus && offlinePackages.some((item) => item.campusId === activeCampus.id))}
+          offlineNeedsUpdate={Boolean(activeCampus && activeCampusVersionId && offlinePackages.some((item) => item.campusId === activeCampus.id && item.versionId !== activeCampusVersionId))}
+          offlineBusy={offlinePackageBusy}
+          offlineUpdatedAt={offlinePackages.find((item) => item.campusId === activeCampus?.id)?.downloadedAt ?? null}
+          offlineError={offlinePackageError}
+          onSaveOffline={() => saveActiveCampusOffline()}
+          onRemoveOffline={() => removeActiveCampusOffline()}
           mobileTop={campusSelectorTop}
           mobileMaxWidth={campusSelectorMaxWidth}
           onSelect={(campusId) => {

@@ -4,6 +4,7 @@ import type { Campus } from "../components/map-builder/types";
 import { studentCampusListing } from "../lib/studentCampusListing";
 import { useAuthUserId } from "../contexts/StudentAuthContext";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
+import { listOfflineCampusPackages, removeOfflineCampus, saveOfflineCampus, type OfflineCampusPackage } from "../lib/offlineCampusStore";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
@@ -264,6 +265,13 @@ interface UsePublishedCampusResult {
   error: string | null;
   isEmpty: boolean;
   isCached: boolean;
+  offlinePackages: OfflineCampusPackage[];
+  saveActiveCampusOffline: () => Promise<void>;
+  removeActiveCampusOffline: () => Promise<void>;
+  offlinePackageBusy: boolean;
+  offlinePackageError: string | null;
+  setNavigationActive: (active: boolean) => void;
+  activeCampusVersionId: string | null;
   refetch: () => Promise<void>;
 }
 
@@ -282,13 +290,22 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
   const [loading, setLoading] = useState<boolean>(() => campuses.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
+  const [offlinePackages, setOfflinePackages] = useState<OfflineCampusPackage[]>([]);
+  const [offlinePackageBusy, setOfflinePackageBusy] = useState(false);
+  const [offlinePackageError, setOfflinePackageError] = useState<string | null>(null);
   const hasCampusDataRef = useRef(campuses.length > 0);
   const fetchInFlightRef = useRef<Promise<void> | null>(null);
+  const navigationActiveRef = useRef(false);
+  const activeCampusIdRef = useRef<string | null>(selectedCampusId);
+  activeCampusIdRef.current = selectedCampusId;
   const userIdRef = useRef(userId);
   const previousUserIdRef = useRef(userId);
   userIdRef.current = userId;
 
   const fetchPublishedCampuses = useCallback((source: "initial" | "manual" | "poll" | "resume" = "manual"): Promise<void> => {
+    if (!navigator.onLine) {
+      return Promise.resolve();
+    }
     if (fetchInFlightRef.current) return fetchInFlightRef.current;
     if (!hasCampusDataRef.current && source === "initial") setLoading(true);
     if (source === "initial" || source === "manual") setError(null);
@@ -333,6 +350,15 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           ? campusesRef.current
           : nextListing;
 
+        if (navigationActiveRef.current && activeCampusIdRef.current
+          && nextListing.find((campus) => campus.id === activeCampusIdRef.current)
+            !== campusesRef.current.find((campus) => campus.id === activeCampusIdRef.current)) {
+          // Keep an active route on one published graph. The latest snapshot
+          // is cached now and applied after navigation finishes.
+          setError(null);
+          return;
+        }
+
         if (stableListing !== campusesRef.current) {
           campusesRef.current = stableListing;
           setCampuses(stableListing);
@@ -343,13 +369,26 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           : chooseInitialCampus(stableListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
         setIsCached(false);
         setError(null);
+        void listOfflineCampusPackages().then(setOfflinePackages);
       } catch {
         // Background metadata or snapshot failure leaves the last good map
         // untouched; the shared retry timers bound future attempts.
         if (hasCampusDataRef.current) {
           setError(null);
-        } else if (source === "initial" || source === "manual") {
-          setError(CAMPUS_LOAD_ERROR);
+        } else {
+          const savedPackages = await listOfflineCampusPackages();
+          if (savedPackages.length > 0) {
+            const savedListing = studentCampusListing(savedPackages.map((item) => item.campus), []);
+            campusesRef.current = savedListing;
+            hasCampusDataRef.current = savedListing.length > 0;
+            setCampuses(savedListing);
+            setOfflinePackages(savedPackages);
+            setSelectedCampusId(chooseInitialCampus(savedListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
+            setIsCached(true);
+            setError(null);
+          } else if (source === "initial" || source === "manual") {
+            setError(CAMPUS_LOAD_ERROR);
+          }
         }
       } finally {
         setLoading(false);
@@ -374,8 +413,65 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       setIsCached(false);
       return;
     }
+    let cancelled = false;
+    void listOfflineCampusPackages().then((packages) => {
+      if (cancelled) return;
+      setOfflinePackages(packages);
+      if (!navigator.onLine) {
+        if (packages.length > 0) {
+          const savedCampuses = packages.map((item) => item.campus);
+          const listing = studentCampusListing(savedCampuses, []);
+          campusesRef.current = listing;
+          hasCampusDataRef.current = listing.length > 0;
+          setCampuses(listing);
+          setSelectedCampusId((current) => current && listing.some((campus) => campus.id === current)
+            ? current
+            : chooseInitialCampus(listing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
+          setIsCached(true);
+          setError(null);
+        } else {
+          setError("No saved campus map is available offline. Connect to the internet to download one.");
+        }
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled && !navigator.onLine) {
+        setError("Offline storage could not be read. Connect to the internet to restore campus access.");
+        setLoading(false);
+      }
+    });
     void fetchPublishedCampuses("initial");
+    return () => { cancelled = true; };
   }, [fetchPublishedCampuses, previewCampus]);
+
+  useEffect(() => {
+    const onOnline = () => { void fetchPublishedCampuses("resume"); };
+    const onOffline = () => {
+      if (hasCampusDataRef.current) return;
+      void listOfflineCampusPackages().then((packages) => {
+        setOfflinePackages(packages);
+        const listing = studentCampusListing(packages.map((item) => item.campus), []);
+        if (listing.length > 0) {
+          campusesRef.current = listing;
+          hasCampusDataRef.current = true;
+          setCampuses(listing);
+          setSelectedCampusId(chooseInitialCampus(listing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
+          setIsCached(true);
+          setError(null);
+        } else setError("No saved campus map is available offline. Connect to the internet to download one.");
+        setLoading(false);
+      }).catch(() => {
+        setError("Offline storage could not be read. Connect to the internet to restore campus access.");
+        setLoading(false);
+      });
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [fetchPublishedCampuses]);
 
   // Apply the signed-in student's remembered/default campus without restarting
   // the public version check or map fetch.
@@ -418,6 +514,11 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     }
     return chooseInitialCampus(campuses, platformSettings, userId);
   }, [campuses, selectedCampusId, platformSettings, userId]);
+  const activeCampusVersionId = activeCampus
+    ? publishedSnapshotsByCampus.get(activeCampus.id)?.versionId
+      ?? offlinePackages.find((item) => item.campusId === activeCampus.id)?.versionId
+      ?? null
+    : null;
 
   const selectCampus = useCallback((id: string) => {
     setSelectedCampusId(id);
@@ -430,6 +531,42 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       // The selected campus still works for this session when browser storage is blocked.
     }
   }, [platformSettings.rememberLastCampus, previewCampus, userId]);
+
+  const saveActiveCampusOffline = useCallback(async () => {
+    if (!activeCampus || previewCampus || !isPublished(activeCampus)) return;
+    setOfflinePackageBusy(true);
+    setOfflinePackageError(null);
+    try {
+      const record = await saveOfflineCampus(activeCampus, publishedSnapshotsByCampus.get(activeCampus.id)?.versionId);
+      setOfflinePackages((current) => [...current.filter((item) => item.campusId !== record.campusId), record]);
+    } catch (error) {
+      setOfflinePackageError(error instanceof Error ? error.message : "Campus map could not be saved offline.");
+      throw error;
+    } finally {
+      setOfflinePackageBusy(false);
+    }
+  }, [activeCampus, previewCampus]);
+
+  const removeActiveCampusOffline = useCallback(async () => {
+    if (!activeCampus) return;
+    setOfflinePackageBusy(true);
+    setOfflinePackageError(null);
+    try {
+      await removeOfflineCampus(activeCampus.id);
+      setOfflinePackages((current) => current.filter((item) => item.campusId !== activeCampus.id));
+    } catch (error) {
+      setOfflinePackageError(error instanceof Error ? error.message : "Saved campus map could not be removed.");
+      throw error;
+    } finally {
+      setOfflinePackageBusy(false);
+    }
+  }, [activeCampus]);
+
+  const setNavigationActive = useCallback((active: boolean) => {
+    const wasActive = navigationActiveRef.current;
+    navigationActiveRef.current = active;
+    if (wasActive && !active) void fetchPublishedCampuses("resume");
+  }, [fetchPublishedCampuses]);
 
   // Auto-select first campus if selection invalid
   useEffect(() => {
@@ -455,6 +592,13 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     error,
     isEmpty,
     isCached,
+    offlinePackages,
+    saveActiveCampusOffline,
+    removeActiveCampusOffline,
+    offlinePackageBusy,
+    offlinePackageError,
+    setNavigationActive,
+    activeCampusVersionId,
     refetch: () => fetchPublishedCampuses("manual"),
   };
 }
