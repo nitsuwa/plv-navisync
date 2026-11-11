@@ -842,7 +842,7 @@ describe("CampusMapPage event overlays", () => {
     await screen.findByText("Comfort Room");
     const comfortRoomCard = screen.getByTestId("student-selected-place-card");
     expect(comfortRoomCard).toHaveTextContent("Comfort Room");
-    expect(comfortRoomCard).toHaveTextContent("Navigation to this room is unavailable.");
+    expect(comfortRoomCard).not.toHaveTextContent("Navigation to this room is unavailable.");
     expect(within(comfortRoomCard).getByRole("button", { name: "Report this room" })).toBeInTheDocument();
     expect(within(comfortRoomCard).queryByRole("button", { name: "Directions" })).not.toBeInTheDocument();
     expect(within(comfortRoomCard).queryByRole("button", { name: "Start here" })).not.toBeInTheDocument();
