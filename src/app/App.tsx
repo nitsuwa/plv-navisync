@@ -6,7 +6,7 @@ import { CampusDataProvider } from "../contexts/CampusDataContext";
 import { AuthProvider, useAuthBootstrap } from "../contexts/StudentAuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
-import { OfflineIndicator, PwaUpdateNotifier } from "../components/layout/PwaPrompts";
+import { PwaUpdateNotifier } from "../components/layout/PwaPrompts";
 import { DiagnosticsCenter } from "../components/diagnostics/DiagnosticsCenter";
 import { NaviBuddyProvider } from "../contexts/NaviBuddyContext";
 
@@ -55,7 +55,6 @@ function AppRuntime() {
             toastOptions={{ style: { fontFamily: "var(--font-body)" } }}
           />
           <PwaUpdateNotifier />
-          <OfflineIndicator />
           <DiagnosticsCenter />
         </CampusDataProvider>
       )}

@@ -6,6 +6,8 @@ import { RoutePlannerDialog } from "../RoutePlannerDialog";
 import type { SearchResult } from "../../../hooks";
 import type { Building } from "../../../types";
 
+vi.mock("../../../lib/pwa", () => ({ usePwaState: () => ({ online: navigator.onLine }) }));
+
 const building: Building = {
   id: "science",
   code: "SCI",
@@ -136,6 +138,7 @@ describe("StudentMapControls", () => {
     expect(screen.getByTestId("student-map-header-slot")).toHaveAttribute("data-map-search-shell", "true");
     expect(screen.getByTestId("student-map-search-panel").querySelector("[data-map-search-header='true']")).toBeInTheDocument();
     expect(screen.getByTestId("student-map-header-slot")).toHaveAttribute("data-right-reservation", "profile");
+    expect(screen.queryByTestId("student-map-offline-status")).not.toBeInTheDocument();
     expect(screen.getByTestId("student-map-utility-controls")).toHaveClass("bottom-3", "md:bottom-6", "flex-col", "items-end");
     expect(screen.getByTestId("student-map-utility-controls")).toHaveAttribute("data-anchor", "map-bottom-right");
     expect(screen.getByTestId("student-map-utility-controls")).toHaveStyle({
@@ -149,6 +152,21 @@ describe("StudentMapControls", () => {
     expect(screen.queryByRole("button", { name: "Reset map view" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+  });
+
+  it("shows a discreet offline badge outside the search control", () => {
+    const originalOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    try {
+      render(<StudentMapControls {...props()} />);
+      const status = screen.getByTestId("student-map-offline-status");
+      expect(status).toHaveAttribute("role", "status");
+      expect(status).toHaveTextContent("Offline");
+      expect(status).toHaveClass("md:top-3", "bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]");
+      expect(screen.getByTestId("student-map-search-panel").contains(status)).toBe(false);
+    } finally {
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: originalOnline });
+    }
   });
 
   it("keeps the focused search anchored in its original safe header slot", () => {

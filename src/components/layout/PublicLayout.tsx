@@ -5,7 +5,7 @@ import { EmergencyBanner } from "./EmergencyBanner";
 import { Footer } from "./Footer";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ScrollToTop } from "./ScrollToTop";
-import { InstallAppBanner } from "./PwaPrompts";
+import { InstallAppBanner, OfflineIndicator } from "./PwaPrompts";
 import { NavigationProgress } from "../ui/NavigationProgress";
 import { cn } from "../../lib/utils";
 import { motion } from "motion/react";
@@ -95,6 +95,7 @@ export function PublicLayout() {
       </a>
       <NavigationProgress />
       <ScrollToTop />
+      <OfflineIndicator />
       {/* Navbar hidden on mobile map for immersive experience */}
       {!isEventEditor && <div data-public-navbar className={cn("sticky top-0 z-40", isMapPage && "hidden md:block")}>
         <Navbar />

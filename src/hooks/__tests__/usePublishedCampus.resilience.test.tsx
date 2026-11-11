@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS } from "../../services/settingsService";
+import { getRecentDiagnosticEvents } from "../../lib/diagnostics";
 import { resetPublishedCampusDirectoryThrottle, usePublishedCampus } from "../usePublishedCampus";
 
 const mocks = vi.hoisted(() => ({
@@ -233,6 +234,12 @@ describe("published campus version refresh", () => {
     expect(result.current.activeCampus).toBe(currentCampus);
     expect(result.current.error).toBeNull();
     expect(mocks.listPublishedSnapshots).toHaveBeenCalledTimes(1);
+    expect(getRecentDiagnosticEvents().at(-1)).toMatchObject({
+      category: "map-data",
+      severity: "warning",
+      summary: "temporary failure",
+      source: "published campus manual refresh",
+    });
   });
 
   it("keeps the last good map if the full snapshot fetch fails after a version change", async () => {

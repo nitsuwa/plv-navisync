@@ -85,7 +85,8 @@ export function PwaUpdateNotifier() {
 /** Small pill shown while the device has no connection. */
 export function OfflineIndicator() {
   const { online } = usePwaState();
-  if (online) return null;
+  const { pathname } = useLocation();
+  if (online || pathname === "/map") return null;
   return (
     <div
       role="status"

@@ -98,8 +98,10 @@ export async function saveOfflineCampus(campus: Campus, versionId?: string): Pro
   const serializedSize = new Blob([JSON.stringify(campus)]).size;
   const storage = navigator.storage;
   const estimate = await storage?.estimate?.().catch(() => undefined);
+  const current = await readOfflineCampusPackages().catch(() => ({ packages: [], incompatibleCount: 0 }));
+  const replacingSize = current.packages.find((item) => item.campusId === campus.id)?.sizeBytes ?? 0;
   const remaining = estimate?.quota !== undefined && estimate.usage !== undefined
-    ? estimate.quota - estimate.usage
+    ? estimate.quota - estimate.usage + replacingSize
     : undefined;
   if (remaining !== undefined && serializedSize > remaining) {
     throw new Error("There is not enough device storage for this campus map. Remove another offline map and retry.");
@@ -108,7 +110,7 @@ export async function saveOfflineCampus(campus: Campus, versionId?: string): Pro
   const record: OfflineCampusPackage = {
     campusId: campus.id,
     campusName: campus.name,
-    versionId: versionId ?? publishedAt ?? campus.databaseUpdatedAt ?? campus.updatedAt,
+    versionId: versionId ?? publishedAt ?? campus.databaseUpdatedAt ?? campus.updatedAt ?? "published-current",
     publishedAt,
     downloadedAt: new Date().toISOString(),
     schemaVersion: PACKAGE_SCHEMA_VERSION,
@@ -117,6 +119,13 @@ export async function saveOfflineCampus(campus: Campus, versionId?: string): Pro
   };
   await transact(CAMPUS_STORE, "readwrite", (store) => store.put(record));
   return record;
+}
+
+export async function saveOfflineCampusIfChanged(campus: Campus, versionId?: string): Promise<OfflineCampusPackage> {
+  const desiredVersion = versionId ?? campus.publishedAt ?? campus.databaseUpdatedAt ?? campus.updatedAt ?? "published-current";
+  const current = (await readOfflineCampusPackages()).packages.find((item) => item.campusId === campus.id);
+  if (current?.versionId === desiredVersion) return current;
+  return saveOfflineCampus(campus, desiredVersion);
 }
 
 export async function listOfflineCampusPackages(): Promise<OfflineCampusPackage[]> {
@@ -160,6 +169,17 @@ export async function removeOfflineCampus(campusId: string): Promise<void> {
 export async function getOfflineVideo(key: string): Promise<OfflineVideoPackage | null> {
   const record = await transact<OfflineVideoPackage | undefined>(MEDIA_STORE, "readonly", (store) => store.get(key)).catch(() => undefined);
   return record?.video instanceof Blob ? record : null;
+}
+
+export async function listOfflineVideosForRoom(campusId: string, roomId: string): Promise<OfflineVideoPackage[]> {
+  const records = await transact<OfflineVideoPackage[]>(MEDIA_STORE, "readonly", (store) => store.getAll());
+  return records.filter((record) => record?.campusId === campusId && record.roomId === roomId
+    && record.video instanceof Blob && record.metadata);
+}
+
+export async function getOfflineVideoUsageForCampus(campusId: string): Promise<number> {
+  const records = await transact<OfflineVideoPackage[]>(MEDIA_STORE, "readonly", (store) => store.getAll());
+  return records.reduce((total, record) => total + (record?.campusId === campusId ? Math.max(0, record.sizeBytes || 0) : 0), 0);
 }
 
 export async function saveOfflineVideo(record: OfflineVideoPackage): Promise<void> {

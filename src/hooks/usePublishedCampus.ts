@@ -4,7 +4,9 @@ import type { Campus } from "../components/map-builder/types";
 import { studentCampusListing } from "../lib/studentCampusListing";
 import { useAuthUserId } from "../contexts/StudentAuthContext";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
-import { readOfflineCampusPackages, listOfflineCampusPackages, removeOfflineCampus, saveOfflineCampus, type OfflineCampusPackage } from "../lib/offlineCampusStore";
+import { readOfflineCampusPackages, listOfflineCampusPackages, removeOfflineCampus, saveOfflineCampus, saveOfflineCampusIfChanged, type OfflineCampusPackage } from "../lib/offlineCampusStore";
+import { prepareCampusEmergencyVideosOffline } from "../lib/offlineMediaPreparation";
+import { recordDiagnosticEvent } from "../lib/diagnostics";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
@@ -18,6 +20,34 @@ const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try
 const OFFLINE_MAP_MISSING = "No campus map is saved on this device. Connect to load a campus map, then save it for offline use.";
 const OFFLINE_MAP_INCOMPATIBLE = "A saved campus map was found, but it is incomplete or incompatible. Reconnect and download the campus again.";
 const OFFLINE_STORAGE_UNAVAILABLE = "Offline campus storage is unavailable in this browser. Reconnect to download the campus map.";
+const queuedOfflinePreparations = new Set<string>();
+
+function schedulePublishedCampusOfflinePreparation(
+  campus: Campus,
+  versionId: string,
+  onSaved: (record: OfflineCampusPackage) => void,
+): void {
+  if (!navigator.onLine || !isPublished(campus)) return;
+  const key = `${campus.id}:${versionId}`;
+  if (queuedOfflinePreparations.has(key)) return;
+  queuedOfflinePreparations.add(key);
+  const run = () => {
+    void (async () => {
+      try {
+        const saved = await saveOfflineCampusIfChanged(campus, versionId);
+        onSaved(saved);
+        await prepareCampusEmergencyVideosOffline(campus);
+      } catch {
+        // Offline preparation is best effort and never blocks the live map.
+      } finally {
+        queuedOfflinePreparations.delete(key);
+      }
+    })();
+  };
+  const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number };
+  if (idleWindow.requestIdleCallback) idleWindow.requestIdleCallback(run, { timeout: 5000 });
+  else window.setTimeout(run, 350);
+}
 
 interface PublishedVersionStatus {
   campus_id: string;
@@ -373,9 +403,29 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
         setIsCached(false);
         setError(null);
         void listOfflineCampusPackages().then(setOfflinePackages).catch(() => undefined);
-      } catch {
+        const selectedForOffline = stableListing.find((campus) => campus.id === activeCampusIdRef.current)
+          ?? chooseInitialCampus(stableListing, platformSettingsRef.current, userIdRef.current);
+        const selectedVersion = selectedForOffline
+          ? status.find((item) => item.campus_id === selectedForOffline.id)?.latest_published_version_id
+          : undefined;
+        if (selectedForOffline && selectedVersion) {
+          schedulePublishedCampusOfflinePreparation(selectedForOffline, selectedVersion, (record) => {
+            setOfflinePackages((current) => [...current.filter((item) => item.campusId !== record.campusId), record]);
+          });
+        }
+      } catch (cause) {
         // Background metadata or snapshot failure leaves the last good map
         // untouched; the shared retry timers bound future attempts.
+        recordDiagnosticEvent({
+          category: "map-data",
+          severity: "warning",
+          summary: cause instanceof Error
+            ? cause.message
+            : cause && typeof cause === "object" && "message" in cause
+              ? String(cause.message)
+              : "Published campus refresh failed.",
+          source: `published campus ${source} refresh`,
+        });
         if (hasCampusDataRef.current) {
           setError(null);
         } else {

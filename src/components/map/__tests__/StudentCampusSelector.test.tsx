@@ -67,6 +67,19 @@ describe("StudentCampusSelector", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("keeps the campus menu focused on selection and never exposes cache management actions", () => {
+    render(<StudentCampusSelector
+      campuses={campuses}
+      activeCampusId="main"
+      onSelect={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: /Change campus/i }));
+
+    expect(screen.getByRole("menuitemradio", { name: /PLV Main Campus.*Active/i })).toBeInTheDocument();
+    expect(screen.queryByText(/offline map|offline use|save campus|update available/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /offline/i })).not.toBeInTheDocument();
+  });
+
   it("uses a compact aligned mobile campus label while keeping the full campus name accessible", () => {
     render(<StudentCampusSelector
       campuses={[{ id: "main", name: "MAIN CAMPUS - PLV", code: "MAIN" }]}

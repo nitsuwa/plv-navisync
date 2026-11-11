@@ -86,13 +86,13 @@ export function searchFloorRooms(
   floor: FloorPlan | undefined,
   building: Pick<CampusBuilding, "id" | "name" | "code"> | undefined,
   query: string,
-  navigableRoomIds: ReadonlySet<string> = new Set(),
+  navigableRoomIds?: ReadonlySet<string>,
 ): SearchResult[] {
   const normalizedQuery = query.trim().toLowerCase();
   if (!floor || !building || !normalizedQuery) return [];
 
   return (floor.rooms ?? [])
-    .filter((room) => room.visible !== false && navigableRoomIds.has(room.id))
+    .filter((room) => room.visible !== false && (!navigableRoomIds || navigableRoomIds.has(room.id)))
     .map((room) => {
       const roomRecord = room as typeof room & { code?: string };
       const name = room.name || roomRecord.code || "Room";
@@ -151,7 +151,6 @@ export function useCampusSearch(
     const entries: SearchResult[] = [];
     const hasPublishedGraph = Boolean((campus.navNodes?.length ?? 0) || (campus.navEdges?.length ?? 0));
     const connected = hasPublishedGraph ? connectedCampusDestinations(campus) : null;
-    const navigableRoomKeys = authoredNavigableRoomKeys(campus);
 
     // 1. Index Buildings
     (campus.buildings ?? []).forEach((b: CampusBuilding) => {
@@ -181,8 +180,6 @@ export function useCampusSearch(
         (b.floors ?? []).forEach((floor: FloorPlan) => {
           (floor.rooms ?? []).forEach((room) => {
             if (room.visible === false) return;
-          if (!navigableRoomKeys.has(authoredRoomNavigationKey(b.id, floor.id, room.id))) return;
-
           const roomCode = (room as typeof room & { code?: string }).code;
           const rName = room.name || roomCode || "Room";
           const rType = (room.type || "room").toLowerCase();
@@ -284,6 +281,15 @@ export function useCampusSearch(
     return filtered;
   }, [allSearchableEntries, selectedCategory, debouncedQuery]);
 
+  const routeDestinations = useMemo(() => {
+    const navigableRoomKeys = authoredNavigableRoomKeys(campus);
+    return allSearchableEntries.filter((item) => {
+      if (item.kind !== "room" && item.kind !== "office" && item.kind !== "laboratory" && item.kind !== "facility") return true;
+      if (!item.buildingId || !item.floorId) return false;
+      return navigableRoomKeys.has(authoredRoomNavigationKey(item.buildingId, item.floorId, item.id));
+    });
+  }, [allSearchableEntries, campus]);
+
   // Popular searches shortcut
   const popularSearches = useMemo(() => {
     if (!campus || !campus.buildings.length) {
@@ -312,7 +318,7 @@ export function useCampusSearch(
     selectedCategory,
     setSelectedCategory,
     results,
-    destinations: allSearchableEntries,
+    destinations: routeDestinations,
     popularSearches,
     isSearching: Boolean(debouncedQuery),
     clearSearch,

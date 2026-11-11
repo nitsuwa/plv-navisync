@@ -147,7 +147,7 @@ export function DiscoverTourPanel({
           data-testid="discover-tour-panel"
           aria-label="Discover PLV tour controls"
           layout
-          className={`absolute z-[52] flex min-h-0 flex-col overflow-hidden border border-border/80 bg-card/95 text-foreground shadow-2xl backdrop-blur-2xl ${isInside
+          className={`absolute z-[52] flex min-h-0 flex-col overflow-hidden bg-card text-foreground ${isInside
             ? "left-[max(0.75rem,env(safe-area-inset-left,0.75rem))] top-[max(0.75rem,env(safe-area-inset-top,0.75rem))] h-fit min-h-[52px] w-fit max-w-[calc(100vw-11rem)] flex-row items-center rounded-2xl p-1.5 md:bottom-auto md:left-4 md:right-auto md:top-4 md:max-w-[calc(100vw-26rem)] md:p-1.5"
             : `${mobileExpanded ? "inset-x-0 bottom-[max(0px,env(safe-area-inset-bottom,0px))] max-h-[min(62dvh,34rem)]" : "inset-x-0 bottom-[max(0px,env(safe-area-inset-bottom,0px))] max-h-[min(40dvh,18rem)]"} rounded-t-3xl p-0 md:inset-y-auto md:bottom-auto md:left-auto md:right-4 md:top-4 md:h-fit md:w-[min(23rem,calc(100vw-2rem))] md:max-h-[calc(100%-2rem)] md:rounded-3xl md:p-5`}`}
           initial={{ opacity: 0, y: reducedMotion ? 0 : 12 }}
@@ -178,9 +178,9 @@ export function DiscoverTourPanel({
                 onPointerUp={finishSheetHandleDrag}
                 onPointerCancel={() => { sheetHandleDragStart.current = null; }}
                 onLostPointerCapture={() => { sheetHandleDragStart.current = null; }}
-                className="mx-auto flex h-5 w-full shrink-0 touch-none select-none items-center justify-center text-muted-foreground md:hidden"
+                className="mx-auto flex h-7 w-full shrink-0 touch-none select-none items-center justify-center pt-1 text-muted-foreground md:hidden"
               >
-                <span className="h-1 w-9 rounded-full bg-muted-foreground/35" />
+                <span className="h-1 w-9 rounded-full bg-muted-foreground/45" />
               </div>
 
               <motion.div
@@ -190,7 +190,7 @@ export function DiscoverTourPanel({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ layout: { duration: reducedMotion ? 0 : 0.24, ease: "easeOut" }, duration: reducedMotion ? 0 : 0.2, ease: "easeOut" }}
               >
-                <div ref={scrollContentRef} onScroll={(event) => { scrollPositionRef.current = event.currentTarget.scrollTop; }} data-testid="discover-panel-scroll-content" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 md:px-0">
+                <div ref={scrollContentRef} onScroll={(event) => { scrollPositionRef.current = event.currentTarget.scrollTop; }} data-testid="discover-panel-scroll-content" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-3 md:px-0">
                   <motion.div key={`building-info-${building?.code ?? "tour"}`} initial={{ opacity: 0.72, y: reducedMotion ? 0 : 2 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0 : 0.22, ease: "easeOut" }} className="flex min-w-0 shrink-0 items-start gap-2.5 md:gap-3">
                     <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary md:flex"><Compass className="h-5 w-5" aria-hidden="true" /></span>
                     <div className="min-w-0 flex-1">
@@ -269,21 +269,19 @@ export function DiscoverTourPanel({
                   )}
                 </div>
 
-                {!unavailable && building && <div data-testid="discover-tour-actions" className="mt-2 shrink-0 border-t border-border/60 bg-card/95 px-4 pb-2 pt-2 md:px-0 md:pb-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <motion.p key={`position-${stopIndex}-${stopCount}`} initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.18 }} data-testid="discover-tour-position" aria-live="polite" className="min-w-0 truncate text-xs font-bold text-muted-foreground">Building {stopIndex + 1} of {stopCount}</motion.p>
+                {!unavailable && building && <div data-testid="discover-tour-actions" className="mt-2 shrink-0 bg-transparent px-4 pb-2 pt-2 md:px-0 md:pb-0">
+                  <div className="mx-auto flex max-w-xs items-center justify-between gap-2">
+                      <button type="button" onClick={onPrevious} aria-label="Previous building" title="Previous building" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
+                      <motion.p key={`position-${stopIndex}-${stopCount}`} initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.18 }} data-testid="discover-tour-position" aria-live="polite" className="min-w-0 flex-1 text-center text-xs font-bold text-muted-foreground">Building {stopIndex + 1} of {stopCount}</motion.p>
+                      <button type="button" onClick={onNext} aria-label="Next building" title="Next" disabled={stopCount < 2} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRight className="h-5 w-5" aria-hidden="true" /></button>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      {stopCount > 1 && <>
-                        <button type="button" onClick={onPrevious} aria-label="Previous Building" title="Previous Building" className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background/60 text-foreground hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowLeft className="h-4 w-4" aria-hidden="true" /></button>
-                        <button type="button" onClick={onNext} aria-label="Next Building" title="Next Building" className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background/60 text-foreground hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowRight className="h-4 w-4" aria-hidden="true" /></button>
-                      </>}
                       <button type="button" data-testid="discover-sheet-toggle" aria-label={mobileExpanded ? "Collapse Discover details" : "Expand Discover details"} aria-expanded={mobileExpanded} onClick={() => changeMobileExpanded(!mobileExpanded)} className="flex h-9 items-center gap-1 rounded-xl border border-border px-2 text-[11px] font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden">
                         <span className="hidden min-[360px]:inline">{mobileExpanded ? "Collapse" : "Expand"}</span>
                         {mobileExpanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronUp className="h-4 w-4" aria-hidden="true" />}
                       </button>
                     </div>
                   </div>
-                  <button type="button" onClick={onEnter} disabled={building.floorCount < 1} className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-extrabold text-primary-foreground shadow-lg shadow-primary/15 transition-[filter,transform] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+                  <button type="button" onClick={onEnter} disabled={building.floorCount < 1} className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-extrabold text-primary-foreground transition-[filter,transform] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
                     <DoorOpen className="h-4 w-4" aria-hidden="true" />See What&apos;s Inside
                   </button>
                 </div>}

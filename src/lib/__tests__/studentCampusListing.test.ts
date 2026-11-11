@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Campus } from "../../components/map-builder/types";
-import { studentCampusListing } from "../studentCampusListing";
+import { explorablePublishedCampuses, studentCampusListing } from "../studentCampusListing";
 
 function campus(id: string, lifecycleStatus: Campus["lifecycleStatus"], isDefault = false): Campus {
   return {
@@ -21,5 +21,13 @@ describe("studentCampusListing", () => {
       [campus("zeta", "coming_soon"), campus("alpha", "coming_soon"), campus("draft", "draft")],
     );
     expect(listing.map((item) => item.id)).toEqual(["main", "secondary", "alpha", "zeta"]);
+  });
+
+  it("includes every published map regardless of location metadata or which status field is populated", () => {
+    const lifecyclePublished = campus("lifecycle", "published");
+    const publishStatusOnly = { ...campus("publish-status", "draft"), publishStatus: "published" as const, lifecycleStatus: "draft" as const };
+    const archived = { ...campus("archived", "published"), status: "archived" as const };
+    expect(explorablePublishedCampuses([lifecyclePublished, publishStatusOnly, archived]).map((item) => item.id))
+      .toEqual(["lifecycle", "publish-status"]);
   });
 });

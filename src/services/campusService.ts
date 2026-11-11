@@ -292,6 +292,13 @@ async function signedImageUrl(path: string | null): Promise<string | undefined> 
   return data.signedUrl;
 }
 
+/** Mint a short-lived URL on demand; Storage RLS restricts this to images referenced by published campuses. */
+export async function resolvePublishedCampusImageUrl(path: string | null | undefined): Promise<string | undefined> {
+  if (!path) return undefined;
+  const { data, error } = await getSupabase().storage.from("campus-images").createSignedUrl(path, 3600);
+  return error ? undefined : data.signedUrl;
+}
+
 function metadataUi(metadata: Json): Partial<CampusBuilding> {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
   const ui = (metadata as { ui?: unknown }).ui;
@@ -1156,6 +1163,6 @@ export const campusService = {
   archive: archiveCampus, restore: restoreCampus, unpublish: unpublishCampus, selectActive: selectActiveCampus,
   listVersions: listCampusVersions, listPublishedSnapshots: listPublishedCampusSnapshots, listPublishedVersionStatus: listPublishedCampusVersionStatus, listComingSoon: listComingSoonCampuses, permanentlyDelete: permanentlyDeleteCampus,
   hideComingSoon: hideComingSoonCampus,
-  validateImage: validateCampusImage, uploadImage: uploadCampusImage,
+  validateImage: validateCampusImage, uploadImage: uploadCampusImage, resolvePublishedImageUrl: resolvePublishedCampusImageUrl,
   publishVersion: publishCampusVersion,
 };

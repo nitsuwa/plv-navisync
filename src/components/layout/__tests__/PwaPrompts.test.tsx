@@ -143,14 +143,14 @@ describe("PwaUpdateNotifier", () => {
 describe("OfflineIndicator", () => {
   it("uses a compact, non-intercepting status when offline and disappears online", () => {
     setState({ online: false });
-    const { rerender } = render(<OfflineIndicator />);
+    const { rerender } = render(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
     const status = screen.getByRole("status", { name: /using saved campus data/i });
     expect(status).toHaveTextContent("Offline");
     expect(status).toHaveClass("pointer-events-none");
     expect(screen.queryByText(/live services need a connection/i)).not.toBeInTheDocument();
 
     setState({ online: true });
-    rerender(<OfflineIndicator />);
+    rerender(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
