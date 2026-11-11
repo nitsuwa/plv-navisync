@@ -1,5 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {getSupabase} from '../../lib/supabase';
+import {writeEventFeedback} from '../../lib/eventFeedbackPins';
 import {campusService} from '../campusService';
 import {eventOverlayService} from '../eventOverlayService';
 vi.mock('../../lib/supabase',()=>({getSupabase:vi.fn()}));
@@ -7,6 +8,8 @@ vi.mock('../campusService',()=>({resolveActiveCampusId:vi.fn().mockResolvedValue
 vi.mock('../activityLogService',()=>({logActivity:vi.fn().mockResolvedValue(undefined)}));
 const context={organizationId:'org-a',organizationName:'IT',grantId:'new-grant',academicYear:'2026–2027',expiresAt:'2027-06-01T00:00:00Z'};
 const location={id:'campus-grounds',locationRef:{type:'campus' as const,label:'Campus Grounds'},eventFurniture:[],eventLabels:[]};
+const feedback = writeEventFeedback('', [{ id: 'pin-1', x: 660, y: 540, comment: 'Move the booth' }]);
+const savedResolution = { feedback, addressedAt: '2026-10-09T00:01:00Z', addressedBy: 'new-representative', note: 'Checked' };
 let row:Record<string,unknown>,rpc:ReturnType<typeof vi.fn>,directUpdate:ReturnType<typeof vi.fn>,directDelete:ReturnType<typeof vi.fn>;
 beforeEach(()=>{
   row={id:'20000000-0000-4000-8000-000000000001',campus_id:'campus-1',organization_id:'org-a',created_at:'2025-03-01T00:00:00Z',updated_at:'2026-10-09T00:00:00Z',metadata:{title:'Inherited draft',organizer:'IT',status:'draft',createdByUserId:'old-representative',locations:[location],organizationId:'spoofed-org'}};
@@ -59,16 +62,48 @@ describe('organization-bound event service',()=>{
     expect(directDelete).not.toHaveBeenCalled();
   });
   it('requires the displayed grant before resolving feedback for a bound event',async()=>{
-    row.metadata={...(row.metadata as object),locationFeedback:{'campus-grounds':[{id:'pin-1',comment:'Check this'}]}};
+    row.metadata={...(row.metadata as object),locationFeedback:{'campus-grounds':feedback}};
     const overlay=await eventOverlayService.getEventOverlay(String(row.id));
     await expect(eventOverlayService.setEventFeedbackPinAddressed(overlay!,'campus-grounds','pin-1',true,'Checked')).rejects.toThrow(/assignment|representative|refresh/i);
     expect(rpc).not.toHaveBeenCalled();
   });
   it('resolves bound feedback with the displayed grant token',async()=>{
-    row.metadata={...(row.metadata as object),locationFeedback:{'campus-grounds':[{id:'pin-1',comment:'Check this'}]}};
+    row.metadata={...(row.metadata as object),locationFeedback:{'campus-grounds':feedback}};
     const overlay=await eventOverlayService.getEventOverlay(String(row.id));
-    await eventOverlayService.setEventFeedbackPinAddressed(overlay!,'campus-grounds','pin-1',true,'Checked','new-grant');
+    rpc.mockResolvedValueOnce({ data: {
+      id: row.id,
+      campusId: row.campus_id,
+      organizationId: row.organization_id,
+      updatedAt: '2026-10-09T00:01:00Z',
+      metadata: { ...(row.metadata as object), feedbackResolutions: { 'campus-grounds': { 'pin-1': savedResolution } } },
+    }, error: null });
+    const saved = await eventOverlayService.setEventFeedbackPinAddressed(overlay!,'campus-grounds','pin-1',true,'  Checked  ','new-grant');
     expect(rpc).toHaveBeenCalledWith('set_organization_event_feedback_pin_addressed',expect.objectContaining({p_overlay_id:row.id,p_expected_updated_at:row.updated_at,p_expected_grant_id:'new-grant',p_location_id:'campus-grounds',p_pin_id:'pin-1',p_addressed:true,p_note:'Checked'}));
+    expect(saved.feedbackResolutions?.['campus-grounds']?.['pin-1']).toEqual(savedResolution);
+  });
+  it.each([
+    ['still has an open pin', undefined],
+    ['has a stale resolution', { ...savedResolution, feedback: 'Previous feedback' }],
+    ['omits the submitted note', { ...savedResolution, note: '' }],
+  ])('rejects an apparently successful save when the returned event %s', async (_case, resolution) => {
+    row.metadata = {
+      ...(row.metadata as object),
+      locationFeedback: { 'campus-grounds': feedback },
+      feedbackResolutions: { 'campus-grounds': resolution ? { 'pin-1': resolution } : {} },
+    };
+    const overlay = await eventOverlayService.getEventOverlay(String(row.id));
+    await expect(eventOverlayService.setEventFeedbackPinAddressed(overlay!, 'campus-grounds', 'pin-1', true, 'Checked', 'new-grant'))
+      .rejects.toThrow(/could not confirm/i);
+  });
+  it('rejects an apparently successful reopen when the resolution is still present', async () => {
+    row.metadata = {
+      ...(row.metadata as object),
+      locationFeedback: { 'campus-grounds': feedback },
+      feedbackResolutions: { 'campus-grounds': { 'pin-1': savedResolution } },
+    };
+    const overlay = await eventOverlayService.getEventOverlay(String(row.id));
+    await expect(eventOverlayService.setEventFeedbackPinAddressed(overlay!, 'campus-grounds', 'pin-1', false, '', 'new-grant'))
+      .rejects.toThrow(/could not confirm/i);
   });
   it('withdraws an inherited pending event with the displayed grant token',async()=>{
     row.metadata={...(row.metadata as object),status:'pending'};

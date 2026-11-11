@@ -5,6 +5,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { DoorOpen, MapPin } from "lucide-react";
 import { Component, Fragment, Suspense, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import * as THREE from "three";
+import { useStudentWebGLRecovery } from "../../hooks/useStudentWebGLRecovery";
 import type { FloorLabel, FloorPlan, FloorRoom, FloorStairs, FloorFurniture, FloorEntranceRamp, FloorEntranceSteps } from "../map-builder/types";
 import { roomOutlinePoints } from "../../lib/roomShape";
 import { getFloorShapeRegions } from "../../lib/floorShape";
@@ -2746,6 +2747,7 @@ function IndoorFloor3DRenderer(props: IndoorFloor3DRendererProps) {
   const [visible, setVisible] = useState(() => typeof document === "undefined" || !document.hidden);
   const invalidateRef = useRef<(() => void) | null>(null);
   const interactionSurfaceRef = useRef<HTMLDivElement>(null);
+  useStudentWebGLRecovery(interactionSurfaceRef, invalidateRef, "floor renderer", props.onFallback);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pointerStartsRef = useRef(new Map<number, { x: number; y: number; button: number; pointerType: string }>());
   const touchGestureStartRef = useRef<readonly [Student3dTouchPoint, Student3dTouchPoint] | null>(null);

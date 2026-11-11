@@ -2786,6 +2786,14 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(await screen.findByRole("searchbox", { name: "Search start" })).toBeInTheDocument();
   });
 
+  it("uses the scanned building name as the start label", () => {
+    render(<RoutePlannerDialog {...plannerProps({ useMyLocation: true, youAreHereLabel: "Science Hall" })} />);
+
+    const start = screen.getByTestId("route-endpoint-card-start");
+    expect(within(start).getByText("Science Hall")).toHaveClass("font-extrabold");
+    expect(start).not.toHaveTextContent("You are here");
+  });
+
   it("hides swap until both endpoints exist, then places it in its own row", () => {
     const onSwapEndpoints = vi.fn();
     const view = render(

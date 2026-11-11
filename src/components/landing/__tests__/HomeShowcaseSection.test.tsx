@@ -56,6 +56,26 @@ describe("HomeShowcaseSection", () => {
     expect(video.loop).toBe(false);
   });
 
+  it("keeps the overview by default and switches to the full showreel on request", async () => {
+    render(<MemoryRouter><HomeShowcaseSection media={{ videoUrl: media.videoUrl, fullVideoUrl: "/test-only/full.mp4" }} /></MemoryRouter>);
+    expect(screen.getByTestId("home-showcase-video")).toHaveAttribute("src", media.videoUrl);
+    expect(playMock).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Watch Full Showreel" })[0]); });
+    expect(screen.getByTestId("home-showcase-video")).toHaveAttribute("src", "/test-only/full.mp4");
+    expect(playMock).toHaveBeenCalledOnce();
+    expect(screen.getByText("Now showing the full showreel (1:40).")).toBeInTheDocument();
+
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Watch Overview" })[0]); });
+    expect(screen.getByTestId("home-showcase-video")).toHaveAttribute("src", media.videoUrl);
+    expect(playMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides the full showreel button when no full version is configured", () => {
+    renderShowcase(media);
+    expect(screen.queryByRole("button", { name: "Watch Full Showreel" })).not.toBeInTheDocument();
+  });
+
   it("offers replay after playback ends", async () => {
     renderShowcase(media);
     const video = screen.getByTestId("home-showcase-video") as HTMLVideoElement;
