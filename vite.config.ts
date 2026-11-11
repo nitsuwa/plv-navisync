@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+﻿import { defineConfig, loadEnv, type Plugin } from 'vite'
 import fs from 'fs'
 import { createHash } from 'crypto'
 import path from 'path'
@@ -31,14 +31,15 @@ function pwaServiceWorkerPlugin(): Plugin {
     configResolved(config) {
       outDir = path.resolve(config.root, config.build.outDir)
     },
-    closeBundle() {
+    writeBundle() {
       const swPath = path.join(outDir, 'sw.js')
       const indexPath = path.join(outDir, 'index.html')
       if (!fs.existsSync(swPath) || !fs.existsSync(indexPath)) return
       const html = fs.readFileSync(indexPath, 'utf8')
-      const assets = [...new Set(
-        [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]),
-      )].sort()
+      const assets = [...new Set([
+        ...[...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]),
+        ...collectCampusCodeAssets(outDir),
+      ])].sort()
       const buildId = createHash('sha256').update(html).digest('hex').slice(0, 12)
       const source = fs.readFileSync(swPath, 'utf8')
         .replace('"__PLV_BUILD_ID__"', JSON.stringify(buildId))
@@ -46,6 +47,36 @@ function pwaServiceWorkerPlugin(): Plugin {
       fs.writeFileSync(swPath, source)
     },
   }
+}
+function collectCampusCodeAssets(outDir: string): string[] {
+  const assetsDir = path.join(outDir, 'assets')
+  if (!fs.existsSync(assetsDir)) return []
+  const mapPage = fs.readdirSync(assetsDir).find(file => /^CampusMapPage-.+\.js$/.test(file))
+  if (!mapPage) return []
+  const html = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8')
+  const entryAssets = new Set([...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]))
+  const files = new Set<string>([`/assets/${mapPage}`])
+  const visited = new Set<string>()
+  const queue = [`/assets/${mapPage}`]
+  const assetExtension = /\.(?:m?js|css|png|jpe?g|gif|svg|webp|avif|woff2?|ttf|otf)$/i
+  while (queue.length > 0) {
+    const assetUrl = queue.pop()!
+    if (visited.has(assetUrl)) continue
+    visited.add(assetUrl)
+    if (entryAssets.has(assetUrl)) continue
+    const filename = path.join(outDir, assetUrl.slice(1))
+    if (!/\.m?js$/i.test(filename) || !fs.existsSync(filename)) continue
+    const source = fs.readFileSync(filename, 'utf8')
+    const candidates = new Set<string>()
+    for (const match of source.matchAll(/(?:from|import\()\s*["']\.\/([^"']+)["']/g)) candidates.add(`/assets/${match[1]}`)
+    for (const match of source.matchAll(/["']assets\/([^"']+)["']/g)) candidates.add(`/assets/${match[1]}`)
+    for (const candidate of candidates) {
+      if (!assetExtension.test(candidate) || files.has(candidate)) continue
+      files.add(candidate)
+      queue.push(candidate)
+    }
+  }
+  return [...files]
 }
 
 function isLocalUrl(value: string): boolean {
@@ -108,7 +139,7 @@ export default defineConfig(({ mode }) => {
     }),
     pwaServiceWorkerPlugin(),
     // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
+    // Tailwind is not being actively used â€“ do not remove them
     react(),
     tailwindcss(),
   ],
@@ -132,7 +163,7 @@ export default defineConfig(({ mode }) => {
     rollupOptions: {
       output: {
         manualChunks: {
-          // Core framework — rarely changes, optimal caching
+          // Core framework â€” rarely changes, optimal caching
           'vendor-react': ['react', 'react-dom'],
           'vendor-router': ['react-router'],
           // Animation library

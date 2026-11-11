@@ -76,6 +76,13 @@ interface StudentCampusSelectorProps {
   mobileMaxWidth?: number | null;
   /** Return false to keep the menu open (for example, after a declined confirmation). */
   onSelect: (campusId: string) => boolean | void;
+  offlineReady?: boolean;
+  offlineNeedsUpdate?: boolean;
+  offlineBusy?: boolean;
+  offlineUpdatedAt?: string | null;
+  offlineError?: string | null;
+  onSaveOffline?: () => Promise<void>;
+  onRemoveOffline?: () => Promise<void>;
 }
 
 const CAMPUS_MENU_OBSTACLES = [
@@ -93,7 +100,7 @@ const CAMPUS_MENU_OBSTACLES = [
   "[data-testid='student-event-map-button']",
 ].join(",");
 
-export function StudentCampusSelector({ campuses, activeCampusId, activeCampusName, mobileTop, mobileMaxWidth, onSelect }: StudentCampusSelectorProps) {
+export function StudentCampusSelector({ campuses, activeCampusId, activeCampusName, mobileTop, mobileMaxWidth, onSelect, offlineReady = false, offlineNeedsUpdate = false, offlineBusy = false, offlineUpdatedAt, offlineError, onSaveOffline, onRemoveOffline }: StudentCampusSelectorProps) {
   const [open, setOpen] = useState(false);
   const [layout, setLayout] = useState<StudentCampusMenuLayout | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -314,6 +321,21 @@ export function StudentCampusSelector({ campuses, activeCampusId, activeCampusNa
               </button>
             );
           })}
+          {(onSaveOffline || offlineReady) && activeCampus?.lifecycleStatus !== "coming_soon" && (
+            <div className="border-t border-border px-3.5 py-2.5">
+              <button
+                type="button"
+                role="menuitem"
+                disabled={offlineBusy}
+                onClick={() => { void Promise.resolve(offlineReady && !offlineNeedsUpdate ? onRemoveOffline?.() : onSaveOffline?.()).catch(() => undefined); }}
+                className="w-full rounded-lg px-2 py-2 text-left text-xs font-bold text-primary transition-colors hover:bg-muted disabled:opacity-60"
+              >
+                {offlineBusy ? "Saving campus map…" : offlineNeedsUpdate ? "Update offline map" : offlineReady ? "Remove offline map" : "Save campus for offline use"}
+              </button>
+              {offlineReady && offlineUpdatedAt && <p className="px-2 text-[10px] text-muted-foreground">{offlineNeedsUpdate ? "Update available · " : "Saved "}{new Date(offlineUpdatedAt).toLocaleDateString()}</p>}
+              {offlineError && <p role="alert" className="px-2 pt-1 text-[10px] text-destructive">{offlineError}</p>}
+            </div>
+          )}
         </div>,
         document.body,
       )}

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Captions, ChevronDown, Download, Loader2, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { cn } from "../../lib/utils";
-import { createPublishedEmergencyEvacuationVideoDownloadUrl, formatEmergencyVideoSize, getPublishedEmergencyEvacuationVideo, type PublishedEmergencyVideo } from "../../services/emergencyEvacuationVideoService";
+import { getOfflineVideo, offlineVideoKey, removeOfflineVideo, saveOfflineVideo, type OfflineVideoPackage } from "../../lib/offlineCampusStore";
+import { createPublishedEmergencyEvacuationVideoDownloadUrl, EMERGENCY_CAPTIONS_MAX_BYTES, EMERGENCY_VIDEO_MAX_BYTES, formatEmergencyVideoSize, getPublishedEmergencyEvacuationVideo, type PublishedEmergencyVideo } from "../../services/emergencyEvacuationVideoService";
 
 interface StudentEmergencyVideoCardProps {
   campusId: string;
@@ -18,6 +19,25 @@ interface StudentEmergencyVideoCardProps {
 }
 
 export type EmergencyVideoPlaybackState = { currentTime: number; muted: boolean; loop: boolean };
+
+async function readBlobWithProgress(response: Response, onProgress: (progress: number | null) => void): Promise<Blob> {
+  const length = Number(response.headers.get("content-length")) || 0;
+  if (!response.body) return response.blob();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress(length > 0 ? Math.min(100, Math.round(loaded / length * 100)) : null);
+  }
+  // Copy each stream chunk into a standalone ArrayBuffer. Newer TypeScript
+  // DOM typings distinguish ArrayBufferLike from the ArrayBuffer BlobPart needs.
+  const parts = chunks.map((chunk) => chunk.slice().buffer as ArrayBuffer);
+  return new Blob(parts, { type: response.headers.get("content-type") || undefined });
+}
 
 export function StudentEmergencyVideoCard({
   campusId, roomId, roomName, videoId, title, routeFingerprint,
@@ -41,6 +61,10 @@ export function StudentEmergencyVideoCard({
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [visible, setVisible] = useState(true);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [offlineNeedsUpdate, setOfflineNeedsUpdate] = useState(false);
+  const [offlineDownloadProgress, setOfflineDownloadProgress] = useState<number | null>(null);
+  const mediaObjectUrlsRef = useRef<string[]>([]);
   const onPlaybackStateChangeRef = useRef(onPlaybackStateChange);
   onPlaybackStateChangeRef.current = onPlaybackStateChange;
   const mutedRef = useRef(muted);
@@ -61,9 +85,35 @@ export function StudentEmergencyVideoCard({
   const load = useCallback(async () => {
     const generation = ++requestGenerationRef.current;
     videoRef.current?.pause();
+    mediaObjectUrlsRef.current.forEach(URL.revokeObjectURL);
+    mediaObjectUrlsRef.current = [];
     setGuide(null);
     setLoading(true); setError(null);
     try {
+      const saved = await getOfflineVideo(offlineVideoKey(campusId, videoId));
+      if (generation !== requestGenerationRef.current) return null;
+      if (saved?.metadata && saved.routeFingerprint === routeFingerprint && navigator.onLine) {
+        const published = await getPublishedEmergencyEvacuationVideo({ videoId, roomId, campusId, routeFingerprint }).catch(() => null);
+        if (generation !== requestGenerationRef.current) return null;
+        if (published) {
+          setGuide(published);
+          setOfflineReady(true);
+          setOfflineNeedsUpdate(published.updated_at !== saved.updatedAt);
+          return published;
+        }
+      }
+      if (saved?.metadata && saved.routeFingerprint === routeFingerprint) {
+        const playbackUrl = URL.createObjectURL(saved.video);
+        const captionsUrl = saved.captions ? URL.createObjectURL(saved.captions) : null;
+        mediaObjectUrlsRef.current = [playbackUrl, ...(captionsUrl ? [captionsUrl] : [])];
+        const localGuide = { ...saved.metadata, playbackUrl, downloadUrl: playbackUrl, captionsUrl } as PublishedEmergencyVideo;
+        setGuide(localGuide);
+        setOfflineReady(true);
+        setOfflineNeedsUpdate(false);
+        return localGuide;
+      }
+      setOfflineReady(false);
+      setOfflineNeedsUpdate(false);
       const next = await getPublishedEmergencyEvacuationVideo({ videoId, roomId, campusId, routeFingerprint });
       if (generation !== requestGenerationRef.current) return null;
       setGuide(next);
@@ -132,6 +182,7 @@ export function StudentEmergencyVideoCard({
   }, []);
 
   useEffect(() => () => { videoRef.current?.pause(); }, []);
+  useEffect(() => () => { mediaObjectUrlsRef.current.forEach(URL.revokeObjectURL); }, []);
 
   useEffect(() => {
     const exitFullscreenOnEscape = (event: KeyboardEvent) => {
@@ -183,6 +234,59 @@ export function StudentEmergencyVideoCard({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The video download could not be started.");
     } finally { setDownloadBusy(false); }
+  };
+
+  const saveForOffline = async () => {
+    setDownloadBusy(true);
+    setError(null);
+    try {
+      const authorized = guide && !guide.playbackUrl.startsWith("blob:")
+        ? guide
+        : await getPublishedEmergencyEvacuationVideo({ videoId, roomId, campusId, routeFingerprint });
+      if (!authorized) throw new Error("This guide is no longer published for the current approved routes.");
+      const [videoResponse, captionsResponse] = await Promise.all([
+        fetch(authorized.playbackUrl),
+        authorized.captionsUrl ? fetch(authorized.captionsUrl) : Promise.resolve(null),
+      ]);
+      if (!videoResponse.ok) throw new Error("The authorized video file could not be downloaded.");
+      if (captionsResponse && !captionsResponse.ok) throw new Error("The captions could not be downloaded. Retry or continue without offline captions.");
+      const [video, captions] = await Promise.all([
+        readBlobWithProgress(videoResponse, setOfflineDownloadProgress),
+        captionsResponse?.blob() ?? Promise.resolve(null),
+      ]);
+      if (video.size > EMERGENCY_VIDEO_MAX_BYTES) throw new Error("This video exceeds the supported offline size limit.");
+      if (captions && captions.size > EMERGENCY_CAPTIONS_MAX_BYTES) throw new Error("The captions exceed the supported offline size limit.");
+      const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+      const required = video.size + (captions?.size ?? 0);
+      if (estimate?.quota !== undefined && estimate.usage !== undefined && required > estimate.quota - estimate.usage) {
+        throw new Error("There is not enough device storage for this video.");
+      }
+      const record: OfflineVideoPackage = {
+        key: offlineVideoKey(campusId, videoId), campusId, videoId, roomId, routeFingerprint,
+        updatedAt: authorized.updated_at, sizeBytes: required, mimeType: "video/mp4",
+        fileName: authorized.original_filename, video, captions,
+        captionsMimeType: captions ? "text/vtt" : null,
+        metadata: {
+          id: authorized.id, campus_id: authorized.campus_id, building_id: authorized.building_id,
+          floor_id: authorized.floor_id, room_id: authorized.room_id, storage_path: authorized.storage_path,
+          captions_path: authorized.captions_path, original_filename: authorized.original_filename,
+          mime_type: authorized.mime_type, file_size_bytes: authorized.file_size_bytes,
+          title: authorized.title, duration_seconds: authorized.duration_seconds, updated_at: authorized.updated_at,
+        },
+      };
+      await saveOfflineVideo(record);
+      setOfflineReady(true);
+      setOfflineNeedsUpdate(false);
+      setOfflineDownloadProgress(100);
+      if (!guide) await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "This guide could not be saved for offline use.");
+    } finally { setDownloadBusy(false); window.setTimeout(() => setOfflineDownloadProgress(null), 900); }
+  };
+
+  const removeOfflineCopy = async () => {
+    await removeOfflineVideo(offlineVideoKey(campusId, videoId));
+    setOfflineReady(false);
   };
 
   const handleMediaError = () => {
@@ -259,6 +363,7 @@ export function StudentEmergencyVideoCard({
             <button type="button" onClick={replay} aria-label="Replay video guide" className="flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={() => setLoop((current) => !current)} aria-pressed={loop} aria-label={loop ? "Turn video loop off" : "Turn video loop on"} className={cn("min-h-10 rounded-lg border px-2.5 text-[9px] font-bold", loop ? "border-primary/40 bg-primary/5 text-primary" : "border-border text-muted-foreground")}>Loop</button>
             <button type="button" onClick={() => void download()} disabled={loading || downloadBusy} className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[9px] font-bold text-foreground hover:bg-muted disabled:opacity-60"><Download className="h-3.5 w-3.5" />{downloadBusy ? "Preparing…" : "Download"}</button>
+            <button type="button" onClick={() => void (offlineReady && !offlineNeedsUpdate ? removeOfflineCopy() : saveForOffline())} disabled={loading || downloadBusy} className="flex min-h-10 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[9px] font-bold text-foreground hover:bg-muted disabled:opacity-60">{downloadBusy ? `Saving${offlineDownloadProgress === null ? "…" : ` ${offlineDownloadProgress}%`}` : offlineNeedsUpdate ? "Update offline copy" : offlineReady ? "Available offline · Remove" : "Save offline"}</button>
           </>}
           {!expanded && <button type="button" onClick={() => setExpanded(true)} aria-label="Show video guide controls" className="ml-auto min-h-10 rounded-lg border border-border px-2.5 text-[9px] font-bold text-foreground">More controls</button>}
         </div>}

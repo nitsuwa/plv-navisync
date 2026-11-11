@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listPublishedVersionStatus: vi.fn(),
   listComingSoon: vi.fn(),
   getSettings: vi.fn(),
+  listOfflinePackages: vi.fn(),
 }));
 
 vi.mock("../../contexts/StudentAuthContext", () => ({
@@ -30,6 +31,12 @@ vi.mock("../../services/settingsService", async (importOriginal) => {
     settingsService: { ...actual.settingsService, getPublicPlatformSettings: mocks.getSettings },
   };
 });
+
+vi.mock("../../lib/offlineCampusStore", () => ({
+  listOfflineCampusPackages: mocks.listOfflinePackages,
+  saveOfflineCampus: vi.fn(),
+  removeOfflineCampus: vi.fn(),
+}));
 
 const campus = {
   id: "published-campus",
@@ -63,6 +70,7 @@ describe("published campus version refresh", () => {
     mocks.listPublishedVersionStatus.mockResolvedValue(status());
     mocks.listPublishedSnapshots.mockResolvedValue([campus]);
     mocks.listComingSoon.mockResolvedValue([]);
+    mocks.listOfflinePackages.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -84,6 +92,32 @@ describe("published campus version refresh", () => {
       versionId: "version-1",
       campus: { id: campus.id },
     }]);
+  });
+
+  it("opens the last saved public campus as Guest without waiting for Supabase while offline", async () => {
+    const previousOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    mocks.listOfflinePackages.mockResolvedValue([{
+      campusId: campus.id,
+      campusName: campus.name,
+      versionId: "saved-version",
+      publishedAt: campus.publishedAt,
+      downloadedAt: "2026-10-02T00:00:00.000Z",
+      schemaVersion: 1,
+      sizeBytes: 100,
+      campus,
+    }]);
+
+    try {
+      const { result } = renderHook(() => usePublishedCampus());
+      await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+      expect(result.current.isCached).toBe(true);
+      expect(result.current.loading).toBe(false);
+      expect(mocks.listPublishedVersionStatus).not.toHaveBeenCalled();
+      expect(mocks.listPublishedSnapshots).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: previousOnline });
+    }
   });
 
   it("does not fetch or replace the campus object when manual refresh sees an unchanged version", async () => {

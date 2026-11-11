@@ -94,7 +94,7 @@ export function OfflineIndicator() {
     >
       <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs font-bold text-foreground shadow-lg backdrop-blur-xl">
         <WifiOff className="h-3.5 w-3.5 text-amber-500" aria-hidden />
-        You're offline — map and live data need a connection
+        Offline — saved maps work when available; live services need a connection
       </div>
     </div>
   );
