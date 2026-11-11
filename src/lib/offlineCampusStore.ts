@@ -34,6 +34,11 @@ export interface OfflineVideoPackage {
   metadata?: Omit<PublishedEmergencyVideo, "playbackUrl" | "downloadUrl" | "captionsUrl">;
 }
 
+export interface OfflineCampusReadResult {
+  packages: OfflineCampusPackage[];
+  incompatibleCount: number;
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("Offline storage is not supported by this browser."));
   return new Promise((resolve, reject) => {
@@ -115,10 +120,37 @@ export async function saveOfflineCampus(campus: Campus, versionId?: string): Pro
 }
 
 export async function listOfflineCampusPackages(): Promise<OfflineCampusPackage[]> {
-  const records = await transact<OfflineCampusPackage[]>(CAMPUS_STORE, "readonly", (store) => store.getAll()).catch(() => []);
-  return records.filter((record) => record?.schemaVersion === PACKAGE_SCHEMA_VERSION
-    && record.campusId === record.campus?.id
-    && typeof record.versionId === "string");
+  return (await readOfflineCampusPackages()).packages;
+}
+
+/** Read and validate complete published snapshots without hiding storage errors. */
+export async function readOfflineCampusPackages(): Promise<OfflineCampusReadResult> {
+  const records = await transact<OfflineCampusPackage[]>(CAMPUS_STORE, "readonly", (store) => store.getAll());
+  const packages: OfflineCampusPackage[] = [];
+  let incompatibleCount = 0;
+  for (const record of records) {
+    const campus = record?.campus;
+    const structurallyComplete = record?.schemaVersion === PACKAGE_SCHEMA_VERSION
+      && record.campusId === campus?.id
+      && typeof record.versionId === "string" && record.versionId.length > 0
+      && typeof campus?.name === "string"
+      && Array.isArray(campus.buildings) && Array.isArray(campus.markers) && Array.isArray(campus.paths)
+      && (campus.lifecycleStatus === "published" || campus.publishStatus === "published");
+    if (!structurallyComplete) {
+      incompatibleCount += 1;
+      continue;
+    }
+    const nodeIds = new Set((campus.navNodes ?? []).map((node) => node.id));
+    const graphIsComplete = (campus.navEdges ?? []).every((edge) =>
+      nodeIds.has(edge.startNodeId) && nodeIds.has(edge.endNodeId),
+    );
+    if (!graphIsComplete) {
+      incompatibleCount += 1;
+      continue;
+    }
+    packages.push(record);
+  }
+  return { packages, incompatibleCount };
 }
 
 export async function removeOfflineCampus(campusId: string): Promise<void> {

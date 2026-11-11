@@ -4,7 +4,7 @@ import type { Campus } from "../components/map-builder/types";
 import { studentCampusListing } from "../lib/studentCampusListing";
 import { useAuthUserId } from "../contexts/StudentAuthContext";
 import { DEFAULT_PUBLIC_PLATFORM_SETTINGS, settingsService, type PublicPlatformSettings } from "../services/settingsService";
-import { listOfflineCampusPackages, removeOfflineCampus, saveOfflineCampus, type OfflineCampusPackage } from "../lib/offlineCampusStore";
+import { readOfflineCampusPackages, listOfflineCampusPackages, removeOfflineCampus, saveOfflineCampus, type OfflineCampusPackage } from "../lib/offlineCampusStore";
 
 const SESSION_CACHE_KEY = "plv_published_campuses_version_cache_v2";
 const LAST_CAMPUS_KEY = "plv_student_last_campus_v1";
@@ -15,6 +15,9 @@ const MAX_REFRESH_BACKOFF_MS = 5 * 60_000;
 const REFRESH_RETRY_BASE_MS = 60_000;
 const COMING_SOON_CACHE_TTL_MS = 5 * 60_000;
 const CAMPUS_LOAD_ERROR = "We couldn't load the campus map right now. Please try again.";
+const OFFLINE_MAP_MISSING = "No campus map is saved on this device. Connect to load a campus map, then save it for offline use.";
+const OFFLINE_MAP_INCOMPATIBLE = "A saved campus map was found, but it is incomplete or incompatible. Reconnect and download the campus again.";
+const OFFLINE_STORAGE_UNAVAILABLE = "Offline campus storage is unavailable in this browser. Reconnect to download the campus map.";
 
 interface PublishedVersionStatus {
   campus_id: string;
@@ -369,25 +372,33 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           : chooseInitialCampus(stableListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
         setIsCached(false);
         setError(null);
-        void listOfflineCampusPackages().then(setOfflinePackages);
+        void listOfflineCampusPackages().then(setOfflinePackages).catch(() => undefined);
       } catch {
         // Background metadata or snapshot failure leaves the last good map
         // untouched; the shared retry timers bound future attempts.
         if (hasCampusDataRef.current) {
           setError(null);
         } else {
-          const savedPackages = await listOfflineCampusPackages();
-          if (savedPackages.length > 0) {
-            const savedListing = studentCampusListing(savedPackages.map((item) => item.campus), []);
-            campusesRef.current = savedListing;
-            hasCampusDataRef.current = savedListing.length > 0;
-            setCampuses(savedListing);
-            setOfflinePackages(savedPackages);
-            setSelectedCampusId(chooseInitialCampus(savedListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
-            setIsCached(true);
-            setError(null);
-          } else if (source === "initial" || source === "manual") {
-            setError(CAMPUS_LOAD_ERROR);
+          try {
+            const saved = await readOfflineCampusPackages();
+            const savedPackages = saved.packages;
+            if (savedPackages.length > 0) {
+              const savedListing = studentCampusListing(savedPackages.map((item) => item.campus), []);
+              if (savedListing.length === 0) throw new Error("incompatible");
+              campusesRef.current = savedListing;
+              hasCampusDataRef.current = true;
+              setCampuses(savedListing);
+              setOfflinePackages(savedPackages);
+              setSelectedCampusId(chooseInitialCampus(savedListing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
+              setIsCached(true);
+              setError(null);
+            } else if (source === "initial" || source === "manual") {
+              setError(saved.incompatibleCount > 0
+                ? OFFLINE_MAP_INCOMPATIBLE
+                : source === "initial" || source === "manual" ? OFFLINE_MAP_MISSING : CAMPUS_LOAD_ERROR);
+            }
+          } catch {
+            setError(OFFLINE_STORAGE_UNAVAILABLE);
           }
         }
       } finally {
@@ -414,33 +425,36 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
       return;
     }
     let cancelled = false;
-    void listOfflineCampusPackages().then((packages) => {
-      if (cancelled) return;
-      setOfflinePackages(packages);
-      if (!navigator.onLine) {
-        if (packages.length > 0) {
-          const savedCampuses = packages.map((item) => item.campus);
-          const listing = studentCampusListing(savedCampuses, []);
+    void (async () => {
+      // Hydrate the last complete public snapshot first. It is useful even
+      // when the browser reports online but its network is captive or failing.
+      try {
+        const saved = await readOfflineCampusPackages();
+        if (cancelled) return;
+        setOfflinePackages(saved.packages);
+        const listing = studentCampusListing(saved.packages.map((item) => item.campus), []);
+        if (listing.length > 0) {
           campusesRef.current = listing;
-          hasCampusDataRef.current = listing.length > 0;
+          hasCampusDataRef.current = true;
           setCampuses(listing);
           setSelectedCampusId((current) => current && listing.some((campus) => campus.id === current)
             ? current
             : chooseInitialCampus(listing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
           setIsCached(true);
           setError(null);
-        } else {
-          setError("No saved campus map is available offline. Connect to the internet to download one.");
+          setLoading(false);
+        } else if (!navigator.onLine) {
+          setError(saved.incompatibleCount > 0 ? OFFLINE_MAP_INCOMPATIBLE : OFFLINE_MAP_MISSING);
+          setLoading(false);
         }
-        setLoading(false);
+      } catch {
+        if (!navigator.onLine) {
+          setError(OFFLINE_STORAGE_UNAVAILABLE);
+          setLoading(false);
+        }
       }
-    }).catch(() => {
-      if (!cancelled && !navigator.onLine) {
-        setError("Offline storage could not be read. Connect to the internet to restore campus access.");
-        setLoading(false);
-      }
-    });
-    void fetchPublishedCampuses("initial");
+      if (!cancelled) void fetchPublishedCampuses("initial");
+    })();
     return () => { cancelled = true; };
   }, [fetchPublishedCampuses, previewCampus]);
 
@@ -448,7 +462,8 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
     const onOnline = () => { void fetchPublishedCampuses("resume"); };
     const onOffline = () => {
       if (hasCampusDataRef.current) return;
-      void listOfflineCampusPackages().then((packages) => {
+      void readOfflineCampusPackages().then((saved) => {
+        const packages = saved.packages;
         setOfflinePackages(packages);
         const listing = studentCampusListing(packages.map((item) => item.campus), []);
         if (listing.length > 0) {
@@ -458,10 +473,10 @@ export function usePublishedCampus(previewCampus?: Campus | null): UsePublishedC
           setSelectedCampusId(chooseInitialCampus(listing, platformSettingsRef.current, userIdRef.current)?.id ?? null);
           setIsCached(true);
           setError(null);
-        } else setError("No saved campus map is available offline. Connect to the internet to download one.");
+        } else setError(saved.incompatibleCount > 0 ? OFFLINE_MAP_INCOMPATIBLE : OFFLINE_MAP_MISSING);
         setLoading(false);
       }).catch(() => {
-        setError("Offline storage could not be read. Connect to the internet to restore campus access.");
+        setError(OFFLINE_STORAGE_UNAVAILABLE);
         setLoading(false);
       });
     };

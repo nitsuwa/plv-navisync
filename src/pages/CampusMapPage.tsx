@@ -7129,20 +7129,35 @@ const buildingFill = (id: string) =>
       </div>
   ) : null;
 
+  const offlineUnavailable = Boolean(campusError?.includes("No campus map is saved"));
+  const offlineIncompatible = Boolean(campusError?.includes("incomplete or incompatible"));
+  const storageUnavailable = Boolean(campusError?.includes("storage is unavailable"));
+  const offlineMessage = offlineUnavailable || offlineIncompatible || storageUnavailable;
   const campusErrorScreen = campusError && !activeCampus ? (
       <div className={cn("relative flex w-full flex-col items-center justify-center p-6", fullScreen && fullScreenHeight ? "h-full" : "")} style={{ height: fullScreen ? fullScreenHeight ?? "100dvh" : "calc(100dvh - 56px)", background: "var(--map-bg)" }}>
         <div className="flex flex-col items-center text-center max-w-sm p-8 rounded-3xl bg-card border border-destructive/20 shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center mb-4 text-destructive">
             <AlertCircle className="h-8 w-8" />
           </div>
-          <h3 className="text-lg font-extrabold text-foreground mb-2">Unable to refresh campus map</h3>
-          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">We couldn&apos;t retrieve campus data right now.</p>
+          <h3 className="text-lg font-extrabold text-foreground mb-2">
+            {offlineUnavailable ? "No offline campus map available" : offlineIncompatible ? "Saved campus map cannot be opened" : storageUnavailable ? "Offline storage unavailable" : "Unable to refresh campus map"}
+          </h3>
+          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">
+            {offlineUnavailable
+              ? "Connect to the internet and save a campus map before using navigation offline."
+              : offlineIncompatible
+                ? "The saved campus data is incomplete or no longer compatible. Reconnect and download the campus again."
+                : storageUnavailable
+                  ? "This browser could not read the saved map storage. Reconnect to download the campus map again."
+                  : "We couldn't retrieve campus data right now."}
+          </p>
           <button
             onClick={() => refetchCampus()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer"
+            disabled={!navigator.onLine}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:brightness-110 transition-all shadow-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Retry
+            {offlineMessage ? "Retry when online" : "Retry"}
           </button>
         </div>
       </div>

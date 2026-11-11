@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listComingSoon: vi.fn(),
   getSettings: vi.fn(),
   listOfflinePackages: vi.fn(),
+  readOfflinePackages: vi.fn(),
 }));
 
 vi.mock("../../contexts/StudentAuthContext", () => ({
@@ -34,6 +35,7 @@ vi.mock("../../services/settingsService", async (importOriginal) => {
 
 vi.mock("../../lib/offlineCampusStore", () => ({
   listOfflineCampusPackages: mocks.listOfflinePackages,
+  readOfflineCampusPackages: mocks.readOfflinePackages,
   saveOfflineCampus: vi.fn(),
   removeOfflineCampus: vi.fn(),
 }));
@@ -71,6 +73,7 @@ describe("published campus version refresh", () => {
     mocks.listPublishedSnapshots.mockResolvedValue([campus]);
     mocks.listComingSoon.mockResolvedValue([]);
     mocks.listOfflinePackages.mockResolvedValue([]);
+    mocks.readOfflinePackages.mockImplementation(async () => ({ packages: await mocks.listOfflinePackages(), incompatibleCount: 0 }));
   });
 
   afterEach(() => {
@@ -115,6 +118,33 @@ describe("published campus version refresh", () => {
       expect(result.current.loading).toBe(false);
       expect(mocks.listPublishedVersionStatus).not.toHaveBeenCalled();
       expect(mocks.listPublishedSnapshots).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: previousOnline });
+    }
+  });
+
+  it("hydrates a saved campus before a failed online refresh", async () => {
+    mocks.listOfflinePackages.mockResolvedValue([{
+      campusId: campus.id, campusName: campus.name, versionId: "saved-version",
+      publishedAt: campus.publishedAt, downloadedAt: "2026-10-02T00:00:00.000Z",
+      schemaVersion: 1, sizeBytes: 100, campus,
+    }]);
+    mocks.listPublishedVersionStatus.mockRejectedValueOnce(new Error("Network unavailable"));
+
+    const { result } = renderHook(() => usePublishedCampus());
+
+    await waitFor(() => expect(result.current.activeCampus?.id).toBe(campus.id));
+    expect(result.current.isCached).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("shows a specific offline download message when no saved campus exists", async () => {
+    const previousOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    try {
+      const { result } = renderHook(() => usePublishedCampus());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.error).toMatch(/No campus map is saved on this device/);
     } finally {
       Object.defineProperty(navigator, "onLine", { configurable: true, value: previousOnline });
     }
@@ -245,14 +275,14 @@ describe("published campus version refresh", () => {
     expect(JSON.parse(sessionStorage.getItem("plv_published_campuses_version_cache_v2") ?? "{}").snapshots).toEqual([]);
   });
 
-  it("does not use the full snapshot RPC when the initial metadata request fails", async () => {
+  it("reports that no campus is saved when the initial metadata request fails", async () => {
     mocks.listPublishedVersionStatus.mockRejectedValueOnce({ code: "500", message: "temporary failure" });
     const { result } = renderHook(() => usePublishedCampus());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.activeCampus).toBeNull();
-    expect(result.current.error).toBe("We couldn't load the campus map right now. Please try again.");
+    expect(result.current.error).toMatch(/No campus map is saved on this device/);
     expect(mocks.listPublishedSnapshots).not.toHaveBeenCalled();
   });
 
