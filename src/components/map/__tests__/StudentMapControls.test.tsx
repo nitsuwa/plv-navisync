@@ -154,15 +154,50 @@ describe("StudentMapControls", () => {
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
   });
 
-  it("shows a discreet offline badge outside the search control", () => {
+  it("groups Discover PLV and Offline in one desktop header row while preserving the mobile bottom position", () => {
     const originalOnline = navigator.onLine;
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
     try {
-      render(<StudentMapControls {...props()} />);
+      const onOpenDiscover = vi.fn();
+      render(<StudentMapControls {...props({ onOpenDiscover })} />);
       const status = screen.getByTestId("student-map-offline-status");
       expect(screen.getByRole("button", { name: "Offline information" })).toHaveTextContent("Offline");
-      expect(status).toHaveClass("md:top-[4.25rem]", "bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]");
+      const actions = screen.getByTestId("student-map-header-actions");
+      expect(actions).toHaveClass("flex", "items-center", "gap-2", "md:mt-1.5");
+      expect(actions).toContainElement(screen.getByRole("button", { name: "Discover PLV" }));
+      expect(actions).toContainElement(status);
+      expect(status).toHaveClass("fixed", "left-3", "bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]", "md:static");
       expect(screen.getByTestId("student-map-search-panel").contains(status)).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Discover PLV" }));
+      expect(onOpenDiscover).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: originalOnline });
+    }
+  });
+
+  it("keeps the single Offline control available when the search and Discover header are hidden", () => {
+    const originalOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    try {
+      render(<StudentMapControls {...props({ directionsMode: true, onOpenDiscover: vi.fn() })} />);
+      const statuses = screen.getAllByTestId("student-map-offline-status");
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0]).toHaveClass("md:absolute", "md:right-3", "md:bottom-6", "md:top-auto");
+      expect(screen.queryByTestId("student-map-header-actions")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Discover PLV" })).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: originalOnline });
+    }
+  });
+
+  it("moves the desktop Offline fallback to the open corner during Discovery", () => {
+    const originalOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    try {
+      render(<StudentMapControls {...props({ discoverMode: true, onOpenDiscover: vi.fn() })} />);
+      const status = screen.getByTestId("student-map-offline-status");
+      expect(status).toHaveClass("md:left-3", "md:bottom-6", "md:top-auto");
+      expect(screen.queryByTestId("student-map-header-slot")).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(navigator, "onLine", { configurable: true, value: originalOnline });
     }
