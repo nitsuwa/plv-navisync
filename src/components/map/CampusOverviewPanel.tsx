@@ -4,7 +4,7 @@ import type { Campus } from "../map-builder/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 import { CampusPublishedMapPreview } from "./CampusPublishedMapPreview";
 import { loadPublishedCampusImage } from "../../lib/campusPublicMedia";
-import { campusLocationQuery, googleCampusDirectionsUrl, googleCampusPlaceUrl, type CampusLocation } from "../../lib/campusDirections";
+import { campusLocationQuery, googleCampusDirectionsUrl, googleCampusPlaceUrl, validatedGoogleMapsUrl, type CampusLocation } from "../../lib/campusDirections";
 
 interface Props {
   campus: Campus;
@@ -13,11 +13,6 @@ interface Props {
   reducedMotion?: boolean;
   onExplore: () => void;
   onClose: () => void;
-}
-
-function openExternalMap(url: string | null, offline: boolean) {
-  if (!url || offline) return;
-  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export function CampusOverviewPanel({ campus, campuses, offline = false, reducedMotion = false, onExplore, onClose }: Props) {
@@ -36,9 +31,9 @@ export function CampusOverviewPanel({ campus, campuses, offline = false, reduced
   const destination = destinations.find((item) => item.id === destinationId);
   const campusLocation = campus as CampusLocation;
   const canShowPlace = Boolean(campusLocationQuery(campusLocation));
-  const placeUrl = googleCampusPlaceUrl(campusLocation);
+  const placeUrl = validatedGoogleMapsUrl(googleCampusPlaceUrl(campusLocation));
   const travelDirectionsUrl = destination
-    ? googleCampusDirectionsUrl(destination as CampusLocation, campusLocation)
+    ? validatedGoogleMapsUrl(googleCampusDirectionsUrl(destination as CampusLocation, campusLocation))
     : null;
   const unavailableOffline = offline || !online;
 
@@ -155,19 +150,25 @@ export function CampusOverviewPanel({ campus, campuses, offline = false, reduced
                     {destinations.map((item) => <SelectItem key={item.id} value={item.id} textValue={item.name} className="min-h-11 rounded-lg py-2 text-xs focus:bg-accent focus:text-accent-foreground"><span className="flex min-w-0 items-center gap-2"><MapPin className="h-4 w-4 shrink-0 text-primary" /><span className="break-words">{item.name}</span></span></SelectItem>)}
                   </SelectContent>
                 </Select>
-                <button type="button" onClick={() => openExternalMap(travelDirectionsUrl, mapActionDisabled)} disabled={!destination || !travelDirectionsUrl || mapActionDisabled} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-4 text-xs font-bold text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-45 sm:min-w-48">
-                  Get Travel Directions<ArrowUpRight className="h-3.5 w-3.5" />
-                </button>
+                {destination && travelDirectionsUrl && !mapActionDisabled
+                  ? <a href={travelDirectionsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-4 text-xs font-bold text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-w-48">
+                      Get Travel Directions<ArrowUpRight className="h-3.5 w-3.5" />
+                    </a>
+                  : <button type="button" disabled className="inline-flex min-h-11 shrink-0 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-4 text-xs font-bold text-primary opacity-45 sm:min-w-48" aria-describedby={mapActionDisabled ? "campus-maps-offline-message" : undefined}>
+                      Get Travel Directions<ArrowUpRight className="h-3.5 w-3.5" />
+                    </button>}
               </div>
             </section>
           )}
 
-          {unavailableOffline && <p role="status" className="mt-4 rounded-xl bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">Campus information is available offline. Google Maps requires an internet connection.</p>}
+          {unavailableOffline && <p id="campus-maps-offline-message" role="status" className="mt-4 rounded-xl bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">Campus information is available offline. Google Maps requires an internet connection.</p>}
           {!canShowPlace && <p className="mt-3 text-[11px] text-muted-foreground">Google Maps location is unavailable because no published campus address or coordinates are available.</p>}
         </div>
 
         <footer data-testid="campus-overview-actions" className="grid shrink-0 gap-2.5 border-t border-border bg-card/95 p-4 sm:grid-cols-2 sm:px-6 md:px-9 md:py-4">
-          <button type="button" onClick={() => openExternalMap(placeUrl, mapActionDisabled)} disabled={!placeUrl || mapActionDisabled} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground transition hover:bg-muted active:scale-[.99] disabled:cursor-not-allowed disabled:opacity-45"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></button>
+          {placeUrl && !mapActionDisabled
+            ? <a href={placeUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground transition hover:bg-muted active:scale-[.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></a>
+            : <button type="button" disabled aria-describedby={mapActionDisabled ? "campus-maps-offline-message" : undefined} className="inline-flex min-h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground opacity-45"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></button>}
           <button type="button" onClick={onExplore} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-md transition hover:brightness-110 active:scale-[.99]"><Building2 className="h-4 w-4" />Explore Campus</button>
         </footer>
       </section>

@@ -17,7 +17,7 @@ export function validatedGoogleMapsUrl(value?: string | null): string | null {
 export function campusLocationQuery(campus: CampusLocation): string | null {
   const { lat, lng } = campus.coordinates ?? { lat: NaN, lng: NaN };
   if (Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) return `${lat},${lng}`;
-  const address = [campus.address, campus.city, campus.province, campus.postalCode].filter((part) => part?.trim()).join(", ");
+  const address = [campus.address, campus.city, campus.province, campus.postalCode].map((part) => part?.trim()).filter(Boolean).join(", ");
   return address || null;
 }
 
@@ -37,8 +37,10 @@ export function googleCampusDirectionsUrl(destination: CampusLocation, origin?: 
 export function googleCampusPlaceUrl(campus: CampusLocation): string | null {
   const query = campusLocationQuery(campus);
   if (!query) return null;
+  const { lat, lng } = campus.coordinates ?? { lat: NaN, lng: NaN };
+  const hasValidCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
   const url = new URL("https://www.google.com/maps/search/");
   url.searchParams.set("api", "1");
-  url.searchParams.set("query", campus.coordinates ? query : `${campus.name}, ${query}`);
+  url.searchParams.set("query", hasValidCoordinates ? query : `${campus.name}, ${query}`);
   return url.toString();
 }
