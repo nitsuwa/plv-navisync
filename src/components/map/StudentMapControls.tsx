@@ -134,6 +134,11 @@ export function StudentMapControls({
     ? "left-3 right-auto top-[max(0.75rem,env(safe-area-inset-top,0px))] bottom-auto items-start"
     : "right-3 bottom-3 items-end md:bottom-6";
   const searchVisible = !discoverMode && !directionsMode && !eventMode;
+  const discoverEntryVisible = Boolean(onOpenDiscover && !discoverMode && !eventMode && !directionsMode && !navigationActive);
+  const headerSlotVisible = searchVisible || discoverEntryVisible;
+  const offlineFallbackDesktopPosition = discoverMode
+    ? "md:absolute md:bottom-6 md:left-3 md:top-auto"
+    : "md:absolute md:bottom-6 md:left-auto md:right-3 md:top-auto";
   const headerSlotClass = "absolute left-2 top-2 w-auto pointer-events-none md:left-3 md:!right-auto md:top-3 md:w-[min(360px,calc(100vw-24px))]";
   const headerSlotStyle = {
     top: "max(0.5rem, env(safe-area-inset-top, 0.5rem))",
@@ -154,7 +159,7 @@ export function StudentMapControls({
 
   return (
     <div data-testid="student-map-controls" className="absolute inset-0 pointer-events-none">
-      {(searchVisible || (onOpenDiscover && !discoverMode && !eventMode && !directionsMode && !navigationActive)) && (
+      {headerSlotVisible && (
         <div
           data-testid="student-map-header-slot"
           ref={headerSlotRef}
@@ -201,16 +206,25 @@ export function StudentMapControls({
               </div>
             </div>
           )}
-          {onOpenDiscover && !discoverMode && !eventMode && !directionsMode && !navigationActive && (
-            <button type="button" data-testid="discover-plv-entry" onClick={onOpenDiscover} className={cn("pointer-events-auto mt-1.5 inline-flex min-h-9 items-center gap-2 rounded-full border border-primary/15 bg-card/95 px-3 text-[11px] font-extrabold text-primary shadow-md shadow-slate-950/5 backdrop-blur-xl transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50", !searchVisible && "mt-0", !directionsMode && "hidden md:inline-flex")}>
-              <Compass className="h-3.5 w-3.5" aria-hidden="true" />Discover PLV
-            </button>
+          {(discoverEntryVisible || (!online && searchVisible)) && (
+            <div data-testid="student-map-header-actions" className="pointer-events-none flex items-center gap-2 md:mt-1.5 md:min-h-9">
+              {discoverEntryVisible && (
+                <button type="button" data-testid="discover-plv-entry" onClick={onOpenDiscover} className="pointer-events-auto hidden min-h-9 items-center gap-2 rounded-full border border-primary/15 bg-card/95 px-3 text-[11px] font-extrabold text-primary shadow-md shadow-slate-950/5 backdrop-blur-xl transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:inline-flex">
+                  <Compass className="h-3.5 w-3.5" aria-hidden="true" />Discover PLV
+                </button>
+              )}
+              {!online && searchVisible && (
+                <div data-testid="student-map-offline-status" className="map-layer-controls pointer-events-auto fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] left-3 z-40 md:static md:z-auto">
+                  <OfflineInfoPopover testId="student-map-offline-trigger" />
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {!online && (
-        <div data-testid="student-map-offline-status" className="map-layer-controls absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] left-3 md:bottom-auto md:left-3 md:top-[4.25rem]">
+      {!online && !searchVisible && (
+        <div data-testid="student-map-offline-status" className={cn("map-layer-controls pointer-events-auto fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] left-3 z-40", offlineFallbackDesktopPosition)}>
           <OfflineInfoPopover testId="student-map-offline-trigger" />
         </div>
       )}
