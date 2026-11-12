@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   submissions: [] as Array<Record<string, unknown>>,
   markSubmissionRead: vi.fn(),
   requestGuarded: vi.fn(),
+  countUnseenLogs: vi.fn(),
+  markLogsSeen: vi.fn(),
 }));
 
 vi.mock("react-router", async (importOriginal) => {
@@ -53,7 +55,7 @@ vi.mock("../../../services/adminNotificationPreferencesService", () => ({
   },
 }));
 vi.mock("../../../lib/notificationService", () => ({
-  notificationService: { markLogsSeen: vi.fn(), countUnseenLogs: () => 0 },
+  notificationService: { markLogsSeen: mocks.markLogsSeen, countUnseenLogs: mocks.countUnseenLogs },
 }));
 vi.mock("../../../hooks/useAdminEventSubmissions", () => ({ useAdminEventSubmissions: () => ({ events: mocks.submissions, unreadIds: new Set(mocks.submissions.map(event => event.id)), pendingCount: mocks.submissions.length, unreadCount: mocks.submissions.length, eventsEnabled: true, loading: false, error: '', receiptError: '', refresh: vi.fn(), markRead: mocks.markSubmissionRead }) }));
 
@@ -63,6 +65,7 @@ describe("Admin activity notifications", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.pathname = "/admin-dashboard";
+    mocks.countUnseenLogs.mockReturnValue(0);
     mocks.submissions = [];
     mocks.markSubmissionRead.mockResolvedValue('saved');
     mocks.requestGuarded.mockImplementation((action: () => void) => action());
@@ -159,5 +162,55 @@ describe("Admin activity notifications", () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
     continueNavigation?.();
     expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/events?view=review&review=qa-one');
+  });
+
+  it('preserves unread activity on opening and marks only activity read explicitly', async () => {
+    mocks.listActivity.mockResolvedValue([{ id: 'unread-log', action: 'report.under_review', entity_id: 'report-one', created_at: '2026-11-13T00:00:00Z', metadata: { report_title: 'Broken light' } }]);
+    mocks.countUnseenLogs.mockImplementation((rows: unknown[]) => rows.length);
+    mocks.submissions = [{ id: 'qa-one', title: 'Student Fair', status: 'pending', locations: [] }];
+    render(<AdminLayout />);
+    await waitFor(() => expect(screen.getByTestId('admin-notification-unread')).toHaveTextContent('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Admin notifications' });
+    expect(dialog).toBeInTheDocument();
+    expect(mocks.markLogsSeen).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark activity read' }));
+    expect(mocks.markLogsSeen).toHaveBeenCalledWith('admin-1');
+    expect(screen.getByTestId('admin-notification-unread')).toHaveTextContent('1');
+    expect(mocks.markSubmissionRead).not.toHaveBeenCalled();
+  });
+
+  it('closes with Escape and restores focus to the bell', async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    render(<AdminLayout />);
+    const bell = screen.getByRole('button', { name: 'Notifications' });
+    fireEvent.click(bell);
+    const close = await screen.findByRole('button', { name: 'Close notifications' });
+    await waitFor(() => expect(close).toHaveFocus());
+    fireEvent.keyDown(close, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Admin notifications' })).not.toBeInTheDocument());
+    expect(bell).toHaveFocus();
+  });
+
+  it('dismisses on an outside pointer without moving focus back into the panel', async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    render(<AdminLayout />);
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+    await screen.findByRole('dialog', { name: 'Admin notifications' });
+    fireEvent.pointerDown(screen.getByTestId('route-outlet-content'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Admin notifications' })).not.toBeInTheDocument());
+  });
+
+  it('guards the activity-log footer destination before closing the panel', async () => {
+    mocks.listActivity.mockResolvedValue([]);
+    let continueNavigation: (() => void) | undefined;
+    mocks.requestGuarded.mockImplementation((action: () => void) => { continueNavigation = action; });
+    render(<AdminLayout />);
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View all activity logs' }));
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Admin notifications' })).toBeInTheDocument();
+    continueNavigation?.();
+    expect(mocks.navigate).toHaveBeenCalledWith('/admin-dashboard/activity-logs');
   });
 });

@@ -8,14 +8,14 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 import { useTheme } from "../../hooks/useTheme";
 import { useAdminAuth } from "../../hooks/useAdminAuth";
 import { cn } from "../../lib/utils";
-import { PanelLeftClose, PanelLeft, Menu, Bell, User, History, CheckCheck } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { PanelLeftClose, PanelLeft, Menu, Bell, User, History, ArrowRight, X, CheckCheck } from "lucide-react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   activityLogErrorMessage,
   activityLogService,
   type ActivityLogRow,
 } from "../../services/activityLogService";
-import { formatAdminActivity } from "../../services/adminActivityPresentation";
+import { AdminActivityNotifications } from "./AdminActivityNotifications";
 import type { ActivityPresentationContext } from "../../services/activityLogService";
 import { notificationService } from "../../lib/notificationService";
 import {
@@ -71,13 +71,16 @@ export function AdminLayout() {
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 767.98px)").matches
   );
   const [bellOpen, setBellOpen] = useState(false);
-  const bellOpenRef = useRef(bellOpen);
-  bellOpenRef.current = bellOpen;
+  const bellContainerRef = useRef<HTMLDivElement>(null);
+  const bellButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const reduceMotion = useReducedMotion();
   const [logs, setLogs] = useState<ActivityLogRow[]>([]);
   const [activityContexts, setActivityContexts] = useState<Map<string, ActivityPresentationContext>>(new Map());
   const [activityFeedLoading, setActivityFeedLoading] = useState(true);
   const [activityFeedError, setActivityFeedError] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
+  const [unreadActivityIds, setUnreadActivityIds] = useState<ReadonlySet<string>>(new Set());
   const navigate = useNavigate();
   const location = useLocation();
   const { loading, isAdmin, profile } = useAdminAuth();
@@ -97,11 +100,12 @@ export function AdminLayout() {
       // Pending submissions have their own actionable feed. Draft/autosave audit
       // records remain in Activity Logs without crowding the notification bell.
       const eligibleRows = allRows.filter((row) => adminNotificationPreferencesService.isEnabled(row, preferences) && !['event_overlay.submit', 'event_overlay.create', 'event_overlay.update_layout', 'event_overlay.update_details'].includes(row.action));
-      const rows = eligibleRows.slice(0, 6);
+      const rows = eligibleRows;
       const contextMap = await activityLogService.resolveActivityPresentationContexts(rows);
       setLogs(rows);
       setActivityContexts(contextMap);
-      setUnread(bellOpenRef.current ? 0 : notificationService.countUnseenLogs(eligibleRows, profile?.id));
+      setUnread(notificationService.countUnseenLogs(rows, profile?.id));
+      setUnreadActivityIds(new Set(rows.filter(row => notificationService.countUnseenLogs([row], profile?.id) > 0).map(row => row.id)));
     } catch (error) {
       setActivityFeedError(activityLogErrorMessage(error));
     } finally {
@@ -127,13 +131,37 @@ export function AdminLayout() {
     };
   }, [isAdmin, loadActivityNotifications, loading]);
 
+  const closeNotifications = useCallback(() => {
+    setBellOpen(false);
+    bellButtonRef.current?.focus();
+  }, []);
+
+  const markActivityRead = () => {
+    notificationService.markLogsSeen(profile?.id);
+    setUnread(0);
+    setUnreadActivityIds(new Set());
+  };
+
   useEffect(() => {
-    if (bellOpen) {
-      notificationService.markLogsSeen(profile?.id);
-      setUnread(0);
-      void loadActivityNotifications();
-    }
-  }, [bellOpen, loadActivityNotifications, profile?.id]);
+    if (!bellOpen) return;
+    void loadActivityNotifications();
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeNotifications();
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !bellContainerRef.current?.contains(event.target)) setBellOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [bellOpen, closeNotifications, loadActivityNotifications]);
 
   // Keep the mobile drawer closed when navigating between pages.
   useEffect(() => {
@@ -228,13 +256,16 @@ export function AdminLayout() {
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
           {/* Notification bell — real activity-log feed */}
-          <div className="relative">
+          <div ref={bellContainerRef} className="relative">
             <button
+              ref={bellButtonRef}
+              type="button"
               onClick={() => setBellOpen((v) => !v)}
               aria-expanded={bellOpen}
-              aria-haspopup="true"
+              aria-haspopup="dialog"
+              aria-controls={bellOpen ? 'admin-notification-panel' : undefined}
               aria-label="Notifications"
-              className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted active:scale-90 transition-all"
+              className={cn("relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", bellOpen && 'bg-muted text-foreground')}
             >
               <Bell className="h-4 w-4" />
               {notificationUnread > 0 && (
@@ -247,78 +278,63 @@ export function AdminLayout() {
             <AnimatePresence>
               {bellOpen && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                  initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.98, y: reduceMotion ? 0 : -5 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                  transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.98, y: reduceMotion ? 0 : -5 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  id="admin-notification-panel"
+                  role="dialog"
                   aria-label="Admin notifications"
-                  className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-border bg-card shadow-xl overflow-hidden max-md:fixed max-md:left-3 max-md:right-3 max-md:top-[4.5rem] max-md:mt-0 max-md:w-auto"
+                  className="absolute right-0 top-full mt-2 flex max-h-[min(40rem,calc(100dvh-6rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)))] w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-xl dark:shadow-black/40 max-md:fixed max-md:left-3 max-md:right-3 max-md:top-[calc(4.5rem+env(safe-area-inset-top,0px))] max-md:mt-0 max-md:w-auto"
                   style={{ zIndex: 60, transformOrigin: "top right" }}
                 >
-                  <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                    <Bell className="h-3.5 w-3.5 text-primary" />
-                    <p className="text-sm font-extrabold text-foreground flex-1">Notifications</p>
+                  <div className="shrink-0 border-b border-border px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <Bell aria-hidden="true" className="h-4 w-4 text-primary" />
+                    <h2 className="flex-1 text-base font-extrabold">Notifications</h2>
                     {notificationUnread > 0 && (
-                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300">{notificationUnread} unread</span>
+                      <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-200">{notificationUnread} unread</span>
                     )}
+                    <button ref={closeButtonRef} type="button" aria-label="Close notifications" onClick={closeNotifications} className="-mr-2 grid min-h-11 min-w-11 place-items-center rounded-lg text-slate-600 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-slate-300"><X aria-hidden="true" className="h-4 w-4" /></button>
+                    </div>
                   </div>
-                  <div className="max-h-[min(28rem,70dvh)] overflow-y-auto overscroll-contain">
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                     {submissions.eventsEnabled && <div className="border-b border-border">
-                      <div className="px-4 pt-3 pb-2"><p className="text-xs font-bold">Event submissions <span className="font-normal text-muted-foreground">· {submissions.pendingCount} pending</span></p><p className="mt-1 text-[11px] text-muted-foreground">Open a submission to mark its update as read.</p></div>
+                      <div className="bg-muted/40 px-4 py-3"><div className="flex items-center justify-between gap-2"><h3 className="text-xs font-bold">Needs review</h3><span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">{submissions.pendingCount} pending</span></div>{submissions.events.length > 0 && <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">Open a submission to mark its update as read.</p>}</div>
                       {submissions.events.slice(0, 6).map(event => {
                         const isUnread = submissions.unreadIds.has(event.id);
                         const count = normalizeEventOverlayLocations(event).length;
-                        return <AdminNotificationAction key={event.id} to={`/admin-dashboard/events?view=review&review=${encodeURIComponent(event.id)}`} ariaLabel={`Review ${event.title}`} onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full gap-3 px-4 py-3 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
-                          <span className="relative mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><History className="h-4 w-4" />{isUnread && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-600 ring-2 ring-card" />}</span>
-                          <span className="min-w-0 flex-1"><span className="block break-words text-xs font-bold">{event.title}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{event.organizer || 'Student organization'} · {count} map{count === 1 ? '' : 's'}</span><span className="mt-1 block text-[11px] text-muted-foreground">{submissionUpdateLabel(event)} · {formatEventSubmissionTime(event.lastEditedAt && Date.parse(event.lastEditedAt) > Date.parse(event.submittedAt ?? '') ? event.lastEditedAt : event.submittedAt)}</span><span className="mt-2 block text-xs font-bold text-primary">Review submission <span aria-hidden="true">→</span></span></span>
+                        return <AdminNotificationAction key={event.id} to={`/admin-dashboard/events?view=review&review=${encodeURIComponent(event.id)}`} ariaLabel={`Review ${event.title}${isUnread ? ', unread' : ''}`} onNavigate={() => setBellOpen(false)} className={cn("flex min-h-11 w-full gap-3 border-t border-border px-4 py-4 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", isUnread && 'bg-blue-50/60 dark:bg-blue-950/25')}>
+                          <span className="relative mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200"><History aria-hidden="true" className="h-4 w-4" />{isUnread && <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-blue-600 ring-2 ring-card dark:bg-blue-400" />}</span>
+                          <span className="min-w-0 flex-1"><span className="block break-words text-sm font-bold leading-5 [overflow-wrap:anywhere]">{event.title}</span><span className="mt-2 block break-words text-xs leading-5 text-slate-600 dark:text-slate-300">{event.organizer || 'Student organization'} · {count} map{count === 1 ? '' : 's'}</span><span className="mt-1 block text-xs leading-5 text-slate-600 dark:text-slate-300">{submissionUpdateLabel(event)} · {formatEventSubmissionTime(event.lastEditedAt && Date.parse(event.lastEditedAt) > Date.parse(event.submittedAt ?? '') ? event.lastEditedAt : event.submittedAt)}</span><span className="mt-2 block text-xs font-bold text-primary">Review submission <span aria-hidden="true">→</span></span></span>
                         </AdminNotificationAction>;
                       })}
                       {submissions.loading && <p role="status" className="px-4 pb-3 text-xs text-muted-foreground">Loading submissions…</p>}
                       {submissions.error && <div className="px-4 pb-3"><p role="alert" className="text-xs text-destructive">{submissions.error}</p><button type="button" onClick={() => void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry submissions</button></div>}
                       {submissions.receiptError && <div className="px-4 pb-3"><p role="status" className="text-xs text-muted-foreground">{submissions.receiptError}</p><button type="button" onClick={()=>void submissions.refresh()} className="mt-1 min-h-11 text-xs font-bold text-primary">Retry read sync</button></div>}
-                      {!submissions.loading && !submissions.error && submissions.pendingCount === 0 && <p className="px-4 pb-3 text-xs text-muted-foreground">No submissions waiting for review.</p>}
+                      {!submissions.loading && !submissions.error && submissions.pendingCount === 0 && <p className="px-4 py-3 text-xs leading-5 text-slate-600 dark:text-slate-300">No submissions waiting for review.</p>}
                       {submissions.pendingCount > 0 && <AdminNotificationAction to="/admin-dashboard/events?view=review" onNavigate={() => setBellOpen(false)} className="flex min-h-11 w-full items-center justify-center border-t border-border text-xs font-bold text-primary hover:bg-muted">View all {submissions.pendingCount} pending submissions</AdminNotificationAction>}
                     </div>}
-                    <div className="divide-y divide-border">
-                    {logs.length > 0 ? (
-                      logs.map((l) => (
-                        <div key={l.id} className="flex items-center gap-2.5 px-4 py-2.5">
-                          <div className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                            <History className="h-3 w-3" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            {(() => {
-                              const formatted = formatAdminActivity(l, activityContexts.get(l.id));
-                              return (
-                                <>
-                                  <p className="truncate text-[11px] font-bold text-foreground">{formatted.title}</p>
-                                  <p className="truncate text-[10px] text-muted-foreground">{formatted.notificationText}</p>
-                                  <p className="truncate text-[9px] text-muted-foreground/80">{formatted.category} · {formatted.actorLabel}</p>
-                                </>
-                              );
-                            })()}
-                          </div>
-                          <span className="shrink-0 text-[9px] text-muted-foreground">{formatAdminActivity(l, activityContexts.get(l.id)).relativeTime}</span>
-                        </div>
-                      ))
-                    ) : activityFeedLoading ? (
-                      <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading activity…</p>
-                    ) : activityFeedError ? (
-                      <div className="space-y-2 px-4 py-5 text-center">
-                        <p role="alert" className="text-xs font-semibold text-muted-foreground">Couldn’t load activity.</p>
-                        <button onClick={() => void loadActivityNotifications()} className="text-[11px] font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Try again</button>
+                    <section aria-labelledby="notification-activity-heading">
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 border-b border-border bg-muted/40 px-4 py-2">
+                        <h3 id="notification-activity-heading" className="py-2 text-xs font-bold">Recent activity</h3>
+                        {unread > 0 && <button type="button" onClick={markActivityRead} className="inline-flex min-h-11 items-center gap-1.5 rounded-md text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><CheckCheck aria-hidden="true" className="h-3.5 w-3.5" />Mark activity read</button>}
                       </div>
-                    ) : (
-                      <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet.</p>
-                    )}
-                    </div>
+                      {activityFeedError && <div className="space-y-2 px-4 py-5 text-center">
+                        <p role="alert" className="text-sm font-semibold text-foreground">Couldn’t load activity.</p>
+                        <button type="button" onClick={() => void loadActivityNotifications()} className="min-h-11 rounded-md px-3 text-xs font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Try again</button>
+                      </div>}
+                      {logs.length > 0 ? <AdminActivityNotifications logs={logs} contexts={activityContexts} unreadIds={unreadActivityIds} />
+                        : activityFeedLoading ? <p role="status" className="px-4 py-6 text-center text-sm text-slate-600 dark:text-slate-300">Loading activity…</p>
+                        : !activityFeedError && <p className="px-4 py-6 text-center text-sm text-slate-600 dark:text-slate-300">No activity yet.</p>}
+                    </section>
                   </div>
                   <AdminNotificationAction
                     to="/admin-dashboard/activity-logs"
                     onNavigate={() => setBellOpen(false)}
-                    className="flex min-h-11 w-full items-center justify-center gap-1.5 px-4 py-2.5 border-t border-border text-[11px] font-bold text-primary hover:bg-muted transition-colors"
+                    className="flex min-h-12 w-full shrink-0 items-center justify-center gap-2 border-t border-border px-4 py-3 text-xs font-bold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
-                    <CheckCheck className="h-3 w-3" /> View all activity logs
+                    View all activity logs <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
                   </AdminNotificationAction>
                 </motion.div>
               )}
