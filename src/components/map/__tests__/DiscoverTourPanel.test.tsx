@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DiscoverTourPanel } from "../DiscoverTourPanel";
 
@@ -7,6 +7,66 @@ const handlers = {
 };
 
 describe("DiscoverTourPanel", () => {
+  it.each([false, true])("shows captions at all five stops and opens the fifth building (reduced motion: %s)", (reducedMotion) => {
+    vi.useFakeTimers();
+    const onNext = vi.fn();
+    const onEnter = vi.fn();
+    try {
+      const buildings = [
+        { code: "SC", name: "Student Center Building", caption: "SC building" },
+        { code: "CABA", name: "College of Accountancy and Business Administration", caption: "CABA building" },
+        { code: "CAN", name: "University Canteen", caption: "the Canteen" },
+        { code: "COED", name: "College of Education Building", caption: "COED building" },
+        { code: "CEIT", name: "College of Engineering and Information Technology", caption: "CEIT building" },
+      ];
+      const panel = (stopIndex: number) => (
+        <DiscoverTourPanel
+          open view="showcase" building={{ ...buildings[stopIndex], floorCount: 2 }}
+          stopIndex={stopIndex} stopCount={6} reducedMotion={reducedMotion} {...handlers} onNext={onNext} onEnter={onEnter}
+        />
+      );
+      const view = render(panel(0));
+      expect(screen.getByTestId("discover-tour-panel")).not.toContainElement(screen.getByRole("status"));
+
+      for (let stopIndex = 0; stopIndex < 4; stopIndex += 1) {
+        expect(screen.getByRole("status")).toHaveTextContent(`Let’s visit ${buildings[stopIndex].caption}.`);
+        expect(screen.getByRole("status")).not.toHaveTextContent(buildings[stopIndex].name);
+        expect(screen.getByRole("button", { name: "Next building" })).toHaveClass("ring-2");
+        act(() => vi.advanceTimersByTime(3600));
+        expect(onNext).toHaveBeenCalledTimes(stopIndex + 1);
+        expect(onEnter).not.toHaveBeenCalled();
+        view.rerender(panel(stopIndex + 1));
+      }
+
+      expect(screen.getByRole("status")).toHaveTextContent("Let’s visit CEIT building.");
+      expect(screen.getByRole("status")).toHaveTextContent("Let’s see what’s inside.");
+      expect(screen.getByRole("button", { name: "See What's Inside" })).toHaveClass("ring-2");
+      act(() => vi.advanceTimersByTime(3600));
+      expect(onEnter).toHaveBeenCalledOnce();
+      expect(onNext).toHaveBeenCalledTimes(4);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the scheduled advance when the guide is skipped", () => {
+    vi.useFakeTimers();
+    const onNext = vi.fn();
+    try {
+      render(<DiscoverTourPanel
+        open view="showcase" building={{ name: "Library", code: "LIB", floorCount: 2 }}
+        stopIndex={0} stopCount={2} reducedMotion {...handlers} onNext={onNext}
+      />);
+      fireEvent.click(screen.getByRole("button", { name: "Skip guide" }));
+      act(() => vi.advanceTimersByTime(3600));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(onNext).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows one authored stop, navigates, enters, and returns from inside", () => {
     const view = render(<DiscoverTourPanel
       open view="showcase" building={{ name: "Science Building", code: "SCI", description: "Labs and lecture rooms.", floorCount: 3 }}

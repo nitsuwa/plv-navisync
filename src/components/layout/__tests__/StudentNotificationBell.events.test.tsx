@@ -200,7 +200,9 @@ describe("student event notifications", () => {
     expect(screen.getByRole("button", { name: /Mark all read/ })).toHaveClass("dark:text-blue-300");
     expect(screen.getByRole("link", { name: /Ongoing Campus Event/i }).querySelector(".uppercase")).toHaveClass("text-emerald-800", "dark:text-emerald-300");
 
-    const statusFilter = screen.getByRole("combobox", { name: "Report status" });
+    const statusFilter = screen.getByRole("combobox", { name: "Filter notifications" });
+    expect(screen.queryByText("Report status")).not.toBeInTheDocument();
+    expect(statusFilter.nextElementSibling).toBe(screen.getByRole("button", { name: "Mark all read" }));
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     try {
@@ -210,6 +212,13 @@ describe("student event notifications", () => {
       fireEvent.click(screen.getByRole("option", { name: "Pending" }));
       expect(await screen.findByText("No pending reports")).toBeInTheDocument();
       expect(statusFilter).toHaveTextContent("Pending");
+
+      fireEvent.click(statusFilter);
+      fireEvent.click(await screen.findByRole("option", { name: "Events" }));
+      expect(statusFilter).toHaveTextContent("Events");
+      expect(await screen.findByRole("link", { name: /Upcoming Campus Event/i })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Ongoing Campus Event/i })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Walkway light/i })).not.toBeInTheDocument();
     } finally {
       Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: originalScrollIntoView });
     }
