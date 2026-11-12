@@ -1,9 +1,40 @@
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Link2, X } from "lucide-react";
+import { Download, Link2, MapPin, X } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
 import { appUrl } from "../../lib/appUrl";
+
+const CARD_WIDTH = 600;
+const CARD_HEIGHT = 720;
+
+function LocationQRCard({ url, name, compact = false }: { url: string; name: string; compact?: boolean }) {
+  const label = Array.from(name);
+  const title = label.length > 52 ? `${label.slice(0, 51).join("")}…` : name;
+  return (
+    <svg
+      viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`}
+      width={compact ? 180 : CARD_WIDTH}
+      height={compact ? 216 : CARD_HEIGHT}
+      className="block h-auto max-w-full rounded-xl shadow-sm"
+      role="img"
+      aria-label={`QR code for ${name}`}
+    >
+      <rect width={CARD_WIDTH} height={CARD_HEIGHT} fill="#0e2a6e" />
+      <rect x="22" y="22" width="556" height="676" rx="18" fill="none" stroke="#4261a0" strokeWidth="2" />
+      <rect x="46" y="38" width="52" height="52" rx="13" fill="#ffdb75" />
+      <MapPin x={57} y={49} width={30} height={30} color="#0e2a6e" aria-hidden="true" />
+      <g fontFamily="Arial, sans-serif" fill="#ffffff">
+        <text x="116" y="74" fontSize="34" fontWeight="800">PLV NaviSync</text>
+        <text x="300" y="654" textAnchor="middle" fontSize="26" fontWeight="700"
+          textLength={label.length > 34 ? 508 : undefined} lengthAdjust="spacingAndGlyphs">{title}</text>
+        <text x="300" y="682" textAnchor="middle" fontSize="17" fill="#dbe8ff">Scan to open this location</text>
+      </g>
+      <QRCodeSVG x={44} y={108} value={url} size={512} level="M" marginSize={4}
+        fgColor="#0b1d3a" bgColor="#ffffff" aria-hidden="true" />
+    </svg>
+  );
+}
 
 /**
  * Scannable QR deep link to a building or an individual room.
@@ -74,8 +105,8 @@ export function LocationQR({
           image.src = imageUrl;
         });
         const canvas = document.createElement("canvas");
-        canvas.width = 1024;
-        canvas.height = 1024;
+        canvas.width = CARD_WIDTH * 2;
+        canvas.height = CARD_HEIGHT * 2;
         const context = canvas.getContext("2d");
         if (!context) throw new Error("Canvas unavailable");
         context.fillStyle = "#ffffff";
@@ -113,8 +144,9 @@ export function LocationQR({
           <div className="min-w-0 flex-1"><h2 id="location-qr-dialog-title" className="truncate text-sm font-extrabold">Location QR</h2><p className="mt-1 truncate text-[11px] text-muted-foreground">{locationName}</p></div>
           <button type="button" onClick={close} aria-label="Close location QR" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><X className="h-4 w-4" /></button>
         </header>
-        <p className="mb-3 text-center text-xs text-muted-foreground">Scan to open this location in PLV NaviSync.</p>
-        <div ref={qrRef} className="mx-auto w-full max-w-[min(76vw,22rem)] rounded-xl bg-white p-2 shadow-sm"><QRCodeSVG value={url} size={512} className="block h-auto w-full" level="M" marginSize={2} fgColor="#0f172a" bgColor="#ffffff" aria-label={`QR code for ${locationName}`} /></div>
+        <div ref={qrRef} className="mx-auto w-full max-w-[min(76vw,22rem)] shrink-0">
+          <LocationQRCard url={url} name={locationName} />
+        </div>
         <div className="mt-3 flex shrink-0 flex-wrap justify-center gap-2">
           <button type="button" onClick={() => void download()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 text-xs font-bold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><Download className="h-4 w-4" />Download QR</button>
           <button type="button" onClick={() => void copyLink()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><Link2 className="h-4 w-4" />Copy link</button>
@@ -125,26 +157,13 @@ export function LocationQR({
 
   return (
     <div className="flex flex-col items-center gap-2.5">
-      <div className="rounded-xl bg-white p-2.5 shadow-sm">
-        <QRCodeSVG
-          value={url}
-          size={132}
-          level="M"
-          marginSize={1}
-          fgColor="#0f172a"
-          bgColor="#ffffff"
-          aria-label={`QR code for ${locationName}`}
-        />
-      </div>
+      <LocationQRCard url={url} name={locationName} compact />
       <button
         onClick={copyLink}
         className="inline-flex items-center gap-1.5 text-[10px] font-bold text-primary hover:underline active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
       >
         <Link2 className="h-3 w-3" /> Copy link
       </button>
-      <p className="text-[10px] text-muted-foreground text-center">
-        Scan to set {locationName} as your current location
-      </p>
     </div>
   );
 }

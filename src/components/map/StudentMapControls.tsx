@@ -14,6 +14,7 @@ import { cn } from "../../lib/utils";
 import { usePwaState } from "../../lib/pwa";
 import type { DestinationFilter } from "../../lib/destinationSearch";
 import { CampusDestinationSearch } from "./CampusDestinationSearch";
+import { OfflineInfoPopover } from "./OfflineInfoPopover";
 
 export interface StudentMapControlsProps {
   isFloorMode: boolean;
@@ -209,15 +210,8 @@ export function StudentMapControls({
       )}
 
       {!online && (
-        <div
-          role="status"
-          aria-label="Offline. Using saved campus data; live updates are unavailable."
-          title="Using saved campus data. Live updates are unavailable."
-          data-testid="student-map-offline-status"
-          className="map-layer-controls pointer-events-none absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] left-3 inline-flex h-8 items-center gap-1.5 rounded-full border border-amber-500/20 bg-card/90 px-2.5 text-[10px] font-bold text-amber-700 shadow-sm backdrop-blur-sm dark:text-amber-300 md:bottom-auto md:left-1/2 md:top-3 md:-translate-x-1/2"
-        >
-          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-          Offline
+        <div data-testid="student-map-offline-status" className="map-layer-controls absolute bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] left-3 md:bottom-auto md:left-3 md:top-[4.25rem]">
+          <OfflineInfoPopover testId="student-map-offline-trigger" />
         </div>
       )}
 

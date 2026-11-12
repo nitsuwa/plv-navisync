@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import { Camera, Flashlight, FlashlightOff, Search, X } from "lucide-react";
 import { useEscToClose } from "../../hooks/useEscToClose";
-import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { triggerMapFeedback } from "../../lib/mapFeedback";
 
 interface LocationQRScannerProps {
@@ -18,10 +17,7 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
   const controlsRef = useRef<IScannerControls | null>(null);
   const onScanRef = useRef(onScan);
   const handledRef = useRef(false);
-  const successTimerRef = useRef<number | null>(null);
-  const reducedMotion = useReducedMotion();
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [scanSuccess, setScanSuccess] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
 
@@ -50,11 +46,8 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
       if (!active || handledRef.current || !result) return;
       handledRef.current = true;
       stopCamera();
-      setScanSuccess(true);
-      successTimerRef.current = window.setTimeout(() => {
-        const validLocation = onScanRef.current(result.getText());
-        if (validLocation !== false) triggerMapFeedback("scan-success");
-      }, reducedMotion ? 0 : 90);
+      const validLocation = onScanRef.current(result.getText());
+      if (validLocation !== false) triggerMapFeedback("scan-success");
     }).then((controls) => {
       if (!active || handledRef.current) {
         controls.stop();
@@ -82,10 +75,9 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
 
     return () => {
       active = false;
-      if (successTimerRef.current !== null) window.clearTimeout(successTimerRef.current);
       stopCamera();
     };
-  }, [reducedMotion]);
+  }, []);
 
   const toggleTorch = async () => {
     const video = videoRef.current;
@@ -129,17 +121,9 @@ export function LocationQRScanner({ onClose, onScan, onSearchInstead }: Location
         <div data-testid="location-qr-scanner-content" className="flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 sm:flex-initial sm:justify-start sm:gap-4 sm:overflow-visible sm:p-4">
           <div data-testid="location-qr-viewfinder" className="relative mx-auto flex min-h-[min(58vw,14rem)] max-h-[58dvh] w-full flex-1 overflow-hidden rounded-2xl bg-black sm:aspect-[4/3] sm:min-h-0 sm:max-h-none sm:flex-initial">
             <video ref={videoRef} data-testid="location-qr-video" autoPlay muted playsInline className="h-full w-full object-cover" aria-label="Camera preview for scanning a location QR" />
-            {!cameraError && <div aria-hidden="true" data-testid="location-qr-scan-frame" data-scan-state={scanSuccess ? "success" : "scanning"} className="location-qr-scan-frame absolute left-1/2 top-1/2 aspect-square w-[min(78%,16rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border-2 border-white/90">
-              <span className="location-qr-scan-beam" />
-            </div>}
             {torchAvailable && !cameraError && <button type="button" data-no-drag onClick={() => void toggleTorch()} aria-label={torchEnabled ? "Turn flashlight off" : "Turn flashlight on"} aria-pressed={torchEnabled} className="absolute right-3 top-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80">
               {torchEnabled ? <FlashlightOff className="h-4 w-4" /> : <Flashlight className="h-4 w-4" />}
             </button>}
-            {!cameraError && (
-              <p className="absolute inset-x-2 bottom-2 rounded-full bg-black/65 px-3 py-2 text-center text-[11px] font-semibold text-white">
-                Align a PLV NaviSync QR code within the frame
-              </p>
-            )}
             {cameraError && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/75 px-6 text-center text-white">
                 <Camera className="h-7 w-7 text-white/80" />
