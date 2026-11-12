@@ -500,10 +500,9 @@ export function AdminReportsPage() {
     void loadReports();
   };
 
-  const visibleReports = useMemo(() => {
+  const matchingReports = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return reports.filter(report => {
-      if (statusFilter !== "all" && report.status !== statusFilter) return false;
       if (categoryFilter !== "All Categories" && report.category !== categoryFilter) return false;
       if (!query) return true;
       return [
@@ -520,7 +519,12 @@ export function AdminReportsPage() {
         report.reporterId,
       ].filter(Boolean).join(" ").toLocaleLowerCase().includes(query);
     });
-  }, [reports, statusFilter, categoryFilter, search]);
+  }, [reports, categoryFilter, search]);
+
+  const visibleReports = useMemo(() => {
+    if (statusFilter === "all") return matchingReports;
+    return matchingReports.filter(report => report.status === statusFilter);
+  }, [matchingReports, statusFilter]);
 
   /** Export the currently filtered reports as a readable CSV. */
   const exportReports = () => {
@@ -534,12 +538,12 @@ export function AdminReportsPage() {
   };
 
   const counts: Record<string, number> = {
-    all: reports.length,
-    pending: reports.filter(r => r.status === "pending").length,
-    under_review: reports.filter(r => r.status === "under_review").length,
-    in_progress: reports.filter(r => r.status === "in_progress").length,
-    resolved: reports.filter(r => r.status === "resolved").length,
-    rejected: reports.filter(r => r.status === "rejected").length,
+    all: matchingReports.length,
+    pending: matchingReports.filter(r => r.status === "pending").length,
+    under_review: matchingReports.filter(r => r.status === "under_review").length,
+    in_progress: matchingReports.filter(r => r.status === "in_progress").length,
+    resolved: matchingReports.filter(r => r.status === "resolved").length,
+    rejected: matchingReports.filter(r => r.status === "rejected").length,
   };
 
   const tabs: { key: ReportStatus | "all"; label: string }[] = [

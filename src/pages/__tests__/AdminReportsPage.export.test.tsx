@@ -59,6 +59,25 @@ const underReviewReport: IssueReport = {
   updatedAt: "2026-09-30T14:40:27.075Z",
 };
 
+const brokenEquipmentUnderReviewReport: IssueReport = {
+  ...underReviewReport,
+  id: "report-under-review-broken-002",
+  title: "Broken equipment awaiting review",
+};
+
+const waterLeakUnderReviewReport: IssueReport = {
+  ...brokenEquipmentUnderReviewReport,
+  id: "report-under-review-water-003",
+  category: "water_leak",
+  title: "Water leak awaiting review",
+};
+
+const secondWaterLeakUnderReviewReport: IssueReport = {
+  ...waterLeakUnderReviewReport,
+  id: "report-under-review-water-004",
+  title: "Second water leak awaiting review",
+};
+
 describe("AdminReportsPage CSV export scope", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -116,6 +135,40 @@ describe("AdminReportsPage CSV export scope", () => {
 
     expect(await screen.findByRole("button", { name: "View report: Water leak at West Annex" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "View report: Test report A" })).not.toBeInTheDocument();
+    expect(reportServiceMocks.listAllReports).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates status tab counts to match the selected category and search", async () => {
+    reportServiceMocks.listAllReports.mockResolvedValueOnce([
+      pendingReport,
+      brokenEquipmentUnderReviewReport,
+      waterLeakUnderReviewReport,
+      secondWaterLeakUnderReviewReport,
+      resolvedReport,
+    ]);
+    render(<AdminReportsPage />);
+
+    expect(await screen.findByRole("button", { name: /^Under Review\s*3$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Under Review\s*3$/ }));
+    expect(screen.getAllByRole("button", { name: /^View report:/ })).toHaveLength(3);
+
+    const categoryTrigger = screen.getByRole("combobox", { name: "Filter reports by category" });
+    fireEvent.keyDown(categoryTrigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Broken Equipment" }));
+
+    expect(await screen.findByRole("button", { name: "View report: Broken equipment awaiting review" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^View report:/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /^All\s*2$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pending\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Under Review\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Resolved\s*0$/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "Broken equipment awaiting review" } });
+
+    expect(screen.getByRole("button", { name: /^All\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pending\s*0$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Under Review\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Resolved\s*0$/ })).toBeInTheDocument();
     expect(reportServiceMocks.listAllReports).toHaveBeenCalledTimes(1);
   });
 
