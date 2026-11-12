@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AdminUsersPage } from "../AdminUsersPage";
 
+const mobileAccounts = () => within(screen.getByTestId("mobile-user-cards"));
+const findMobileText = async (text: string) => within(await screen.findByTestId("mobile-user-cards")).findByText(text);
+
 const mocks = vi.hoisted(() => ({
   useAdminAuth: vi.fn(),
   listManagedProfiles: vi.fn(),
@@ -93,9 +96,35 @@ describe("AdminUsersPage role-aware account forms", () => {
     });
     render(<AdminUsersPage />);
     expect(await screen.findByText("Backend setup required")).toBeTruthy();
-    expect(screen.getByText("Jamie Student")).toBeTruthy();
+    expect(mobileAccounts().getByText("Jamie Student")).toBeTruthy();
     expect((screen.getByRole("button", { name: /Invite User/i }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Pending Invite" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows mobile account cards before organization management and keeps a jump link to that panel", async () => {
+    mocks.listManagedProfiles.mockResolvedValue({
+      profiles: [{
+        id: "student-4", role: "student", account_status: "active", first_name: "Taylor", last_name: "Student",
+        email: "taylor@example.test", student_number: "23-3314", department: "Science", avatar_path: null,
+        is_active: true, last_login_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      }],
+      invitationMetadataAvailable: true,
+    });
+    const { container } = render(<AdminUsersPage />);
+
+    const manageLink = await screen.findByRole("link", { name: "Manage student organizations" });
+    const results = container.querySelector('[data-testid="user-results"]')!;
+    const organizations = container.querySelector("#student-organizations")!;
+    expect(manageLink).toHaveAttribute("href", "#student-organizations");
+    expect(results.compareDocumentPosition(organizations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const cards = container.querySelector('[data-testid="mobile-user-cards"]')!;
+    expect(within(cards).getByText("Taylor Student")).toBeTruthy();
+    expect(within(cards).getByText("taylor@example.test")).toBeTruthy();
+    expect(within(cards).getByText("Science")).toBeTruthy();
+    expect(within(cards).getByText("Student")).toBeTruthy();
+    expect(within(cards).getByText("Active")).toBeTruthy();
+    expect(within(cards).getByRole("button", { name: "Actions for Taylor Student" })).toBeTruthy();
   });
 
   it.each([
@@ -116,8 +145,8 @@ describe("AdminUsersPage role-aware account forms", () => {
       ],
     });
     render(<AdminUsersPage />);
-    await screen.findByText(targetName);
-    fireEvent.pointerDown(screen.getByRole("button", { name: `Actions for ${targetName}` }), { button: 0, ctrlKey: false });
+    await findMobileText(targetName);
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: `Actions for ${targetName}` }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
     const roleControl = screen.getByRole("combobox", { name: "Role" }) as HTMLButtonElement;
     const accessControl = screen.getByRole("combobox", { name: "Account status" }) as HTMLButtonElement;
@@ -136,8 +165,8 @@ describe("AdminUsersPage role-aware account forms", () => {
     mocks.useAdminAuth.mockReturnValue({ profile: { id: "root", role: "super_admin", is_active: true }, refreshProfile: vi.fn().mockResolvedValue(undefined) });
     mocks.listManagedProfiles.mockResolvedValue({ profiles: [self], invitationMetadataAvailable: true });
     render(<AdminUsersPage />);
-    await screen.findByText("Alex Root");
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Alex Root" }), { button: 0, ctrlKey: false });
+    await findMobileText("Alex Root");
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: "Actions for Alex Root" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
     expect(screen.getByText("You can't change your own role or deactivate your own account.")).toBeTruthy();
     expect((screen.getByRole("combobox", { name: "Role" }) as HTMLButtonElement).disabled).toBe(true);
@@ -152,8 +181,8 @@ describe("AdminUsersPage role-aware account forms", () => {
     };
     mocks.listManagedProfiles.mockResolvedValue({ profiles: [target], invitationMetadataAvailable: true });
     render(<AdminUsersPage />);
-    await screen.findByText("Casey Admin");
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Casey Admin" }), { button: 0, ctrlKey: false });
+    await findMobileText("Casey Admin");
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: "Actions for Casey Admin" }), { button: 0, ctrlKey: false });
     const edit = await screen.findByRole("menuitem", { name: "Edit account" });
     expect(edit.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByText("Only a Super Admin can manage this account.")).toBeTruthy();
@@ -171,8 +200,8 @@ describe("AdminUsersPage role-aware account forms", () => {
     });
     mocks.updateManagedProfile.mockResolvedValue({});
     render(<AdminUsersPage />);
-    await screen.findByText("Riley Superadmin");
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Riley Superadmin" }), { button: 0, ctrlKey: false });
+    await findMobileText("Riley Superadmin");
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: "Actions for Riley Superadmin" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
     fireEvent.click(screen.getByRole("combobox", { name: "Role" }));
     fireEvent.click((await screen.findAllByRole("option", { name: /Administrative tools/ }))[0]);
@@ -191,8 +220,8 @@ describe("AdminUsersPage role-aware account forms", () => {
       created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
     }] });
     render(<AdminUsersPage />);
-    await screen.findByText("Taylor Student");
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Taylor Student" }), { button: 0, ctrlKey: false });
+    await findMobileText("Taylor Student");
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: "Actions for Taylor Student" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
     fireEvent.click(screen.getByRole("combobox", { name: "Role" }));
     fireEvent.click((await screen.findAllByRole("option", { name: /Administrative tools/ }))[0]);
@@ -216,8 +245,8 @@ describe("AdminUsersPage role-aware account forms", () => {
       }],
     });
     render(<AdminUsersPage />);
-    await screen.findByText("Jordan Student");
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Jordan Student" }), { button: 0, ctrlKey: false });
+    await findMobileText("Jordan Student");
+    fireEvent.pointerDown(mobileAccounts().getByRole("button", { name: "Actions for Jordan Student" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
     fireEvent.click(screen.getByRole("combobox", { name: "Role" }));
     fireEvent.click(await screen.findByRole("option", { name: /Administrative tools/ }));
@@ -251,8 +280,8 @@ describe("AdminUsersPage role-aware account forms", () => {
     mocks.listOrganizations.mockResolvedValue([assignedOrganization]);
 
     render(<AdminUsersPage />);
-    await screen.findByText(assignedOrganization.name);
-    fireEvent.pointerDown(await screen.findByRole("button", { name: "Actions for Demo Student Org" }), { button: 0, ctrlKey: false });
+    await findMobileText(assignedOrganization.name);
+    fireEvent.pointerDown(await mobileAccounts().findByRole("button", { name: "Actions for Demo Student Org" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit account" }));
 
     const assignedField = await screen.findByLabelText("Assigned organization") as HTMLInputElement;
@@ -268,11 +297,11 @@ describe("AdminUsersPage role-aware account forms", () => {
       { ...common, id: "org-1", role: "student_org", first_name: "Olive", last_name: "Org", email: "olive@example.test" },
     ] });
     render(<AdminUsersPage />);
-    await screen.findByText("Sam Student");
+    await findMobileText("Sam Student");
     fireEvent.click(screen.getByRole("button", { name: "Student Org" }));
     expect(screen.getByRole("button", { name: "Student Org" }).getAttribute("aria-pressed")).toBe("true");
-    expect(await screen.findByText("Olive Org")).toBeTruthy();
-    await waitFor(() => expect(screen.queryByText("Sam Student")).toBeNull());
+    expect(await mobileAccounts().findByText("Olive Org")).toBeTruthy();
+    await waitFor(() => expect(mobileAccounts().queryByText("Sam Student")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Inactive" }));
     expect(screen.getByRole("button", { name: "Inactive" }).getAttribute("aria-pressed")).toBe("true");
     expect(await screen.findByText("No users match these filters.")).toBeTruthy();

@@ -118,20 +118,41 @@ function EventModal({ event, onClose, onSave }: {
   const inputCls = "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>
+    <div style={{ paddingLeft: "max(0.75rem, env(safe-area-inset-left, 0px))", paddingRight: "max(0.75rem, env(safe-area-inset-right, 0px))" }} className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-background/70 px-3 py-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] backdrop-blur-sm" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.92, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", duration: 0.4, bounce: 0.25 }}
-        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="event-modal-title"
+        data-testid="event-editor-dialog"
+        onKeyDown={event => {
+          if (event.key !== "Tab") return;
+          const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(element => element.offsetParent !== null);
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        style={{
+          maxHeight: "calc(100dvh - max(1.5rem, env(safe-area-inset-top, 0px)) - max(1.5rem, env(safe-area-inset-bottom, 0px)))",
+        }}
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[calc(100dvh-1.5rem)] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h3 className="font-extrabold text-foreground text-sm">
+          <h3 id="event-modal-title" className="font-extrabold text-foreground text-sm">
             {isNew ? "Create Event" : "Edit Event"}
           </h3>
           <button type="button" aria-label="Close modal" onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
+            className="h-11 w-11 shrink-0 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
             <XCircle className="h-4 w-4" />
           </button>
         </div>
@@ -139,7 +160,7 @@ function EventModal({ event, onClose, onSave }: {
         <div className="overflow-y-auto flex-1 p-6 space-y-4 scrollbar-show-on-hover">
           <div>
             <label htmlFor="event-title" className="block text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">Event Title *</label>
-            <input id="event-title" type="text" value={form.title} onChange={e => update("title", e.target.value)}
+            <input id="event-title" type="text" autoFocus value={form.title} onChange={e => update("title", e.target.value)}
               placeholder="e.g. PLV Foundation Day 2025"
               className={inputCls + (formErrors.title ? " border-destructive focus:ring-destructive/30" : "")} />
             {formErrors.title && <p className="text-[10px] text-destructive mt-1 font-medium">{formErrors.title}</p>}
@@ -191,12 +212,12 @@ function EventModal({ event, onClose, onSave }: {
           </div>
         </div>
 
-        <div className="flex gap-2 px-6 pb-5 pt-3 border-t border-border shrink-0">
-          <button onClick={onClose} className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
+        <div className="flex shrink-0 gap-2 border-t border-border px-4 pb-4 pt-3 sm:px-6">
+          <button onClick={onClose} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving || !form.title.trim() || !form.venue.trim()}
-            className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+            className="min-h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-sm font-extrabold hover:bg-primary/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
             {saving ? "Saving…" : isNew ? "Create Event" : "Save Changes"}
           </button>
         </div>
@@ -216,6 +237,8 @@ export function AdminEventsPage() {
   const [archiveTarget, setArchiveTarget] = useState<ManagedEvent | null>(null);
   const [busy, setBusy] = useState(false);
   const requestRef = useRef(0);
+  const modalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const archiveTriggerRef = useRef<HTMLButtonElement | null>(null);
   const toast = useToast();
 
   const loadEvents = useCallback(async () => {
@@ -239,6 +262,14 @@ export function AdminEventsPage() {
   useEffect(() => {
     loadEvents();
   }, [loadEvents]);
+
+  useEffect(() => {
+    if (modal === null) modalTriggerRef.current?.focus();
+  }, [modal]);
+
+  useEffect(() => {
+    if (archiveTarget === null) archiveTriggerRef.current?.focus();
+  }, [archiveTarget]);
 
   const handleSave = async (input: EventInput) => {
     if (modal && modal !== "new") {
@@ -321,7 +352,7 @@ export function AdminEventsPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in sm:space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -330,8 +361,8 @@ export function AdminEventsPage() {
             Create and manage campus events. Published events appear on the student map during their time window.
           </p>
         </div>
-        <button onClick={() => setModal("new")}
-          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shrink-0 shadow-sm">
+        <button onClick={event => { modalTriggerRef.current = event.currentTarget; setModal("new"); }}
+          className="flex min-h-11 items-center gap-2 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shrink-0 shadow-sm">
           <Plus className="h-3.5 w-3.5" /> New Event
         </button>
       </div>
@@ -363,10 +394,10 @@ export function AdminEventsPage() {
             size="md"
           />
         </div>
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+        <div className="flex flex-wrap items-center gap-1">
           {tabs.map(t => (
             <button key={t.key} type="button" onClick={() => setStatusFilter(t.key)}
-              className={cn("shrink-0 h-8 px-3 rounded-xl text-xs font-bold transition-all active:scale-[0.97]",
+              className={cn("shrink-0 min-h-11 px-3 rounded-xl text-xs font-bold transition-all active:scale-[0.97]",
                 statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
               {t.label}
               <span className={cn("ml-1.5 text-[10px] px-1.5 rounded-full",
@@ -385,14 +416,14 @@ export function AdminEventsPage() {
           const StatusIcon = cfg.icon;
           return (
             <div key={event.id} className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-              <div className="flex items-start gap-4 p-5">
+              <div className="flex items-start gap-3 p-4 sm:gap-4 sm:p-5">
                 <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
                   <CalendarDays className="h-6 w-6 text-primary" />
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-3 mb-1">
-                    <h3 className="font-extrabold text-foreground text-sm">{event.title}</h3>
+                    <h3 title={event.title} className="min-w-0 flex-1 line-clamp-2 break-words [overflow-wrap:anywhere] font-extrabold text-foreground text-sm sm:line-clamp-none">{event.title}</h3>
                     <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0", cfg.bg, cfg.color)}>
                       <StatusIcon className="h-3 w-3" /> {cfg.label}
                     </div>
@@ -414,15 +445,15 @@ export function AdminEventsPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2 px-5 py-3 border-t border-border bg-muted/20">
-                <button onClick={() => setModal(event)}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted active:scale-[0.97] transition-all">
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-border bg-muted/20 sm:px-5">
+                <button onClick={triggerEvent => { modalTriggerRef.current = triggerEvent.currentTarget; setModal(event); }}
+                  className="flex min-h-11 items-center gap-1.5 px-3 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted active:scale-[0.97] transition-all">
                   <Edit2 className="h-3.5 w-3.5" /> Edit
                 </button>
 
                 {event.status === "draft" && (
                   <button onClick={() => handlePublish(event)} disabled={busy}
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 active:scale-[0.97] transition-all disabled:opacity-50">
+                    className="flex min-h-11 items-center gap-1.5 px-3 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 active:scale-[0.97] transition-all disabled:opacity-50">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Publish
                   </button>
                 )}
@@ -434,8 +465,8 @@ export function AdminEventsPage() {
                 )}
 
                 <div className="ml-auto">
-                  <button onClick={() => setArchiveTarget(event)} disabled={busy}
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 active:scale-[0.97] transition-all">
+                  <button onClick={triggerEvent => { archiveTriggerRef.current = triggerEvent.currentTarget; setArchiveTarget(event); }} disabled={busy}
+                    className="flex min-h-11 items-center gap-1.5 px-3 rounded-xl border border-destructive/30 text-xs font-bold text-destructive hover:bg-destructive/10 active:scale-[0.97] transition-all">
                     <Trash2 className="h-3.5 w-3.5" /> Archive
                   </button>
                 </div>
@@ -455,7 +486,7 @@ export function AdminEventsPage() {
                 : "Create campus events with a title, venue, and schedule. Published events appear on the student map during their time window."
             }
             action={
-              <button onClick={() => setModal("new")}
+              <button onClick={triggerEvent => { modalTriggerRef.current = triggerEvent.currentTarget; setModal("new"); }}
                 className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 active:scale-[0.97] transition-all shadow-sm">
                 <Plus className="h-3.5 w-3.5" /> New Event
               </button>
@@ -479,29 +510,34 @@ export function AdminEventsPage() {
           <motion.div
             key="archive-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            style={{ paddingTop: "max(1rem, env(safe-area-inset-top, 0px))", paddingRight: "max(1rem, env(safe-area-inset-right, 0px))", paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))", paddingLeft: "max(1rem, env(safe-area-inset-left, 0px))" }}
+            className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-black/50 backdrop-blur-sm"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.92, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
-              className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6 text-center"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="archive-event-title"
+              style={{ maxHeight: "calc(100dvh - max(2rem, env(safe-area-inset-top, 0px)) - max(2rem, env(safe-area-inset-bottom, 0px))" }}
+              className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-border bg-card p-6 text-center shadow-2xl"
             >
               <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
                 <Archive className="h-7 w-7 text-destructive" />
               </div>
-              <h3 className="font-extrabold text-foreground mb-1">Archive Event?</h3>
-              <p className="text-sm text-muted-foreground mb-5">
+              <h3 id="archive-event-title" className="mb-1 font-extrabold text-foreground">Archive Event?</h3>
+              <p className="mb-5 break-words text-sm text-muted-foreground">
                 "{archiveTarget.title}" will be hidden from students. Its history is preserved.
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setArchiveTarget(null)}
-                  className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted transition-colors">
+                <button autoFocus onClick={() => setArchiveTarget(null)}
+                  className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold text-muted-foreground transition-colors hover:bg-muted">
                   Cancel
                 </button>
                 <button onClick={handleArchive} disabled={busy}
-                  className="flex-1 h-10 rounded-xl bg-destructive text-white text-sm font-bold hover:bg-destructive/90 transition-colors disabled:opacity-50">
+                  className="min-h-11 flex-1 rounded-xl bg-destructive text-white text-sm font-bold transition-colors hover:bg-destructive/90 disabled:opacity-50">
                   {busy ? "Archiving…" : "Archive Event"}
                 </button>
               </div>

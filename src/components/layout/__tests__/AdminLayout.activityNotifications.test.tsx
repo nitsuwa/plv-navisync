@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolveContexts: vi.fn(),
   getPreferences: vi.fn(),
   navigate: vi.fn(),
+  pathname: "/admin-dashboard",
   submissions: [] as Array<Record<string, unknown>>,
   markSubmissionRead: vi.fn(),
   requestGuarded: vi.fn(),
@@ -17,8 +18,8 @@ vi.mock("react-router", async (importOriginal) => {
   return {
     ...actual,
     Link: ({ to, children }: { to: string; children: ReactNode }) => <a href={to}>{children}</a>,
-    Outlet: () => null,
-    useLocation: () => ({ pathname: "/admin-dashboard", search: "", hash: "" }),
+    Outlet: () => <div data-testid="route-outlet-content">Route content</div>,
+    useLocation: () => ({ pathname: mocks.pathname, search: "", hash: "" }),
     useNavigate: () => mocks.navigate,
   };
 });
@@ -61,6 +62,7 @@ import { AdminLayout } from "../AdminLayout";
 describe("Admin activity notifications", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.pathname = "/admin-dashboard";
     mocks.submissions = [];
     mocks.markSubmissionRead.mockResolvedValue('saved');
     mocks.requestGuarded.mockImplementation((action: () => void) => action());
@@ -88,6 +90,27 @@ describe("Admin activity notifications", () => {
     expect(await screen.findByRole("status", { name: "Current user" })).toBeInTheDocument();
     expect(screen.queryByText(/Diagnostics/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /profile menu/i })).not.toBeInTheDocument();
+  });
+
+  it("lets ordinary route content grow inside the padded page scroller while Map Builder stays full-height", async () => {
+    mocks.listActivity.mockReturnValue(new Promise(() => {}));
+    mocks.getPreferences.mockReturnValue(new Promise(() => {}));
+    const { unmount, container } = render(<AdminLayout />);
+    const main = container.querySelector("main")!;
+    const ordinaryOutlet = screen.getByTestId("route-outlet-content").parentElement!;
+    expect(main.className).toContain("overflow-y-auto");
+    expect(ordinaryOutlet.className).toContain("min-h-full");
+    expect(ordinaryOutlet.className.split(/\s+/)).not.toContain("h-full");
+
+    unmount();
+    mocks.pathname = "/admin-dashboard/map-builder";
+    const mapRoute = render(<AdminLayout />);
+    const mapMain = mapRoute.container.querySelector("main")!;
+    const mapOutlet = screen.getByTestId("route-outlet-content").parentElement!;
+    expect(mapMain.className).toContain("overflow-hidden");
+    expect(mapMain.className).not.toContain("p-5");
+    expect(mapOutlet.className).toContain("h-full");
+    expect(mapOutlet.className).not.toContain("min-h-full");
   });
 
   it("shows an error and retry instead of a false empty state, then loads restored activity", async () => {

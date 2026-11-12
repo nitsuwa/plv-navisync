@@ -52,9 +52,20 @@ describe("AdminReportsPage CSV export scope", () => {
     });
   });
 
+  it("aligns report status, date, and details action together on wide layouts", async () => {
+    render(<AdminReportsPage />);
+
+    const action = await screen.findByRole("button", { name: "View report: Test report A" });
+    const summary = action.parentElement;
+
+    expect(summary).toHaveClass("lg:flex-row");
+    expect(summary).toHaveClass("lg:items-center");
+    expect(summary).toHaveClass("flex-wrap");
+  });
+
   it("exports the active status-filtered result set with a descriptive filename", async () => {
     render(<AdminReportsPage />);
-    expect(await screen.findByText("Test report A")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View report: Test report A" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Pending/ }));
     await waitFor(() => {
@@ -64,7 +75,7 @@ describe("AdminReportsPage CSV export scope", () => {
         search: "",
       });
     });
-    await screen.findByText("Test report A");
+    await screen.findByRole("button", { name: "View report: Test report A" });
 
     fireEvent.click(screen.getByRole("button", { name: "Export currently loaded filtered reports as CSV" }));
 
@@ -91,7 +102,7 @@ describe("AdminReportsPage CSV export scope", () => {
       throw new Error("Download blocked");
     });
     render(<AdminReportsPage />);
-    await screen.findByText("Test report A");
+    await screen.findByRole("button", { name: "View report: Test report A" });
 
     fireEvent.click(screen.getByRole("button", { name: "Export currently loaded filtered reports as CSV" }));
 

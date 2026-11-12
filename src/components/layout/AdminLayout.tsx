@@ -171,7 +171,7 @@ export function AdminLayout() {
 
   return (
     <UnsavedChangesProvider>
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden bg-background" style={{ height: "100dvh" }}>
       <NavigationProgress />
 
       {/* Desktop: inline collapsible sidebar */}
@@ -343,14 +343,14 @@ export function AdminLayout() {
           "flex-1 min-h-0",           // min-h-0 allows flex child to shrink below content size
           location.pathname === "/admin-dashboard/map-builder"
             ? "overflow-hidden flex flex-col"   // map builder fills all remaining height, no padding
-            : "overflow-y-auto p-5 lg:p-7"
+            : "overflow-y-auto overscroll-y-contain p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] lg:p-7 lg:pb-[calc(1.75rem+env(safe-area-inset-bottom,0px))]"
         )}>
           <motion.div
             key={location.pathname}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.1 }}
-            className="h-full flex flex-col"
+            className={location.pathname === "/admin-dashboard/map-builder" ? "h-full flex flex-col" : "min-h-full flex flex-col"}
           >
             <Outlet />
           </motion.div>

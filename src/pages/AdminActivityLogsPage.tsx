@@ -125,7 +125,7 @@ export function AdminActivityLogsPage() {
   }
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">Activity Logs</h1>
@@ -135,19 +135,19 @@ export function AdminActivityLogsPage() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button onClick={exportDisplayedEntries} disabled={logs.length === 0}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-bold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-bold text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             title="Export only the entries currently displayed (up to 50)"
             aria-label="Export displayed activity entries as CSV">
             <Download className="h-3.5 w-3.5" /> <span>Export CSV</span>
           </button>
           <button onClick={refresh} disabled={isRefreshing}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:bg-accent hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:bg-accent hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="Refresh activity logs">
             <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin text-primary")} />
           </button>
           <AlertDialog.Root open={confirmClear} onOpenChange={(open) => { setConfirmClear(open); if (!open) setClearError(null); }}>
             <AlertDialog.Trigger asChild>
-              <button className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-bold text-muted-foreground transition hover:border-destructive/40 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <button className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-bold text-muted-foreground transition hover:border-destructive/40 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <Trash2 className="h-3.5 w-3.5" /> <span>Clear History</span>
               </button>
             </AlertDialog.Trigger>
@@ -173,12 +173,12 @@ export function AdminActivityLogsPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <Filter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div role="group" aria-label="Filter activity logs by type" className="flex flex-wrap items-center gap-1.5">
+        <Filter aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         {ENTITY_TYPES.map((item) => (
           <button key={item.key || "all"} onClick={() => setFilter(item.key)}
             className={cn(
-              "shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "min-h-11 shrink-0 rounded-xl px-3 text-xs font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               filter === item.key ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/60 text-muted-foreground hover:bg-muted-foreground/10",
             )}>
             {item.label}
@@ -201,7 +201,7 @@ export function AdminActivityLogsPage() {
             {logs.map((log) => {
               const formatted = formatAdminActivity(log, contexts.get(log.id));
               return (
-                <article key={log.id} className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-muted/30 sm:px-5">
+                <article key={log.id} className="flex items-start gap-2.5 px-3 py-3 transition-colors hover:bg-muted/30 sm:gap-3 sm:px-5 sm:py-3.5">
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                     <Clock className="h-4 w-4" />
                   </div>

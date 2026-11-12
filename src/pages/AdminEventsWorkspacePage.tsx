@@ -1,4 +1,4 @@
-import { useEffect, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Navigate, useSearchParams } from "react-router";
 import { CalendarDays, ClipboardCheck, History, ListChecks } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -25,6 +25,8 @@ export function AdminEventsWorkspacePage() {
   // /admin-dashboard/events was the legacy Campus Events URL. Keep direct
   // bookmarks there working; the new sidebar explicitly opens ?view=review.
   const activeView: AdminEventsWorkspaceView = isWorkspaceView(requestedView) ? requestedView : "listings";
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const previousViewRef = useRef(activeView);
 
   useEffect(() => {
     if (!isWorkspaceView(requestedView)) {
@@ -35,6 +37,13 @@ export function AdminEventsWorkspacePage() {
       }, { replace: true });
     }
   }, [requestedView, setSearchParams]);
+
+  useEffect(() => {
+    if (previousViewRef.current === activeView) return;
+    previousViewRef.current = activeView;
+    const pageScroller = workspaceRef.current?.closest("main");
+    if (pageScroller) pageScroller.scrollTop = 0;
+  }, [activeView]);
 
   const selectView = (view: AdminEventsWorkspaceView) => {
     setSearchParams(current => {
@@ -56,13 +65,13 @@ export function AdminEventsWorkspacePage() {
   };
 
   return (
-    <div className="space-y-5 animate-fade-in" aria-labelledby="admin-events-title">
+    <div ref={workspaceRef} className="space-y-4 animate-fade-in" aria-labelledby="admin-events-title">
       <header className="space-y-1">
         <h1 id="admin-events-title" className="text-2xl font-extrabold text-foreground">Events</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">Review organization event maps, manage approved publication, browse past submissions, and maintain campus listings from one workspace.</p>
+        <p className="max-w-3xl text-sm text-muted-foreground">Review submissions, manage publication, browse history, and maintain campus listings.</p>
       </header>
 
-      <div role="tablist" aria-label="Events workspace" className="flex w-full gap-1 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 no-scrollbar">
+      <div role="tablist" aria-label="Events workspace" className="grid w-full grid-cols-2 gap-1 rounded-2xl border border-border bg-card p-1.5 sm:flex sm:flex-wrap">
         {VIEWS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -75,12 +84,12 @@ export function AdminEventsWorkspacePage() {
             onKeyDown={event => handleTabKeyDown(event, VIEWS.findIndex(view => view.id === id))}
             onClick={() => selectView(id)}
             className={cn(
-              "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl px-3 sm:px-4 text-xs sm:text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              "inline-flex min-h-11 min-w-0 w-full items-center justify-center gap-2 rounded-xl px-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:w-auto sm:px-4 sm:text-sm",
               activeView === id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {label}
+            <span className="min-w-0 text-center leading-tight sm:whitespace-nowrap">{label}</span>
           </button>
         ))}
       </div>

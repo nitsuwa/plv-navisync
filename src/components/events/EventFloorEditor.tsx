@@ -2802,7 +2802,7 @@ export function EventFloorEditor({
 
   return (
     <Dialog.Root open={mobileInspectorOpen} onOpenChange={(open) => { if (!open) setInspectorOpen(false); }}>
-    <div className="flex min-w-0 flex-col h-full bg-background">
+    <div className={cn("flex min-w-0 flex-col h-full bg-background", compactPreview && "min-h-0 flex-1")}>
       {/* Top Bar */}
       <div className={cn("flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3 border-b border-border bg-card shrink-0", compactPreview && "hidden")}>
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">

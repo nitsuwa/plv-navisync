@@ -561,7 +561,7 @@ export function AdminReportsPage() {
       <motion.div
         initial="hidden" animate="visible"
         variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
-        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
+        className="grid grid-cols-3 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5"
       >
         {[
           { label: "Total Reports", value: counts.all, color: "text-foreground", bg: "bg-muted/50" },
@@ -574,10 +574,10 @@ export function AdminReportsPage() {
             key={c.label}
             variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
             transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className={cn("rounded-2xl border border-border p-4 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200", c.bg)}
+            className={cn("rounded-2xl border border-border p-2.5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 sm:p-4", c.bg)}
           >
-            <p className={cn("text-2xl font-extrabold", c.color)}>{c.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{c.label}</p>
+            <p className={cn("text-xl font-extrabold sm:text-2xl", c.color)}>{c.value}</p>
+            <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground sm:text-xs">{c.label}</p>
           </motion.div>
         ))}
       </motion.div>
@@ -649,8 +649,8 @@ export function AdminReportsPage() {
               const StatusIcon = cfg.icon;
               const shown = presentReport(report);
               return (
-                <div key={report.id} className="flex items-start gap-4 px-5 py-4 hover:bg-muted/20 transition-colors group">
-                  <div className="w-9 h-9 rounded-xl bg-destructive/8 flex items-center justify-center shrink-0 mt-0.5">
+                <div key={report.id} className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/20 group sm:flex sm:items-start sm:gap-4 sm:px-5 sm:py-4">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-destructive/8">
                     <Flag className="h-4 w-4 text-destructive" />
                   </div>
 
@@ -676,7 +676,7 @@ export function AdminReportsPage() {
                     {shown.details && <p className="mt-1.5 text-xs text-muted-foreground line-clamp-1">{shown.details}</p>}
                   </div>
 
-                  <div className="flex flex-col items-end gap-2 shrink-0">
+                  <div className="col-span-2 flex min-w-0 flex-wrap items-center justify-between gap-2 sm:ml-auto sm:shrink-0 sm:flex-col sm:items-end lg:flex-row lg:items-center lg:gap-3">
                     <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold", cfg.bg, cfg.color)}>
                       <StatusIcon className="h-2.5 w-2.5" /> {cfg.label}
                     </div>
