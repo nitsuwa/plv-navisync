@@ -269,7 +269,14 @@ function ReviewModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: reducedMotion ? 0 : 0.16 }}
         aria-busy={busy}
-        className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-card border border-border rounded-2xl shadow-2xl w-[calc(100%-1.5rem)] max-w-3xl overflow-hidden max-h-[calc(100dvh-1.5rem)] flex flex-col outline-none"
+        style={{
+          left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
+          right: "calc(0.75rem + env(safe-area-inset-right, 0px))",
+          width: "calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))",
+          marginInline: "auto",
+          maxHeight: "calc(100dvh - 3rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))",
+        }}
+        className="fixed top-1/2 z-50 -translate-y-1/2 bg-card border border-border rounded-2xl shadow-2xl max-w-3xl overflow-hidden max-h-[calc(100dvh-1.5rem)] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
@@ -282,7 +289,7 @@ function ReviewModal({
             aria-label="Close modal"
             onClick={requestClose}
             disabled={busy}
-            className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground"
+            className="h-11 w-11 shrink-0 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground"
           >
             <XCircle className="h-4 w-4" />
           </button>
@@ -382,18 +389,18 @@ function ReviewModal({
 
         </div>
 
-        <div className="flex flex-wrap gap-2 px-4 sm:px-6 pb-5 pt-3 border-t border-border shrink-0 bg-card">
+        <div className="flex flex-wrap gap-2 px-4 sm:px-6 pb-4 pt-3 border-t border-border shrink-0 bg-card">
           <button
             onClick={requestClose}
             disabled={busy}
-            className="flex-1 h-10 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all"
+            className="min-h-11 min-w-[8rem] flex-1 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all"
           >
             Cancel
           </button>
           <button
             onClick={() => handleReview("disapproved")}
             disabled={busy || (comment.trim().length === 0) || !overlay.updatedAt}
-            className="flex-1 h-10 rounded-xl bg-destructive text-white text-sm font-bold hover:bg-destructive/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="min-h-11 min-w-[8rem] flex-1 rounded-xl bg-destructive text-white text-sm font-bold hover:bg-destructive/90 active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {busyAction === 'disapproved' ? (
               <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
@@ -405,7 +412,7 @@ function ReviewModal({
           <button
             onClick={() => handleReview("approved")}
             disabled={busy || !eventScheduleValid || !publicationScheduleValid || !overlay.updatedAt || !locations.length || !overlay.createdByUserId}
-            className="flex-1 h-10 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 active:scale-[0.97] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+            className="min-h-11 min-w-[8rem] flex-1 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 active:scale-[0.97] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {busyAction === 'approved' ? (
               <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
@@ -446,6 +453,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
     null
   );
   const [publicationTarget, setPublicationTarget] = useState<CampusEventOverlay | null>(null);
+  const publicationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const requestRef = useRef(0);
   const activeRequestRef = useRef<number | null>(null);
   const lastBackgroundRefreshAt = useRef(0);
@@ -478,6 +486,10 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
     });
     return () => { cancelled = true; };
   }, [requestedReviewId, isAdmin, authLoading, setSearchParams]);
+
+  useEffect(() => {
+    if (publicationTarget === null) publicationTriggerRef.current?.focus();
+  }, [publicationTarget]);
 
   useEffect(() => {
     // The modal is absent during the skeleton and the empty error page.
@@ -620,13 +632,16 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in sm:space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
+          <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-xl font-extrabold text-foreground">
             {workspaceView === "review" ? "Needs review" : workspaceView === "publication" ? "Approved & publication" : workspaceView === "history" ? "Layout history" : "Event layouts"}
           </h2>
+          {counts.pending > 0 && <span className="inline-flex min-h-8 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 text-[11px] font-bold text-amber-800 dark:text-amber-300"><Clock className="h-3 w-3" />{counts.pending} pending review</span>}
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {workspaceView === "review"
               ? "Check submitted layouts and record the GSO decision."
@@ -639,28 +654,11 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
         </div>
       </div>
 
-      {/* Pending Count Banner */}
       {error && overlays.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs"><p>Showing the last loaded event layouts. {error}</p><button type="button" onClick={()=>void loadOverlays(true)} className="mt-1 min-h-11 font-bold text-primary">Retry event layouts</button></div>}
-      {counts.pending > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/30 rounded-2xl px-4 py-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
-            <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-amber-700 dark:text-amber-400">
-              {counts.pending} Pending Review{counts.pending !== 1 ? "s" : ""}
-            </p>
-            <p className="text-xs text-amber-600/80 dark:text-amber-400/60">
-              Student organizations are waiting for approval on their event
-              layouts.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Search + Filter tabs */}
-      <div className="flex flex-col xl:flex-row xl:items-end gap-3 rounded-2xl border border-border bg-card p-3">
-        <div className="w-full xl:max-w-sm">
+      <div className="grid grid-cols-1 gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-2 xl:flex xl:items-end xl:gap-3">
+        <div className="w-full sm:col-span-2 xl:w-full xl:max-w-sm">
           <SearchBar
             placeholder="Search event layouts..."
             value={search}
@@ -670,7 +668,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
             size="md"
           />
         </div>
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10px] font-semibold text-muted-foreground">
+        <label className="flex min-w-0 flex-col gap-1 text-[10px] font-semibold text-muted-foreground xl:flex-1">
           <span>Organization</span>
           <select aria-label="Filter by organization" value={organizationFilter} onChange={event => setOrganizationFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <option value="all">All organizations</option>
@@ -678,14 +676,14 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
             {overlays.some(item => !item.organizationId) && <option value="unassigned">Unassigned legacy events</option>}
           </select>
         </label>
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10px] font-semibold text-muted-foreground">
+        <label className="flex min-w-0 flex-col gap-1 text-[10px] font-semibold text-muted-foreground xl:flex-1">
           <span>Academic year</span>
           <select aria-label="Filter by academic year" value={academicYearFilter} onChange={event => setAcademicYearFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <option value="all">All academic years</option>
             {academicYears.map(year => <option key={year} value={year}>{year}</option>)}
           </select>
         </label>
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+        <div className="flex flex-wrap items-center gap-1 sm:col-span-2 xl:flex-nowrap">
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -693,7 +691,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
               aria-pressed={statusFilter === t.key}
               onClick={() => setStatusFilter(t.key)}
               className={cn(
-                "shrink-0 min-h-10 px-3 rounded-xl text-xs font-bold transition-colors focus-visible:ring-2 focus-visible:ring-primary",
+                "shrink-0 min-h-11 px-2.5 rounded-xl text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-3",
                 statusFilter === t.key
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-muted"
@@ -735,7 +733,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
 
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                    <h3 className="font-extrabold text-foreground text-base break-words">
+                    <h3 title={overlay.title} className="min-w-0 flex-1 line-clamp-2 break-words [overflow-wrap:anywhere] font-extrabold text-foreground text-sm sm:line-clamp-none sm:text-base">
                       {overlay.title}
                     </h3>
                     <div
@@ -765,29 +763,24 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
                       <MapPin className="h-3 w-3 text-primary" />{" "}
                       {locations.length} requested location{locations.length === 1 ? "" : "s"}
                     </span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">Organizer:</span> {overlay.organizer || "Not recorded"}
-                    </span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Submitted by:</span><span>{(overlay.createdByUserId && submitterNames[overlay.createdByUserId]) || (overlay.createdByUserId ? "Student organization account" : "Not recorded")}</span></span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                     {locations.map((location) => location.locationRef.label).join(" · ") || "No location set"}
                   </p>
-                  <dl className="mt-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
-                    <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Created</dt><dd className="mt-1 text-xs text-foreground">{overlay.createdAt ? formatEventSubmissionTime(overlay.createdAt) : "Not recorded"}</dd></div>
-                    <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Submitted to GSO</dt><dd className="mt-1 text-xs text-foreground">{formatEventSubmissionTime(overlay.submittedAt)}</dd></div>
-                    <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Latest content edit</dt><dd className="mt-1 text-xs text-foreground">{overlay.lastEditedAt ? formatEventSubmissionTime(overlay.lastEditedAt) : "Not recorded"}{overlay.revision ? ` · Revision ${overlay.revision}` : ""}</dd></div>
-                  </dl>
+                  {status === "pending" && <p className="mt-2 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Submitted:</span> {formatEventSubmissionTime(overlay.submittedAt)}</p>}
                   {status === 'approved' && <EventStudentVisibility overlay={overlay} />}
-                  {/* Layout stats */}
-                  <div className="flex items-center gap-3 mt-2">
-                    <span className="text-[10px] font-bold text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
-                      {itemCounts.furniture} furniture
-                    </span>
-                    <span className="text-[10px] font-bold text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
-                      {itemCounts.labels} labels
-                    </span>
-                  </div>
+                  <details className="mt-3 border-t border-border pt-1 text-xs text-muted-foreground">
+                    <summary className="flex min-h-11 w-fit cursor-pointer items-center font-semibold text-foreground">Submission and layout details</summary>
+                    <dl className="grid gap-x-4 gap-y-2 pb-2 sm:grid-cols-2">
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Created</dt><dd className="mt-1 text-xs text-foreground">{overlay.createdAt ? formatEventSubmissionTime(overlay.createdAt) : "Not recorded"}</dd></div>
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Submitted to GSO</dt><dd className="mt-1 text-xs text-foreground">{formatEventSubmissionTime(overlay.submittedAt)}</dd></div>
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Latest content edit</dt><dd className="mt-1 text-xs text-foreground">{overlay.lastEditedAt ? formatEventSubmissionTime(overlay.lastEditedAt) : "Not recorded"}{overlay.revision ? ` · Revision ${overlay.revision}` : ""}</dd></div>
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Organizer</dt><dd className="mt-1 text-xs text-foreground">{overlay.organizer || "Not recorded"}</dd></div>
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Submitted by</dt><dd className="mt-1 text-xs text-foreground">{(overlay.createdByUserId && submitterNames[overlay.createdByUserId]) || (overlay.createdByUserId ? "Student organization account" : "Not recorded")}</dd></div>
+                      {overlay.createdByUserId && <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Creator account ID</dt><dd className="mt-1 break-all text-xs text-foreground">{overlay.createdByUserId}</dd></div>}
+                      <div><dt className="text-[10px] font-semibold uppercase tracking-wide">Layout items</dt><dd className="mt-1 text-xs text-foreground">{itemCounts.furniture} furniture · {itemCounts.labels} labels</dd></div>
+                    </dl>
+                  </details>
                 </div>
               </div>
 
@@ -800,9 +793,10 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
                       <p className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase mb-0.5">
                         Admin Comment
                       </p>
-                      <p className="text-xs text-red-700 dark:text-red-300">
+                  <p className="line-clamp-2 text-xs text-red-700 dark:text-red-300">
                         {overlay.adminComment}
                       </p>
+                  <details className="mt-1 text-xs text-red-700 dark:text-red-300"><summary className="min-h-11 w-fit cursor-pointer font-semibold">Read full decision comment</summary><p className="break-words pb-1">{overlay.adminComment}</p></details>
                     </div>
                   </div>
                 </div>
@@ -810,12 +804,10 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
 
               {/* Actions */}
               <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-t border-border bg-muted/20">
-                {status === "pending" && <button type="button" onClick={event => { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(false); setReviewTarget(overlay); }} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Eye className="h-3.5 w-3.5" />Review submission</button>}
-                {status === "approved" && <button type="button" onClick={() => setPublicationTarget(overlay)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Settings2 className="h-3.5 w-3.5" />Manage publication</button>}
-                <button type="button" onClick={event => { if (overlay.status === "pending") { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(true); setReviewTarget(overlay); } else { standalonePreviewTriggerRef.current = event.currentTarget; setPreviewTarget(overlay); } }} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-foreground hover:bg-muted"><Eye className="h-3.5 w-3.5" />Open map preview</button>
-                <EventFurnitureSummary overlay={overlay} />
-
-                {overlay.createdByUserId && <details className="min-w-0 w-full sm:w-auto sm:ml-auto text-[10px] text-muted-foreground"><summary className="cursor-pointer py-2">Creator account</summary><p className="max-w-xs break-all pb-1">{overlay.createdByUserId}</p></details>}
+                {status === "pending" && <button type="button" onClick={event => { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(false); setReviewTarget(overlay); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Eye className="h-3.5 w-3.5" />Review submission</button>}
+                {status === "approved" && <button type="button" onClick={event => { publicationTriggerRef.current = event.currentTarget; setPublicationTarget(overlay); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Settings2 className="h-3.5 w-3.5" />Manage publication</button>}
+                <button type="button" onClick={event => { if (overlay.status === "pending") { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(true); setReviewTarget(overlay); } else { standalonePreviewTriggerRef.current = event.currentTarget; setPreviewTarget(overlay); } }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-foreground hover:bg-muted"><Eye className="h-3.5 w-3.5" />Open map preview</button>
+                <EventFurnitureSummary overlay={overlay} compact />
               </div>
             </div>
           );

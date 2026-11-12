@@ -67,6 +67,18 @@ beforeEach(() => {
 });
 
 describe("AdminEventLayoutPreviewPage", () => {
+  it("uses the shell's remaining height for a direct preview instead of a viewport offset and minimum canvas height", async () => {
+    renderPage();
+    const title = await screen.findByRole("heading", { name: "Student Fair" });
+    const previewWorkspace = title.parentElement?.parentElement?.parentElement;
+    expect(previewWorkspace?.className).toContain("flex-1");
+    expect(previewWorkspace?.className).toContain("min-h-0");
+    expect(previewWorkspace?.className).not.toContain("420px");
+    const editor = screen.getByTestId("readonly-editor");
+    expect(editor.parentElement?.className).toContain("flex-col");
+    expect(editor.parentElement?.className).toContain("min-h-0");
+  });
+
   it("asks before discarding a positioned comment on location switch", async () => {
     render(<MemoryRouter><AdminEventLayoutPreviewPage previewOverlay={previewState.overlay as never} onClose={vi.fn()} onAddFeedbackPin={vi.fn()} /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'Add pin' }));

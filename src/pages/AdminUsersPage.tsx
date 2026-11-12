@@ -110,6 +110,27 @@ function statusStyle(status: ManagedAccountStatus) {
   return "bg-muted text-muted-foreground";
 }
 
+function UserActionsMenu({ user, manageable, lastSuperAdmin, isSelf, resending, onEdit, onResend }: {
+  user: ManagedProfile;
+  manageable: boolean;
+  lastSuperAdmin: boolean;
+  isSelf: boolean;
+  resending: boolean;
+  onEdit: () => void;
+  onResend: () => void;
+}) {
+  return <DropdownMenu>
+    <DropdownMenuTrigger asChild><button type="button" aria-label={`Actions for ${displayName(user)}`} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><Ellipsis className="h-4 w-4" /></button></DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuItem disabled={!manageable} onSelect={onEdit}><Pencil className="h-4 w-4" />Edit account</DropdownMenuItem>
+      {manageable && user.account_status === "pending_invite" && <DropdownMenuItem disabled={resending} onSelect={onResend}><RotateCw className="h-4 w-4" />{resending ? "Sending…" : "Resend invitation"}</DropdownMenuItem>}
+      {!manageable && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">Only a Super Admin can manage this account.</div></>}
+      {lastSuperAdmin && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">At least one active Super Admin is required.</div></>}
+      {isSelf && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">You can't change your own role or deactivate your own account.</div></>}
+    </DropdownMenuContent>
+  </DropdownMenu>;
+}
+
 export function AdminUsersPage() {
   const { profile: currentProfile, refreshProfile } = useAdminAuth();
   const toast = useToast();
@@ -366,11 +387,12 @@ export function AdminUsersPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in sm:space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground">User Management</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">Manage accounts and send secure setup invitations.</p>
+          <a href="#student-organizations" className="mt-1 inline-flex min-h-11 items-center gap-1.5 text-xs font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Building2 className="h-3.5 w-3.5" />Manage student organizations</a>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5"><Button onClick={openInvite} disabled={invitationMetadataAvailable === false} title={invitationMetadataAvailable === false ? "User invitations require the latest database update." : undefined}><Plus className="h-3.5 w-3.5" /> Invite User</Button>{loading && hasLoaded && <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="h-3 w-3 animate-spin" />Refreshing users</span>}</div>
       </div>
@@ -380,16 +402,14 @@ export function AdminUsersPage() {
         <div><p className="font-bold">Backend setup required</p><p className="mt-0.5 text-xs leading-relaxed">Existing profiles are loaded. Invitation tracking and invitations require the latest database update; account status currently uses Active / Inactive only.</p></div>
       </div>}
 
-      <AdminOrganizationsPanel profiles={users} onOrganizationsChange={handleOrganizationsChange} />
-
-      <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.06 } } }} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.06 } } }} className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
           { label: "Matching Users", value: stats.total, note: undefined, icon: Users, style: "bg-primary/8 text-primary" },
           { label: "Active Users", value: stats.active, note: undefined, icon: UserRoundCheck, style: "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400" },
           { label: "Administrators", value: stats.admins, note: "Admins + Super Admins", icon: Shield, style: "bg-primary/10 text-primary" },
         ].map(({ label, value, note, icon: Icon, style }) => (
-          <motion.div key={label} variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-            <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</p><div className="mt-1 h-8 overflow-hidden text-2xl font-extrabold tabular-nums" aria-live="polite"><AnimatePresence initial={false} mode="popLayout"><motion.p key={value} initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4 }} transition={{ duration: transitionDuration }} className="leading-8">{value}</motion.p></AnimatePresence></div>{note && <p className="mt-0.5 text-[10px] text-muted-foreground">{note}</p>}</div><div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", style)}><Icon className="h-5 w-5" /></div></div>
+          <motion.div key={label} variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }} className="rounded-2xl border border-border bg-card p-2.5 shadow-sm sm:p-4">
+            <div className="flex min-h-[4.5rem] flex-col justify-between gap-1 sm:min-h-0 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-[9px] font-bold uppercase leading-tight tracking-wide text-muted-foreground sm:text-xs">{label}</p><div className="mt-1 h-7 overflow-hidden text-xl font-extrabold tabular-nums sm:text-2xl" aria-live="polite"><AnimatePresence initial={false} mode="popLayout"><motion.p key={value} initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4 }} transition={{ duration: transitionDuration }} className="leading-7">{value}</motion.p></AnimatePresence></div>{note && <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground sm:text-[10px]">{note}</p>}</div><div className={cn("hidden h-10 w-10 items-center justify-center rounded-xl sm:flex", style)}><Icon className="h-5 w-5" /></div></div>
           </motion.div>
         ))}
       </motion.div>
@@ -397,12 +417,40 @@ export function AdminUsersPage() {
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
         <div className="w-full max-w-md xl:flex-1"><SearchBar placeholder="Search name, email, department, or Student ID" value={search} onSearch={setSearch} onClear={() => setSearch("")} size="md" /></div>
         <div className="flex min-w-0 flex-wrap gap-2">
-          {(["all", ...roles] as FilterRole[]).map((role) => <button key={role} type="button" aria-pressed={roleFilter === role} onClick={() => setRoleFilter(role)} className={cn("rounded-xl border px-3 py-1.5 text-xs font-bold transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none", roleFilter === role ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-transparent bg-muted text-muted-foreground hover:border-primary/20 hover:text-foreground")}>{role === "all" ? "All roles" : roleLabel(role)}</button>)}
-          {statusFilters.map((status) => <button key={status} type="button" aria-pressed={statusFilter === status} disabled={status === "pending_invite" && invitationMetadataAvailable === false} title={status === "pending_invite" && invitationMetadataAvailable === false ? "Apply the database update to view invitation status." : undefined} onClick={() => setStatusFilter(status)} className={cn("rounded-xl border px-3 py-1.5 text-xs font-bold transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none", statusFilter === status ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-transparent bg-muted text-muted-foreground hover:border-primary/20 hover:text-foreground", status === "pending_invite" && invitationMetadataAvailable === false && "cursor-not-allowed opacity-45")}>{status === "all" ? "Any status" : status === "pending_invite" ? "Pending Invite" : status === "active" ? "Active" : "Inactive"}</button>)}
+          {(["all", ...roles] as FilterRole[]).map((role) => <button key={role} type="button" aria-pressed={roleFilter === role} onClick={() => setRoleFilter(role)} className={cn("min-h-11 rounded-xl border px-2.5 text-xs font-bold transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none sm:px-3", roleFilter === role ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-transparent bg-muted text-muted-foreground hover:border-primary/20 hover:text-foreground")}>{role === "all" ? "All roles" : roleLabel(role)}</button>)}
+          {statusFilters.map((status) => <button key={status} type="button" aria-pressed={statusFilter === status} disabled={status === "pending_invite" && invitationMetadataAvailable === false} title={status === "pending_invite" && invitationMetadataAvailable === false ? "Apply the database update to view invitation status." : undefined} onClick={() => setStatusFilter(status)} className={cn("min-h-11 rounded-xl border px-2.5 text-xs font-bold transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none sm:px-3", statusFilter === status ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-transparent bg-muted text-muted-foreground hover:border-primary/20 hover:text-foreground", status === "pending_invite" && invitationMetadataAvailable === false && "cursor-not-allowed opacity-45")}>{status === "all" ? "Any status" : status === "pending_invite" ? "Pending Invite" : status === "active" ? "Active" : "Inactive"}</button>)}
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      <div data-testid="user-results" className="space-y-3">
+        <div data-testid="mobile-user-cards" className="grid gap-3 lg:hidden">
+          {visibleUsers.map((user) => {
+            const isSelf = currentProfile?.id === user.id;
+            const manageable = canManage(user);
+            const policy = getManagedUserEditPolicy(currentProfile ?? {}, user, activeSuperAdmins);
+            const assignedOrganizations = activeOrganizationNamesByRepresentative.get(user.id) ?? [];
+            const departmentOrOrganization = user.role === "student_org" && assignedOrganizations.length > 0
+              ? assignedOrganizations.join(", ")
+              : user.department || "Not provided";
+            return <article key={user.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-xs font-extrabold text-white">{initials(user)}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-bold text-foreground">{displayName(user)} {isSelf && <span className="text-[10px] text-primary">(you)</span>}</p>
+                  <p className="break-all text-xs text-muted-foreground">{user.email}</p>
+                </div>
+                <UserActionsMenu user={user} manageable={manageable} lastSuperAdmin={policy.lastActiveSuperAdmin} isSelf={isSelf} resending={resending === user.id} onEdit={() => openEdit(user)} onResend={() => void resend(user)} />
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border pt-3">
+                <div><dt className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Role</dt><dd className="mt-1"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold", roleBadge(user.role))}><RoleIcon role={user.role} className="h-3 w-3" />{roleLabel(user.role)}</span></dd></div>
+                <div><dt className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Status</dt><dd className="mt-1"><span className={cn("inline-flex rounded-full px-2 py-1 text-[11px] font-bold", statusStyle(user.account_status))}>{user.account_status === "pending_invite" ? "Pending Invite" : user.account_status === "active" ? "Active" : "Inactive"}</span></dd></div>
+                <div className="col-span-2 min-w-0"><dt className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">{user.role === "student_org" && assignedOrganizations.length > 0 ? "Assigned organization" : "Department / organization"}</dt><dd className="mt-0.5 break-words text-xs text-foreground">{departmentOrOrganization}</dd></div>
+              </dl>
+            </article>;
+          })}
+        </div>
+
+        <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:block">
         <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/50">
           <th className="px-5 py-3 text-left text-xs font-bold uppercase text-muted-foreground">User</th><th className="px-4 py-3 text-left text-xs font-bold uppercase text-muted-foreground">Role</th><th className="hidden px-4 py-3 text-left text-xs font-bold uppercase text-muted-foreground lg:table-cell">Department / Organization</th><th className="px-4 py-3 text-left text-xs font-bold uppercase text-muted-foreground">Status</th><th className="px-5 py-3 text-right text-xs font-bold uppercase text-muted-foreground">Actions</th>
         </tr></thead><tbody><AnimatePresence initial={false}>{visibleUsers.map((user) => {
@@ -415,22 +463,14 @@ export function AdminUsersPage() {
             <td className="px-4 py-3.5"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold", roleBadge(user.role))}><RoleIcon role={user.role} className="h-3.5 w-3.5" />{roleLabel(user.role)}</span></td>
             <td className="hidden px-4 py-3.5 text-muted-foreground lg:table-cell">{user.department || "—"}</td>
             <td className="px-4 py-3.5"><span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-bold", statusStyle(user.account_status))}>{user.account_status === "pending_invite" ? "Pending Invite" : user.account_status === "active" ? "Active" : "Inactive"}</span></td>
-          <td className="px-5 py-3.5 text-right">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild><button type="button" aria-label={`Actions for ${displayName(user)}`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><Ellipsis className="h-4 w-4" /></button></DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem disabled={!manageable} onSelect={() => openEdit(user)}><Pencil className="h-4 w-4" />Edit account</DropdownMenuItem>
-                  {manageable && user.account_status === "pending_invite" && <DropdownMenuItem disabled={resending === user.id} onSelect={() => void resend(user)}><RotateCw className="h-4 w-4" />{resending === user.id ? "Sending…" : "Resend invitation"}</DropdownMenuItem>}
-                  {!manageable && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">Only a Super Admin can manage this account.</div></>}
-                  {lastSuperAdmin && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">At least one active Super Admin is required.</div></>}
-                  {isSelf && <><DropdownMenuSeparator /><div className="px-2 py-1.5 text-xs text-muted-foreground">You can't change your own role or deactivate your own account.</div></>}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </td>
+          <td className="px-5 py-3.5 text-right"><UserActionsMenu user={user} manageable={manageable} lastSuperAdmin={lastSuperAdmin} isSelf={isSelf} resending={resending === user.id} onEdit={() => openEdit(user)} onResend={() => void resend(user)} /></td>
           </motion.tr>;
         })}</AnimatePresence></tbody></table></div>
-        <AnimatePresence initial={false}>{visibleUsers.length === 0 && <motion.div key="empty-users" initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4 }} transition={{ duration: transitionDuration }}><EmptyState icon={search || roleFilter !== "all" || statusFilter !== "all" ? Search : UserPlus} title={statusFilter === "pending_invite" && invitationMetadataAvailable === false ? "Pending Invite status is unavailable." : statusFilter === "pending_invite" ? "No pending invitations." : "No users match these filters."} description={statusFilter === "pending_invite" && invitationMetadataAvailable === false ? "Apply the latest database update to view invitation status." : "Try changing the search or filters."} action={<Button variant="outline" size="sm" onClick={() => { setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}>Clear filters</Button>} /></motion.div>}</AnimatePresence>
+        </div>
+        {visibleUsers.length === 0 && <AnimatePresence initial={false}><motion.div key="empty-users" initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4 }} transition={{ duration: transitionDuration }}><EmptyState icon={search || roleFilter !== "all" || statusFilter !== "all" ? Search : UserPlus} title={statusFilter === "pending_invite" && invitationMetadataAvailable === false ? "Pending Invite status is unavailable." : statusFilter === "pending_invite" ? "No pending invitations." : "No users match these filters."} description={statusFilter === "pending_invite" && invitationMetadataAvailable === false ? "Apply the latest database update to view invitation status." : "Try changing the search or filters."} action={<Button variant="outline" size="sm" onClick={() => { setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }}>Clear filters</Button>} /></motion.div></AnimatePresence>}
       </div>
+
+      <div id="student-organizations" className="scroll-mt-4"><AdminOrganizationsPanel profiles={users} onOrganizationsChange={handleOrganizationsChange} /></div>
 
       {showModal && createPortal(<div className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-black/50 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={editTarget ? "Edit user" : "Invite user"}>
         <div style={{ maxHeight: "min(800px, 90dvh, calc(100dvh - max(2rem, env(safe-area-inset-top)) - max(2rem, env(safe-area-inset-bottom))))" }} className="flex max-h-[min(90dvh,800px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
@@ -454,7 +494,7 @@ export function AdminUsersPage() {
             <motion.section key={form.role} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }} className="space-y-3">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">{form.role === "student" ? "Student details" : form.role === "student_org" ? "Organization details" : "Admin details"}</p>
               {form.role === "student" && <FormField label="Student ID" id="student-number" value={form.studentNumber} onChange={(studentNumber) => { setForm((value) => ({ ...value, studentNumber: formatStudentNumberInput(studentNumber) })); setFormErrors((errors) => ({ ...errors, studentNumber: "" })); }} error={formErrors.studentNumber} maxLength={7} inputMode="numeric" placeholder="23-3314" helper="Use the format NN-NNNN." required />}
-              {editTarget && form.role === "student_org" && (activeOrganizationNamesByRepresentative.get(editTarget.id)?.length ?? 0) > 0 && <div className="space-y-1.5"><label htmlFor="assigned-organization" className="block text-sm font-medium">Assigned organization</label><input id="assigned-organization" value={activeOrganizationNamesByRepresentative.get(editTarget.id)!.join(", ")} readOnly className="h-11 w-full rounded-xl border border-border bg-muted/60 px-3 text-sm text-muted-foreground" /><p className="text-xs text-muted-foreground">From the active representative assignment. Manage it in Student Organizations above.</p></div>}
+              {editTarget && form.role === "student_org" && (activeOrganizationNamesByRepresentative.get(editTarget.id)?.length ?? 0) > 0 && <div className="space-y-1.5"><label htmlFor="assigned-organization" className="block text-sm font-medium">Assigned organization</label><input id="assigned-organization" value={activeOrganizationNamesByRepresentative.get(editTarget.id)!.join(", ")} readOnly className="h-11 w-full rounded-xl border border-border bg-muted/60 px-3 text-sm text-muted-foreground" /><p className="text-xs text-muted-foreground">From the active representative assignment. Manage it in Student Organizations below.</p></div>}
               <FormField label={form.role === "admin" || form.role === "super_admin" ? "Department / Office (optional)" : form.role === "student_org" ? "Department (optional)" : "Department / Program (optional)"} id="department" value={form.department} onChange={(department) => setForm((value) => ({ ...value, department }))} maxLength={120} />
               {form.role === "student_org" && <p className="rounded-xl bg-muted/55 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">Grant Student Organization access only after the organization has been verified.</p>}
               {form.role === "super_admin" && <p className="rounded-xl border border-amber-300/60 bg-amber-50/70 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">Super Admins can manage administrator access and privileged accounts.</p>}

@@ -42,6 +42,32 @@ describe("AdminEventsWorkspacePage", () => {
     expect(screen.getByRole("tab", { name: "Approved & publication" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("returns the Events scroller to the new view and keeps keyboard focus on its tab", () => {
+    render(<MemoryRouter initialEntries={["/admin-dashboard/events?view=review"]}>
+      <main data-testid="admin-main" style={{ overflowY: "auto" }}>
+        <Routes><Route path="/admin-dashboard/events" element={<AdminEventsWorkspacePage />} /></Routes>
+      </main>
+    </MemoryRouter>);
+
+    const main = screen.getByTestId("admin-main");
+    main.scrollTop = 280;
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Needs review" }), { key: "ArrowRight" });
+
+    expect(screen.getByRole("tab", { name: "Approved & publication" })).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Approved & publication" }));
+    expect(main.scrollTop).toBe(0);
+  });
+
+  it("keeps every Events view tab in a two-column layout contract for narrow screens", () => {
+    render(<MemoryRouter initialEntries={["/admin-dashboard/events?view=review"]}>
+      <Routes><Route path="/admin-dashboard/events" element={<AdminEventsWorkspacePage />} /></Routes>
+    </MemoryRouter>);
+
+    const tablist = screen.getByRole("tablist", { name: "Events workspace" });
+    expect(tablist.className).toContain("grid-cols-2");
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+  });
+
   it("redirects old review links while preserving their query parameters", () => {
     render(<MemoryRouter initialEntries={["/admin-dashboard/event-layouts?review=event-1&source=bell"]}>
       <Routes>

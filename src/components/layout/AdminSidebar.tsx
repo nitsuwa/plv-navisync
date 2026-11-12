@@ -254,7 +254,7 @@ export function AdminSidebar({
       </nav>
 
       {/* Sign out */}
-      <div className="px-2.5 pb-5 border-t border-sidebar-border pt-3">
+      <div className="px-2.5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] border-t border-sidebar-border pt-3">
         <button
           onClick={handleSignOut}
           disabled={signingOut}

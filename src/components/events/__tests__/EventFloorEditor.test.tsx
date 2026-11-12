@@ -590,6 +590,13 @@ describe("EventFloorEditor", () => {
     expect(screen.getByText("No event additions yet")).toBeInTheDocument();
   });
 
+  it("lets a compact preview editor fill the flex space allocated by its preview page", () => {
+    render(<EventFloorEditor floorPlan={floorPlan} overlay={overlay} compactPreview readOnly onSave={vi.fn()} onSubmit={vi.fn()} onBack={vi.fn()} />);
+    const workspace = screen.getByTestId("event-editor-workspace");
+    expect(workspace.parentElement?.className).toContain("flex-1");
+    expect(workspace.parentElement?.className).toContain("min-h-0");
+  });
+
   it("renders the complete canonical published floor beneath event items", () => {
     const detailedFloor: FloorPlan = {
       ...floorPlan,

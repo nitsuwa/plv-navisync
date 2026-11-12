@@ -55,6 +55,25 @@ describe("AdminEventLayoutsPage publication controls", () => {
     expect(within(alphaCard).queryByText("2025–2026")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["review", { ...pending, id: "pending-long", status: "pending" }, "Pending", "Review submission"],
+    ["publication", { ...approved, id: "approved-long", status: "approved" }, "Approved", "Manage publication"],
+    ["history", { ...approved, id: "history-long", status: "disapproved", adminComment: "Needs a safer route." }, "Disapproved", "Open map preview"],
+  ] as const)("wraps an unbroken title and keeps the %s card action beside its status", async (view, fixture, status, action) => {
+    const longTitle = "CampusLayoutReview".repeat(9);
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...fixture, title: longTitle } as CampusEventOverlay]);
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView={view} /></MemoryRouter>);
+
+    const card = await screen.findByTestId(`event-layout-card-${fixture.id}`);
+    const title = within(card).getByRole("heading", { name: longTitle, exact: true });
+    const badge = within(card).getByText(status, { exact: true });
+
+    expect(title).toHaveClass("min-w-0", "flex-1", "break-words");
+    expect(title).toHaveClass("[overflow-wrap:anywhere]");
+    expect(badge.className).toContain("shrink-0");
+    expect(within(card).getByRole("button", { name: action })).toBeInTheDocument();
+  });
+
   it('retains a loaded queue with visible retry when a foreground refresh fails',async()=>{
     render(<MemoryRouter><AdminEventLayoutsPage/></MemoryRouter>);
     await screen.findByRole('button',{name:/Review submission/i});
@@ -215,6 +234,18 @@ describe("AdminEventLayoutsPage publication controls", () => {
     expect(screen.getByRole("button", { name: "Preview requested maps" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText(/Choose the start and end dates/)).toHaveClass("text-muted-foreground");
+  });
+  it("bounds the review dialog to both landscape safe-area insets", async () => {
+    render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
+    await openPendingReview();
+    const dialog = screen.getByRole("dialog", { name: "Review Event Layout" });
+
+    expect(dialog.style.left).toContain("safe-area-inset-left");
+    expect(dialog.style.right).toContain("safe-area-inset-right");
+    expect(dialog.style.width).toContain("safe-area-inset-left");
+    expect(dialog.style.width).toContain("safe-area-inset-right");
+    expect(dialog.style.maxHeight).toContain("safe-area-inset-top");
+    expect(dialog.style.maxHeight).toContain("safe-area-inset-bottom");
   });
   it("returns focus to the queue action when the review dialog closes", async () => {
     render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
