@@ -122,5 +122,5 @@
 - Implemented the eight groups on `codex/action-confirmations` using the shared confirmation helper and unsaved-form registry.
 - Public mutation confirmations retain errors for retry; sign-out preserves the existing session-clearing/error path after user confirmation and draft resolution.
 - Automated coverage includes cancellation, mutation gating, navigation, reload guards, and event-editor prelogout save/discard decisions.
-- Production build passes with the existing large-chunk warning. No live database writes, deployment, commit, or push performed.
-- Physical-device and manual browser visual checks remain unperformed; automated component/router coverage is the verification basis.
+- Production build passes with the existing large-chunk warning. No live database writes were needed.
+- Pre-merge browser smoke verification passes in headless Edge at 1440px and 390px: cancellation, confirmation, retained failure and retry. External requests were blocked; physical-device checks remain unperformed.
