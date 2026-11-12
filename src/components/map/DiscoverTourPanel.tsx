@@ -1,7 +1,7 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Compass, DoorOpen, MousePointer2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Compass, DoorOpen, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { createPortal } from "react-dom";
+import { DiscoverGuideCursor, type DiscoverCursorPosition } from "./DiscoverGuideCursor";
 
 export interface DiscoverTourBuilding {
   name: string;
@@ -27,6 +27,7 @@ interface DiscoverTourPanelProps {
   mobileExpanded?: boolean;
   onMobileExpandedChange?: (expanded: boolean) => void;
   reducedMotion?: boolean;
+  initialCursorPosition?: DiscoverCursorPosition;
   navigationGuard?: boolean;
   unavailable?: boolean;
   roomSelected?: boolean;
@@ -49,6 +50,7 @@ export function DiscoverTourPanel({
   mobileExpanded: controlledMobileExpanded,
   onMobileExpandedChange,
   reducedMotion = false,
+  initialCursorPosition,
   navigationGuard = false,
   unavailable = false,
   onPrevious,
@@ -67,7 +69,6 @@ export function DiscoverTourPanel({
   const nextBuildingRef = useRef<HTMLButtonElement>(null);
   const enterBuildingRef = useRef<HTMLButtonElement>(null);
   const [guideDismissed, setGuideDismissed] = useState(false);
-  const [guidePosition, setGuidePosition] = useState<{ x: number; y: number; captionOnLeft: boolean } | null>(null);
   const guideActionsRef = useRef({ onNext, onEnter });
   const scrollPositionRef = useRef(0);
   const wasOpenRef = useRef(open);
@@ -98,7 +99,6 @@ export function DiscoverTourPanel({
   useEffect(() => {
     if (!open) {
       setGuideDismissed(false);
-      setGuidePosition(null);
     }
   }, [open]);
 
@@ -114,28 +114,6 @@ export function DiscoverTourPanel({
     }, GUIDE_STOP_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [building?.code, guideTarget, guideVisible, stopIndex]);
-
-  useLayoutEffect(() => {
-    if (!guideVisible) return;
-    const target = (guideTarget === "next" ? nextBuildingRef : enterBuildingRef).current;
-    if (!target) return;
-    let frameId: number;
-    let previousPosition: typeof guidePosition = null;
-    // The panel can move during its layout animation without resizing the button.
-    const updatePosition = () => {
-      const bounds = target.getBoundingClientRect();
-      const x = Math.round(bounds.right - 14);
-      const y = Math.round(bounds.bottom - 15);
-      const captionOnLeft = x > window.innerWidth / 2;
-      if (previousPosition?.x !== x || previousPosition.y !== y || previousPosition.captionOnLeft !== captionOnLeft) {
-        previousPosition = { x, y, captionOnLeft };
-        setGuidePosition(previousPosition);
-      }
-      frameId = window.requestAnimationFrame(updatePosition);
-    };
-    updatePosition();
-    return () => window.cancelAnimationFrame(frameId);
-  }, [guideTarget, guideVisible]);
 
   const dismissGuide = () => setGuideDismissed(true);
   const changeMobileExpanded = (expanded: boolean) => {
@@ -358,33 +336,17 @@ export function DiscoverTourPanel({
         </motion.aside>
       ))}
     </AnimatePresence>
-    {guideVisible && guidePosition && createPortal(
-      <motion.div
-        className="pointer-events-none fixed left-0 top-0 z-[80] h-5 w-5"
-        initial={reducedMotion ? false : { x: -window.innerWidth, y: guidePosition.y }}
-        animate={{ x: guidePosition.x, y: guidePosition.y }}
-        transition={{ duration: reducedMotion ? 0 : 0.8, ease: "easeInOut" }}
+    {guideVisible && (
+      <DiscoverGuideCursor
+        targetRef={guideTarget === "next" ? nextBuildingRef : enterBuildingRef}
+        stepKey={stopIndex}
+        clickAfterMs={guideTarget ? GUIDE_STOP_DURATION_MS : undefined}
+        reducedMotion={reducedMotion}
+        initialPosition={initialCursorPosition}
       >
-        {guideTarget && !reducedMotion && (
-          <motion.span
-            key={stopIndex}
-            aria-hidden="true"
-            className="block origin-top-left text-white drop-shadow-md"
-            animate={{ scale: [1, 0.68, 1] }}
-            transition={{ delay: GUIDE_STOP_DURATION_MS / 1000 - 0.4, duration: 0.32 }}
-          >
-            <MousePointer2 className="h-5 w-5 fill-white stroke-slate-900" />
-          </motion.span>
-        )}
-        <div
-          role="status"
-          className={`absolute w-max max-w-[min(13rem,calc(50vw-1rem))] rounded-xl bg-slate-950 px-3 py-2 text-xs leading-snug text-white shadow-lg ring-1 ring-inset ring-white/25 ${guidePosition.captionOnLeft ? "right-full mr-1" : "left-full ml-1"} ${guidePosition.y > 100 ? "bottom-2" : "top-0"}`}
-        >
-          <p className="font-extrabold">Let’s visit {guideBuildingLabel}.</p>
-          {guideTarget === "inside" && <p className="text-slate-200">Let’s see what’s inside.</p>}
-        </div>
-      </motion.div>,
-      document.body,
+        <p className="font-extrabold">Let’s visit {guideBuildingLabel}.</p>
+        {guideTarget === "inside" && <p className="text-slate-200">Let’s see what’s inside.</p>}
+      </DiscoverGuideCursor>
     )}
   </>);
 }

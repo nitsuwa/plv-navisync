@@ -123,6 +123,7 @@ import type { EventMapFilter } from "../types/eventPreview";
 import { ComingSoonCampusScreen } from "../components/map/ComingSoonCampusScreen";
 import { StudentCampusSelector, computeStudentCampusSelectorMaxWidth } from "../components/map/StudentCampusSelector";
 import { CampusOverviewPanel } from "../components/map/CampusOverviewPanel";
+import type { DiscoverCursorPosition } from "../components/map/DiscoverGuideCursor";
 import { previousDiscoverTourTarget } from "../lib/discoveryTourNavigation";
 import { explorablePublishedCampuses } from "../lib/studentCampusListing";
 import {
@@ -1027,7 +1028,9 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const [indoor3DLoaded, setIndoor3DLoaded] = useState(false);
   const [campus3DFallback, setCampus3DFallback] = useState(false);
   const [discoverTour, setDiscoverTour] = useState<DiscoverTourState>({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
-  const [campusOverviewOpen, setCampusOverviewOpen] = useState(false);
+  const [campusOverviewMode, setCampusOverviewMode] = useState<"guided" | "manual" | null>(null);
+  const [discoverCursorStart, setDiscoverCursorStart] = useState<DiscoverCursorPosition>();
+  const campusOverviewOpen = campusOverviewMode !== null;
   const pendingDiscoverCampusSwitchRef = useRef<string | null>(null);
   const discoverSnapshotRef = useRef<DiscoverMapSnapshot | null>(null);
   const discoverExitHandlerRef = useRef<(() => void) | null>(null);
@@ -4153,7 +4156,8 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     const stopIndex = discoverStops.length ? 0 : 0;
     discoverStopIndexRef.current = stopIndex;
     setDiscoverTour({ active: true, navigationGuard: false, campusId: activeCampus.id, view: "showcase", stopIndex, mobileExpanded: false });
-    setCampusOverviewOpen(!navigationEnded);
+    setCampusOverviewMode("guided");
+    setDiscoverCursorStart(undefined);
     setCampus3DFallback(false);
     setCampus3DLoaded(true);
     setCampusViewMode("3d");
@@ -4179,7 +4183,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }
     const snapshot = discoverSnapshotRef.current;
     setDiscoverTour({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
-    setCampusOverviewOpen(false);
+    setCampusOverviewMode(null);
     discoverSnapshotRef.current = null;
     discoverExteriorCameraPoseRef.current = null;
     pending2DRendererReframeRef.current = null;
@@ -4277,7 +4281,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       pendingDiscoverCampusSwitchRef.current = null;
       discoverStopIndexRef.current = 0;
       setDiscoverTour((current) => ({ ...current, campusId: activeCampus.id, stopIndex: 0, view: "showcase", mobileExpanded: false }));
-      setCampusOverviewOpen(true);
+      setCampusOverviewMode("manual");
       setSelected(null);
       setSelectedCampusPlaceId(null);
       setFloorView(null);
@@ -4287,7 +4291,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     }
     discoverSnapshotRef.current = null;
     setDiscoverTour({ active: false, navigationGuard: false, campusId: null, view: "showcase", stopIndex: 0, mobileExpanded: false });
-    setCampusOverviewOpen(false);
+    setCampusOverviewMode(null);
   }, [activeCampus?.id, discoverTour.active, discoverTour.campusId]);
 
   const changeStudentFloor = useCallback((floorNumber: number) => {
@@ -11989,7 +11993,7 @@ const buildingFill = (id: string) =>
         />
       )}
       {discoverTour.active && !discoverTour.navigationGuard && !campusOverviewOpen && !isFloorMode && !route && activeCampus && (
-        <button type="button" data-no-drag onClick={() => setCampusOverviewOpen(true)} className="absolute left-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[72] inline-flex min-h-10 items-center gap-2 rounded-full border border-border/80 bg-card/95 px-3 text-[11px] font-bold text-foreground shadow-lg backdrop-blur-xl transition hover:bg-muted md:left-5" aria-label="Open campus information">
+        <button type="button" data-no-drag onClick={() => setCampusOverviewMode("manual")} className="absolute left-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[72] inline-flex min-h-10 items-center gap-2 rounded-full border border-border/80 bg-card/95 px-3 text-[11px] font-bold text-foreground shadow-lg backdrop-blur-xl transition hover:bg-muted md:left-5" aria-label="Open campus information">
           <MapPin className="h-4 w-4 text-primary" />Campus Info
         </button>
       )}
@@ -12237,6 +12241,7 @@ const buildingFill = (id: string) =>
         onBackToEvents={() => { setInspectedEventVenueId(null); setSelectedEventId(null); setSelectedLocationId(null); }}
       />}
       <DiscoverTourPanel
+        initialCursorPosition={discoverCursorStart}
         open={(discoverTour.active && !campusOverviewOpen) || discoverTour.navigationGuard}
         view={discoverTour.view}
         building={currentDiscoverStop ? {
@@ -12272,8 +12277,15 @@ const buildingFill = (id: string) =>
           campuses={explorablePublishedCampuses(availableCampuses)}
           offline={!navigator.onLine}
           reducedMotion={reducedMotion}
-          onExplore={() => setCampusOverviewOpen(false)}
-          onClose={() => setCampusOverviewOpen(false)}
+          guided={campusOverviewMode === "guided"}
+          onExplore={(cursorPosition) => {
+            setDiscoverCursorStart(cursorPosition);
+            setCampusOverviewMode(null);
+          }}
+          onClose={() => {
+            setDiscoverCursorStart(undefined);
+            setCampusOverviewMode(null);
+          }}
         />
       )}
     </div>

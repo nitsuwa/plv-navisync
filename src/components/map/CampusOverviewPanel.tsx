@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Building2, Check, MapPin, X } from "lucide-react";
 import type { Campus } from "../map-builder/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../app/components/ui/select";
 import { CampusPublishedMapPreview } from "./CampusPublishedMapPreview";
+import { DiscoverGuideCursor, discoverCursorTargetPosition, type DiscoverCursorPosition } from "./DiscoverGuideCursor";
 import { loadPublishedCampusImage } from "../../lib/campusPublicMedia";
 import { campusLocationQuery, googleCampusDirectionsUrl, googleCampusPlaceUrl, validatedGoogleMapsUrl, type CampusLocation } from "../../lib/campusDirections";
 
@@ -11,11 +12,15 @@ interface Props {
   campuses: readonly Campus[];
   offline?: boolean;
   reducedMotion?: boolean;
-  onExplore: () => void;
+  guided?: boolean;
+  onExplore: (cursorPosition?: DiscoverCursorPosition) => void;
   onClose: () => void;
 }
 
-export function CampusOverviewPanel({ campus, campuses, offline = false, reducedMotion = false, onExplore, onClose }: Props) {
+export function CampusOverviewPanel({ campus, campuses, offline = false, reducedMotion = false, guided = false, onExplore, onClose }: Props) {
+  const [guideStep, setGuideStep] = useState<"maps" | "explore" | "done">("maps");
+  const mapsLinkRef = useRef<HTMLAnchorElement>(null);
+  const exploreButtonRef = useRef<HTMLButtonElement>(null);
   const [destinationId, setDestinationId] = useState("");
   const [online, setOnline] = useState(() => typeof navigator === "undefined" ? false : navigator.onLine && !offline);
   const imageKey = JSON.stringify([campus.id, campus.overviewImagePath ?? null, campus.logoPath ?? null]);
@@ -87,6 +92,19 @@ export function CampusOverviewPanel({ campus, campuses, offline = false, reduced
   }, [campus.id, campus.overviewImagePath, campus.logoPath, imageKey, unavailableOffline]);
 
   const mapActionDisabled = unavailableOffline;
+  const guideTarget = !guided || guideStep === "done" ? null
+    : guideStep === "maps" && placeUrl && !mapActionDisabled ? "maps" : "explore";
+  const exploreDelayMs = 2800;
+
+  useEffect(() => {
+    if (!guideTarget) return;
+    const timer = window.setTimeout(() => {
+      if (guideTarget === "maps") setGuideStep("explore");
+      else exploreButtonRef.current?.click();
+    }, guideTarget === "maps" ? 3600 : exploreDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [guideTarget]);
+
   const description = campus.description?.trim();
   const entryClass = reducedMotion ? "" : "animate-in fade-in zoom-in-[.98] duration-200 motion-reduce:animate-none";
 
@@ -117,6 +135,7 @@ export function CampusOverviewPanel({ campus, campuses, offline = false, reduced
             {logoUrl && <img src={logoUrl} alt="" className="h-5 w-5 rounded-full bg-white object-contain p-0.5" />}
             Campus overview
           </div>
+          {guideTarget && <button type="button" onClick={() => setGuideStep("done")} className="absolute right-14 top-3 min-h-9 rounded-full border border-white/35 bg-slate-950/70 px-3 text-xs font-bold text-white hover:bg-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white md:right-16 md:top-5">Skip guide</button>}
           <button type="button" onClick={onClose} aria-label="Close campus overview" className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full border border-white/35 bg-slate-950/45 text-white shadow backdrop-blur-sm transition hover:bg-slate-950/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white md:right-5 md:top-5">
             <X className="h-4 w-4" />
           </button>
@@ -167,11 +186,24 @@ export function CampusOverviewPanel({ campus, campuses, offline = false, reduced
 
         <footer data-testid="campus-overview-actions" className="grid shrink-0 gap-2.5 border-t border-border bg-card/95 p-4 sm:grid-cols-2 sm:px-6 md:px-9 md:py-4">
           {placeUrl && !mapActionDisabled
-            ? <a href={placeUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground transition hover:bg-muted active:scale-[.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></a>
+            ? <a ref={mapsLinkRef} onClick={() => setGuideStep("done")} href={placeUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground transition hover:bg-muted active:scale-[.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></a>
             : <button type="button" disabled aria-describedby={mapActionDisabled ? "campus-maps-offline-message" : undefined} className="inline-flex min-h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground opacity-45"><MapPin className="h-4 w-4 text-primary" />Google Maps<ArrowUpRight className="h-3 w-3" /></button>}
-          <button type="button" onClick={onExplore} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-md transition hover:brightness-110 active:scale-[.99]"><Building2 className="h-4 w-4" />Explore Campus</button>
+          <button ref={exploreButtonRef} type="button" onClick={(event) => {
+            setGuideStep("done");
+            onExplore(guideTarget === "explore" ? discoverCursorTargetPosition(event.currentTarget) : undefined);
+          }} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-md transition hover:brightness-110 active:scale-[.99]"><Building2 className="h-4 w-4" />Explore Campus</button>
         </footer>
       </section>
+      {guideTarget && (
+        <DiscoverGuideCursor
+          targetRef={guideTarget === "maps" ? mapsLinkRef : exploreButtonRef}
+          stepKey={guideTarget}
+          clickAfterMs={guideTarget === "explore" ? exploreDelayMs : undefined}
+          reducedMotion={reducedMotion}
+        >
+          <p className="font-extrabold">{guideTarget === "maps" ? "Check the campus location on Google Maps." : "Let’s explore the campus."}</p>
+        </DiscoverGuideCursor>
+      )}
     </div>
   );
 }

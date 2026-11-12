@@ -18,6 +18,31 @@ function publishedCampus(overrides: Partial<Campus> = {}): Campus {
 }
 
 describe("CampusOverviewPanel", () => {
+  it("points out Google Maps without opening it, then activates Explore Campus", async () => {
+    vi.useFakeTimers();
+    try {
+      const onExplore = vi.fn();
+      const onMapsClick = vi.fn();
+      const view = render(<CampusOverviewPanel campus={publishedCampus()} campuses={[]} guided reducedMotion onExplore={onExplore} onClose={vi.fn()} />);
+      screen.getByRole("link", { name: "Google Maps" }).addEventListener("click", onMapsClick);
+      vi.spyOn(screen.getByRole("button", { name: "Explore Campus" }), "getBoundingClientRect")
+        .mockReturnValue(new DOMRect(300, 400, 120, 48));
+
+      expect(screen.getByRole("status")).toHaveTextContent("Check the campus location on Google Maps.");
+      await act(async () => vi.advanceTimersByTime(3600));
+      expect(screen.getByRole("status")).toHaveTextContent("Let’s explore the campus.");
+      expect(onExplore).not.toHaveBeenCalled();
+
+      await act(async () => vi.advanceTimersByTime(2800));
+      expect(onExplore).toHaveBeenCalledOnce();
+      expect(onExplore).toHaveBeenCalledWith({ x: 406, y: 433 });
+      expect(onMapsClick).not.toHaveBeenCalled();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the real published map preview when no cover image is available and keeps the full description", () => {
     render(<CampusOverviewPanel campus={publishedCampus()} campuses={[publishedCampus()]} onExplore={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByTestId("campus-published-map-preview")).toHaveAttribute("aria-label", "Main Campus published campus map preview");
