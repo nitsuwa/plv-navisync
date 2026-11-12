@@ -66,6 +66,7 @@ interface StudentCampus3DRendererProps {
   focusNonce?: number;
   youAreHerePoint?: Pt | null;
   youAreHereLabel?: string | null;
+  showScannedLocation?: boolean;
   /** Refit a selected tour stop when its responsive viewport layout changes. */
   focusOnViewportChange?: boolean;
   /** Selected exterior tour stop; only this selection uses entrance-facing showcase framing. */
@@ -2357,7 +2358,7 @@ function WorldCamera({ campus, humanPoint, walkProgressRef, routePoints, followR
     const source = campusMapPointToWorld(routeInspectionFocusPoint, 0.35);
     const target = new THREE.Vector3(source.x, source.y, source.z);
     const currentOffset = controls.object.position.clone().sub(controls.target);
-    const distance = THREE.MathUtils.clamp(currentOffset.length() || 12, 8, 22);
+    const distance = THREE.MathUtils.clamp(currentOffset.length() || 12, 8, routeInspectionFocusKey.startsWith("scan:") ? 12 : 22);
     const direction = currentOffset.lengthSq() > 1e-6
       ? currentOffset.normalize()
       : new THREE.Vector3(0, 0.74, 0.673).normalize();
@@ -3046,21 +3047,16 @@ function Scene(props: StudentCampus3DRendererProps & { surfaceRef: RefObject<HTM
       </Html>
     </group>}
     {(props.followMode || human) && <FollowHumanMarker route={props.followRoutePoints ?? route} progressRef={props.walkProgressRef} initialPoint={props.humanPoint} reducedMotion={props.reducedMotion} />}
-    {props.youAreHerePoint && !route.length && <group name="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
+    {props.youAreHerePoint && (props.showScannedLocation || !route.length) && <group name="student-campus-3d-current-location" position={worldTuple(props.youAreHerePoint, STUDENT_CAMPUS_3D_GROUND_EPSILON)}>
       <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
         <ringGeometry args={[0.16, 0.22, 24]} />
         <meshBasicMaterial color="#2563eb" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <mesh raycast={() => {}} position={[0, 0.28, 0]} renderOrder={25}>
-        <cylinderGeometry args={[0.025, 0.045, 0.48, 10]} />
-        <meshStandardMaterial color="#2563eb" roughness={0.45} />
-      </mesh>
-      <mesh raycast={() => {}} position={[0, 0.56, 0]} renderOrder={26}>
-        <sphereGeometry args={[0.085, 14, 10]} />
-        <meshStandardMaterial color="#60a5fa" emissive="#1d4ed8" emissiveIntensity={0.35} />
-      </mesh>
-      <Html position={[0, 0.82, 0]} center occlude distanceFactor={13} zIndexRange={[96, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
-        <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-[9px] font-extrabold tracking-wide text-white shadow-lg">{props.youAreHereLabel ?? "You are here"}</span>
+      <Html zIndexRange={[96, 0]} style={{ pointerEvents: "none" }}>
+        <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center gap-0.5 whitespace-nowrap drop-shadow-sm">
+          <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-xs font-bold text-white">{props.youAreHereLabel ?? "You are here"}</span>
+          <MapPin aria-hidden="true" className="h-7 w-7 fill-blue-600 stroke-white stroke-[2.25]" />
+        </div>
       </Html>
     </group>}
     {props.activeTransition && <ActiveTransitionMarker transition={props.activeTransition} reducedMotion={props.reducedMotion} shouldSuppressClick={shouldSuppressClick} />}
