@@ -1971,49 +1971,6 @@
 @media (prefers-reduced-motion: reduce) {
   [data-sonner-toast] { animation: none !important; transition: none !important; }
 }
-.location-qr-scan-frame {
-  box-shadow: 0 0 0 999px rgb(0 0 0 / 22%), 0 0 24px rgb(59 130 246 / 30%);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-.location-qr-scan-frame::before,
-.location-qr-scan-frame::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  pointer-events: none;
-}
-.location-qr-scan-frame::before {
-  border: 3px solid transparent;
-  border-top-color: #60a5fa;
-  border-bottom-color: #60a5fa;
-  filter: drop-shadow(0 0 5px rgb(96 165 250 / 75%));
-}
-.location-qr-scan-frame[data-scan-state="success"] {
-  border-color: #86efac;
-  box-shadow: 0 0 0 999px rgb(0 0 0 / 15%), 0 0 28px rgb(34 197 94 / 55%);
-}
-.location-qr-scan-frame[data-scan-state="success"]::before { border-color: #86efac; }
-.location-qr-scan-beam {
-  position: absolute;
-  left: 5%;
-  right: 5%;
-  top: 8%;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, #bfdbfe 18%, #fff 50%, #bfdbfe 82%, transparent);
-  box-shadow: 0 0 12px rgb(96 165 250 / 85%);
-  animation: location-qr-scan-sweep 1.8s ease-in-out infinite alternate;
-}
-.location-qr-scan-frame[data-scan-state="success"] .location-qr-scan-beam { display: none; }
-@keyframes location-qr-scan-sweep {
-  from { top: 8%; opacity: 0.45; }
-  to { top: 82%; opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .location-qr-scan-beam { animation: none; display: none; }
-  .location-qr-scan-frame { transition: none; }
-}
 /* NaviBuddy uses only SVG transforms; the motion is paused for reduced-motion users. */
 .navibuddy-portrait { transform-origin: 50% 90%; animation: navibuddy-breathe 3.8s ease-in-out infinite; }
 .navibuddy-wardrobe-thumb { animation: none !important; }

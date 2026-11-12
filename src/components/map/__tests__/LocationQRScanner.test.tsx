@@ -33,18 +33,18 @@ describe("LocationQRScanner", () => {
     expect(screen.getByRole("button", { name: /Search the map instead/ })).toBeInTheDocument();
   });
 
-  it("uses a full-screen mobile surface with a bounded viewfinder and centered square scan frame", () => {
+  it("uses a full-screen mobile surface with a clean, bounded camera preview", () => {
     render(<LocationQRScanner onClose={vi.fn()} onScan={vi.fn()} onSearchInstead={vi.fn()} />);
 
     const dialog = screen.getByRole("dialog", { name: "Scan a location QR" });
     const scanner = screen.getByTestId("location-qr-scanner");
     const viewfinder = screen.getByTestId("location-qr-viewfinder");
-    const frame = screen.getByTestId("location-qr-scan-frame");
     expect(scanner).toHaveClass("fixed", "inset-0", "z-[1000]");
     expect(dialog).toHaveClass("h-full", "w-full", "max-w-none", "sm:max-w-md");
     expect(screen.getByTestId("location-qr-scanner-content")).toHaveClass("flex-1", "justify-center", "overflow-y-auto", "sm:justify-start");
     expect(viewfinder).toHaveClass("flex-1", "min-h-[min(58vw,14rem)]", "max-h-[58dvh]");
-    expect(frame).toHaveClass("aspect-square", "left-1/2", "top-1/2");
+    expect(screen.queryByTestId("location-qr-scan-frame")).not.toBeInTheDocument();
+    expect(screen.queryByText("Align a PLV NaviSync QR code within the frame")).not.toBeInTheDocument();
     expect(screen.getByTestId("location-qr-video")).toHaveClass("object-cover");
     expect(screen.getByRole("button", { name: "Close QR scanner" })).toHaveClass("h-11", "w-11");
     expect(screen.getByRole("button", { name: /Search the map instead/ })).toHaveClass("min-h-11");
@@ -58,10 +58,9 @@ describe("LocationQRScanner", () => {
     let stream: MediaStream | { getTracks: () => { stop: () => void }[] } | null = { getTracks: () => [track] };
     Object.defineProperty(video, "srcObject", { configurable: true, get: () => stream, set: (value) => { stream = value; } });
     await waitFor(() => expect(scanner.decode).toBeTypeOf("function"));
-    await act(async () => {
+    act(() => {
       scanner.decode?.({ getText: () => "https://example.test/map?locationId=gate" });
       scanner.decode?.({ getText: () => "https://example.test/map?locationId=gate" });
-      await new Promise((resolve) => window.setTimeout(resolve, 110));
     });
     expect(onScan).toHaveBeenCalledOnce();
     expect(track.stop).toHaveBeenCalledOnce();
