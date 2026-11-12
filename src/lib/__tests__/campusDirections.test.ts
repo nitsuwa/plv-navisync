@@ -32,6 +32,11 @@ describe("published campus directions", () => {
     expect(address.searchParams.get("query")).toBe("Campus A, 123 Main Road, Valenzuela, Metro Manila, 1440");
   });
 
+  it("uses a campus name and address when published coordinates are invalid", () => {
+    const url = new URL(googleCampusPlaceUrl(campus({ coordinates: { lat: 95, lng: 500 } }))!);
+    expect(url.searchParams.get("query")).toBe("Campus A, 123 Main Road, Valenzuela, Metro Manila, 1440");
+  });
+
   it("accepts only HTTPS Google Maps links", () => {
     expect(validatedGoogleMapsUrl("https://www.google.com/maps/place/example")).toContain("google.com/maps");
     expect(validatedGoogleMapsUrl("javascript:alert(1)")).toBeNull();
