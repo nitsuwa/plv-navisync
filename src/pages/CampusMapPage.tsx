@@ -2278,6 +2278,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
   const getScale = useCallback(() => {
     return cameraScreenScaleRef.current || 1;
   }, [viewportCanvasW]);
+  const scanFocusPanRef = useRef<Pt | null>(null);
   const getMapPanBounds = useCallback((zoomValue = zoomRef.current) => {
     const rect = cameraViewportRectRef.current;
     const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 768;
@@ -2286,7 +2287,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       && !isFloorMode
       && !roomDestination
       && Boolean(toBuilding);
-    return getViewportPanBounds({
+    const bounds = getViewportPanBounds({
       mapWidth: viewportCanvasW,
       mapHeight: viewportCanvasH,
       viewportWidth: rect?.width || viewportCanvasW,
@@ -2308,7 +2309,13 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
             isMobileViewport,
           ),
     });
-  }, [directionsMode, isFloorMode, roomDestination, toBuilding, viewportCanvasH, viewportCanvasW]);
+    const scanPan = directionsMode && qrRouteStartNotice ? scanFocusPanRef.current : null;
+    if (!scanPan) return bounds;
+    return {
+      minX: Math.min(bounds.minX, scanPan.x), maxX: Math.max(bounds.maxX, scanPan.x),
+      minY: Math.min(bounds.minY, scanPan.y), maxY: Math.max(bounds.maxY, scanPan.y),
+    };
+  }, [directionsMode, isFloorMode, qrRouteStartNotice, roomDestination, toBuilding, viewportCanvasH, viewportCanvasW]);
   const clampMapPan = useCallback((candidate: Pt, zoomValue = zoomRef.current) =>
     clampViewportPan(candidate, getMapPanBounds(zoomValue)), [getMapPanBounds]);
 
@@ -3173,6 +3180,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
       setSearchFocused(false);
       routeModeTouchedRef.current = false;
       setMapMode(platformSettings.defaultRouteMode);
+      dispatchStudentRouteUi({ type: "OPEN_PLAN" });
       setDirectionsMode(true);
       setRoutePlannerEndpoint(null);
       setRoutePlannerMapPick(null);
@@ -3219,6 +3227,7 @@ export function CampusMapPage({ previewCampus = null, initialCampusId, initialBu
     setSearchFocused(false);
     routeModeTouchedRef.current = false;
     setMapMode(platformSettings.defaultRouteMode);
+    dispatchStudentRouteUi({ type: "OPEN_PLAN" });
     setDirectionsMode(true);
     setRoutePlannerEndpoint(null);
     setRoutePlannerMapPick(null);
@@ -7335,6 +7344,70 @@ const buildingFill = (id: string) =>
     && Boolean(selected && !discoverTour.active && !isFloorMode && showBuildingDetailsDuringRoutePlanner);
   const routePanelVisible = !routePanelMinimized && !routePanelSuspendedForBuilding && routePanelBaseVisible;
   const routePanelMounted = routePanelVisible || routePanelMinimized || routePanelSuspendedForBuilding;
+  const scannedLocationFocusPoint = !discoverTour.active && directionsMode && qrRouteStartNotice && qrLocationScannedAt !== null
+    ? isFloorMode
+      ? indoorQrLocation?.buildingId === floorView?.building.id && indoorQrLocation?.floorId === activeFloorPlan?.id
+        ? indoorQrLocation?.point ?? null
+        : null
+      : youAreHere
+    : null;
+  const scannedLocationFocusKey = scannedLocationFocusPoint
+    ? `scan:${qrLocationScannedAt}:${routePanelVisible}:${routePanelMinimized}:${student3DActive}`
+    : undefined;
+  const [settledScanFocusKey, setSettledScanFocusKey] = useState<string>();
+  useEffect(() => {
+    if (!scannedLocationFocusKey) return;
+    const startedAt = performance.now();
+    let previousTop: number | undefined;
+    let stableFrames = 0;
+    const measure = () => {
+      const panel = routePanelVisible
+        ? mapContainerRef.current?.querySelector<HTMLElement>("[data-testid='route-planner-dialog']")
+        : null;
+      const top = panel?.getBoundingClientRect().top;
+      stableFrames = top !== undefined && previousTop !== undefined && Math.abs(top - previousTop) < 0.5
+        ? stableFrames + 1 : 0;
+      previousTop = top;
+      if (!routePanelVisible || (stableFrames >= 3 && panel?.dataset.sheetMotionActive !== "true")
+        || performance.now() - startedAt >= 900) {
+        setSettledScanFocusKey(scannedLocationFocusKey);
+        return;
+      }
+      frame = requestAnimationFrame(measure);
+    };
+    let frame = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(frame);
+  }, [routePanelVisible, scannedLocationFocusKey]);
+  const readyScanFocusKey = settledScanFocusKey === scannedLocationFocusKey ? scannedLocationFocusKey : undefined;
+  const readyScanFocusPoint = readyScanFocusKey ? scannedLocationFocusPoint : null;
+  const lastScannedLocation2DFocusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (student3DActive || !scannedLocationFocusKey) {
+      lastScannedLocation2DFocusRef.current = undefined;
+      scanFocusPanRef.current = null;
+    }
+    if (student3DActive || !readyScanFocusPoint || !readyScanFocusKey || lastScannedLocation2DFocusRef.current === readyScanFocusKey) return;
+    const surface = mapContainerRef.current;
+    if (!surface) return;
+    const safe = studentMapFocusViewport(surface);
+    const panel = routePanelVisible ? surface.querySelector<HTMLElement>("[data-testid='route-planner-dialog']") : null;
+    const sheet = panel?.getBoundingClientRect();
+    const bottom = isMobileNavigationViewport && sheet && sheet.height > 0
+      ? Math.min(safe.bottom, sheet.top - 12) : safe.bottom;
+    const top = bottom - safe.top >= 56 ? safe.top : surface.getBoundingClientRect().top + 12;
+    const center = { x: viewCX, y: viewCY };
+    const target = focusViewPointFromScreen({ x: (safe.left + safe.right) / 2, y: (top + bottom) / 2 }, center);
+    const worldPoint = isFloorMode ? {
+      x: readyScanFocusPoint.x + floorViewport.offsetX,
+      y: readyScanFocusPoint.y + floorViewport.offsetY,
+    } : readyScanFocusPoint;
+    const nextZoom = clampActiveStudentZoom(Math.max(isMobileNavigationViewport ? 1.65 : 1.25, displayZoomRef.current));
+    const targetPan = panForRouteFocusPoint(worldPoint, target, center, nextZoom);
+    lastScannedLocation2DFocusRef.current = readyScanFocusKey;
+    // A QR near a campus edge can require more pan than free browsing allows.
+    scanFocusPanRef.current = targetPan;
+    animateCameraTo(targetPan, nextZoom, "route-preview");
+  }, [animateCameraTo, clampActiveStudentZoom, floorViewport.offsetX, floorViewport.offsetY, focusViewPointFromScreen, isFloorMode, isMobileNavigationViewport, readyScanFocusKey, readyScanFocusPoint, routePanelVisible, scannedLocationFocusKey, student3DActive, viewCX, viewCY]);
   const roomDetailsPanelOpen = Boolean(isFloorMode
     && selectedRoomContext
     && selectedRoomContext.buildingId === floorView?.building.id
@@ -9971,6 +10044,7 @@ const buildingFill = (id: string) =>
               focusPoint={campus3DFocusPoint}
               focusNonce={searchFocusNonce}
               youAreHerePoint={youAreHere}
+              showScannedLocation={Boolean(scannedLocationFocusPoint)}
               youAreHereLabel={qrLocationScannedAt === null ? "Dropped pin" : qrLocationStale ? "Last scanned location" : "You are here"}
               focusOnViewportChange={discoverTour.active}
               showcaseBuildingId={discoverTour.active && !campusOverviewOpen && discoverTour.view === "showcase" ? currentDiscoverStop?.published.id ?? null : null}
@@ -9979,8 +10053,8 @@ const buildingFill = (id: string) =>
               arrivalFocusKey={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.key : null}
               arrivalFocusBuildingId={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.buildingId ?? null : null}
               arrivalFocusPlaceId={!discoverTour.active && arrivalCameraActive && arrivalCameraTarget?.context === "campus" ? arrivalCameraTarget.campusPlaceId ?? null : null}
-              routeInspectionFocusPoint={!discoverTour.active && routeInspectionFocus?.target.context === "campus" ? routeInspectionFocus.point : null}
-              routeInspectionFocusKey={!discoverTour.active && routeInspectionFocus?.target.context === "campus" ? routeInspectionFocus.key : undefined}
+              routeInspectionFocusPoint={readyScanFocusPoint ?? (!discoverTour.active && routeInspectionFocus?.target.context === "campus" ? routeInspectionFocus.point : null)}
+              routeInspectionFocusKey={readyScanFocusKey ?? (!discoverTour.active && routeInspectionFocus?.target.context === "campus" ? routeInspectionFocus.key : undefined)}
               recenterNonce={student3dCameraRecenterNonceForContext(campus3DCameraRecenterRequest, "campus")}
               onRecenterComplete={onCampus3DCameraRecenterComplete}
               selectedBuildingId={selected?.id}
@@ -10067,21 +10141,22 @@ const buildingFill = (id: string) =>
                 && activeFloorPlan.id === indoorQrLocation.floorId
                 ? indoorQrLocation.point : null}
               youAreHereLabel={qrLocationStale ? "Last scanned location" : "You are here"}
+              showScannedLocation={Boolean(scannedLocationFocusPoint)}
               arrivalFocusKey={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.key : undefined}
               arrivalFocusPoint={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.visualAvatarPoint ?? null : null}
               arrivalApproachPoint={!discoverTour.active && arrivalIndoorContextActive ? arrivalCameraTarget?.approachPoint ?? null : null}
-              routeInspectionFocusPoint={!discoverTour.active && routeInspectionFocus?.target.context === "floor"
+              routeInspectionFocusPoint={readyScanFocusPoint ?? (!discoverTour.active && routeInspectionFocus?.target.context === "floor"
                 && routeInspectionFocus.target.segment?.buildingId === floorView?.building.id
                 && (routeInspectionFocus.target.segment?.floorId
                   ? routeInspectionFocus.target.segment?.floorId === activeFloorPlan.id
                   : routeInspectionFocus.target.segment?.floorNumber === floorView.floor)
-                ? routeInspectionFocus.point : null}
-              routeInspectionFocusKey={!discoverTour.active && routeInspectionFocus?.target.context === "floor"
+                ? routeInspectionFocus.point : null)}
+              routeInspectionFocusKey={readyScanFocusKey ?? (!discoverTour.active && routeInspectionFocus?.target.context === "floor"
                 && routeInspectionFocus.target.segment?.buildingId === floorView?.building.id
                 && (routeInspectionFocus.target.segment?.floorId
                   ? routeInspectionFocus.target.segment?.floorId === activeFloorPlan.id
                   : routeInspectionFocus.target.segment?.floorNumber === floorView.floor)
-                ? routeInspectionFocus.key : undefined}
+                ? routeInspectionFocus.key : undefined)}
               destinationRoomId={!discoverTour.active && route?.destinationRoom && route.destinationRoom.buildingId === floorView?.building.id && route.destinationRoom.floorNumber === floorView.floor ? route.destinationRoom.roomId : null}
               eventFurniture={!discoverTour.active && showEventMaps && selectedLocationIsVisible ? selectedEventLocationData?.location.eventFurniture ?? EMPTY_FLOOR_FURNITURE : EMPTY_FLOOR_FURNITURE}
               showDiningFurniture={Boolean(floorView && (/canteen/i.test(floorView.building.name) || /^can$/i.test(floorView.building.code)))}
@@ -10584,7 +10659,7 @@ const buildingFill = (id: string) =>
                 <circle cx={youAreHere.x} cy={youAreHere.y} r={9} fill="#2563eb" stroke="white" strokeWidth={3}
                   style={{ filter: "drop-shadow(0 2px 6px rgba(37,99,235,0.5))" }} />
                 <circle cx={youAreHere.x} cy={youAreHere.y} r={3.5} fill="white" />
-                <g transform={`translate(${youAreHere.x},${youAreHere.y + 24})`}>
+                <g transform={`translate(${youAreHere.x},${youAreHere.y + (qrLocationScannedAt === null ? 24 : -24)})`}>
                   <rect x={-36} y={-11} width={72} height={20} rx={9} fill="rgba(15,23,42,0.88)" />
                     <text x={0} y={2} textAnchor="middle" fill="white" fontSize={8.5} fontWeight={800} className="select-none" letterSpacing="0.5">
                     {qrLocationScannedAt === null ? "DROPPED PIN" : qrLocationStale ? "LAST SCANNED" : "YOU ARE HERE"}

@@ -66,6 +66,7 @@ interface IndoorFloor3DRendererProps {
   focusNonce?: number;
   youAreHerePoint?: Pt | null;
   youAreHereLabel?: string | null;
+  showScannedLocation?: boolean;
   arrivalFocusKey?: string;
   arrivalFocusPoint?: Pt | null;
   arrivalApproachPoint?: Pt | null;
@@ -2565,6 +2566,18 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
     const target = new THREE.Vector3(...pointToWorld(props.routeInspectionFocusPoint, viewport, FLOOR_SURFACE_Y + 0.18));
     const currentTarget = controls.current.target as THREE.Vector3;
     const currentOffset = camera.position.clone().sub(currentTarget);
+    if (props.routeInspectionFocusKey.startsWith("scan:")) {
+      const { canvasRect, safeRect } = indoorSafeFocusRect(controls.current.domElement);
+      const distance = THREE.MathUtils.clamp(currentOffset.length(), 5, 10);
+      currentOffset.setLength(distance);
+      target.y += rampHeightAt(props.routeInspectionFocusPoint, ramps);
+      const worldPerPixel = 2 * distance * Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov / 2))
+        / Math.max(1, canvasRect.height);
+      const right = new THREE.Vector3().crossVectors(camera.up, currentOffset).normalize();
+      const up = new THREE.Vector3().crossVectors(currentOffset, right).normalize();
+      target.addScaledVector(right, (canvasRect.left + canvasRect.width / 2 - safeRect.left - safeRect.width / 2) * worldPerPixel);
+      target.addScaledVector(up, (safeRect.top + safeRect.height / 2 - canvasRect.top - canvasRect.height / 2) * worldPerPixel);
+    }
     const endPosition = target.clone().add(currentOffset);
     cancelRecenterTween();
     selectionFocusLockRef.current = false;
@@ -2587,7 +2600,7 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
       duration: 380,
     };
     invalidate();
-  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, viewport]);
+  }, [camera, cancelRecenterTween, floor.id, invalidate, props.arrivalFocusKey, props.freeLook, props.followMode, props.reducedMotion, props.routeInspectionFocusKey, props.routeInspectionFocusPoint, ramps, viewport]);
 
   useEffect(() => {
     const nonce = props.cameraPoseRestoreNonce ?? 0;
@@ -2687,21 +2700,16 @@ function FloorScene(props: IndoorFloor3DRendererProps & {
         <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18}><ringGeometry args={[0.11, 0.15, 24]} /><meshBasicMaterial color="#c83c51" transparent opacity={0.72} side={THREE.DoubleSide} /></mesh>
         <Html position={[0, 0.01, 0]} center occlude zIndexRange={[85, 0]}><span data-testid="student-indoor-3d-route-destination-pin" className="student-destination-pin block -translate-y-full drop-shadow-sm"><MapPin className="h-6 w-6 fill-rose-600 stroke-white stroke-[2.25]" /></span></Html>
       </group>}
-      {props.youAreHerePoint && !props.showStartMarker && <group name="student-indoor-3d-current-location" position={pointToWorld(props.youAreHerePoint, viewport, FLOOR_SURFACE_Y + 0.02)}>
+      {props.youAreHerePoint && (props.showScannedLocation || !props.showStartMarker) && <group name="student-indoor-3d-current-location" position={pointToWorld(props.youAreHerePoint, viewport, FLOOR_SURFACE_Y + 0.02 + rampHeightAt(props.youAreHerePoint, ramps))}>
         <mesh raycast={() => {}} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={24}>
           <ringGeometry args={[0.16, 0.22, 24]} />
           <meshBasicMaterial color="#2563eb" transparent opacity={0.86} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
-        <mesh raycast={() => {}} position={[0, 0.28, 0]} renderOrder={25}>
-          <cylinderGeometry args={[0.025, 0.045, 0.48, 10]} />
-          <meshStandardMaterial color="#2563eb" roughness={0.45} />
-        </mesh>
-        <mesh raycast={() => {}} position={[0, 0.56, 0]} renderOrder={26}>
-          <sphereGeometry args={[0.085, 14, 10]} />
-          <meshStandardMaterial color="#60a5fa" emissive="#1d4ed8" emissiveIntensity={0.35} />
-        </mesh>
-        <Html position={[0, 0.82, 0]} center occlude distanceFactor={13} zIndexRange={[96, 0]} style={{ pointerEvents: "none", whiteSpace: "nowrap" }}>
-          <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-[9px] font-extrabold tracking-wide text-white shadow-lg">{props.youAreHereLabel ?? "You are here"}</span>
+        <Html zIndexRange={[96, 0]} style={{ pointerEvents: "none" }}>
+          <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center gap-0.5 whitespace-nowrap drop-shadow-sm">
+            <span className="rounded-full border border-white/90 bg-blue-700 px-2 py-1 text-xs font-bold text-white">{props.youAreHereLabel ?? "You are here"}</span>
+            <MapPin aria-hidden="true" className="h-7 w-7 fill-blue-600 stroke-white stroke-[2.25]" />
+          </div>
         </Html>
       </group>}
       {props.humanVisible && <group ref={humanMarkerRef} position={humanPoint ? pointToWorld(humanPoint, viewport, navigationWalkerGroundElevation(FLOOR_SURFACE_Y, humanRampHeight)) : [0, FLOOR_SURFACE_Y, 0]}>
