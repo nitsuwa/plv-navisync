@@ -1,5 +1,5 @@
 import { confirmAction } from "../lib/confirmAction";
-import { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import {
@@ -13,6 +13,7 @@ import { useToast } from "../hooks/useToast";
 import { useEscToClose } from "../hooks/useEscToClose";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
 import {
   reportService,
   REPORT_CATEGORIES,
@@ -454,47 +455,77 @@ function ReportDetailModal({ report, onClose, onChanged }: {
 export function AdminReportsPage() {
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ReportStatus | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState("All Categories");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<IssueReport | null>(null);
   const requestRef = useRef(0);
+  const hasLoadedReportsRef = useRef(false);
   const toast = useToast();
 
-  const loadReports = useCallback(async (showSpinner = true) => {
+  const loadReports = useCallback(async () => {
     const requestId = ++requestRef.current;
-    if (showSpinner) setLoading(true);
+    const isInitialLoad = !hasLoadedReportsRef.current;
+    if (isInitialLoad) setLoading(true);
+    else setRefreshing(true);
+    setRefreshError(false);
     try {
-      const data = await reportService.listAllReports({ status: statusFilter, category: categoryFilter === "All Categories" ? undefined : categoryFilter, search });
+      const data = await reportService.listAllReports();
       if (requestId !== requestRef.current) return;
       setReports(data);
       setSelected(current => current ? data.find(report => report.id === current.id) ?? null : null);
       setError(null);
+      setRefreshError(false);
+      hasLoadedReportsRef.current = true;
     } catch (err) {
       if (requestId !== requestRef.current) return;
-      setError(err instanceof Error ? err.message : "Could not load reports.");
-      setReports([]);
+      if (isInitialLoad) setError(err instanceof Error ? err.message : "Could not load reports.");
+      else setRefreshError(true);
     } finally {
       if (requestId === requestRef.current) {
-        setLoading(false);
+        if (isInitialLoad) setLoading(false);
+        else setRefreshing(false);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, categoryFilter, search]);
+  }, []);
 
   useEffect(() => {
     loadReports();
   }, [loadReports]);
 
   const handleStatusChange = () => {
-    loadReports(false);
+    void loadReports();
   };
+
+  const visibleReports = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return reports.filter(report => {
+      if (statusFilter !== "all" && report.status !== statusFilter) return false;
+      if (categoryFilter !== "All Categories" && report.category !== categoryFilter) return false;
+      if (!query) return true;
+      return [
+        report.id,
+        report.title,
+        report.description,
+        report.category,
+        formatCategoryLabel(report.category),
+        report.campusPlaceName,
+        report.buildingName,
+        report.floorLabel,
+        report.roomName,
+        report.reporterName,
+        report.reporterId,
+      ].filter(Boolean).join(" ").toLocaleLowerCase().includes(query);
+    });
+  }, [reports, statusFilter, categoryFilter, search]);
 
   /** Export the currently filtered reports as a readable CSV. */
   const exportReports = () => {
     try {
-      const rows = toAdminReportExportRows(reports);
+      const rows = toAdminReportExportRows(visibleReports);
       const stamp = formatManilaDateStamp();
       downloadCsv(rows, `PLV_NaviSync_Reports_${stamp}.csv`);
     } catch {
@@ -533,7 +564,7 @@ export function AdminReportsPage() {
           title="Could not load reports"
           description={error}
           action={
-            <button onClick={() => loadReports()}
+            <button onClick={() => void loadReports()}
               className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-all">
               <RefreshCw className="h-4 w-4" /> Try Again
             </button>
@@ -555,7 +586,7 @@ export function AdminReportsPage() {
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
             title="Export the currently loaded filtered reports as CSV"
             aria-label="Export currently loaded filtered reports as CSV"
-            disabled={reports.length === 0}>
+            disabled={visibleReports.length === 0}>
             <Download className="h-3.5 w-3.5" /> Export CSV
           </button>
         </div>
@@ -604,11 +635,25 @@ export function AdminReportsPage() {
           </div>
 
           <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row lg:ml-auto lg:w-auto lg:shrink-0">
-            <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-              className="custom-select h-10 w-full rounded-xl border border-border bg-input-background px-4 text-sm text-foreground sm:w-56"
-              style={{ fontFamily: "var(--font-body)" }}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c === "All Categories" ? c : formatCategoryLabel(c)}</option>)}
-            </select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger
+                aria-label="Filter reports by category"
+                className="h-10 w-full rounded-xl border-border bg-input-background px-4 text-sm text-foreground shadow-sm transition-colors hover:border-primary/30 focus-visible:ring-2 focus-visible:ring-primary/30 sm:w-56"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent
+                position="popper"
+                sideOffset={6}
+                className="z-50 max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+              >
+                {CATEGORIES.map(category => (
+                  <SelectItem key={category} value={category} className="rounded-lg text-sm">
+                    {category === "All Categories" ? category : formatCategoryLabel(category)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             <div className="w-full sm:w-48">
               <SearchBar
@@ -622,8 +667,22 @@ export function AdminReportsPage() {
           </div>
         </div>
 
+        {refreshing && (
+          <div role="status" aria-live="polite" className="border-b border-border px-5 py-2 text-xs text-muted-foreground">
+            Updating reports…
+          </div>
+        )}
+        {refreshError && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/20 bg-amber-500/5 px-5 py-3 text-sm text-foreground">
+            <span>Couldn't refresh reports. Showing the last loaded results.</span>
+            <Button variant="ghost" size="sm" onClick={() => void loadReports()}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Retry refresh
+            </Button>
+          </div>
+        )}
+
         {/* Reports table */}
-        {reports.length === 0 ? (
+        {visibleReports.length === 0 ? (
           <EmptyState
             icon={search || categoryFilter !== "All Categories" || statusFilter !== "all" ? Search : Flag}
             title={search || categoryFilter !== "All Categories" || statusFilter !== "all"
@@ -648,7 +707,7 @@ export function AdminReportsPage() {
             variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
             className="divide-y divide-border"
           >
-            {reports.map(report => {
+            {visibleReports.map(report => {
               const cfg = STATUS_CONFIG[report.status as ReportStatus] ?? STATUS_CONFIG.pending;
               const StatusIcon = cfg.icon;
               const shown = presentReport(report);
