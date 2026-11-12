@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Download, EllipsisVertical, Maximize2, MonitorDown, RefreshCw, Share, Sparkles, SquarePlus, WifiOff, X, Zap } from "lucide-react";
+import { Download, EllipsisVertical, Maximize2, MonitorDown, RefreshCw, Share, Sparkles, SquarePlus, X, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { applyPwaUpdate, promptPwaInstall, usePwaState, type ManualInstallPlatform } from "../../lib/pwa";
 import { cn } from "../../lib/utils";
@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { PLVLogo } from "../ui/PLVLogo";
 import { DURATION, SPRING } from "../../config/animation";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
+import { OfflineInfoPopover } from "../map/OfflineInfoPopover";
 
 const INSTALL_DISMISS_KEY = "plv-install-dismissed-at";
 const INSTALL_DISMISS_MS = 14 * 24 * 60 * 60 * 1000;
@@ -88,17 +89,8 @@ export function OfflineIndicator() {
   const { pathname } = useLocation();
   if (online || pathname === "/map") return null;
   return (
-    <div
-      role="status"
-      aria-label="Offline. Using saved campus data; live updates are unavailable."
-      title="Using saved campus data. Live updates are unavailable."
-      className="pointer-events-none fixed right-3 z-[35] flex max-w-[5.5rem] items-center justify-center"
-      style={{ top: "calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 3.75rem)" }}
-    >
-      <div className="pointer-events-none inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-card/95 px-2.5 py-1.5 text-[10px] font-bold text-foreground shadow-sm backdrop-blur-xl">
-        <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
-        <span>Offline</span>
-      </div>
+    <div className="fixed right-3 z-[35] flex items-center justify-center" style={{ top: "calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 3.75rem)" }}>
+      <OfflineInfoPopover testId="global-offline-trigger" resetKey={pathname} />
     </div>
   );
 }

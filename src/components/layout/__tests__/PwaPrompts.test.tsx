@@ -141,16 +141,45 @@ describe("PwaUpdateNotifier", () => {
 });
 
 describe("OfflineIndicator", () => {
-  it("uses a compact, non-intercepting status when offline and disappears online", () => {
+  it("shows an interactive information trigger offline and disappears online", () => {
     setState({ online: false });
     const { rerender } = render(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
-    const status = screen.getByRole("status", { name: /using saved campus data/i });
-    expect(status).toHaveTextContent("Offline");
-    expect(status).toHaveClass("pointer-events-none");
-    expect(screen.queryByText(/live services need a connection/i)).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Offline information" });
+    expect(trigger).toHaveTextContent("Offline");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("offline-info-popover")).toHaveTextContent("Available when saved");
+    expect(screen.getByTestId("offline-info-popover")).toHaveTextContent("Requires internet");
 
     setState({ online: true });
     rerender(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Offline information" })).not.toBeInTheDocument();
+  });
+
+  it("toggles by click, dismisses outside without swallowing that interaction, and closes on Escape", () => {
+    setState({ online: false });
+    const onOutsideClick = vi.fn();
+    render(<MemoryRouter><><OfflineIndicator /><button onClick={onOutsideClick}>Map action</button></></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: "Offline information" });
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("offline-info-popover")).toBeInTheDocument();
+    const mapAction = screen.getByRole("button", { name: "Map action" });
+    fireEvent.pointerDown(mapAction, { pointerType: "mouse" });
+    fireEvent.click(mapAction);
+    expect(onOutsideClick).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("offline-info-popover")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("offline-info-popover")).not.toBeInTheDocument();
+  });
+
+  it("opens on desktop hover and remains open while the popover is pointer-hovered", () => {
+    setState({ online: false });
+    render(<MemoryRouter><OfflineIndicator /></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: "Offline information" });
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    const popover = screen.getByTestId("offline-info-popover");
+    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    fireEvent.pointerEnter(popover, { pointerType: "mouse" });
+    expect(popover).toBeInTheDocument();
   });
 });

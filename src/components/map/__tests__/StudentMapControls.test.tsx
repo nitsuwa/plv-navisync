@@ -160,9 +160,8 @@ describe("StudentMapControls", () => {
     try {
       render(<StudentMapControls {...props()} />);
       const status = screen.getByTestId("student-map-offline-status");
-      expect(status).toHaveAttribute("role", "status");
-      expect(status).toHaveTextContent("Offline");
-      expect(status).toHaveClass("md:top-3", "bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]");
+      expect(screen.getByRole("button", { name: "Offline information" })).toHaveTextContent("Offline");
+      expect(status).toHaveClass("md:top-[4.25rem]", "bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]");
       expect(screen.getByTestId("student-map-search-panel").contains(status)).toBe(false);
     } finally {
       Object.defineProperty(navigator, "onLine", { configurable: true, value: originalOnline });
