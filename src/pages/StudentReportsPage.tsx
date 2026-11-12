@@ -76,6 +76,7 @@ export function StudentReportsPage() {
   const { loading: authLoading, isStudent, profile } = useStudentAuth();
   const { activeCampus, campuses } = usePublishedCampus();
   const location = useLocation();
+  const backTo = location.state?.backTo === "/home" ? "/home" : "/student";
   const navigate = useNavigate();
   const [reports, setReports] = useState<IssueReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,14 +141,14 @@ export function StudentReportsPage() {
     const params = new URLSearchParams(location.search);
     params.delete("building");
     const search = params.toString();
-    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true, state: location.state });
   };
 
   const clearRequestedReport = () => {
     const params = new URLSearchParams(location.search);
     params.delete("reportId");
     const search = params.toString();
-    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true });
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, { replace: true, state: location.state });
   };
 
   // Wait for the Supabase session/profile check before deciding. Reuse the
@@ -220,7 +221,7 @@ export function StudentReportsPage() {
     <PageTransition>
       <div className="min-h-screen">
         <StudentPageHeader
-          backTo="/student"
+          backTo={backTo}
           title="My Reports"
           subtitle={`${reports.length} submitted ${reports.length === 1 ? "report" : "reports"}`}
           icon={Flag}

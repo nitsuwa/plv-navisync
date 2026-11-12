@@ -76,8 +76,11 @@ const REPORT_STATUS_PRESENTATION: Record<ReportStatus, { label: string; classNam
   // Matches the student Reports page, which shows rejected reports as Dismissed.
   rejected: { label: "Dismissed", className: "bg-destructive/10 text-destructive dark:text-red-300" },
 };
-const REPORT_STATUS_FILTER_OPTIONS: Array<{ value: ReportStatus | "all"; label: string }> = [
+type NotificationFilter = ReportStatus | "all" | "events";
+
+const NOTIFICATION_FILTER_OPTIONS: Array<{ value: NotificationFilter; label: string }> = [
   { value: "all", label: "All notifications" },
+  { value: "events", label: "Events" },
   ...Object.entries(REPORT_STATUS_PRESENTATION).map(([value, status]) => ({
     value: value as ReportStatus,
     label: status.label,
@@ -243,7 +246,6 @@ function StudentNotificationFeed({
   reportsSnapshot, reportsSnapshotLoading = false, reportsSnapshotError = false, onRetryReports,
 }: StudentNotificationFeedProps) {
   const isSection = presentation === "section";
-  const filterLabelId = useId();
   const sectionListId = useId();
   const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState(false);
@@ -254,7 +256,7 @@ function StudentNotificationFeed({
   const [reportError, setReportError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [readIds, setReadIds] = useState(() => loadReadIds(ownerId));
-  const [reportStatusFilter, setReportStatusFilter] = useState<ReportStatus | "all">("all");
+  const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>("all");
   const reportRequestInFlight = useRef(false);
   const lastReportRefreshAt = useRef(0);
   const publishedEventFeed = usePublishedEventPreviews({
@@ -377,9 +379,10 @@ function StudentNotificationFeed({
     return items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
   }, [eventClockMs, eventServerOffsetMs, eventUpdates, handoverUpdates, isStudentOrg, preferences, publishedEvents, readIds, reports, reportsSnapshot, unreadEventIds]);
   const filteredNotifications = useMemo(() => {
-    if (!isSection || reportStatusFilter === "all") return notifications;
-    return notifications.filter((item) => item.kind === "report" && item.reportStatus === reportStatusFilter);
-  }, [isSection, notifications, reportStatusFilter]);
+    if (!isSection || notificationFilter === "all") return notifications;
+    if (notificationFilter === "events") return notifications.filter((item) => item.kind !== "report");
+    return notifications.filter((item) => item.kind === "report" && item.reportStatus === notificationFilter);
+  }, [isSection, notifications, notificationFilter]);
   const unreadCount = notifications.filter((item) => item.unread).length;
   const displayedNotifications = isSection
     ? (expanded ? filteredNotifications : filteredNotifications.slice(0, SECTION_PREVIEW_COUNT))
@@ -400,11 +403,12 @@ function StudentNotificationFeed({
   };
   const displayedReportsLoading = reportsSnapshot === undefined ? loading : reportsSnapshotLoading;
   const displayedReportError = reportsSnapshot === undefined ? reportError : reportsSnapshotError;
-  const includeNonReportNotifications = !isSection || reportStatusFilter === "all";
-  const displayedNotificationsLoading = displayedReportsLoading
-    || (includeNonReportNotifications && Boolean(campusId) && publishedEventsLoading);
-  const displayedNotificationsError = displayedReportError
-    || (includeNonReportNotifications && (Boolean(eventUpdatesError) || publishedEventsError));
+  const includeReportNotifications = !isSection || notificationFilter !== "events";
+  const includeEventNotifications = !isSection || notificationFilter === "all" || notificationFilter === "events";
+  const displayedNotificationsLoading = (includeReportNotifications && displayedReportsLoading)
+    || (includeEventNotifications && Boolean(campusId) && publishedEventsLoading);
+  const displayedNotificationsError = (includeReportNotifications && displayedReportError)
+    || (includeEventNotifications && (Boolean(eventUpdatesError) || publishedEventsError));
 
   const markReportRead = (id: string) => {
     setReadIds((current) => {
@@ -490,7 +494,7 @@ function StudentNotificationFeed({
           >
             <header className={cn(
               "flex shrink-0 items-center justify-between gap-3",
-              isSection ? "mb-3" : "border-b border-border px-4 py-3",
+              isSection ? "mb-3 flex-wrap" : "border-b border-border px-4 py-3",
             )}>
               <div className={cn("min-w-0", isSection && "flex items-center gap-2.5")}>
                 {isSection && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Bell className="h-4 w-4" aria-hidden="true" /></span>}
@@ -499,45 +503,40 @@ function StudentNotificationFeed({
                   <p className="mt-0.5 text-[11px] text-muted-foreground">{unreadLabel}</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={markAllRead}
-                disabled={unreadCount === 0}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold text-primary transition-colors disabled:cursor-default disabled:opacity-45 dark:text-blue-300",
-                  isSection
-                    ? "min-h-9 rounded-xl border border-border/60 bg-card/60 px-3 hover:border-primary/25 hover:bg-primary/5"
-                    : "rounded-lg px-2 py-1.5 hover:bg-primary/8",
+              <div className={cn("flex items-center", isSection && "ml-auto max-w-full gap-2")}>
+                {isSection && (
+                  <Select value={notificationFilter} onValueChange={(value) => { setNotificationFilter(value as NotificationFilter); setExpanded(false); }}>
+                    <NotificationSelectTrigger
+                      size="default"
+                      aria-label="Filter notifications"
+                      className="!h-9 min-w-0 w-auto rounded-xl border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15 [&_svg]:opacity-100"
+                    >
+                      <SelectValue />
+                    </NotificationSelectTrigger>
+                    <NotificationSelectContent position="popper" sideOffset={6} className="z-[80] max-h-[min(21rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-reduce:animate-none">
+                      {NOTIFICATION_FILTER_OPTIONS.map((option) => (
+                        <NotificationSelectItem key={option.value} value={option.value} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-foreground">
+                          {option.label}
+                        </NotificationSelectItem>
+                      ))}
+                    </NotificationSelectContent>
+                  </Select>
                 )}
-              >
-                <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" /> Mark all read
-              </button>
-            </header>
-
-            {isSection && (
-              <div className="mb-2.5 flex items-center justify-between gap-3">
-                <span id={filterLabelId} className="shrink-0 text-xs font-semibold text-muted-foreground">
-                  Report status
-                </span>
-                <Select value={reportStatusFilter} onValueChange={(value) => { setReportStatusFilter(value as ReportStatus | "all"); setExpanded(false); }}>
-                  <NotificationSelectTrigger
-                    size="default"
-                    aria-label="Filter notifications by report status"
-                    aria-labelledby={filterLabelId}
-                    className="!h-9 min-w-0 w-[min(13rem,62%)] rounded-xl border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm transition-colors hover:border-primary/45 focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30 motion-reduce:transition-none data-[state=open]:border-primary/60 data-[state=open]:ring-2 data-[state=open]:ring-primary/15 [&_svg]:opacity-100"
-                  >
-                    <SelectValue />
-                  </NotificationSelectTrigger>
-                  <NotificationSelectContent position="popper" sideOffset={6} className="z-[80] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] rounded-xl border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-reduce:animate-none">
-                    {REPORT_STATUS_FILTER_OPTIONS.map((option) => (
-                      <NotificationSelectItem key={option.value} value={option.value} className="min-h-11 rounded-lg px-3 py-2 text-sm focus:bg-primary/10 focus:text-foreground data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:text-foreground">
-                        {option.label}
-                      </NotificationSelectItem>
-                    ))}
-                  </NotificationSelectContent>
-                </Select>
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  disabled={unreadCount === 0}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold text-primary transition-colors disabled:cursor-default disabled:opacity-45 dark:text-blue-300",
+                    isSection
+                      ? "min-h-9 rounded-xl border border-border/60 bg-card/60 px-3 hover:border-primary/25 hover:bg-primary/5"
+                      : "rounded-lg px-2 py-1.5 hover:bg-primary/8",
+                  )}
+                >
+                  <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" /> Mark all read
+                </button>
               </div>
-            )}
+            </header>
 
             <div className={cn(
               isSection ? "w-full" : "min-h-0 flex-1 overflow-y-auto overscroll-contain",
@@ -553,7 +552,8 @@ function StudentNotificationFeed({
                     return (
                       <li key={item.id}>
                         <Link
-                        to={item.href}
+                          to={item.href}
+                          state={isSection && item.kind === "report" ? { backTo: "/home" } : undefined}
                           onClick={() => {
                             if (item.kind === "report" || item.kind === "campus-event") markReportRead(item.id);
                             else if (item.kind === "event-handover" && item.handover) markHandoverRead?.(item.handover.grantId);
@@ -637,13 +637,15 @@ function StudentNotificationFeed({
                 <div className={cn("px-4 py-8 text-center", isSection && "rounded-2xl border border-dashed border-border/60 bg-card/40")}>
                   <span className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-muted-foreground"><Bell className="h-4 w-4" aria-hidden="true" /></span>
                   <p className="mt-2 text-xs font-bold text-foreground">
-                    {isSection && reportStatusFilter !== "all"
-                      ? `No ${REPORT_STATUS_PRESENTATION[reportStatusFilter].label.toLowerCase()} reports`
+                    {isSection && notificationFilter !== "all"
+                      ? (notificationFilter === "events" ? "No event notifications" : `No ${REPORT_STATUS_PRESENTATION[notificationFilter].label.toLowerCase()} reports`)
                       : "You’re all caught up"}
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {isSection && reportStatusFilter !== "all"
-                      ? "Choose another report status to see matching notifications."
+                    {isSection && notificationFilter !== "all"
+                      ? (notificationFilter === "events"
+                        ? "Event updates will appear here."
+                        : "Choose another report status to see matching notifications.")
                       : "Report updates and upcoming campus events will appear here."}
                   </p>
                 </div>
