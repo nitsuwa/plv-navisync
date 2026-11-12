@@ -6,24 +6,31 @@ import { AdminEventsWorkspacePage, LegacyAdminEventLayoutsRedirect } from "../Ad
 vi.mock("../AdminEventLayoutsPage", () => ({
   AdminEventLayoutsPage: ({ workspaceView }: { workspaceView: string }) => <div data-testid="layout-workspace" data-view={workspaceView}>Layout content</div>,
 }));
-vi.mock("../AdminEventsPage", () => ({ AdminEventsPage: () => <div data-testid="campus-listings">Campus listing content</div> }));
-
 function CurrentLocation() {
   const location = useLocation();
   return <output data-testid="location">{location.pathname}{location.search}</output>;
 }
 
 describe("AdminEventsWorkspacePage", () => {
-  it("keeps the legacy Events URL on campus listings and switches workspace views", () => {
+  it("opens the legacy Events URL on Needs review and switches workspace views", () => {
     render(<MemoryRouter initialEntries={["/admin-dashboard/events"]}>
       <Routes><Route path="/admin-dashboard/events" element={<><AdminEventsWorkspacePage /><CurrentLocation /></>} /></Routes>
     </MemoryRouter>);
 
-    expect(screen.getByTestId("campus-listings")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Campus listings" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "Needs review" }));
+    expect(screen.queryByRole("tab", { name: "Campus listings" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Needs review" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("layout-workspace")).toHaveAttribute("data-view", "review");
     expect(screen.getByTestId("location")).toHaveTextContent("/admin-dashboard/events?view=review");
+  });
+
+  it("redirects old Campus listings URLs to Needs review", () => {
+    render(<MemoryRouter initialEntries={["/admin-dashboard/events?view=listings&source=legacy"]}>
+      <Routes><Route path="/admin-dashboard/events" element={<><AdminEventsWorkspacePage /><CurrentLocation /></>} /></Routes>
+    </MemoryRouter>);
+
+    expect(screen.getByRole("tab", { name: "Needs review" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("layout-workspace")).toHaveAttribute("data-view", "review");
+    expect(screen.getByTestId("location")).toHaveTextContent("/admin-dashboard/events?view=review&source=legacy");
   });
 
   it("opens the requested review view from the new sidebar link", () => {
@@ -65,7 +72,7 @@ describe("AdminEventsWorkspacePage", () => {
 
     const tablist = screen.getByRole("tablist", { name: "Events workspace" });
     expect(tablist.className).toContain("grid-cols-2");
-    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
   });
 
   it("redirects old review links while preserving their query parameters", () => {

@@ -1,30 +1,27 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Navigate, useSearchParams } from "react-router";
-import { CalendarDays, ClipboardCheck, History, ListChecks } from "lucide-react";
+import { CalendarDays, ClipboardCheck, History } from "lucide-react";
 import { cn } from "../lib/utils";
 import { AdminEventLayoutsPage } from "./AdminEventLayoutsPage";
-import { AdminEventsPage } from "./AdminEventsPage";
 
-export type AdminEventsWorkspaceView = "review" | "publication" | "history" | "listings";
+export type AdminEventsWorkspaceView = "review" | "publication" | "history";
 
 const VIEWS: Array<{ id: AdminEventsWorkspaceView; label: string; icon: typeof ClipboardCheck }> = [
   { id: "review", label: "Needs review", icon: ClipboardCheck },
   { id: "publication", label: "Approved & publication", icon: CalendarDays },
   { id: "history", label: "History", icon: History },
-  { id: "listings", label: "Campus listings", icon: ListChecks },
 ];
 
 function isWorkspaceView(value: string | null): value is AdminEventsWorkspaceView {
   return VIEWS.some(view => view.id === value);
 }
 
-/** One admin Events workspace for student layouts and legacy campus listings. */
+/** Admin Events workspace for student event submissions and publication. */
 export function AdminEventsWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedView = searchParams.get("view");
-  // /admin-dashboard/events was the legacy Campus Events URL. Keep direct
-  // bookmarks there working; the new sidebar explicitly opens ?view=review.
-  const activeView: AdminEventsWorkspaceView = isWorkspaceView(requestedView) ? requestedView : "listings";
+  // Bare Events URLs and retired Campus listings links now open the review queue.
+  const activeView: AdminEventsWorkspaceView = isWorkspaceView(requestedView) ? requestedView : "review";
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previousViewRef = useRef(activeView);
 
@@ -32,7 +29,7 @@ export function AdminEventsWorkspacePage() {
     if (!isWorkspaceView(requestedView)) {
       setSearchParams(current => {
         const next = new URLSearchParams(current);
-        next.set("view", "listings");
+        next.set("view", "review");
         return next;
       }, { replace: true });
     }
@@ -68,7 +65,7 @@ export function AdminEventsWorkspacePage() {
     <div ref={workspaceRef} className="space-y-4 animate-fade-in" aria-labelledby="admin-events-title">
       <header className="space-y-1">
         <h1 id="admin-events-title" className="text-2xl font-extrabold text-foreground">Events</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">Review submissions, manage publication, browse history, and maintain campus listings.</p>
+        <p className="max-w-3xl text-sm text-muted-foreground">Review submissions, manage publication, and browse event history.</p>
       </header>
 
       <div role="tablist" aria-label="Events workspace" className="grid w-full grid-cols-2 gap-1 rounded-2xl border border-border bg-card p-1.5 sm:flex sm:flex-wrap">
@@ -95,9 +92,7 @@ export function AdminEventsWorkspacePage() {
       </div>
 
       <section id="admin-events-view" role="tabpanel" aria-labelledby={`admin-events-tab-${activeView}`} className="min-w-0">
-        {activeView === "listings"
-          ? <AdminEventsPage />
-          : <AdminEventLayoutsPage key={activeView} workspaceView={activeView} />}
+        <AdminEventLayoutsPage key={activeView} workspaceView={activeView} />
       </section>
     </div>
   );
