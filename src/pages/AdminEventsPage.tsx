@@ -1,3 +1,5 @@
+import { confirmAction } from "../lib/confirmAction";
+import { useUnsavedFormGuard } from "../hooks/useUnsavedFormGuard";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { EventCardSkeleton } from "../components/ui/PageSkeleton";
@@ -54,7 +56,7 @@ function EventModal({ event, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: EventInput) => Promise<void>;
 }) {
-  useEscToClose(onClose);
+
   const isNew = event === null;
   const toast = useToast();
   const [saving, setSaving] = useState(false);
@@ -68,6 +70,10 @@ function EventModal({ event, onClose, onSave }: {
     endsAt: toLocalInput(event?.endsAt ?? ""),
     status: event?.status ?? ("draft" as ManagedEventStatus),
   });
+  const [initialForm] = useState(() => JSON.stringify(form));
+  const guard = useUnsavedFormGuard(JSON.stringify(form) !== initialForm, saving);
+  const requestClose = async () => { if (await guard.requestDiscard()) onClose(); };
+  useEscToClose(() => void requestClose());
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const startParts = splitDateTime(form.startsAt);
   const endParts = splitDateTime(form.endsAt);
@@ -94,31 +100,44 @@ function EventModal({ event, onClose, onSave }: {
     const endsAt = endEntered ? endIso : startIso;
     if (!endsAt) { setFormErrors({ endsAt: "Choose an end date and enter a valid 24-hour time" }); return; }
 
-    setSaving(true);
-    try {
-      await onSave({
-        title: form.title.trim(),
-        description: form.description.trim() || undefined,
-        category: form.category,
-        organizer: form.organizer.trim() || undefined,
-        venue: form.venue.trim(),
-        startsAt: startIso,
-        endsAt,
-        status: form.status,
-      });
-      toast.success(isNew ? "Event created" : "Event updated", `"${form.title}" has been ${isNew ? "created" : "updated"}.`);
-      onClose();
-    } catch (err) {
-      toast.error(isNew ? "Create failed" : "Update failed", err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setSaving(false);
+    const persist = async () => {
+      setSaving(true);
+      try {
+        await onSave({
+          title: form.title.trim(),
+          description: form.description.trim() || undefined,
+          category: form.category,
+          organizer: form.organizer.trim() || undefined,
+          venue: form.venue.trim(),
+          startsAt: startIso,
+          endsAt,
+          status: form.status,
+        });
+        toast.success(isNew ? "Event created" : "Event updated", `"${form.title}" has been ${isNew ? "created" : "updated"}.`);
+        guard.markSaved();
+        onClose();
+      } catch (err) {
+        toast.error(isNew ? "Create failed" : "Update failed", err instanceof Error ? err.message : "Something went wrong.");
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    };
+    if (form.status !== (event?.status ?? "draft")) {
+      await confirmAction({
+      title: form.status === "published" ? "Publish event?" : "Hide event from students?",
+      message: `“${form.title}”\n${startParts.date} ${startParts.time} – ${endParts.date || startParts.date} ${endParts.time || startParts.time} PHT\n${form.status === "published" ? "Students will see this event during its scheduled time window." : "This event will no longer be visible to students."}`,
+      confirmLabel: form.status === "published" ? "Publish event" : "Save as draft",
+      action: persist });
+    } else {
+      try { await persist(); } catch { /* Existing save error toast is shown above. */ }
     }
   };
 
   const inputCls = "w-full h-10 px-4 rounded-xl border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
   return (
-    <div style={{ paddingLeft: "max(0.75rem, env(safe-area-inset-left, 0px))", paddingRight: "max(0.75rem, env(safe-area-inset-right, 0px))" }} className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-background/70 px-3 py-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] backdrop-blur-sm" onClick={onClose}>
+    <div style={{ paddingLeft: "max(0.75rem, env(safe-area-inset-left, 0px))", paddingRight: "max(0.75rem, env(safe-area-inset-right, 0px))" }} className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-background/70 px-3 py-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] backdrop-blur-sm" onClick={() => void requestClose()}>
       <motion.div
         initial={{ opacity: 0, scale: 0.92, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -151,7 +170,7 @@ function EventModal({ event, onClose, onSave }: {
           <h3 id="event-modal-title" className="font-extrabold text-foreground text-sm">
             {isNew ? "Create Event" : "Edit Event"}
           </h3>
-          <button type="button" aria-label="Close modal" onClick={onClose}
+          <button type="button" aria-label="Close modal" onClick={() => void requestClose()}
             className="h-11 w-11 shrink-0 rounded-xl bg-muted flex items-center justify-center hover:bg-secondary active:scale-90 transition-all text-muted-foreground">
             <XCircle className="h-4 w-4" />
           </button>
@@ -213,7 +232,7 @@ function EventModal({ event, onClose, onSave }: {
         </div>
 
         <div className="flex shrink-0 gap-2 border-t border-border px-4 pb-4 pt-3 sm:px-6">
-          <button onClick={onClose} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
+          <button onClick={() => void requestClose()} className="min-h-11 flex-1 rounded-xl border border-border text-sm font-bold text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all">
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving || !form.title.trim() || !form.venue.trim()}
@@ -281,16 +300,19 @@ export function AdminEventsPage() {
   };
 
   const handlePublish = async (event: ManagedEvent) => {
-    setBusy(true);
-    try {
-      await eventService.updateEvent(event.id, { status: "published" });
-      toast.success("Event published", `"${event.title}" is now visible to students.`);
-      loadEvents();
-    } catch (err) {
-      toast.error("Publish failed", err instanceof Error ? err.message : "Could not publish the event.");
-    } finally {
-      setBusy(false);
-    }
+    await confirmAction({ title: "Publish event?", message: `“${event.title}”\n${new Date(event.startsAt).toLocaleString("en-PH", { timeZone: "Asia/Manila" })} – ${new Date(event.endsAt).toLocaleString("en-PH", { timeZone: "Asia/Manila" })} PHT\nStudents will see this event during its scheduled time window.`, confirmLabel: "Publish event", action: async () => {
+      setBusy(true);
+      try {
+        await eventService.updateEvent(event.id, { status: "published" });
+        toast.success("Event published", `"${event.title}" is now visible to students.`);
+        loadEvents();
+      } catch (err) {
+        toast.error("Publish failed", err instanceof Error ? err.message : "Could not publish the event.");
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    } });
   };
 
   const handleArchive = async () => {

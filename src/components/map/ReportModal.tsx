@@ -1,3 +1,4 @@
+import { useUnsavedFormGuard } from "../../hooks/useUnsavedFormGuard";
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, Flag, X, Camera, Loader2 } from "lucide-react";
@@ -31,7 +32,7 @@ interface ReportModalProps {
 }
 
 export function ReportModal({ building, campusPlace, campusId, floors = [], initialFloorId, initialRoomId, onClose }: ReportModalProps) {
-  useEscToClose(onClose);
+
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -39,6 +40,10 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [floorId, setFloorId] = useState(() => floors.some(floor => floor.id === initialFloorId) ? initialFloorId! : "");
   const [roomId, setRoomId] = useState(() => floors.find(floor => floor.id === initialFloorId)?.rooms.some(room => room.id === initialRoomId) ? initialRoomId! : "");
+  const initialLocation = useRef({ floorId, roomId });
+  const { requestDiscard, markSaved } = useUnsavedFormGuard(!submitted && Boolean(issueType || description || imageFile || floorId !== initialLocation.current.floorId || roomId !== initialLocation.current.roomId), isSubmitting);
+  const requestClose = async () => { if (await requestDiscard()) onClose(); };
+  useEscToClose(() => { void requestClose(); });
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const selectedFloor = floors.find(floor => floor.id === floorId);
@@ -93,6 +98,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
       });
 
       window.dispatchEvent(new Event(STUDENT_REPORT_SUBMITTED_EVENT));
+      markSaved();
       setSubmitted(true);
       setWarning(report.submissionWarning ?? null);
     } catch (err) {
@@ -114,7 +120,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
         aria-label="Report submitted"
         data-map-layer="modal"
         className="map-layer-modal fixed inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in"
-        onClick={onClose}
+        onClick={() => void requestClose()}
       >
         <div
           className="bg-card border border-border rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center"
@@ -132,7 +138,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
             Location: <span className="font-semibold text-foreground">{locationLabel}</span>
           </p>
           <button
-            onClick={onClose}
+            onClick={() => void requestClose()}
             className="h-10 px-8 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
           >
             Done
@@ -152,7 +158,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
       aria-label="Report issue"
       data-map-layer="modal"
       className="map-layer-modal fixed inset-0 flex items-end sm:items-center justify-center bg-background/70 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
+      onClick={() => void requestClose()}
     >
       <div
         className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md mx-0 sm:mx-4 animate-slide-up max-h-[calc(100dvh-1rem)] overflow-hidden sm:max-h-[90vh] sm:overflow-y-auto"
@@ -171,7 +177,7 @@ export function ReportModal({ building, campusPlace, campusId, floors = [], init
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => void requestClose()}
             aria-label="Close report form"
             className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
           >

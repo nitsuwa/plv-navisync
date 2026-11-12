@@ -1,3 +1,4 @@
+import { UnsavedFormsNavigationGuard } from "../../hooks/useUnsavedFormGuard";
 import { Outlet, useNavigate, useLocation } from "react-router";
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { NavigationProgress } from "../ui/NavigationProgress";
@@ -171,6 +172,7 @@ export function AdminLayout() {
 
   return (
     <UnsavedChangesProvider>
+      <UnsavedFormsNavigationGuard />
     <div className="flex h-screen overflow-hidden bg-background" style={{ height: "100dvh" }}>
       <NavigationProgress />
 

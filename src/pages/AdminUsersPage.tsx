@@ -1,3 +1,5 @@
+import { useUnsavedFormGuard } from "../hooks/useUnsavedFormGuard";
+import { useEscToClose } from "../hooks/useEscToClose";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
@@ -149,6 +151,10 @@ export function AdminUsersPage() {
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<ManagedProfile | null>(null);
   const [form, setForm] = useState<UserForm>(emptyForm);
+  const formBaseline = useRef(JSON.stringify(emptyForm));
+  const { requestDiscard, markSaved } = useUnsavedFormGuard(showModal && JSON.stringify(form) !== formBaseline.current, saving);
+  const closeUserForm = async () => { if (await requestDiscard()) setShowModal(false); };
+  useEscToClose(() => { if (!confirmation) void closeUserForm(); }, showModal && !saving);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
   const handleOrganizationsChange = useCallback((next: EventOrganization[]) => setOrganizations(next), []);
@@ -246,6 +252,7 @@ export function AdminUsersPage() {
       return;
     }
     setEditTarget(null);
+    formBaseline.current = JSON.stringify({ ...emptyForm, role: "student" });
     setForm({ ...emptyForm, role: "student" });
     setFormErrors({});
     setShowModal(true);
@@ -253,7 +260,7 @@ export function AdminUsersPage() {
 
   const openEdit = (user: ManagedProfile) => {
     setEditTarget(user);
-    setForm({
+    const nextForm: UserForm = {
       firstName: user.first_name,
       lastName: user.last_name,
       email: user.email,
@@ -261,7 +268,9 @@ export function AdminUsersPage() {
       studentNumber: user.role === "student" ? user.student_number ?? "" : "",
       role: user.role,
       isActive: user.is_active,
-    });
+    };
+    formBaseline.current = JSON.stringify(nextForm);
+    setForm(nextForm);
     setFormErrors({});
     setShowModal(true);
   };
@@ -313,6 +322,7 @@ export function AdminUsersPage() {
         });
         toast.success("Invitation sent", `An invitation was sent to ${form.email.trim()}.`);
       }
+      markSaved();
       setShowModal(false);
       setConfirmation(null);
       await loadUsers();
@@ -474,7 +484,7 @@ export function AdminUsersPage() {
 
       {showModal && createPortal(<div className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-black/50 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={editTarget ? "Edit user" : "Invite user"}>
         <div style={{ maxHeight: "min(800px, 90dvh, calc(100dvh - max(2rem, env(safe-area-inset-top)) - max(2rem, env(safe-area-inset-bottom))))" }} className="flex max-h-[min(90dvh,800px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-          <div className="sticky top-0 flex items-center justify-between border-b border-border bg-card px-5 py-3.5"><div><h2 className="font-extrabold">{editTarget ? "Edit User" : "Invite User"}</h2><p className="mt-0.5 text-xs text-muted-foreground">{editTarget ? "Account details and access" : "The recipient creates their own password."}</p></div><button aria-label="Close" onClick={() => setShowModal(false)} className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button></div>
+          <div className="sticky top-0 flex items-center justify-between border-b border-border bg-card px-5 py-3.5"><div><h2 className="font-extrabold">{editTarget ? "Edit User" : "Invite User"}</h2><p className="mt-0.5 text-xs text-muted-foreground">{editTarget ? "Account details and access" : "The recipient creates their own password."}</p></div><button aria-label="Close" onClick={() => void closeUserForm()} className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button></div>
           <div className="space-y-4 overflow-y-auto overscroll-contain p-5">
             <section className="space-y-3"><p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Account</p><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><FormField label="First name" id="first-name" value={form.firstName} onChange={(firstName) => setForm((value) => ({ ...value, firstName }))} error={formErrors.firstName} required maxLength={80} /><FormField label="Last name" id="last-name" value={form.lastName} onChange={(lastName) => setForm((value) => ({ ...value, lastName }))} error={formErrors.lastName} required maxLength={80} /></div>
               <FormField label="Email" id="user-email" value={form.email} onChange={(email) => setForm((value) => ({ ...value, email }))} error={formErrors.email} type="email" required disabled={!!editTarget} helper={editTarget ? "Email changes require account verification." : "Supabase Auth will send the secure invitation email."} />
@@ -505,7 +515,7 @@ export function AdminUsersPage() {
             })()}
             {!editTarget && <p className="text-xs text-muted-foreground">The recipient sets their password from the invitation email. New accounts remain Pending Invite until setup is complete.</p>}
           </div>
-          <div className="flex shrink-0 gap-3 border-t border-border bg-card px-6 py-4"><Button variant="outline" onClick={() => setShowModal(false)} className="flex-1">Cancel</Button><Button onClick={requestSave} isLoading={saving} className="flex-1">{editTarget ? "Save Changes" : "Send Invitation"}</Button></div>
+          <div className="flex shrink-0 gap-3 border-t border-border bg-card px-6 py-4"><Button variant="outline" onClick={() => void closeUserForm()} className="flex-1">Cancel</Button><Button onClick={requestSave} isLoading={saving} className="flex-1">{editTarget ? "Save Changes" : "Send Invitation"}</Button></div>
         </div>
       </div>, document.body)}
 

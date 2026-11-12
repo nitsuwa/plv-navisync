@@ -1,3 +1,4 @@
+import { confirmAction } from "../../lib/confirmAction";
 import { Accessibility, ArrowLeft, ArrowUpDown, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, DoorOpen, List, MapPin, Minimize2, Navigation, Pause, Pencil, Play, Route as RouteIcon, ShieldAlert, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
@@ -1632,7 +1633,9 @@ export function UnifiedRoutePlannerDialog({
             <button type="button" onClick={onClear} aria-label="Close Preview" title="Close Preview" className="min-h-11 rounded-xl border border-border px-3 text-[11px] font-extrabold text-muted-foreground hover:bg-muted">Close Preview</button>
           </>}
         </div> : navigatingPhase ? <div className="flex gap-2">
-          <button type="button" onClick={onEndNavigation} className="min-h-11 flex-1 rounded-xl border border-destructive/30 text-[11px] font-extrabold text-destructive hover:bg-destructive/5">End Navigation</button>
+          <button type="button" onClick={async () => {
+            if (await confirmAction({ title: "End navigation?", message: mode === "emergency" ? "This stops the current SOS emergency directions and clears the route." : "This stops the current directions and clears the route.", cancelLabel: "Keep navigating", confirmLabel: "End navigation" })) onEndNavigation?.();
+          }} className="min-h-11 flex-1 rounded-xl border border-destructive/30 text-[11px] font-extrabold text-destructive hover:bg-destructive/5">End Navigation</button>
         </div> : null}
       </footer>}
     </motion.div>

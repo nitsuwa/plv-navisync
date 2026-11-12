@@ -1,3 +1,4 @@
+import { registerUnsavedFormGuard } from "../hooks/useUnsavedFormGuard";
 /** Focused multi-location event map editor for active Student Org accounts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
@@ -82,6 +83,8 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
   const [submitting, setSubmitting] = useState(false);
   const [pendingLocationId, setPendingLocationId] = useState<string | null>(null);
   const [pendingBack, setPendingBack] = useState(false);
+  const [pendingSignOut, setPendingSignOut] = useState(false);
+  const signOutDecision = useRef<((proceed: boolean) => void) | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [submissionLocations, setSubmissionLocations] = useState<EventOverlayLocation[] | null>(null);
   const [feedbackSaving, setFeedbackSaving] = useState(false);
@@ -300,7 +303,7 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
   }, [captureLocations, clearRecoveryDrafts, editAccess, grantId, overlay, saving, submitting]);
   const saveStatus = useEventAutosave(
     isDirty,
-    Boolean(overlay && editAccess?.canEditContent && !editAccess.isArchived && (overlay.status === "draft" || overlay.status === "disapproved" || overlay.status === "pending") && !saving && !feedbackSaving && !submitting && !pendingLocationId && !pendingBack && !submissionLocations && blocker.state !== "blocked"),
+    Boolean(overlay && editAccess?.canEditContent && !editAccess.isArchived && (overlay.status === "draft" || overlay.status === "disapproved" || overlay.status === "pending") && !saving && !feedbackSaving && !submitting && !pendingLocationId && !pendingBack && !pendingSignOut && !submissionLocations && blocker.state !== "blocked"),
     locations,
     autosave,
   );
@@ -351,7 +354,20 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
     return { id: location.id, label: location.locationRef.label, furnitureCount: location.eventFurniture.length, labelCount: location.eventLabels.length, issues };
   }), [submissionLocations, eventCampus]);
 
+  useEffect(() => registerUnsavedFormGuard(async () => {
+    if (layoutsMatch(captureLocations(), persistedLocations)) return true;
+    return new Promise<boolean>((resolve) => {
+      signOutDecision.current = resolve;
+      setDialogError(null);
+      setPendingSignOut(true);
+    });
+  }, () => { allowNavigationRef.current = false; }), [captureLocations, persistedLocations]);
+  useEffect(() => () => { signOutDecision.current?.(false); }, []);
+
   const closePrompt = useCallback(() => {
+    signOutDecision.current?.(false);
+    signOutDecision.current = null;
+    setPendingSignOut(false);
     setPendingBack(false);
     setPendingLocationId(null);
     setDialogError(null);
@@ -359,6 +375,14 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
   }, [blocker]);
 
   const continuePendingAction = useCallback(() => {
+    if (signOutDecision.current) {
+      allowNavigationRef.current = true;
+      const resolve = signOutDecision.current;
+      signOutDecision.current = null;
+      setPendingSignOut(false);
+      resolve(true);
+      return;
+    }
     const nextLocationId = pendingLocationId;
     setPendingLocationId(null);
     setDialogError(null);
@@ -424,5 +448,5 @@ function StudentEventEditorSession({ownerId,organizations,historyRoute}:{ownerId
   };
 
   const archivedReadOnly = Boolean(editAccess?.isArchived);
-  return <motion.div initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="h-full min-h-0 flex flex-col overflow-hidden bg-background"><div className="shrink-0 px-3 py-2">{archivedReadOnly && <p role="status" className="mb-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Archived organization layout · read-only history</p>}<EventFeedbackChecklist overlay={overlay} busy={feedbackSaving || saving || submitting || !editAccess?.canAddressFeedback || archivedReadOnly} forceOpen={feedbackOpen} onLocatePin={locateFeedback} onChange={(...args) => void changeFeedback(...args)} /></div><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher readOnly={!editAccess?.canEditContent || archivedReadOnly} presentation="responsive" locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} readOnly={!editAccess?.canEditContent || archivedReadOnly} floorPlan={floorPlan} overlay={focusedOverlay} feedbackPins={feedbackPinsWithStatus(overlay.locationFeedback?.[activeLocation.id], overlay.feedbackResolutions?.[activeLocation.id]).filter(pin => !pin.addressed)} feedbackFocusRequest={feedbackFocus?.locationId === activeLocation.id ? feedbackFocus : null} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} finalizeDraftRef={finalizeDraftRef} onBack={() => { if (archivedReadOnly) { navigate("/student/events"); return; } captureLocations(); setDialogError(null); setPendingBack(true); }} isSaving={saving || feedbackSaving} isSubmitting={submitting} saveStatus={saveStatus} tutorialAccountId={profile?.id} /></div></div><EventSubmissionReview feedbackTotal={Object.values(overlay.locationFeedback ?? {}).reduce((total, value) => total + readEventFeedback(value).pins.length, 0)} feedbackOpen={countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions)} updateMode={overlay.status === "pending"} open={Boolean(submissionLocations)} title={overlay.title} locations={submissionChecks} busy={submitting || saving || feedbackSaving} onClose={() => setSubmissionLocations(null)} onConfirm={() => void confirmSubmission()} onReviewLocation={(locationId) => { setSubmissionLocations(null); setActiveLocationId(locationId); }} /><UnsavedChangesDialog open={pendingBack || Boolean(pendingLocationId) || blocker.state === "blocked"} isDirty={isDirty || blocker.state === "blocked"} saving={saving} error={dialogError} description="Save your event map changes before leaving, or discard them." infoTitle="Leave event editor?" infoDescription="Your draft is saved. You can return to My Events and continue designing later." leaveLabel="Back to My Events" saveLabel={pendingBack ? "Save draft & leave" : "Save Draft"} discardLabel={pendingBack ? "Leave without saving" : "Don't Save"} onCancel={closePrompt} onSave={() => void saveAndContinue()} onDiscard={discardAndContinue} /></motion.div>;
+  return <motion.div initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="h-full min-h-0 flex flex-col overflow-hidden bg-background"><div className="shrink-0 px-3 py-2">{archivedReadOnly && <p role="status" className="mb-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Archived organization layout · read-only history</p>}<EventFeedbackChecklist overlay={overlay} busy={feedbackSaving || saving || submitting || !editAccess?.canAddressFeedback || archivedReadOnly} forceOpen={feedbackOpen} onLocatePin={locateFeedback} onChange={(...args) => void changeFeedback(...args)} /></div><div className="flex-1 min-h-0 flex flex-col lg:flex-row"><EventLocationSwitcher readOnly={!editAccess?.canEditContent || archivedReadOnly} presentation="responsive" locations={locations} activeLocationId={activeLocation.id} onChange={handleLocationChange} /><div className="flex-1 min-w-0 min-h-0"><EventFloorEditor key={activeLocation.id} readOnly={!editAccess?.canEditContent || archivedReadOnly} floorPlan={floorPlan} overlay={focusedOverlay} feedbackPins={feedbackPinsWithStatus(overlay.locationFeedback?.[activeLocation.id], overlay.feedbackResolutions?.[activeLocation.id]).filter(pin => !pin.addressed)} feedbackFocusRequest={feedbackFocus?.locationId === activeLocation.id ? feedbackFocus : null} activeCampus={eventCampus} onSave={handleSave} onSubmit={handleSubmit} onDraftChange={handleDraftChange} interactionCommitRef={interactionCommitRef} finalizeDraftRef={finalizeDraftRef} onBack={() => { if (archivedReadOnly) { navigate("/student/events"); return; } captureLocations(); setDialogError(null); setPendingBack(true); }} isSaving={saving || feedbackSaving} isSubmitting={submitting} saveStatus={saveStatus} tutorialAccountId={profile?.id} /></div></div><EventSubmissionReview feedbackTotal={Object.values(overlay.locationFeedback ?? {}).reduce((total, value) => total + readEventFeedback(value).pins.length, 0)} feedbackOpen={countOpenFeedbackPins(overlay.locationFeedback, overlay.feedbackResolutions)} updateMode={overlay.status === "pending"} open={Boolean(submissionLocations)} title={overlay.title} locations={submissionChecks} busy={submitting || saving || feedbackSaving} onClose={() => setSubmissionLocations(null)} onConfirm={() => void confirmSubmission()} onReviewLocation={(locationId) => { setSubmissionLocations(null); setActiveLocationId(locationId); }} /><UnsavedChangesDialog open={pendingSignOut || pendingBack || Boolean(pendingLocationId) || blocker.state === "blocked"} isDirty={isDirty || blocker.state === "blocked"} saving={saving} error={dialogError} description="Save your event map changes before leaving, or discard them." infoTitle="Leave event editor?" infoDescription="Your draft is saved. You can return to My Events and continue designing later." leaveLabel="Back to My Events" saveLabel={pendingBack ? "Save draft & leave" : "Save Draft"} discardLabel={pendingBack ? "Leave without saving" : "Don't Save"} onCancel={closePrompt} onSave={() => void saveAndContinue()} onDiscard={discardAndContinue} /></motion.div>;
 }

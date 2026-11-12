@@ -1,3 +1,5 @@
+import { confirmAction } from "../../lib/confirmAction";
+import { useUnsavedFormGuard } from "../../hooks/useUnsavedFormGuard";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertCircle, Building2, ChevronDown, ChevronUp, Clock3, LoaderCircle, Pencil, Plus, RefreshCw, UserRound, UserRoundPlus, UserRoundX, X } from "lucide-react";
@@ -86,34 +88,45 @@ function OrganizationDetailsDialog({ organization, onClose, onSave, onConflict }
   const [error, setError] = useState<string | null>(null);
   const title = organization ? "Edit organization" : "Add organization";
   const dialogRef = useRef<HTMLFormElement>(null);
-  useDialogKeyboard(dialogRef, onClose, saving, "#organization-code");
+  const baseline = useRef(JSON.stringify({ code, name, isActive }));
+  const guard = useUnsavedFormGuard(JSON.stringify({ code, name, isActive }) !== baseline.current, saving);
+  const requestClose = async () => { if (await guard.requestDiscard()) onClose(); };
+  useDialogKeyboard(dialogRef, () => void requestClose(), saving, "#organization-code");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!code.trim() || !name.trim()) { setError("Enter both an organization code and name."); return; }
-    setSaving(true); setError(null);
-    try {
-      await onSave({ id: organization?.id ?? null, code: code.trim(), name: name.trim(), isActive, expectedUpdatedAt: organization?.updatedAt ?? null });
-    } catch (cause) {
-      if (cause instanceof OrganizationRecordChanged || (cause instanceof Error && cause.name === "OrganizationRecordChanged")) {
-        await onConflict();
-        onClose();
-      } else {
-        setError(cause instanceof Error ? cause.message : "The organization could not be saved. Please retry.");
-      }
-    } finally { setSaving(false); }
+    const persist = async () => {
+      setSaving(true); setError(null);
+      try {
+        await onSave({ id: organization?.id ?? null, code: code.trim(), name: name.trim(), isActive, expectedUpdatedAt: organization?.updatedAt ?? null });
+      } catch (cause) {
+        if (cause instanceof OrganizationRecordChanged || (cause instanceof Error && cause.name === "OrganizationRecordChanged")) {
+          await onConflict();
+          onClose();
+        } else {
+          setError(cause instanceof Error ? cause.message : "The organization could not be saved. Please retry.");
+          throw cause;
+        }
+      } finally { setSaving(false); }
+    };
+    if (organization && isActive !== organization.isActive) {
+      await confirmAction({ title: isActive ? "Activate organization?" : "Deactivate organization?", message: `“${name}” ${isActive ? "will be eligible to access event drafts when its representative assignment is valid." : "will lose access to event drafts, even if its representative assignment has not expired."}`, confirmLabel: isActive ? "Activate organization" : "Deactivate organization", action: persist });
+    } else {
+      try { await persist(); } catch { /* The form retains its save error. */ }
+    }
   };
 
-  return <div className="fixed inset-0 z-[70] flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-slate-950/45 p-3 pt-[max(.75rem,env(safe-area-inset-top))] pb-[max(.75rem,env(safe-area-inset-bottom))] backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+  return <div className="fixed inset-0 z-[70] flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-slate-950/45 p-3 pt-[max(.75rem,env(safe-area-inset-top))] pb-[max(.75rem,env(safe-area-inset-bottom))] backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) void requestClose(); }}>
     <form ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="organization-details-title" onSubmit={submit} style={dialogViewport} className="my-auto flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-      <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4"><div><h2 id="organization-details-title" className="font-extrabold">{title}</h2><p className="mt-1 text-xs text-muted-foreground">Verified organization record for event ownership.</p></div><button type="button" aria-label="Close organization form" onClick={onClose} className="rounded-full p-2 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button></header>
+      <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4"><div><h2 id="organization-details-title" className="font-extrabold">{title}</h2><p className="mt-1 text-xs text-muted-foreground">Verified organization record for event ownership.</p></div><button type="button" aria-label="Close organization form" onClick={() => void requestClose()} className="rounded-full p-2 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button></header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
         <label className="block space-y-1.5 text-sm font-semibold" htmlFor="organization-code"><span>Organization code</span><input id="organization-code" maxLength={40} value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. IT-ORG" className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm font-medium uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" /></label>
         <label className="block space-y-1.5 text-sm font-semibold" htmlFor="organization-name"><span>Organization name</span><input id="organization-name" maxLength={120} value={name} onChange={(event) => setName(event.target.value)} placeholder="Official organization name" className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" /></label>
         <label className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 p-3 text-sm"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-semibold">Organization is active</span><span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">Inactive organizations cannot access event drafts, even when an assignment has not expired.</span></span></label>
         {error && <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       </div>
-      <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button type="button" variant="outline" disabled={saving} onClick={onClose} className="w-full sm:w-auto">Cancel</Button><Button type="submit" isLoading={saving} disabled={saving} className="w-full sm:w-auto">{organization ? "Save organization" : "Create organization"}</Button></footer>
+      <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end"><Button type="button" variant="outline" disabled={saving} onClick={() => void requestClose()} className="w-full sm:w-auto">Cancel</Button><Button type="submit" isLoading={saving} disabled={saving} className="w-full sm:w-auto">{organization ? "Save organization" : "Create organization"}</Button></footer>
     </form>
   </div>;
 }

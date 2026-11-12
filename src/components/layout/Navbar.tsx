@@ -1,3 +1,5 @@
+import { rearmUnsavedForms } from "../../hooks/useUnsavedFormGuard";
+import { confirmSignOut } from "../../lib/confirmSignOut";
 import { Link, useLocation, useNavigate } from "react-router";
 import {
   Map, Home, Compass, CalendarDays, LayoutDashboard, LogIn, LogOut, User, Bookmark, Flag, Settings,
@@ -58,11 +60,15 @@ export function Navbar() {
   const handleStudentLogout = async () => {
     if (signingOut) return;
     setSigningOut(true);
+    setDropdownOpen(false);
+    dropdownTriggerRef.current?.focus();
     try {
+      if (!await confirmSignOut()) return;
       await signOut();
       setDropdownOpen(false);
       navigate("/");
     } catch {
+      rearmUnsavedForms();
       toast.error("This browser could not clear the saved session. Please retry.");
     } finally {
       setSigningOut(false);

@@ -7,6 +7,7 @@ import { SPRING, DURATION } from "../../config/animation";
 
 interface ConfirmDialogProps {
   open: boolean;
+  busy?: boolean;
   title: string;
   message: string;
   confirmLabel?: string;
@@ -20,6 +21,7 @@ interface ConfirmDialogProps {
 
 export function ConfirmDialog({
   open,
+  busy = false,
   title,
   message,
   confirmLabel = "Confirm",
@@ -30,6 +32,7 @@ export function ConfirmDialog({
   zIndexClassName = "z-[60]",
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
 
   // Focus trap: save and restore focus
@@ -38,12 +41,13 @@ export function ConfirmDialog({
       previousActiveElement.current = document.activeElement as HTMLElement | null;
       // Focus the dialog container on next frame
       requestAnimationFrame(() => {
-        dialogRef.current?.focus();
+        cancelRef.current?.focus();
       });
     } else {
       previousActiveElement.current?.focus();
       previousActiveElement.current = null;
     }
+    return () => { previousActiveElement.current?.focus(); };
   }, [open]);
 
   // Focus trap: keep focus within dialog
@@ -52,7 +56,7 @@ export function ConfirmDialog({
       const dialog = dialogRef.current;
       if (!dialog) return;
       const focusable = dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       );
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -74,11 +78,11 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); if (!busy) onCancel(); }
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onCancel]);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [open, onCancel, busy]);
 
   const variantStyles = {
     danger: {
@@ -108,9 +112,9 @@ export function ConfirmDialog({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: DURATION.fast }}
-          role="dialog" aria-modal="true" aria-label={title}
+          role="dialog" aria-modal="true" aria-label={title} aria-busy={busy}
           className={`fixed inset-0 ${zIndexClassName} flex items-center justify-center bg-background/70 backdrop-blur-sm p-4`}
-          onClick={onCancel}
+          onClick={() => { if (!busy) onCancel(); }}
         >
           <motion.div
             ref={dialogRef}
@@ -120,7 +124,7 @@ export function ConfirmDialog({
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={SPRING.confirm}
             onKeyDown={handleKeyDown}
-            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden outline-none"
+            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-4 p-5">
@@ -132,6 +136,7 @@ export function ConfirmDialog({
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-line">{message}</p>
               </div>
               <button type="button" aria-label="Close dialog"
+                disabled={busy}
                 onClick={onCancel}
                 className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground shrink-0"
               >
@@ -140,6 +145,9 @@ export function ConfirmDialog({
             </div>
             <div className="flex gap-2 px-5 pb-5">
               <motion.button
+                ref={cancelRef}
+                type="button"
+                disabled={busy}
                 onClick={onCancel}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
@@ -148,6 +156,8 @@ export function ConfirmDialog({
                 {cancelLabel}
               </motion.button>
               <motion.button
+                type="button"
+                disabled={busy}
                 onClick={onConfirm}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}

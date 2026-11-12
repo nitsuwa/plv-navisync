@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
   listCampuses: vi.fn(),
   getNotificationPreferences: vi.fn(),
   saveNotificationPreferences: vi.fn(),
+  confirm: vi.fn(),
 }));
+
+vi.mock("../../lib/confirmAction", () => ({ confirmAction: mocks.confirm }));
 
 vi.mock("../../services/settingsService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/settingsService")>();
@@ -37,6 +40,7 @@ import { AdminSettingsPage } from "../AdminSettingsPage";
 describe("Admin Settings platform controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.confirm.mockImplementation(async options => { try { await options.action?.(); return true; } catch { return false; } });
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     mocks.getSettings.mockResolvedValue({ default_campus_id: "campus-main" });
     mocks.listCampuses.mockResolvedValue([
@@ -116,6 +120,17 @@ describe("Admin Settings platform controls", () => {
     expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
     expect(mocks.logActivity).toHaveBeenCalledTimes(1);
     expect(mocks.logActivity).toHaveBeenCalledWith(["remember_last_campus"]);
+  });
+
+  it("preserves changed platform values when applying settings is cancelled", async () => {
+    mocks.confirm.mockResolvedValue(false);
+    render(<AdminSettingsPage />);
+    await screen.findByRole("tab", { name: "Student Experience" });
+    fireEvent.click(screen.getByRole("switch", { name: "Show Approved Event Overlays" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: "Apply platform settings?", message: expect.stringContaining("Show approved event overlays: On → Off") })));
+    expect(mocks.upsertSettings).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch", { name: "Show Approved Event Overlays" })).toHaveAttribute("aria-checked", "false");
   });
 
   it("keeps unsaved edits across tabs and saves them together", async () => {

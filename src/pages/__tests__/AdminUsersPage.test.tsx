@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { AdminUsersPage } from "../AdminUsersPage";
 
 const mobileAccounts = () => within(screen.getByTestId("mobile-user-cards"));
+const discardConfirmation = vi.hoisted(() => vi.fn());
+vi.mock('../../lib/confirmAction', () => ({ confirmAction: discardConfirmation }));
 const findMobileText = async (text: string) => within(await screen.findByTestId("mobile-user-cards")).findByText(text);
 
 const mocks = vi.hoisted(() => ({
@@ -36,6 +38,20 @@ describe("AdminUsersPage role-aware account forms", () => {
     mocks.useAdminAuth.mockReturnValue({ profile: { id: "caller", role: "admin", is_active: true }, refreshProfile: vi.fn().mockResolvedValue(undefined) });
   });
   afterEach(cleanup);
+
+  it('retains edited user details when discarding is cancelled', async () => {
+    render(<AdminUsersPage />);
+    await screen.findByRole('heading', {name:'User Management'});
+    fireEvent.click(screen.getByRole('button', {name:/Invite User/i}));
+    fireEvent.change(screen.getByLabelText(/First name/i), {target:{value:'Draft name'}});
+    discardConfirmation.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    fireEvent.click(screen.getByRole('button', {name:'Cancel'}));
+    await waitFor(() => expect(discardConfirmation).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText(/First name/i)).toHaveValue('Draft name');
+    expect(mocks.inviteManagedUser).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', {name:'Cancel'}));
+    await waitFor(() => expect(screen.queryByRole('dialog', {name:'Invite user'})).toBeNull());
+  });
 
   it("lets an Admin invite Students and Student Orgs without exposing privileged role options", async () => {
     render(<AdminUsersPage />);

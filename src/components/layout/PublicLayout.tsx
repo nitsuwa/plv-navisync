@@ -1,3 +1,4 @@
+import { UnsavedFormsNavigationGuard } from "../../hooks/useUnsavedFormGuard";
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { Navbar } from "./Navbar";
@@ -93,6 +94,7 @@ export function PublicLayout() {
       >
         Skip to main content
       </a>
+      <UnsavedFormsNavigationGuard />
       <NavigationProgress />
       <ScrollToTop />
       <OfflineIndicator />

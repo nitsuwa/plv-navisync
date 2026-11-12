@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
@@ -7,7 +7,7 @@ import type { StudentAuthState } from "../../../hooks/useStudentAuth";
 import { MobileMapAccountMenu } from "../MobileMapAccountMenu";
 import { MobileBuildingSheet } from "../MobileBuildingSheet";
 
-const authState = vi.hoisted(() => ({ isStudentOrg: false }));
+const authState = vi.hoisted(() => ({ isStudentOrg: false, signOut: vi.fn() }));
 
 const building: Building = {
   id: "b1", name: "Science Hall", code: "SCI", description: "", category: "academic", floor_count: 3,
@@ -21,12 +21,34 @@ vi.mock("../../../hooks/useStudentAuth", () => ({
     loading: false,
     username: "Demo Student",
     role: "student",
-    signOut: vi.fn(),
+    signOut: authState.signOut,
   }),
 }));
 
 describe("MobileMapAccountMenu", () => {
-  beforeEach(() => { authState.isStudentOrg = false; });
+  beforeEach(() => { authState.isStudentOrg = false; authState.signOut.mockReset().mockResolvedValue(undefined); });
+  it("accepts a real pointer gesture on sign-out confirmation above the account menu", async () => {
+    render(<MemoryRouter><MobileMapAccountMenu /></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: /user menu/i });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign Out" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out?" });
+    expect(authState.signOut).not.toHaveBeenCalled();
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    fireEvent.pointerDown(cancel, { pointerType: "mouse" });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Sign out?" })).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(authState.signOut).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign Out" }));
+    const next = await screen.findByRole("dialog", { name: "Sign out?" });
+    const confirm = within(next).getByRole("button", { name: "Sign out" });
+    fireEvent.pointerDown(confirm, { pointerType: "mouse" });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(authState.signOut).toHaveBeenCalledOnce());
+  });
+
   it("reserves a compact 48px profile target beside the full-width responsive search", () => {
     render(
       <MemoryRouter>

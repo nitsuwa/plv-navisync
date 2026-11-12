@@ -1,3 +1,5 @@
+import { confirmAction } from "../lib/confirmAction";
+import { useUnsavedFormGuard } from "../hooks/useUnsavedFormGuard";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { TablePageSkeleton } from "../components/ui/PageSkeleton";
@@ -63,7 +65,7 @@ export function AdminAnnouncementsPage() {
   const [statusFilter, setStatusFilter] = useState<AnnouncementStatus | "all">("all");
 
   const [showModal, setShowModal] = useState(false);
-  useEscToClose(() => setShowModal(false), showModal);
+
   const [editTarget, setEditTarget] = useState<ManagedAnnouncement | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ManagedAnnouncement | null>(null);
   useEscToClose(() => setArchiveTarget(null), Boolean(archiveTarget));
@@ -72,6 +74,10 @@ export function AdminAnnouncementsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const baseline = useRef(JSON.stringify(EMPTY_FORM));
+  const guard = useUnsavedFormGuard(showModal && JSON.stringify(form) !== baseline.current, saving);
+  const requestClose = async () => { if (await guard.requestDiscard()) setShowModal(false); };
+  useEscToClose(() => void requestClose(), showModal);
   const requestRef = useRef(0);
   const toast = useToast();
 
@@ -120,6 +126,7 @@ export function AdminAnnouncementsPage() {
   );
 
   const openAdd = () => {
+    baseline.current = JSON.stringify(EMPTY_FORM);
     setForm(EMPTY_FORM);
     setFormErrors({});
     setEditTarget(null);
@@ -127,6 +134,7 @@ export function AdminAnnouncementsPage() {
   };
 
   const openEdit = (a: ManagedAnnouncement) => {
+    baseline.current = JSON.stringify({ title: a.title, content: a.content, category: a.category, priority: a.priority === "low" ? "normal" : a.priority, status: a.status, expires_at: toLocalInput(a.expiresAt) });
     setForm({
       title: a.title, content: a.content, category: a.category, priority: a.priority === "low" ? "normal" : a.priority,
       status: a.status, expires_at: toLocalInput(a.expiresAt),
@@ -142,43 +150,56 @@ export function AdminAnnouncementsPage() {
     if (!form.content.trim()) errors.content = "Content is required";
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setFormErrors({});
-    setSaving(true);
-    try {
-      const input = {
-        title: form.title.trim(),
-        content: form.content.trim(),
-        category: form.category,
-        priority: form.priority,
-        status: form.status,
-        expiresAt: form.expires_at ? new Date(form.expires_at).toISOString() : null,
-      };
-      if (editTarget) {
-        await announcementService.updateAnnouncement(editTarget.id, input);
-        toast.success("Announcement updated", `${form.title} has been updated.`);
-      } else {
-        await announcementService.createAnnouncement(input);
-        toast.success(form.status === "published" ? "Announcement published" : "Announcement saved", `${form.title} has been ${form.status === "published" ? "published" : "saved as draft"}.`);
+    const persist = async () => {
+      setSaving(true);
+      try {
+        const input = {
+          title: form.title.trim(),
+          content: form.content.trim(),
+          category: form.category,
+          priority: form.priority,
+          status: form.status,
+          expiresAt: form.expires_at ? new Date(form.expires_at).toISOString() : null,
+        };
+        if (editTarget) {
+          await announcementService.updateAnnouncement(editTarget.id, input);
+          toast.success("Announcement updated", `${form.title} has been updated.`);
+        } else {
+          await announcementService.createAnnouncement(input);
+          toast.success(form.status === "published" ? "Announcement published" : "Announcement saved", `${form.title} has been ${form.status === "published" ? "published" : "saved as draft"}.`);
+        }
+        guard.markSaved();
+        baseline.current = JSON.stringify(form);
+        setShowModal(false);
+        loadAnnouncements();
+      } catch (err) {
+        toast.error("Save failed", err instanceof Error ? err.message : "Could not save the announcement.");
+        throw err;
+      } finally {
+        setSaving(false);
       }
-      setShowModal(false);
-      loadAnnouncements();
-    } catch (err) {
-      toast.error("Save failed", err instanceof Error ? err.message : "Could not save the announcement.");
-    } finally {
-      setSaving(false);
+    };
+    if (form.status !== (editTarget?.status ?? "draft")) {
+      await confirmAction({ title: form.status === "published" ? "Publish announcement?" : "Hide announcement from students?", message: `“${form.title}” ${form.status === "published" ? "will be visible to students." : "will no longer be visible to students."}`, confirmLabel: form.status === "published" ? "Publish announcement" : "Save status", action: persist });
+    } else {
+      try { await persist(); } catch { /* Existing save error toast is shown above. */ }
     }
   };
 
   const handlePublish = async (a: ManagedAnnouncement) => {
-    setBusy(true);
-    try {
-      await announcementService.publishAnnouncement(a.id);
-      toast.success("Announcement published", `${a.title} is now live.`);
-      loadAnnouncements();
-    } catch (err) {
-      toast.error("Publish failed", err instanceof Error ? err.message : "Could not publish the announcement.");
-    } finally {
-      setBusy(false);
-    }
+    await confirmAction({ title: "Publish announcement?", message: `“${a.title}” will be visible to students.`, confirmLabel: "Publish announcement", action: async () => {
+      setBusy(true);
+      try {
+        await announcementService.publishAnnouncement(a.id);
+        toast.success("Announcement published", `${a.title} is now live.`);
+        loadAnnouncements();
+      } catch (err) {
+        toast.error("Publish failed", err instanceof Error ? err.message : "Could not publish the announcement.");
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    } });
   };
 
   const handleArchive = async () => {
@@ -358,7 +379,7 @@ export function AdminAnnouncementsPage() {
             key="modal-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowModal(false)}
+            onClick={() => void requestClose()}
             role="dialog" aria-modal="true" aria-label="Announcement form"
           >
             <motion.div
@@ -376,7 +397,7 @@ export function AdminAnnouncementsPage() {
                   </div>
                   <h2 className="font-extrabold text-foreground text-sm">{editTarget ? "Edit Announcement" : "Post Announcement"}</h2>
                 </div>
-                <button type="button" aria-label="Close modal" onClick={() => setShowModal(false)}
+                <button type="button" aria-label="Close modal" onClick={() => void requestClose()}
                   className="w-8 h-8 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors shrink-0">
                   <X className="h-4 w-4" />
                 </button>
@@ -433,7 +454,7 @@ export function AdminAnnouncementsPage() {
                 <p className="text-[10px] text-muted-foreground">Published announcements appear on the student feed until they expire or are archived.</p>
               </div>
               <div className="flex gap-3 px-6 pb-6">
-                <Button variant="outline" onClick={() => setShowModal(false)} className="flex-1">Cancel</Button>
+                <Button variant="outline" onClick={() => void requestClose()} className="flex-1">Cancel</Button>
                 <Button variant="primary" onClick={handleSave} className="flex-1" disabled={saving || !form.title.trim() || !form.content.trim()}>
                   {saving ? "Saving…" : editTarget ? "Save Changes" : "Post Announcement"}
                 </Button>

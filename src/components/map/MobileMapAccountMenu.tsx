@@ -1,3 +1,5 @@
+import { rearmUnsavedForms } from "../../hooks/useUnsavedFormGuard";
+import { confirmSignOut } from "../../lib/confirmSignOut";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -145,11 +147,16 @@ export function MobileMapAccountMenu({ open: controlledOpen, onOpenChange }: Mob
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
+    openRef.current = false;
+    changeOpen(false);
+    triggerRef.current?.focus();
     try {
+      if (!await confirmSignOut()) return;
       await signOut();
       changeOpen(false);
       navigate("/");
     } catch {
+      rearmUnsavedForms();
       showError("This browser could not clear the saved session. Please retry.");
     } finally {
       setSigningOut(false);

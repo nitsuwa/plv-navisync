@@ -99,6 +99,10 @@ import { AdminAnnouncementsPage } from "../AdminAnnouncementsPage";
 import { AdminEventsPage } from "../AdminEventsPage";
 import { AdminReportsPage } from "../AdminReportsPage";
 import { reportService } from "../../services/reportService";
+import { eventService } from "../../services/eventService";
+
+const confirmation = vi.hoisted(() => ({ ask: vi.fn() }));
+vi.mock("../../lib/confirmAction", () => ({ confirmAction: confirmation.ask }));
 
 describe("admin operational pages (C8-A)", () => {
   beforeAll(() => {
@@ -118,6 +122,40 @@ describe("admin operational pages (C8-A)", () => {
   });
 
   beforeEach(() => vi.clearAllMocks());
+
+  it("does not publish a campus event when confirmation is cancelled", async () => {
+    confirmation.ask.mockResolvedValue(false);
+    render(<MemoryRouter><AdminEventsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(confirmation.ask).toHaveBeenCalled());
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not archive a report when confirmation is cancelled", async () => {
+    confirmation.ask.mockResolvedValue(false);
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(confirmation.ask).toHaveBeenCalled());
+    expect(reportService.archiveReport).not.toHaveBeenCalled();
+  });
+
+  it("publishes the selected event once after confirmation", async () => {
+    confirmation.ask.mockImplementation(async options => { await options.action?.(); return true; });
+    render(<MemoryRouter><AdminEventsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(eventService.updateEvent).toHaveBeenCalledWith("ev1", { status: "published" }));
+    expect(eventService.updateEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("archives the selected report once after confirmation", async () => {
+    confirmation.ask.mockImplementation(async options => { await options.action?.(); return true; });
+    render(<MemoryRouter><AdminReportsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "View report: Broken hallway light" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(reportService.archiveReport).toHaveBeenCalledWith("r1"));
+    expect(reportService.archiveReport).toHaveBeenCalledTimes(1);
+  });
 
   it("renders the report queue from reportService", async () => {
     render(

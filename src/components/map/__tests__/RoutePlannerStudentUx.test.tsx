@@ -167,7 +167,7 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(summary).toHaveTextContent("Arrive at CABA-101.");
   });
 
-  it("exposes guided step and end controls in Follow without a duplicate Overview", () => {
+  it("exposes guided step and confirms ending navigation without a duplicate Overview", async () => {
     const onPreviousStep = vi.fn();
     const onPause = vi.fn();
     const onNextStep = vi.fn();
@@ -205,7 +205,25 @@ describe("RoutePlannerDialog student accessibility", () => {
     expect(onPreviousStep).toHaveBeenCalledOnce();
     expect(onPause).toHaveBeenCalledOnce();
     expect(onNextStep).toHaveBeenCalledOnce();
-    expect(onEndNavigation).toHaveBeenCalledOnce();
+    expect(onEndNavigation).not.toHaveBeenCalled();
+    const confirmation = await screen.findByRole("dialog", { name: "End navigation?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "End navigation" }));
+    await waitFor(() => expect(onEndNavigation).toHaveBeenCalledOnce());
+  });
+
+  it("keeps SOS guidance running when ending navigation is cancelled", async () => {
+    const onEndNavigation = vi.fn();
+    render(<RoutePlannerDialog {...plannerProps({
+      from: building("science", "SCI", "Science Hall"),
+      to: building("gate", "GATE", "Campus Gate"),
+      route: route({ mode: "emergency" }), mode: "emergency",
+      phase: "navigating", cameraMode: "follow", onEndNavigation,
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "End Navigation" }));
+    const confirmation = await screen.findByRole("dialog", { name: "End navigation?" });
+    expect(within(confirmation).getByText(/stops the current SOS emergency directions/)).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Keep navigating" }));
+    expect(onEndNavigation).not.toHaveBeenCalled();
   });
 
   it("places Edit Route beside the destination in expanded navigation without adding a control row", () => {

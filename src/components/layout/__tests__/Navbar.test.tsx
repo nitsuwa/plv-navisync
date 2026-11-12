@@ -3,6 +3,9 @@ import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Navbar } from "../Navbar";
 
+const logoutConfirmation = vi.hoisted(() => ({ confirm: vi.fn().mockResolvedValue(true) }));
+vi.mock("../../../lib/confirmSignOut", () => ({ confirmSignOut: logoutConfirmation.confirm }));
+
 const authState = vi.hoisted(() => ({
   isStudent: true,
   isAdmin: false,
@@ -85,6 +88,7 @@ describe("Navbar student navigation", () => {
     authState.username = "Test Student";
     authState.profile = null;
     authState.signOut.mockReset();
+    logoutConfirmation.confirm.mockReset().mockResolvedValue(true);
     themeState.theme = "light";
     themeState.toggleTheme.mockReset();
   });
@@ -162,6 +166,15 @@ describe("Navbar student navigation", () => {
 
     await waitFor(() => expect(screen.queryByRole("link", { name: /My Profile/ })).not.toBeInTheDocument());
     expect(underlay).not.toHaveBeenCalled();
+  });
+
+  it("retains the session when sign-out confirmation is cancelled", async () => {
+    logoutConfirmation.confirm.mockResolvedValue(false);
+    renderNavbar();
+    fireEvent.click(screen.getByRole("button", { name: /Test Student.*user menu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Sign Out/ }));
+    await waitFor(() => expect(logoutConfirmation.confirm).toHaveBeenCalledOnce());
+    expect(authState.signOut).not.toHaveBeenCalled();
   });
 
   it("executes Sign Out and returns to the public route", async () => {

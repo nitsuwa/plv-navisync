@@ -6,6 +6,8 @@ import type { Building } from "../../../types";
 import type { FloorPlan } from "../../map-builder/types";
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+const confirmDiscard = vi.hoisted(() => vi.fn());
+vi.mock('../../../lib/confirmAction', () => ({ confirmAction: confirmDiscard }));
 
 vi.mock("../../../services/reportService", async importOriginal => ({
   ...(await importOriginal<typeof import("../../../services/reportService")>()),
@@ -21,6 +23,19 @@ const submit = vi.mocked(reportService.submitReport);
 function showForm(initialFloorId?: string) { render(<ReportModal building={building} campusId="c1" floors={floors} initialFloorId={initialFloorId} onClose={vi.fn()} />); }
 describe("student building and room reporting", () => {
   beforeEach(() => vi.clearAllMocks());
+  it('keeps the report draft when dismissal is cancelled', async () => {
+    const onClose = vi.fn();
+    confirmDiscard.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<ReportModal building={building} onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText('Description'), {target:{value:'An unfinished report'}});
+    fireEvent.click(screen.getByRole('button', {name:'Close report form'}));
+    await waitFor(() => expect(confirmDiscard).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Description')).toHaveValue('An unfinished report');
+    fireEvent.click(screen.getByRole('button', {name:'Close report form'}));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(submit).not.toHaveBeenCalled();
+  });
   it("locks the report location to the selected building when no floor or room was selected", () => {
     showForm();
 

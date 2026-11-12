@@ -1,3 +1,5 @@
+import { rearmUnsavedForms } from "../../hooks/useUnsavedFormGuard";
+import { confirmSignOut } from "../../lib/confirmSignOut";
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import {
@@ -35,10 +37,12 @@ export function MoreSheet({ open, onClose }: MoreSheetProps) {
     if (signingOut) return;
     setSigningOut(true);
     try {
+      if (!await confirmSignOut()) return;
       await signOut();
       onClose();
       navigate("/");
     } catch {
+      rearmUnsavedForms();
       showError("This browser could not clear the saved session. Please retry.");
     } finally {
       setSigningOut(false);

@@ -1,3 +1,5 @@
+import { confirmAction } from "../lib/confirmAction";
+import { useUnsavedFormGuard } from "../hooks/useUnsavedFormGuard";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Bell, Check, GraduationCap, Map, Save } from "lucide-react";
@@ -216,6 +218,8 @@ export function AdminSettingsPage() {
     setSaved(false);
   };
 
+  useUnsavedFormGuard(!loading && dirty, saving);
+
   const updateNotification = <K extends keyof AdminNotificationPreferences>(key: K, value: boolean) => {
     setNotifications((current) => ({ ...current, [key]: value }));
     setSaved(false);
@@ -229,27 +233,40 @@ export function AdminSettingsPage() {
     const notificationChanged = JSON.stringify(notifications) !== JSON.stringify(initialNotifications.current);
     if (entries.length === 0 && !notificationChanged) return;
 
-    saveLock.current = true;
-    setSaving(true);
-    setSaved(false);
-    try {
-      await settingsService.upsertSettings(entries, false);
-      if (notificationChanged) await adminNotificationPreferencesService.save(notifications);
-      await logPlatformSettingsActivity([
-        ...entries.map((entry) => entry.key),
-        ...(notificationChanged ? ["admin_notification_preferences"] : []),
-      ]);
-      initialPlatform.current = { ...platform };
-      initialNotifications.current = { ...notifications };
-      setSaved(true);
-      toastRef.current.success("Settings saved", "Your changes are updated.");
-      if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
-      savedTimer.current = window.setTimeout(() => setSaved(false), 2200);
-    } catch (error) {
-      toastRef.current.error("Settings could not be saved", error instanceof Error ? error.message : "Try again. Your changes are still here.");
-    } finally {
-      saveLock.current = false;
-      setSaving(false);
+    const reviewedPlatform = { ...platform };
+    const reviewedNotifications = { ...notifications };
+    const persist = async () => {
+      saveLock.current = true;
+      setSaving(true);
+      setSaved(false);
+      try {
+        await settingsService.upsertSettings(entries, false);
+        if (notificationChanged) await adminNotificationPreferencesService.save(reviewedNotifications);
+        await logPlatformSettingsActivity([
+          ...entries.map((entry) => entry.key),
+          ...(notificationChanged ? ["admin_notification_preferences"] : []),
+        ]);
+        initialPlatform.current = reviewedPlatform;
+        initialNotifications.current = reviewedNotifications;
+        setSaved(true);
+        toastRef.current.success("Settings saved", "Your changes are updated.");
+        if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+        savedTimer.current = window.setTimeout(() => setSaved(false), 2200);
+      } catch (error) {
+        toastRef.current.error("Settings could not be saved", error instanceof Error ? error.message : "Try again. Your changes are still here.");
+        throw error;
+      } finally {
+        saveLock.current = false;
+        setSaving(false);
+      }
+    };
+    if (entries.length > 0) {
+      const labels: Record<keyof PublicPlatformSettings, string> = { defaultCampusId: "Default campus", defaultLandingPage: "Default landing page", rememberLastCampus: "Remember last campus", showApprovedEventOverlays: "Show approved event overlays", defaultRouteMode: "Default route mode", animatedRouteArrows: "Animated route arrows", autoFocusRoute: "Auto focus route", autoFollowFloors: "Auto follow floors", showMapLabels: "Show map labels" };
+      const display = (key: keyof PublicPlatformSettings, value: unknown) => typeof value === "boolean" ? (value ? "On" : "Off") : key === "defaultCampusId" ? (campuses.find(campus => campus.id === value)?.name ?? String(value || "None")) : String(value);
+      const summary = (Object.keys(PLATFORM_SETTING_KEYS) as (keyof PublicPlatformSettings)[]).filter(key => platform[key] !== initialPlatform.current[key]).map(key => `${labels[key]}: ${display(key, initialPlatform.current[key])} → ${display(key, platform[key])}`).join("\n");
+      await confirmAction({ title: "Apply platform settings?", message: `${summary}\n\nThese changes affect the student map and default experience.`, confirmLabel: "Apply settings", action: persist });
+    } else {
+      try { await persist(); } catch { /* Existing save error toast is shown above. */ }
     }
   };
 

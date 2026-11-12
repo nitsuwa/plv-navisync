@@ -1,3 +1,4 @@
+import { resolveUnsavedForms } from "../../hooks/useUnsavedFormGuard";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -185,6 +186,38 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("StudentEventEditPage pending interaction boundaries", () => {
+  it("resolves pending editor work before allowing sign-out", async () => {
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    startPendingChairMove();
+    let decision!: Promise<boolean>;
+    act(() => { decision = resolveUnsavedForms(); });
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue Editing" }));
+    expect(await decision).toBe(false);
+    expect(fixture.service.updateEventOverlayLayout).not.toHaveBeenCalled();
+    act(() => { decision = resolveUnsavedForms(); });
+    const nextDialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
+    fireEvent.click(within(nextDialog).getByRole("button", { name: "Don't Save" }));
+    expect(await decision).toBe(true);
+  });
+
+  it("keeps sign-out pending when the editor draft cannot save", async () => {
+    fixture.service.updateEventOverlayLayout.mockRejectedValue(new Error("Offline"));
+    renderPage();
+    await screen.findByTestId("event-furniture-a-chair");
+    startPendingChairMove();
+    let decision!: Promise<boolean>;
+    let settled = false;
+    act(() => { decision = resolveUnsavedForms(); void decision.then(() => { settled = true; }); });
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved Changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Draft" }));
+    await screen.findByText("Save failed. Your changes are still in the editor.");
+    expect(settled).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue Editing" }));
+    expect(await decision).toBe(false);
+  });
+
   it("retains the active location and unsaved 3D placements after an unchanged grant refresh", async () => {
     fixture.service.getEventOverlay.mockResolvedValue({ ...overlay, organizationId: "org-a" });
     fixture.service.getEventEditAccess.mockResolvedValue({ organizationId: "org-a", grantId: "grant-a", isArchived: false, canEditContent: true, canAddressFeedback: true });

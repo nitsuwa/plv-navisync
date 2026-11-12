@@ -1,3 +1,4 @@
+import { confirmAction } from "../lib/confirmAction";
 import { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
@@ -164,17 +165,20 @@ function ReportDetailModal({ report, onClose, onChanged }: {
   };
 
   const archive = async () => {
-    setChangingStatus(true);
-    try {
-      await reportService.archiveReport(report.id);
-      toast.success("Report archived", "The report has been archived.");
-      onChanged();
-      onClose();
-    } catch (err) {
-      toast.error("Archive failed", err instanceof Error ? err.message : "Could not archive the report.");
-    } finally {
-      setChangingStatus(false);
-    }
+    await confirmAction({ title: "Archive report?", message: `“${report.title}” will be removed from the active report list. Its workflow status and stored data will be kept.`, confirmLabel: "Archive report", action: async () => {
+      setChangingStatus(true);
+      try {
+        await reportService.archiveReport(report.id);
+        toast.success("Report archived", "The report has been archived.");
+        onChanged();
+        onClose();
+      } catch (err) {
+        toast.error("Archive failed", err instanceof Error ? err.message : "Could not archive the report.");
+        throw err;
+      } finally {
+        setChangingStatus(false);
+      }
+    } });
   };
 
   return (

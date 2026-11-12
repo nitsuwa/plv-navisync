@@ -1,3 +1,5 @@
+import { rearmUnsavedForms } from "../../hooks/useUnsavedFormGuard";
+import { confirmSignOut } from "../../lib/confirmSignOut";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useUnsavedChangesContext } from "../map-builder/UnsavedChangesContext";
 import {
@@ -185,8 +187,9 @@ export function AdminSidebar({
     });
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     if (signingOut) return;
+    if (!await confirmSignOut()) return;
 
     // Signing out leaves the editor entirely. Ask about unsaved work BEFORE
     // destroying the authenticated session.
@@ -198,6 +201,7 @@ export function AdminSidebar({
         onNavigate?.();
         navigate("/admin", { replace: true });
       } catch {
+        rearmUnsavedForms();
         toast.error("This browser could not clear the saved session. Please retry.");
       } finally {
         setSigningOut(false);
