@@ -22,8 +22,31 @@ vi.mock('../../hooks/useAdminEventSubmissions', () => ({ useAdminEventSubmission
 
 const pending = { ...eventPreviewFixture(), id: "pending-event", title: "Alpha submitted layout", organizationId: "org-a", academicYear: "2026–2027", createdAt: "2026-09-20T00:00:00Z", createdByUserId: "org-demo", updatedAt: "2026-10-02T00:00:00.000Z", status: "pending", submittedAt: "2026-10-01T00:00:00Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
 const approved = { ...eventPreviewFixture(), id: "approved-event", title: "Beta past layout", organizationId: "org-b", academicYear: "2025–2026", createdAt: "2025-09-20T00:00:00Z", status: "approved", updatedAt: "2026-10-02T00:00:00.000Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
+const disapproved = { ...eventPreviewFixture(), id: "disapproved-event", title: "Disapproved past layout", organizationId: "org-b", academicYear: "2024–2025", createdAt: "2024-09-20T00:00:00Z", status: "disapproved", adminComment: "Please move the booth.", updatedAt: "2026-10-02T00:00:00.000Z", restrictedAreas: [] } as unknown as CampusEventOverlay;
+
+const eventFilterFixtures: CampusEventOverlay[] = [
+  pending,
+  { ...pending, id: "pending-event-two", title: "Gamma pending layout", organizer: "Gamma Club", organizationId: "org-a", academicYear: "2025–2026" },
+  approved,
+  { ...approved, id: "approved-event-two", title: "Delta approved layout", organizer: "Delta Society", organizationId: "org-a", academicYear: "2026–2027" },
+  disapproved,
+];
+
+function useEventFilterFixtures() {
+  vi.mocked(eventOverlayService.listEventOverlays).mockImplementation(async (filters) => {
+    const status = filters?.status ?? "all";
+    const query = filters?.search?.trim().toLocaleLowerCase() ?? "";
+    return eventFilterFixtures.filter((event) => {
+      const matchesStatus = status === "all" || event.status === status;
+      const searchableText = [event.title, event.description, event.organizer].join(" ").toLocaleLowerCase();
+      return matchesStatus && (!query || searchableText.includes(query));
+    });
+  });
+  vi.mocked(eventOverlayService.listEventSubmitterNames).mockResolvedValue({});
+}
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
   localStorage.clear();
   vi.clearAllMocks();
   vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-03T02:00:00Z"));
@@ -41,15 +64,20 @@ async function openPendingReview() {
   await act(async () => { fireEvent.click(trigger); });
 }
 
+async function chooseFilterOption(label: string, optionName: string) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: optionName }));
+}
+
 describe("AdminEventLayoutsPage publication controls", () => {
   it("filters layout history by verified organization and academic year", async () => {
     render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
     await screen.findByText("Beta past layout");
-    const organization = screen.getByRole("combobox", { name: "Filter by organization" });
-    fireEvent.change(organization, { target: { value: "org-a" } });
+    await chooseFilterOption("Filter by organization", "Alpha Organization");
     expect(await screen.findByText("Alpha submitted layout")).toBeInTheDocument();
     expect(screen.queryByText("Beta past layout")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by academic year" }), { target: { value: "2026–2027" } });
+    await chooseFilterOption("Filter by academic year", "2026–2027");
     const alphaCard = screen.getByTestId("event-layout-card-pending-event");
     expect(within(alphaCard).getByText("2026–2027")).toBeInTheDocument();
     expect(within(alphaCard).queryByText("2025–2026")).not.toBeInTheDocument();
@@ -205,7 +233,7 @@ describe("AdminEventLayoutsPage publication controls", () => {
     vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValue([{ ...pending, status: "draft" }, approved]);
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /Review submission/i })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /Manage publication/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manage publication/i })).not.toBeInTheDocument();
   });
 
   it("removes a deleted submission from the queue on tab focus", async () => {
@@ -258,13 +286,13 @@ describe("AdminEventLayoutsPage publication controls", () => {
     render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
     expect(await screen.findByRole("button", { name: /Review submission/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Quick Approve/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Manage publication/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manage publication/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Review submission/i }));
     expect(await screen.findByRole("heading", { name: /Review Event Layout/i })).toBeInTheDocument();
   });
 
   it("opens a separate approved-event publication dialog and preserves cancellation", async () => {
-    render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView="publication" /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: /Manage publication/i }));
     expect(await screen.findByRole("heading", { name: /Manage event publication/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Unpublish$/i }));
@@ -273,12 +301,116 @@ describe("AdminEventLayoutsPage publication controls", () => {
   });
 
   it("sends the event revision with a publication command and reloads after the server confirms", async () => {
-    render(<MemoryRouter><AdminEventLayoutsPage /></MemoryRouter>);
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView="publication" /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: /Manage publication/i }));
     fireEvent.click(screen.getByRole("button", { name: /Publish now/i }));
     await waitFor(() => expect(eventOverlayService.manageEventPublication).toHaveBeenCalledWith(
       "approved-event", "2026-10-02T00:00:00.000Z", { action: "publish_now" },
     ));
     expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(2);
+  });
+
+  it("filters the loaded records while keeping the search input mounted and focused", async () => {
+    useEventFilterFixtures();
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView="all" /></MemoryRouter>);
+
+    const input = await screen.findByPlaceholderText("Search event layouts...");
+    input.focus();
+    expect(screen.getByTestId("event-layout-card-pending-event-two")).toBeInTheDocument();
+    expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "Gamma pending" } });
+    });
+
+    expect(screen.getByPlaceholderText("Search event layouts...")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(screen.getByTestId("event-layout-card-pending-event-two")).toBeInTheDocument();
+    expect(screen.queryByTestId("event-layout-card-approved-event")).not.toBeInTheDocument();
+    expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps history decision counts stable when a decision filter is selected", async () => {
+    useEventFilterFixtures();
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView="history" /></MemoryRouter>);
+
+    const allDecisions = await screen.findByRole("button", { name: /All decisions/ });
+    const approvedFilter = screen.getByRole("button", { name: /Approved/ });
+    const disapprovedFilter = screen.getByRole("button", { name: /Disapproved/ });
+    expect(allDecisions.textContent).toBe("All decisions3");
+    expect(approvedFilter.textContent).toBe("Approved2");
+    expect(disapprovedFilter.textContent).toBe("Disapproved1");
+
+    fireEvent.click(approvedFilter);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Approved/ })).toHaveAttribute("aria-pressed", "true"));
+
+    expect(allDecisions.textContent).toBe("All decisions3");
+    expect(approvedFilter.textContent).toBe("Approved2");
+    expect(disapprovedFilter.textContent).toBe("Disapproved1");
+    fireEvent.click(disapprovedFilter);
+    expect(screen.getByTestId("event-layout-card-disapproved-event")).toBeInTheDocument();
+    expect(screen.queryByTestId("event-layout-card-approved-event")).not.toBeInTheDocument();
+    await chooseFilterOption("Filter by organization", "Beta Organization");
+    expect(allDecisions.textContent).toBe("All decisions2");
+    expect(approvedFilter.textContent).toBe("Approved1");
+    expect(disapprovedFilter.textContent).toBe("Disapproved1");
+    await chooseFilterOption("Filter by academic year", "2025–2026");
+    expect(allDecisions.textContent).toBe("All decisions1");
+    expect(approvedFilter.textContent).toBe("Approved1");
+    expect(disapprovedFilter.textContent).toBe("Disapproved0");
+    expect(eventOverlayService.listEventOverlays).toHaveBeenCalledTimes(1);
+  });
+
+  it("limits review, publication, and history controls to their workspace statuses", async () => {
+    useEventFilterFixtures();
+    const review = render(<MemoryRouter><AdminEventLayoutsPage workspaceView="review" /></MemoryRouter>);
+    expect(await screen.findByTestId("event-layout-card-pending-event")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Approved/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Disapproved/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("event-layout-card-approved-event")).not.toBeInTheDocument();
+    review.unmount();
+
+    const publication = render(<MemoryRouter><AdminEventLayoutsPage workspaceView="publication" /></MemoryRouter>);
+    expect(await screen.findByTestId("event-layout-card-approved-event")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pending/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Disapproved/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("event-layout-card-pending-event")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Manage publication/ }).length).toBeGreaterThan(0);
+    publication.unmount();
+
+    render(<MemoryRouter><AdminEventLayoutsPage workspaceView="history" /></MemoryRouter>);
+    expect(await screen.findByTestId("event-layout-card-disapproved-event")).toBeInTheDocument();
+    expect(screen.queryByTestId("event-layout-card-pending-event")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manage publication/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Open map preview/ }).length).toBeGreaterThan(0);
+  });
+
+  it("uses themed filter dropdowns and labels unresolved organization data honestly", async () => {
+    useEventFilterFixtures();
+    const unresolvedOrganizationEvent = {
+      ...approved,
+      id: "unresolved-organization-event",
+      title: "Unresolved organization event",
+      organizationId: "org-missing",
+      academicYear: "",
+    } as CampusEventOverlay;
+    vi.mocked(eventOverlayService.listEventOverlays).mockResolvedValueOnce([...eventFilterFixtures, unresolvedOrganizationEvent]);
+    const { container } = render(<MemoryRouter><AdminEventLayoutsPage workspaceView="all" /></MemoryRouter>);
+
+    expect(await screen.findByText("Unknown year")).toBeInTheDocument();
+    expect(screen.getByText("Organization unavailable")).toBeInTheDocument();
+    expect(container.querySelectorAll("select")).toHaveLength(0);
+
+    const organization = screen.getByRole("combobox", { name: "Filter by organization" });
+    fireEvent.keyDown(organization, { key: "ArrowDown" });
+    const alphaOrganization = await screen.findByRole("option", { name: "Alpha Organization" });
+    fireEvent.click(alphaOrganization);
+    expect(organization).toHaveTextContent("Alpha Organization");
+
+    const academicYear = screen.getByRole("combobox", { name: "Filter by academic year" });
+    fireEvent.keyDown(academicYear, { key: "ArrowDown" });
+    const yearOption = await screen.findByRole("option", { name: "All academic years" });
+    fireEvent.click(yearOption);
+    expect(academicYear).toHaveTextContent("All academic years");
   });
 });

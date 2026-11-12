@@ -52,6 +52,7 @@ import { submissionUpdateLabel } from '../lib/adminEventSubmissions';
 import { EventStudentVisibility } from '../components/events/EventStudentVisibility';
 import { eventOrganizationService } from '../services/eventOrganizationService';
 import type { EventOrganization } from '../types/eventOrganization';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../app/components/ui/select";
 
 // ── Status configuration ──────────────────────────────────────────────────
 
@@ -441,6 +442,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
   const [overlays, setOverlays] = useState<CampusEventOverlay[]>([]);
   const [submitterNames, setSubmitterNames] = useState<Record<string, string>>({});
   const [organizations, setOrganizations] = useState<EventOrganization[]>([]);
+  const [organizationsResolved, setOrganizationsResolved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -456,6 +458,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
   const publicationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const requestRef = useRef(0);
   const activeRequestRef = useRef<number | null>(null);
+  const hasLoadedRef = useRef(false);
   const lastBackgroundRefreshAt = useRef(0);
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -464,9 +467,10 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
   useEffect(() => {
     let cancelled = false;
     if (!isAdmin || authLoading) return;
+    setOrganizationsResolved(false);
     void eventOrganizationService.listOrganizations()
-      .then(rows => { if (!cancelled) setOrganizations(rows); })
-      .catch(() => { if (!cancelled) setOrganizations([]); });
+      .then(rows => { if (!cancelled) { setOrganizations(rows); setOrganizationsResolved(true); } })
+      .catch(() => { if (!cancelled) { setOrganizations([]); setOrganizationsResolved(true); } });
     return () => { cancelled = true; };
   }, [isAdmin, authLoading]);
 
@@ -476,7 +480,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
     void eventOverlayService.getEventOverlay(requestedReviewId).then(event => {
       if (cancelled) return;
       if (event?.status === 'pending') {
-        setSearch(''); setStatusFilter('all'); setReviewPreviewFirst(false);
+        setSearch(''); setStatusFilter(workspaceView === "review" ? "pending" : "all"); setReviewPreviewFirst(false);
         setReviewTarget(event);
       } else if (!event) toastRef.current.error('Could not open submission', 'Refresh Event Layouts, then retry the notification.');
       else toastRef.current.error('Submission is no longer pending', 'Refresh Event Layouts to see its current review status.');
@@ -485,7 +489,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
       if (!cancelled) toastRef.current.error('Could not open submission', error instanceof Error ? error.message : 'Please retry from the notification.');
     });
     return () => { cancelled = true; };
-  }, [requestedReviewId, isAdmin, authLoading, setSearchParams]);
+  }, [requestedReviewId, isAdmin, authLoading, setSearchParams, workspaceView]);
 
   useEffect(() => {
     if (publicationTarget === null) publicationTriggerRef.current?.focus();
@@ -503,18 +507,16 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
     if (background) lastBackgroundRefreshAt.current = now;
     const requestId = ++requestRef.current;
     activeRequestRef.current = requestId;
-    if (!background) setLoading(true);
+    if (!background && !hasLoadedRef.current) setLoading(true);
     try {
       const data = await eventOverlayService.listEventOverlays({
         allCampuses: true,
-        status: statusFilter,
-        search,
+        status: "all",
         strict: true,
       });
       if (requestId !== requestRef.current) return;
-      const submitted = data.filter((item) => item.status !== "draft" && (
-        workspaceView !== "history" || item.status === "approved" || item.status === "disapproved"
-      ));
+      hasLoadedRef.current = true;
+      const submitted = data.filter((item) => item.status !== "draft");
       setOverlays(submitted);
       const visibleIds = new Set(submitted.map(item => item.id));
       setReviewTarget(current => current && !visibleIds.has(current.id) ? null : current);
@@ -527,12 +529,11 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
       setError(
         err instanceof Error ? err.message : "Could not load event layouts."
       );
-      if (!background) setOverlays([]);
     } finally {
       if (activeRequestRef.current === requestId) activeRequestRef.current = null;
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, [statusFilter, search, workspaceView]);
+  }, []);
 
   useEffect(() => {
     void loadOverlays();
@@ -575,26 +576,45 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
         { key: "approved", label: "Approved" },
         { key: "disapproved", label: "Disapproved" },
       ]
-    : [
-        { key: "all", label: "All" },
-        { key: "pending", label: "Pending" },
-        { key: "approved", label: "Approved" },
-        { key: "disapproved", label: "Disapproved" },
-      ];
+    : workspaceView === "review"
+      ? [{ key: "pending", label: "Pending" }]
+      : workspaceView === "publication"
+        ? [{ key: "approved", label: "Approved" }]
+        : [
+            { key: "all", label: "All" },
+            { key: "pending", label: "Pending" },
+            { key: "approved", label: "Approved" },
+            { key: "disapproved", label: "Disapproved" },
+          ];
 
   const organizationById = new Map(organizations.map(item => [item.id, item]));
-  const organizationIds = [...new Set(overlays.flatMap(item => item.organizationId ? [item.organizationId] : []))].sort();
-  const academicYears = [...new Set(overlays.map(item => item.academicYear?.trim() || "Unknown year"))].sort((a, b) => a.localeCompare(b));
-  const scopedOverlays = overlays.filter(item => {
+  const workspaceOverlays = overlays.filter(item => {
+    if (item.status === "draft") return false;
+    if (workspaceView === "review") return item.status === "pending";
+    if (workspaceView === "publication") return item.status === "approved";
+    if (workspaceView === "history") return item.status === "approved" || item.status === "disapproved";
+    return true;
+  });
+  const organizationIds = [...new Set(workspaceOverlays.flatMap(item => item.organizationId ? [item.organizationId] : []))].sort();
+  const academicYears = [...new Set(workspaceOverlays.map(item => item.academicYear?.trim() || "Unknown year"))].sort((a, b) => a.localeCompare(b));
+  const organizationScopedOverlays = workspaceOverlays.filter(item => {
     const year = item.academicYear?.trim() || "Unknown year";
     return (organizationFilter === "all" || (organizationFilter === "unassigned" ? !item.organizationId : item.organizationId === organizationFilter))
       && (academicYearFilter === "all" || academicYearFilter === year);
   });
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const countOverlays = organizationScopedOverlays.filter(item => {
+    if (!normalizedSearch) return true;
+    const organizationName = item.organizationId ? organizationById.get(item.organizationId)?.name ?? "" : "unassigned legacy event";
+    return [item.title, item.description, item.organizer, organizationName, item.academicYear]
+      .some(value => value?.toLocaleLowerCase().includes(normalizedSearch));
+  });
+  const scopedOverlays = countOverlays.filter(item => statusFilter === "all" || item.status === statusFilter);
   const counts: Record<string, number> = {
-    all: scopedOverlays.filter(item => workspaceView !== "history" || item.status === "approved" || item.status === "disapproved").length,
-    pending: scopedOverlays.filter((o) => o.status === "pending").length,
-    approved: scopedOverlays.filter((o) => o.status === "approved").length,
-    disapproved: scopedOverlays.filter((o) => o.status === "disapproved").length,
+    all: countOverlays.length,
+    pending: countOverlays.filter((o) => o.status === "pending").length,
+    approved: countOverlays.filter((o) => o.status === "approved").length,
+    disapproved: countOverlays.filter((o) => o.status === "disapproved").length,
   };
 
   if (error && overlays.length === 0) {
@@ -670,18 +690,28 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
         </div>
         <label className="flex min-w-0 flex-col gap-1 text-[10px] font-semibold text-muted-foreground xl:flex-1">
           <span>Organization</span>
-          <select aria-label="Filter by organization" value={organizationFilter} onChange={event => setOrganizationFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <option value="all">All organizations</option>
-            {organizationIds.map(id => <option key={id} value={id}>{organizationById.get(id)?.name ?? `Organization ${id.slice(0, 8)}`}</option>)}
-            {overlays.some(item => !item.organizationId) && <option value="unassigned">Unassigned legacy events</option>}
-          </select>
+          <Select value={organizationFilter} onValueChange={setOrganizationFilter}>
+            <SelectTrigger aria-label="Filter by organization" className="min-h-10 w-full rounded-xl border border-border bg-background text-xs text-foreground">
+              <SelectValue placeholder="All organizations" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-border bg-popover shadow-xl">
+              <SelectItem className="min-h-10 rounded-lg text-xs" value="all">All organizations</SelectItem>
+              {organizationIds.map(id => <SelectItem className="min-h-10 rounded-lg text-xs" key={id} value={id}>{organizationById.get(id)?.name ?? (organizationsResolved ? "Organization unavailable" : "Loading organization…")}</SelectItem>)}
+              {workspaceOverlays.some(item => !item.organizationId) && <SelectItem className="min-h-10 rounded-lg text-xs" value="unassigned">Unassigned legacy events</SelectItem>}
+            </SelectContent>
+          </Select>
         </label>
         <label className="flex min-w-0 flex-col gap-1 text-[10px] font-semibold text-muted-foreground xl:flex-1">
           <span>Academic year</span>
-          <select aria-label="Filter by academic year" value={academicYearFilter} onChange={event => setAcademicYearFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <option value="all">All academic years</option>
-            {academicYears.map(year => <option key={year} value={year}>{year}</option>)}
-          </select>
+          <Select value={academicYearFilter} onValueChange={setAcademicYearFilter}>
+            <SelectTrigger aria-label="Filter by academic year" className="min-h-10 w-full rounded-xl border border-border bg-background text-xs text-foreground">
+              <SelectValue placeholder="All academic years" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-border bg-popover shadow-xl">
+              <SelectItem className="min-h-10 rounded-lg text-xs" value="all">All academic years</SelectItem>
+              {academicYears.map(year => <SelectItem className="min-h-10 rounded-lg text-xs" key={year} value={year}>{year}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </label>
         <div className="flex flex-wrap items-center gap-1 sm:col-span-2 xl:flex-nowrap">
           {tabs.map((t) => (
@@ -754,7 +784,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
                   {status === 'pending' && submissions.unreadIds.has(overlay.id) && <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300"><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />{submissionUpdateLabel(overlay) === 'Maps updated' ? 'Updated submission' : 'New submission'}</p>}
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">Organization:</span> {overlay.organizationId ? organizationById.get(overlay.organizationId)?.name ?? `Organization ${overlay.organizationId.slice(0, 8)}` : "Unassigned legacy event"}
+                      <span className="font-semibold text-foreground">Organization:</span> {overlay.organizationId ? organizationById.get(overlay.organizationId)?.name ?? (organizationsResolved ? "Organization unavailable" : "Loading organization…") : "Unassigned legacy event"}
                     </span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="font-semibold text-foreground">Academic year:</span> {overlay.academicYear?.trim() || "Unknown year"}
@@ -805,7 +835,7 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
               {/* Actions */}
               <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-t border-border bg-muted/20">
                 {status === "pending" && <button type="button" onClick={event => { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(false); setReviewTarget(overlay); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Eye className="h-3.5 w-3.5" />Review submission</button>}
-                {status === "approved" && <button type="button" onClick={event => { publicationTriggerRef.current = event.currentTarget; setPublicationTarget(overlay); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Settings2 className="h-3.5 w-3.5" />Manage publication</button>}
+                {status === "approved" && workspaceView === "publication" && <button type="button" onClick={event => { publicationTriggerRef.current = event.currentTarget; setPublicationTarget(overlay); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"><Settings2 className="h-3.5 w-3.5" />Manage publication</button>}
                 <button type="button" onClick={event => { if (overlay.status === "pending") { reviewTriggerRef.current = event.currentTarget; setReviewPreviewFirst(true); setReviewTarget(overlay); } else { standalonePreviewTriggerRef.current = event.currentTarget; setPreviewTarget(overlay); } }} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold text-foreground hover:bg-muted"><Eye className="h-3.5 w-3.5" />Open map preview</button>
                 <EventFurnitureSummary overlay={overlay} compact />
               </div>
@@ -819,6 +849,8 @@ export function AdminEventLayoutsPage({ workspaceView = "all" }: { workspaceView
             title={
               search || organizationFilter !== "all" || academicYearFilter !== "all"
                 ? "No matching layouts"
+                : workspaceOverlays.length === 0
+                ? workspaceView === "review" ? "No submissions need review" : workspaceView === "publication" ? "No approved layouts yet" : workspaceView === "history" ? "No layout decisions yet" : "No event layouts yet"
                 : statusFilter !== "all"
                 ? "No layouts in this category"
                 : "No event layouts yet"
