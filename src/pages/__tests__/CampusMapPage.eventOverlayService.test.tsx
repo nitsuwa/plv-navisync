@@ -145,12 +145,29 @@ vi.mock("../../services/usageAnalyticsService", () => ({
   usageAnalyticsService: { track: vi.fn() },
 }));
 
+vi.mock("../../components/map/StudentCampus3DRenderer", () => ({
+  default: ({ youAreHerePoint, youAreHereLabel, showScannedLocation, routeInspectionFocusPoint }: {
+    youAreHerePoint?: { x: number; y: number } | null;
+    youAreHereLabel?: string | null;
+    showScannedLocation?: boolean;
+    routeInspectionFocusPoint?: { x: number; y: number } | null;
+  }) => <div data-testid="student-campus-3d-renderer"
+    data-location-pin={youAreHerePoint ? `${youAreHerePoint.x},${youAreHerePoint.y}` : undefined}
+    data-location-focus={routeInspectionFocusPoint ? `${routeInspectionFocusPoint.x},${routeInspectionFocusPoint.y}` : undefined}>
+    {showScannedLocation ? youAreHereLabel : null}
+  </div>,
+}));
+
 vi.mock("../../components/map/IndoorFloor3DRenderer", async () => {
   const React = await import("react");
   return {
-    default: ({ floor, focusRoomId, recenterNonce = 0, onRecenterComplete }: {
+    default: ({ floor, focusRoomId, youAreHerePoint, youAreHereLabel, showScannedLocation, routeInspectionFocusPoint, recenterNonce = 0, onRecenterComplete }: {
       floor: { id: string; label: string };
       focusRoomId?: string | null;
+      youAreHerePoint?: { x: number; y: number } | null;
+      youAreHereLabel?: string | null;
+      showScannedLocation?: boolean;
+      routeInspectionFocusPoint?: { x: number; y: number } | null;
       recenterNonce?: number;
       onRecenterComplete?: (nonce: number) => void;
     }) => {
@@ -161,6 +178,9 @@ vi.mock("../../components/map/IndoorFloor3DRenderer", async () => {
         "data-testid": "student-indoor-floor-3d-renderer",
         "data-floor-id": floor.id,
         "data-focus-room-id": focusRoomId ?? "",
+        "data-location-pin": youAreHerePoint ? `${youAreHerePoint.x},${youAreHerePoint.y}` : undefined,
+        "data-location-pin-label": showScannedLocation ? youAreHereLabel : undefined,
+        "data-location-focus": routeInspectionFocusPoint ? `${routeInspectionFocusPoint.x},${routeInspectionFocusPoint.y}` : undefined,
         "aria-label": `${floor.label} 3D map`,
       });
     },
@@ -687,6 +707,8 @@ describe("CampusMapPage event overlays", () => {
       }],
     }, [{ buildingId: "building-test", floorId, roomId }]);
     const originalUrl = window.location.href;
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 516 });
     window.history.replaceState({}, "", `/map?locationId=${roomId}&locationType=room&buildingId=building-test&floorId=${floorId}&floorNumber=1&campusId=campus-test`);
     try {
       renderCampusMap({ previewCampus: campus });
@@ -695,9 +717,66 @@ describe("CampusMapPage event overlays", () => {
       expect(await screen.findByTestId("student-indoor-current-location")).toHaveAttribute("aria-label", expect.stringContaining("You are here: Science Hall"));
       expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("QR Test Room");
       expect(within(planner).getByTestId("route-endpoint-card-destination")).toHaveTextContent("Choose destination");
-      expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "idle");
+      expect(screen.getByTestId("student-map-surface")).toHaveAttribute("data-route-phase", "planning");
       expect(screen.queryByTestId("collapsed-route-card")).not.toBeInTheDocument();
+      fireEvent.click(within(planner).getByRole("button", { name: "Minimize route panel" }));
+      const restore = await screen.findByTestId("restore-route-panel");
+      expect(screen.getByTestId("student-indoor-current-location")).toBeInTheDocument();
+      fireEvent.click(restore);
+      expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("QR Test Room");
+      fireEvent.click(screen.getByRole("button", { name: "Switch to 3D view" }));
+      const floorRenderer = await screen.findByTestId("student-indoor-floor-3d-renderer");
+      expect(floorRenderer).toHaveAttribute("data-location-pin", "40,40");
+      expect(floorRenderer).toHaveAttribute("data-location-pin-label", "You are here");
+      await waitFor(() => expect(floorRenderer).toHaveAttribute("data-location-focus", "40,40"));
     } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+      window.history.replaceState({}, "", originalUrl);
+    }
+  });
+
+  it("keeps a scanned campus-edge pin above the mobile planner after the zoom settles", async () => {
+    const originalUrl = window.location.href;
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 528 });
+    const mapRect = new DOMRect(0, 0, 528, 870);
+    const panelRect = new DOMRect(0, 272, 528, 520);
+    const getRect = Element.prototype.getBoundingClientRect;
+    const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      if (this.matches("[data-testid='route-planner-dialog']")) return panelRect;
+      if (this.matches("[data-testid='student-map-surface'], svg.student-map-renderer-crossfade")) return mapRect;
+      return getRect.call(this);
+    });
+    window.history.replaceState({}, "", "/map?locationId=building-test&campusId=campus-test");
+    try {
+      renderCampusMap({ previewCampus: { ...previewCampus, buildings: [{ ...previewCampus.buildings[0], x: 690, y: 560 }] } });
+      const camera = screen.getByTestId("student-map-camera-transform");
+
+      const planner = await screen.findByTestId("route-planner-dialog");
+      expect(within(planner).getByTestId("route-endpoint-card-start")).toHaveTextContent("Science Hall");
+      expect(within(camera).getByText("YOU ARE HERE")).toBeInTheDocument();
+      const pin = camera.querySelector("[data-you-are-here] circle[cx]");
+      const pinPoint = { x: Number(pin?.getAttribute("cx")), y: Number(pin?.getAttribute("cy")) };
+      await waitFor(() => {
+        const transform = camera.getAttribute("transform") ?? "";
+        const [, translateX, translateY, zoom] = transform.match(/translate\((\S+) ([^)]+)\) scale\(([^)]+)\)/) ?? [];
+        expect(Number(zoom)).toBeGreaterThanOrEqual(1.65);
+        const fitScale = mapRect.width / previewCampus.canvasW!;
+        const pinX = (Number(translateX) + pinPoint.x * Number(zoom)) * fitScale;
+        const pinY = (Number(translateY) + pinPoint.y * Number(zoom)) * fitScale
+          + (mapRect.height - previewCampus.canvasH! * fitScale) / 2;
+        expect(pinX).toBeCloseTo(mapRect.width / 2);
+        expect(pinY).toBeGreaterThan(64);
+        expect(pinY).toBeLessThan(panelRect.top - 24);
+      }, { timeout: 1800 });
+      fireEvent.click(screen.getByRole("button", { name: "Switch to 3D view" }));
+      const campusRenderer = await screen.findByTestId("student-campus-3d-renderer");
+      expect(campusRenderer).toHaveTextContent("You are here");
+      expect(campusRenderer).toHaveAttribute("data-location-pin", `${pinPoint.x},${pinPoint.y}`);
+      await waitFor(() => expect(campusRenderer).toHaveAttribute("data-location-focus", `${pinPoint.x},${pinPoint.y}`));
+    } finally {
+      rects.mockRestore();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
       window.history.replaceState({}, "", originalUrl);
     }
   });
