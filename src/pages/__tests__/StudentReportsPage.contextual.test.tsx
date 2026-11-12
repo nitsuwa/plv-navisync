@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 const campus = vi.hoisted(() => ({ id: "campus-1" }));
@@ -24,6 +24,23 @@ vi.mock("../../components/map/ReportModal", () => ({
 import { StudentReportsPage } from "../StudentReportsPage";
 
 describe("StudentReportsPage contextual report flow", () => {
+  it.each([
+    { state: { backTo: "/home" }, path: "/home", destination: "Home" },
+    { state: null, path: "/student", destination: "Student profile" },
+  ])("returns from reports to $destination", async ({ state, path, destination }) => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/student/reports", state }]}>
+        <Routes>
+          <Route path="/student/reports" element={<StudentReportsPage />} />
+          <Route path={path} element={<h1>{destination}</h1>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "Back" }));
+    expect(screen.getByRole("heading", { name: destination })).toBeInTheDocument();
+  });
+
   it("opens a report form for the building from the canonical query", async () => {
     render(
       <MemoryRouter initialEntries={["/student/reports?building=b1"]}>

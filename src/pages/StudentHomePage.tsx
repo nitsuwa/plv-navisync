@@ -450,6 +450,7 @@ export function StudentHomePage() {
             </div>
             <Link
               to="/student/reports"
+              state={{ backTo: "/home" }}
               className="text-xs font-bold text-primary hover:underline"
             >
               View All
@@ -492,6 +493,7 @@ export function StudentHomePage() {
                   <Link
                     key={report.id}
                     to="/student/reports"
+                    state={{ backTo: "/home" }}
                     className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/50 px-4 py-3 hover:border-primary/20 hover:bg-card transition-all"
                   >
                     <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">

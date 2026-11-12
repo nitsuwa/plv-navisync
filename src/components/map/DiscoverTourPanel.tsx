@@ -1,6 +1,7 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Compass, DoorOpen, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Compass, DoorOpen, MousePointer2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 
 export interface DiscoverTourBuilding {
   name: string;
@@ -12,6 +13,9 @@ export interface DiscoverTourBuilding {
 }
 
 export type DiscoverTourView = "showcase" | "inside";
+
+const GUIDE_STOP_LIMIT = 5;
+const GUIDE_STOP_DURATION_MS = 3600;
 
 interface DiscoverTourPanelProps {
   open: boolean;
@@ -60,6 +64,11 @@ export function DiscoverTourPanel({
   const [displayedCover, setDisplayedCover] = useState<{ url: string; name: string } | null>(null);
   const [loadedCoverCandidate, setLoadedCoverCandidate] = useState<{ url: string; name: string } | null>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
+  const nextBuildingRef = useRef<HTMLButtonElement>(null);
+  const enterBuildingRef = useRef<HTMLButtonElement>(null);
+  const [guideDismissed, setGuideDismissed] = useState(false);
+  const [guidePosition, setGuidePosition] = useState<{ x: number; y: number; captionOnLeft: boolean } | null>(null);
+  const guideActionsRef = useRef({ onNext, onEnter });
   const scrollPositionRef = useRef(0);
   const wasOpenRef = useRef(open);
   const sheetHandleDragStart = useRef<{ pointerId: number; y: number } | null>(null);
@@ -72,6 +81,63 @@ export function DiscoverTourPanel({
   const displayedCurrentCover = displayedCover?.url === coverImageUrl ? displayedCover : null;
   const adjacentCoverSignature = adjacentCoverImageUrls.filter((url): url is string => Boolean(url?.trim())).join("\u0000");
   const coverLoading = Boolean(showCover && coverImageUrl && displayedCover?.url !== coverImageUrl);
+  const canEnterBuilding = (building?.floorCount ?? 0) > 0;
+  const guideStopCount = Math.min(stopCount, GUIDE_STOP_LIMIT);
+  const guideVisible = open && !navigationGuard && !unavailable && !isInside && Boolean(building) && !guideDismissed && stopIndex < guideStopCount;
+  const guideTarget = guideVisible && stopIndex < guideStopCount - 1 ? "next"
+    : guideVisible && canEnterBuilding ? "inside" : null;
+  const guideBuildingCode = building?.code.trim().toUpperCase();
+  const guideBuildingLabel = guideBuildingCode === "CAN" || guideBuildingCode === "CANTEEN"
+    ? "the Canteen"
+    : guideBuildingCode ? `${guideBuildingCode} building` : "this building";
+
+  useLayoutEffect(() => {
+    guideActionsRef.current = { onNext, onEnter };
+  }, [onNext, onEnter]);
+
+  useEffect(() => {
+    if (!open) {
+      setGuideDismissed(false);
+      setGuidePosition(null);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!guideVisible) return;
+    const timer = window.setTimeout(() => {
+      if (guideTarget === "next") {
+        guideActionsRef.current.onNext();
+        return;
+      }
+      setGuideDismissed(true);
+      if (guideTarget === "inside") guideActionsRef.current.onEnter();
+    }, GUIDE_STOP_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [building?.code, guideTarget, guideVisible, stopIndex]);
+
+  useLayoutEffect(() => {
+    if (!guideVisible) return;
+    const target = (guideTarget === "next" ? nextBuildingRef : enterBuildingRef).current;
+    if (!target) return;
+    let frameId: number;
+    let previousPosition: typeof guidePosition = null;
+    // The panel can move during its layout animation without resizing the button.
+    const updatePosition = () => {
+      const bounds = target.getBoundingClientRect();
+      const x = Math.round(bounds.right - 14);
+      const y = Math.round(bounds.bottom - 15);
+      const captionOnLeft = x > window.innerWidth / 2;
+      if (previousPosition?.x !== x || previousPosition.y !== y || previousPosition.captionOnLeft !== captionOnLeft) {
+        previousPosition = { x, y, captionOnLeft };
+        setGuidePosition(previousPosition);
+      }
+      frameId = window.requestAnimationFrame(updatePosition);
+    };
+    updatePosition();
+    return () => window.cancelAnimationFrame(frameId);
+  }, [guideTarget, guideVisible]);
+
+  const dismissGuide = () => setGuideDismissed(true);
   const changeMobileExpanded = (expanded: boolean) => {
     if (controlledMobileExpanded === undefined) setLocalMobileExpanded(expanded);
     onMobileExpandedChange?.(expanded);
@@ -117,7 +183,7 @@ export function DiscoverTourPanel({
     wasOpenRef.current = open;
   }, [open]);
 
-  return (
+  return (<>
     <AnimatePresence initial={false}>
       {open && (navigationGuard ? (
         <motion.div
@@ -269,19 +335,20 @@ export function DiscoverTourPanel({
                   )}
                 </div>
 
-                {!unavailable && building && <div data-testid="discover-tour-actions" className="mt-2 shrink-0 bg-transparent px-4 pb-2 pt-2 md:px-0 md:pb-0">
+                {!unavailable && building && <div data-testid="discover-tour-actions" className="mt-2 shrink-0 bg-transparent px-4 pb-2 pt-2 md:pb-0 md:pl-0 md:pr-3">
                   <div className="mx-auto flex max-w-xs items-center justify-between gap-2">
-                      <button type="button" onClick={onPrevious} aria-label="Previous building" title="Previous building" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
+                      <button type="button" onClick={() => { dismissGuide(); onPrevious(); }} aria-label="Previous building" title="Previous building" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
                       <motion.p key={`position-${stopIndex}-${stopCount}`} initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.18 }} data-testid="discover-tour-position" aria-live="polite" className="min-w-0 flex-1 text-center text-xs font-bold text-muted-foreground">Building {stopIndex + 1} of {stopCount}</motion.p>
-                      <button type="button" onClick={onNext} aria-label="Next building" title="Next" disabled={stopCount < 2} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRight className="h-5 w-5" aria-hidden="true" /></button>
+                      <button ref={nextBuildingRef} type="button" onClick={() => { dismissGuide(); onNext(); }} aria-label="Next building" title="Next" disabled={stopCount < 2} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/70 text-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40 ${guideTarget === "next" ? "ring-2 ring-primary/60" : ""}`}><ArrowRight className="h-5 w-5" aria-hidden="true" /></button>
                     <div className="flex shrink-0 items-center gap-1.5">
+                      {guideVisible && <button type="button" onClick={dismissGuide} aria-label="Skip guide" className="min-h-9 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">Skip</button>}
                       <button type="button" data-testid="discover-sheet-toggle" aria-label={mobileExpanded ? "Collapse Discover details" : "Expand Discover details"} aria-expanded={mobileExpanded} onClick={() => changeMobileExpanded(!mobileExpanded)} className="flex h-9 items-center gap-1 rounded-xl border border-border px-2 text-[11px] font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden">
                         <span className="hidden min-[360px]:inline">{mobileExpanded ? "Collapse" : "Expand"}</span>
                         {mobileExpanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronUp className="h-4 w-4" aria-hidden="true" />}
                       </button>
                     </div>
                   </div>
-                  <button type="button" onClick={onEnter} disabled={building.floorCount < 1} className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-extrabold text-primary-foreground transition-[filter,transform] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+                  <button ref={enterBuildingRef} type="button" onClick={() => { dismissGuide(); onEnter(); }} disabled={!canEnterBuilding} className={`mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-extrabold text-primary-foreground transition-[filter,transform] hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${guideTarget === "inside" ? "ring-2 ring-primary/60 ring-offset-2 ring-offset-card" : ""}`}>
                     <DoorOpen className="h-4 w-4" aria-hidden="true" />See What&apos;s Inside
                   </button>
                 </div>}
@@ -291,5 +358,33 @@ export function DiscoverTourPanel({
         </motion.aside>
       ))}
     </AnimatePresence>
-  );
+    {guideVisible && guidePosition && createPortal(
+      <motion.div
+        className="pointer-events-none fixed left-0 top-0 z-[80] h-5 w-5"
+        initial={reducedMotion ? false : { x: -window.innerWidth, y: guidePosition.y }}
+        animate={{ x: guidePosition.x, y: guidePosition.y }}
+        transition={{ duration: reducedMotion ? 0 : 0.8, ease: "easeInOut" }}
+      >
+        {guideTarget && !reducedMotion && (
+          <motion.span
+            key={stopIndex}
+            aria-hidden="true"
+            className="block origin-top-left text-white drop-shadow-md"
+            animate={{ scale: [1, 0.68, 1] }}
+            transition={{ delay: GUIDE_STOP_DURATION_MS / 1000 - 0.4, duration: 0.32 }}
+          >
+            <MousePointer2 className="h-5 w-5 fill-white stroke-slate-900" />
+          </motion.span>
+        )}
+        <div
+          role="status"
+          className={`absolute w-max max-w-[min(13rem,calc(50vw-1rem))] rounded-xl bg-slate-950 px-3 py-2 text-xs leading-snug text-white shadow-lg ring-1 ring-inset ring-white/25 ${guidePosition.captionOnLeft ? "right-full mr-1" : "left-full ml-1"} ${guidePosition.y > 100 ? "bottom-2" : "top-0"}`}
+        >
+          <p className="font-extrabold">Let’s visit {guideBuildingLabel}.</p>
+          {guideTarget === "inside" && <p className="text-slate-200">Let’s see what’s inside.</p>}
+        </div>
+      </motion.div>,
+      document.body,
+    )}
+  </>);
 }
