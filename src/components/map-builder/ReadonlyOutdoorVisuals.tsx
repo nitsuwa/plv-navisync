@@ -1426,7 +1426,7 @@ export interface ReadonlyOutdoorCampusSceneProps {
   reducedMotion?: boolean;
   /** Preview routable map-pick targets without exposing editor handles. */
   mapPickActive?: boolean;
-  /** Student-only landmark artwork override; Admin/Preview keep generic authored artwork. */
+  /** Shared landmark artwork, enabled by default for Student and event maps. */
   studentSuhayHusayLandmark?: boolean;
   emergencyMode?: boolean;
   /** Only Assembly Points used by a current complete eligible SOS route are exposed to the Student Map. */
@@ -1446,7 +1446,7 @@ export const ReadonlyOutdoorArtworkLayer = memo(function ReadonlyOutdoorArtworkL
   selectedBuildingId,
   selectedCampusPlaceId,
   mapPickActive = false,
-  studentSuhayHusayLandmark = false,
+  studentSuhayHusayLandmark = true,
   onSelectBuilding,
   onDoubleClickBuilding,
 }: ReadonlyOutdoorArtworkLayerProps) {

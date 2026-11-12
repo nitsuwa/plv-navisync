@@ -42,7 +42,7 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(screen.getAllByTestId("exterior-stair-tread").length).toBeGreaterThan(2);
     expect(screen.getAllByTestId("readonly-decor").some((node) => node.getAttribute("data-asset-id") === "d1")).toBe(true);
     expect(screen.getByTestId("readonly-ground-area")).toHaveAttribute("data-ground-type", "parking");
-    expect(screen.getAllByTestId("readonly-decor").some((node) => node.getAttribute("data-asset-id") === "monument-1")).toBe(true);
+    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "monument-1");
     expect(screen.queryByTestId("nav-graph-layer")).not.toBeInTheDocument();
   });
 
@@ -58,7 +58,7 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(treeArtwork).toHaveAttribute("height", "84");
   });
 
-  it("uses the dedicated Suhay Husay symbol only when Student landmark presentation is enabled", () => {
+  it("uses the same Suhay Husay artwork by default in event and Student scenes", () => {
     const landmarkCampus = {
       ...campus,
       markers: [{ id: "suhay-place", name: "Suhay Husay", type: "landmark", x: 460, y: 290, color: "#7c3aed" }],
@@ -67,12 +67,13 @@ describe("ReadonlyOutdoorCampusScene", () => {
     const projected = projectReadonlyOutdoorCampus(landmarkCampus);
 
     const admin = render(<svg><ReadonlyOutdoorCampusScene campus={projected} /></svg>);
-    expect(admin.getByTestId("readonly-decor")).toHaveAttribute("data-asset-id", "suhay-statue");
-    expect(admin.queryByTestId("student-suhay-husay-2d-symbol")).not.toBeInTheDocument();
+    expect(admin.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "suhay-statue");
+    const eventArtwork = Array.from(admin.getByTestId("student-suhay-husay-2d-symbol").querySelectorAll("path"), path => path.outerHTML);
 
     admin.unmount();
     render(<svg><ReadonlyOutdoorCampusScene campus={projected} studentSuhayHusayLandmark selectedCampusPlaceId="suhay-place" /></svg>);
     expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "suhay-statue");
+    expect(Array.from(screen.getByTestId("student-suhay-husay-2d-symbol").querySelectorAll("path"), path => path.outerHTML)).toEqual(eventArtwork);
       expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-version", "v13");
     expect(screen.getByTestId("student-suhay-standing-silhouette")).toBeInTheDocument();
     expect(screen.getByTestId("student-suhay-seated-silhouette")).toBeInTheDocument();
@@ -83,6 +84,19 @@ describe("ReadonlyOutdoorCampusScene", () => {
     expect(suhaySymbol.querySelectorAll("circle")).toHaveLength(0);
     expect(screen.getByTestId("student-suhay-husay-selection-ring")).toBeInTheDocument();
     expect(screen.queryByTestId("readonly-decor")).not.toBeInTheDocument();
+  });
+
+  it("updates legacy event monuments while keeping unrelated monuments generic", () => {
+    const legacy = { id: "legacy-statue", type: "monument" as const, x: 460, y: 290 };
+    const { rerender } = render(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus({ ...campus, decorAssets: [legacy] })} /></svg>);
+    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "legacy-statue");
+
+    const identified = { ...legacy, id: "suhay", visualVariant: "suhay-husay" as const };
+    const memorial = { ...legacy, id: "memorial", name: "Other Memorial" };
+    rerender(<svg><ReadonlyOutdoorCampusScene campus={projectReadonlyOutdoorCampus({ ...campus, decorAssets: [identified, memorial] })} /></svg>);
+    expect(screen.getAllByTestId("student-suhay-husay-2d-symbol")).toHaveLength(1);
+    expect(screen.getByTestId("student-suhay-husay-2d-symbol")).toHaveAttribute("data-asset-id", "suhay");
+    expect(screen.getByTestId("readonly-decor")).toHaveAttribute("data-asset-id", "memorial");
   });
 
   it("honors Admin ground-area stacking order in the read-only scene", () => {
